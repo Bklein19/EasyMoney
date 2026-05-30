@@ -13,8 +13,8 @@ export default function TransactionsPage() {
   const [isCreatingBulkCategory, setIsCreatingBulkCategory] = useState(false);
   const [newBulkCategoryName, setNewBulkCategoryName] = useState('');
   const [pendingBulkCategoryValue, setPendingBulkCategoryValue] = useState(null);
-  const { transactions, updateTransaction } = useTransactions(filters);
-  const { accounts } = useAccounts();
+  const { transactions, updateTransaction, deleteTransaction } = useTransactions(filters);
+  const { accounts, updateBalance } = useAccounts();
   const { categories, addCategory } = useCategories();
   const accountMap = useMemo(() => buildAccountMap(accounts), [accounts]);
   const categoryMap = useMemo(() => {
@@ -124,6 +124,15 @@ export default function TransactionsPage() {
   const handleFilterChange = (nextFilters) => {
     setPendingBulkCategoryValue(null);
     setFilters(nextFilters);
+  };
+
+  const handleDeleteTransaction = async (transaction) => {
+    const account = accountMap[transaction.accountId];
+    await deleteTransaction(transaction.id);
+
+    if (account) {
+      await updateBalance(account.id, (account.currentBalance || 0) - transaction.amount);
+    }
   };
 
   const totals = useMemo(() => {
@@ -245,6 +254,7 @@ export default function TransactionsPage() {
                   key={tx.id} 
                   transaction={tx} 
                   onUpdate={updateTransaction} 
+                  onDelete={handleDeleteTransaction}
                   account={accountMap[tx.accountId]}
                   categories={categories}
                   addCategory={addCategory}
