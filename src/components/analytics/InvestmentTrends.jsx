@@ -8,7 +8,7 @@ import {
   XAxis,
   YAxis
 } from 'recharts';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, startOfWeek } from 'date-fns';
 import { isInvestmentMovement } from '../../utils/transactionSemantics';
 
 const formatCurrency = (val) => new Intl.NumberFormat('en-US', {
@@ -18,14 +18,17 @@ const formatCurrency = (val) => new Intl.NumberFormat('en-US', {
 }).format(val);
 
 const resolveGrouping = (transactions, groupMode) => {
+  if (groupMode === 'Weekly') return { labelFormat: 'week', keyFormat: 'week' };
   if (groupMode === 'Monthly') return { labelFormat: 'MMM yyyy', keyFormat: 'yyyy-MM' };
   if (groupMode === 'Yearly') return { labelFormat: 'yyyy', keyFormat: 'yyyy' };
 
   const dates = transactions.map(t => new Date(t.date).getTime());
   const diffDays = (Math.max(...dates) - Math.min(...dates)) / (1000 * 60 * 60 * 24);
-  return diffDays > 60
+  return diffDays > 400
+    ? { labelFormat: 'yyyy', keyFormat: 'yyyy' }
+    : diffDays > 60
     ? { labelFormat: 'MMM yyyy', keyFormat: 'yyyy-MM' }
-    : { labelFormat: 'MMM dd', keyFormat: 'yyyy-MM-dd' };
+    : { labelFormat: 'week', keyFormat: 'week' };
 };
 
 const CustomTooltip = ({ active, payload }) => {
@@ -53,8 +56,9 @@ export default function InvestmentTrends({ transactions, accountMap = {}, catego
 
     investmentTransactions.forEach(t => {
       const dateObj = parseISO(t.date);
-      const groupKey = format(dateObj, keyFormat);
-      const displayLabel = format(dateObj, labelFormat);
+      const weekStart = startOfWeek(dateObj);
+      const groupKey = keyFormat === 'week' ? format(weekStart, 'yyyy-MM-dd') : format(dateObj, keyFormat);
+      const displayLabel = keyFormat === 'week' ? `Week of ${format(weekStart, 'MMM d')}` : format(dateObj, labelFormat);
 
       if (!grouped[groupKey]) {
         grouped[groupKey] = { timeKey: groupKey, displayLabel, Investments: 0, transactionIds: [] };

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { addMonths, endOfDay, endOfMonth, endOfYear, format, parseISO, startOfMonth, startOfYear, subMonths } from 'date-fns';
+import { addMonths, endOfDay, endOfMonth, endOfWeek, endOfYear, format, parseISO, startOfMonth, startOfWeek, startOfYear, subMonths, subWeeks } from 'date-fns';
 import { Calendar, ChevronLeft, ChevronRight, HelpCircle, Landmark, RotateCcw, Search, X } from 'lucide-react';
 import { useTransactions } from '../../hooks/useTransactions';
 import { useCategories } from '../../hooks/useCategories';
@@ -20,6 +20,7 @@ import './Analytics.css';
 const DATE_RANGES = {
   THIS_MONTH: 'This Month',
   LAST_MONTH: 'Last Month',
+  LAST_WEEK: 'Last Week',
   THIS_YEAR: 'This Year',
   CUSTOM: 'Custom',
   ALL_TIME: 'All Time'
@@ -27,6 +28,7 @@ const DATE_RANGES = {
 
 const CASH_FLOW_GROUPS = {
   AUTO: 'Auto',
+  WEEK: 'Weekly',
   MONTH: 'Monthly',
   YEAR: 'Yearly'
 };
@@ -63,6 +65,10 @@ export default function AnalyticsPage() {
       case DATE_RANGES.LAST_MONTH: {
         const lastMonth = subMonths(today, 1);
         return { startDate: startOfMonth(lastMonth).toISOString(), endDate: endOfMonth(lastMonth).toISOString() };
+      }
+      case DATE_RANGES.LAST_WEEK: {
+        const lastWeek = subWeeks(today, 1);
+        return { startDate: startOfWeek(lastWeek).toISOString(), endDate: endOfWeek(lastWeek).toISOString() };
       }
       case DATE_RANGES.THIS_YEAR:
         return { startDate: startOfYear(today).toISOString(), endDate: endOfYear(today).toISOString() };
@@ -127,17 +133,25 @@ export default function AnalyticsPage() {
     const dates = analysisTransactions.map(t => new Date(t.date).getTime());
     const diffDays = (Math.max(...dates) - Math.min(...dates)) / (1000 * 60 * 60 * 24);
     const groupMode = cashFlowGroup === CASH_FLOW_GROUPS.AUTO
-      ? (diffDays > 400 ? CASH_FLOW_GROUPS.YEAR : CASH_FLOW_GROUPS.MONTH)
+      ? (diffDays > 400 ? CASH_FLOW_GROUPS.YEAR : diffDays > 60 ? CASH_FLOW_GROUPS.MONTH : CASH_FLOW_GROUPS.WEEK)
       : cashFlowGroup;
-    const keyFormat = groupMode === CASH_FLOW_GROUPS.YEAR ? 'yyyy' : 'yyyy-MM';
-    const labelFormat = groupMode === CASH_FLOW_GROUPS.YEAR ? 'yyyy' : 'MMM yyyy';
 
     const grouped = {};
     analysisTransactions.forEach(t => {
       const dateObj = parseISO(t.date);
-      const key = format(dateObj, keyFormat);
+      const weekStart = startOfWeek(dateObj);
+      const key = groupMode === CASH_FLOW_GROUPS.YEAR
+        ? format(dateObj, 'yyyy')
+        : groupMode === CASH_FLOW_GROUPS.MONTH
+          ? format(dateObj, 'yyyy-MM')
+          : format(weekStart, 'yyyy-MM-dd');
+      const label = groupMode === CASH_FLOW_GROUPS.YEAR
+        ? format(dateObj, 'yyyy')
+        : groupMode === CASH_FLOW_GROUPS.MONTH
+          ? format(dateObj, 'MMM yyyy')
+          : `Week of ${format(weekStart, 'MMM d')}`;
       if (!grouped[key]) {
-        grouped[key] = { key, label: format(dateObj, labelFormat), income: 0, expenses: 0, net: 0, count: 0 };
+        grouped[key] = { key, label, groupMode, income: 0, expenses: 0, net: 0, count: 0 };
       }
       if (isIncome(t, accountMap, categoryMap)) grouped[key].income += t.amount;
       if (isExpense(t, accountMap, categoryMap)) grouped[key].expenses += Math.abs(t.amount);
@@ -626,7 +640,11 @@ export default function AnalyticsPage() {
                 title: `${row.label} Cash Flow`,
                 ids: new Set(analysisTransactions.filter(t => {
                   const dateObj = parseISO(t.date);
-                  const key = row.key.length === 4 ? format(dateObj, 'yyyy') : format(dateObj, 'yyyy-MM');
+                  const key = row.groupMode === CASH_FLOW_GROUPS.YEAR
+                    ? format(dateObj, 'yyyy')
+                    : row.groupMode === CASH_FLOW_GROUPS.MONTH
+                      ? format(dateObj, 'yyyy-MM')
+                      : format(startOfWeek(dateObj), 'yyyy-MM-dd');
                   return key === row.key;
                 }).map(t => t.id))
               })}
