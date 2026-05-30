@@ -34,8 +34,7 @@ const CASH_FLOW_GROUPS = {
 const ANALYSIS_SCOPES = {
   CASH_FLOW: 'All Accounts',
   BANK: 'Bank Accounts Only',
-  CREDIT: 'Credit Cards Only',
-  ALL_ACTIVITY: 'All Activity'
+  CREDIT: 'Credit Cards Only'
 };
 
 const toDateInput = (date) => format(date, 'yyyy-MM-dd');
@@ -104,9 +103,8 @@ export default function AnalyticsPage() {
   }, [transactions, analysisScope, accountMap]);
 
   const analysisTransactions = useMemo(() => {
-    if (analysisScope === ANALYSIS_SCOPES.ALL_ACTIVITY) return scopedTransactions;
     return scopedTransactions.filter(transaction => !isExcludedFromCashFlow(transaction, accountMap, categoryMap));
-  }, [scopedTransactions, analysisScope, accountMap, categoryMap]);
+  }, [scopedTransactions, accountMap, categoryMap]);
 
   // Derived Summary
   const { totalIncome, totalExpense, filteredInternalMovement, filteredInvestments } = useMemo(() => {
@@ -479,7 +477,7 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
-      {analysisScope !== ANALYSIS_SCOPES.ALL_ACTIVITY && (filteredInternalMovement > 0 || filteredInvestments > 0) && (
+      {(filteredInternalMovement > 0 || filteredInvestments > 0) && (
         <div className="analytics-scope-note">
           {filteredInternalMovement > 0 && (
             <span>Internal movement totaling {formatCurrency(filteredInternalMovement)} is filtered from spending, including card payments and transfers between your own accounts.</span>
