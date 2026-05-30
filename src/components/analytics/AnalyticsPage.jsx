@@ -28,6 +28,7 @@ const DATE_RANGES = {
 
 const CASH_FLOW_GROUPS = {
   AUTO: 'Auto',
+  DAY: 'Daily',
   WEEK: 'Weekly',
   MONTH: 'Monthly',
   YEAR: 'Yearly'
@@ -144,12 +145,16 @@ export default function AnalyticsPage() {
         ? format(dateObj, 'yyyy')
         : groupMode === CASH_FLOW_GROUPS.MONTH
           ? format(dateObj, 'yyyy-MM')
-          : format(weekStart, 'yyyy-MM-dd');
+          : groupMode === CASH_FLOW_GROUPS.WEEK
+            ? format(weekStart, 'yyyy-MM-dd')
+            : format(dateObj, 'yyyy-MM-dd');
       const label = groupMode === CASH_FLOW_GROUPS.YEAR
         ? format(dateObj, 'yyyy')
         : groupMode === CASH_FLOW_GROUPS.MONTH
           ? format(dateObj, 'MMM yyyy')
-          : `Week of ${format(weekStart, 'MMM d')}`;
+          : groupMode === CASH_FLOW_GROUPS.WEEK
+            ? `Week of ${format(weekStart, 'MMM d')}`
+            : format(dateObj, 'MMM d');
       if (!grouped[key]) {
         grouped[key] = { key, label, groupMode, income: 0, expenses: 0, net: 0, count: 0 };
       }
@@ -644,7 +649,9 @@ export default function AnalyticsPage() {
                     ? format(dateObj, 'yyyy')
                     : row.groupMode === CASH_FLOW_GROUPS.MONTH
                       ? format(dateObj, 'yyyy-MM')
-                      : format(startOfWeek(dateObj), 'yyyy-MM-dd');
+                      : row.groupMode === CASH_FLOW_GROUPS.WEEK
+                        ? format(startOfWeek(dateObj), 'yyyy-MM-dd')
+                        : format(dateObj, 'yyyy-MM-dd');
                   return key === row.key;
                 }).map(t => t.id))
               })}

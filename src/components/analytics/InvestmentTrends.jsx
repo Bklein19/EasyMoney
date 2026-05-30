@@ -18,6 +18,7 @@ const formatCurrency = (val) => new Intl.NumberFormat('en-US', {
 }).format(val);
 
 const resolveGrouping = (transactions, groupMode) => {
+  if (groupMode === 'Daily') return { labelFormat: 'MMM d', keyFormat: 'yyyy-MM-dd' };
   if (groupMode === 'Weekly') return { labelFormat: 'week', keyFormat: 'week' };
   if (groupMode === 'Monthly') return { labelFormat: 'MMM yyyy', keyFormat: 'yyyy-MM' };
   if (groupMode === 'Yearly') return { labelFormat: 'yyyy', keyFormat: 'yyyy' };
