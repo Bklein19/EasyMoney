@@ -94,7 +94,7 @@ export function groupMerchantTransactions(transactions, getName) {
   }));
 }
 
-export function applyManualStacks(groups, stackMap = {}) {
+export function applyManualStacks(groups, stackMap = {}, labelMap = {}) {
   const byKey = {};
   groups.forEach(group => {
     byKey[group.normalized] = {
@@ -123,6 +123,8 @@ export function applyManualStacks(groups, stackMap = {}) {
 
   return Object.values(byKey).map(group => ({
     ...group,
+    name: labelMap[group.normalized] || group.name,
+    customName: labelMap[group.normalized] || '',
     aliases: Array.from(group.aliases).sort((a, b) => a.localeCompare(b)),
     transactionIds: Array.from(new Set(group.transactionIds)),
     stackedKeys: Array.from(new Set(group.stackedKeys)),

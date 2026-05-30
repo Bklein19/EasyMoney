@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
-import { startOfMonth, endOfMonth, subMonths, startOfYear, endOfYear, subDays, format, parseISO, endOfDay } from 'date-fns';
-import { Calendar, Landmark, Search, X } from 'lucide-react';
+import { addDays, endOfDay, endOfMonth, endOfQuarter, endOfYear, format, parseISO, startOfMonth, startOfQuarter, startOfYear, subDays, subMonths, subQuarters, differenceInCalendarDays } from 'date-fns';
+import { Calendar, ChevronLeft, ChevronRight, Landmark, RotateCcw, Search, X } from 'lucide-react';
 import { useTransactions } from '../../hooks/useTransactions';
 import { useCategories } from '../../hooks/useCategories';
 import { useAccounts } from '../../hooks/useAccounts';
@@ -17,9 +17,14 @@ import InvestmentTrends from './InvestmentTrends';
 import './Analytics.css';
 
 const DATE_RANGES = {
+  LAST_7: 'Last 7 Days',
   LAST_30: 'Last 30 Days',
+  LAST_90: 'Last 90 Days',
   THIS_MONTH: 'This Month',
   LAST_MONTH: 'Last Month',
+  THIS_QUARTER: 'This Quarter',
+  LAST_QUARTER: 'Last Quarter',
+  YEAR_TO_DATE: 'Year to Date',
   THIS_YEAR: 'This Year',
   CUSTOM: 'Custom',
   ALL_TIME: 'All Time'
@@ -38,6 +43,8 @@ const ANALYSIS_SCOPES = {
   ALL_ACTIVITY: 'All Activity'
 };
 
+const toDateInput = (date) => format(date, 'yyyy-MM-dd');
+
 export default function AnalyticsPage() {
   const [dateRange, setDateRange] = useState(DATE_RANGES.THIS_MONTH);
   const [customStartDate, setCustomStartDate] = useState('');
@@ -55,14 +62,26 @@ export default function AnalyticsPage() {
   const { startDate, endDate } = useMemo(() => {
     const today = new Date();
     switch (dateRange) {
+      case DATE_RANGES.LAST_7:
+        return { startDate: subDays(today, 7).toISOString(), endDate: today.toISOString() };
       case DATE_RANGES.LAST_30:
         return { startDate: subDays(today, 30).toISOString(), endDate: today.toISOString() };
+      case DATE_RANGES.LAST_90:
+        return { startDate: subDays(today, 90).toISOString(), endDate: today.toISOString() };
       case DATE_RANGES.THIS_MONTH:
         return { startDate: startOfMonth(today).toISOString(), endDate: endOfMonth(today).toISOString() };
       case DATE_RANGES.LAST_MONTH: {
         const lastMonth = subMonths(today, 1);
         return { startDate: startOfMonth(lastMonth).toISOString(), endDate: endOfMonth(lastMonth).toISOString() };
       }
+      case DATE_RANGES.THIS_QUARTER:
+        return { startDate: startOfQuarter(today).toISOString(), endDate: endOfQuarter(today).toISOString() };
+      case DATE_RANGES.LAST_QUARTER: {
+        const lastQuarter = subQuarters(today, 1);
+        return { startDate: startOfQuarter(lastQuarter).toISOString(), endDate: endOfQuarter(lastQuarter).toISOString() };
+      }
+      case DATE_RANGES.YEAR_TO_DATE:
+        return { startDate: startOfYear(today).toISOString(), endDate: today.toISOString() };
       case DATE_RANGES.THIS_YEAR:
         return { startDate: startOfYear(today).toISOString(), endDate: endOfYear(today).toISOString() };
       case DATE_RANGES.CUSTOM:
@@ -291,6 +310,45 @@ export default function AnalyticsPage() {
     setDrilldownSort('date_desc');
   };
 
+  const resetAnalyticsSelection = () => {
+    setPendingDrilldownCategoryValue(null);
+    setDrilldown(null);
+    setDrilldownSearch('');
+    setDrilldownSort('date_desc');
+  };
+
+  const handleDateRangeChange = (nextRange) => {
+    setDateRange(nextRange);
+    resetAnalyticsSelection();
+  };
+
+  const handleShiftDateWindow = (direction) => {
+    if (!startDate || !endDate) return;
+
+    const currentStart = parseISO(startDate);
+    const currentEnd = parseISO(endDate);
+    const spanDays = Math.max(1, differenceInCalendarDays(currentEnd, currentStart) + 1);
+    const nextStart = addDays(currentStart, direction * spanDays);
+    const nextEnd = addDays(currentEnd, direction * spanDays);
+
+    setCustomStartDate(toDateInput(nextStart));
+    setCustomEndDate(toDateInput(nextEnd));
+    setDateRange(DATE_RANGES.CUSTOM);
+    resetAnalyticsSelection();
+  };
+
+  const handleResetToCurrentMonth = () => {
+    setCustomStartDate('');
+    setCustomEndDate('');
+    setDateRange(DATE_RANGES.THIS_MONTH);
+    resetAnalyticsSelection();
+  };
+
+  const activeDateLabel = useMemo(() => {
+    if (!startDate || !endDate) return 'All available dates';
+    return `${format(parseISO(startDate), 'MMM d, yyyy')} - ${format(parseISO(endDate), 'MMM d, yyyy')}`;
+  }, [startDate, endDate]);
+
   const handleInvestmentPeriodSelect = (period) => {
     openDrilldown({
       type: 'investmentPeriod',
@@ -347,16 +405,47 @@ export default function AnalyticsPage() {
             <select 
               className="input input--sm"
               value={dateRange}
-              onChange={(e) => {
-                setDateRange(e.target.value);
-                setPendingDrilldownCategoryValue(null);
-                setDrilldown(null);
-              }}
+              onChange={(e) => handleDateRangeChange(e.target.value)}
             >
               {Object.values(DATE_RANGES).map(range => (
                 <option key={range} value={range}>{range}</option>
               ))}
             </select>
+          </div>
+
+          <div className="date-navigator" aria-label="Date range navigation">
+            <button
+              className="btn btn--ghost btn--icon"
+              type="button"
+              disabled={!startDate || !endDate}
+              onClick={() => handleShiftDateWindow(-1)}
+              aria-label="Previous date window"
+              title="Previous matching period"
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <div className="date-navigator__label" title={activeDateLabel}>
+              {activeDateLabel}
+            </div>
+            <button
+              className="btn btn--ghost btn--icon"
+              type="button"
+              disabled={!startDate || !endDate}
+              onClick={() => handleShiftDateWindow(1)}
+              aria-label="Next date window"
+              title="Next matching period"
+            >
+              <ChevronRight size={16} />
+            </button>
+            <button
+              className="btn btn--ghost btn--icon"
+              type="button"
+              onClick={handleResetToCurrentMonth}
+              aria-label="Reset to this month"
+              title="Reset to this month"
+            >
+              <RotateCcw size={15} />
+            </button>
           </div>
 
           {dateRange === DATE_RANGES.CUSTOM && (

@@ -18,6 +18,8 @@ function writeStackMap(storageKey, value) {
 
 export function usePersistentStackMap(storageKey) {
   const [stackMap, setStackMapState] = useState(() => readStackMap(storageKey));
+  const labelStorageKey = `${storageKey}:labels`;
+  const [labelMap, setLabelMapState] = useState(() => readStackMap(labelStorageKey));
 
   const setStackMap = useCallback((updater) => {
     setStackMapState(previous => {
@@ -26,6 +28,14 @@ export function usePersistentStackMap(storageKey) {
       return next;
     });
   }, [storageKey]);
+
+  const setLabelMap = useCallback((updater) => {
+    setLabelMapState(previous => {
+      const next = typeof updater === 'function' ? updater(previous) : updater;
+      writeStackMap(labelStorageKey, next);
+      return next;
+    });
+  }, [labelStorageKey]);
 
   const stackGroup = useCallback((sourceKey, targetKey) => {
     if (!sourceKey || !targetKey || sourceKey === targetKey) return;
@@ -45,7 +55,23 @@ export function usePersistentStackMap(storageKey) {
       });
       return next;
     });
-  }, [setStackMap]);
+    setLabelMap(previous => {
+      if (!previous[targetKey]) return previous;
+      const next = { ...previous };
+      delete next[targetKey];
+      return next;
+    });
+  }, [setStackMap, setLabelMap]);
 
-  return { stackMap, stackGroup, undoStack };
+  const renameStack = useCallback((targetKey, label) => {
+    const nextLabel = label.trim();
+    setLabelMap(previous => {
+      const next = { ...previous };
+      if (nextLabel) next[targetKey] = nextLabel;
+      else delete next[targetKey];
+      return next;
+    });
+  }, [setLabelMap]);
+
+  return { stackMap, labelMap, stackGroup, undoStack, renameStack };
 }
