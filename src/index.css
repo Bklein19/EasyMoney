@@ -876,10 +876,25 @@ select option:hover {
   z-index: 100;
 }
 
-.tooltip-wrapper:hover .tooltip-text {
+.tooltip-wrapper:hover .tooltip-text,
+.tooltip-wrapper:focus-within .tooltip-text {
   visibility: visible;
   opacity: 1;
   transform: translateX(-50%) translateY(0);
+}
+
+.tooltip-wrapper .tooltip-text--left {
+  left: auto;
+  right: calc(100% + 8px);
+  bottom: 50%;
+  transform: translateY(50%) translateX(4px);
+  white-space: normal;
+  width: 260px;
+}
+
+.tooltip-wrapper:hover .tooltip-text--left,
+.tooltip-wrapper:focus-within .tooltip-text--left {
+  transform: translateY(50%) translateX(0);
 }
 
 /* ─── Recharts Overrides ────────────────────────────────────────── */
