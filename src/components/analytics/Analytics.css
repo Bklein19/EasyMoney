@@ -534,6 +534,16 @@
   overflow: hidden;
 }
 
+.drilldown-list--scrollable {
+  max-height: 560px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.drilldown-list--scrollable .drilldown-footer {
+  flex: 0 0 auto;
+}
+
 .cash-flow-row,
 .drilldown-row {
   display: grid;

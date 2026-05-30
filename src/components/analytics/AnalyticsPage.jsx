@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { addMonths, endOfDay, endOfMonth, endOfYear, format, parseISO, startOfMonth, startOfYear, subMonths } from 'date-fns';
 import { Calendar, ChevronLeft, ChevronRight, HelpCircle, Landmark, RotateCcw, Search, X } from 'lucide-react';
 import { useTransactions } from '../../hooks/useTransactions';
@@ -32,6 +32,7 @@ const CASH_FLOW_GROUPS = {
 };
 
 const toDateInput = (date) => format(date, 'yyyy-MM-dd');
+const DRILLDOWN_PAGE_SIZE = 20;
 
 function getMonthSpan(startDate, endDate) {
   const start = parseISO(startDate);
@@ -52,6 +53,7 @@ export default function AnalyticsPage() {
   const [isCreatingDrilldownCategory, setIsCreatingDrilldownCategory] = useState(false);
   const [newDrilldownCategoryName, setNewDrilldownCategoryName] = useState('');
   const [pendingDrilldownCategoryValue, setPendingDrilldownCategoryValue] = useState(null);
+  const [drilldownVisibleCount, setDrilldownVisibleCount] = useState(DRILLDOWN_PAGE_SIZE);
   
   const { startDate, endDate } = useMemo(() => {
     const today = new Date();
@@ -211,6 +213,12 @@ export default function AnalyticsPage() {
 
   const drilldownCategorySelectValue = pendingDrilldownCategoryValue ?? drilldownCategoryValue;
 
+  const loadedDrilldownTransactions = useMemo(() => {
+    return visibleDrilldownTransactions.slice(0, drilldownVisibleCount);
+  }, [visibleDrilldownTransactions, drilldownVisibleCount]);
+
+  const hasMoreDrilldownTransactions = drilldownVisibleCount < visibleDrilldownTransactions.length;
+
   const confirmLargeDrilldownChange = (count, categoryName) => {
     if (count <= 50) return true;
     return window.confirm(
@@ -274,6 +282,7 @@ export default function AnalyticsPage() {
     setDrilldownSearch('');
     setDrilldownSort('date_desc');
     setPendingDrilldownCategoryValue(null);
+    setDrilldownVisibleCount(DRILLDOWN_PAGE_SIZE);
     setDrilldown(nextDrilldown);
   };
 
@@ -293,6 +302,18 @@ export default function AnalyticsPage() {
     setDrilldown(null);
     setDrilldownSearch('');
     setDrilldownSort('date_desc');
+    setDrilldownVisibleCount(DRILLDOWN_PAGE_SIZE);
+  };
+
+  const handleDrilldownScroll = (event) => {
+    if (!hasMoreDrilldownTransactions) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
+    if (scrollHeight - scrollTop - clientHeight < 96) {
+      setDrilldownVisibleCount(previous =>
+        Math.min(previous + DRILLDOWN_PAGE_SIZE, visibleDrilldownTransactions.length)
+      );
+    }
   };
 
   const handleDateRangeChange = (nextRange) => {
@@ -628,7 +649,7 @@ export default function AnalyticsPage() {
             <div>
               <h3 className="analytics-card__title">{drilldown.title}</h3>
               <p>
-                {visibleDrilldownTransactions.length} shown
+                {Math.min(drilldownVisibleCount, visibleDrilldownTransactions.length)} shown
                 {visibleDrilldownTransactions.length !== drilldownTransactions.length && ` of ${drilldownTransactions.length}`}
                 {' '}matching transaction{visibleDrilldownTransactions.length === 1 ? '' : 's'}
               </p>
@@ -709,14 +730,20 @@ export default function AnalyticsPage() {
               <input
                 className="input input--sm"
                 value={drilldownSearch}
-                onChange={(event) => setDrilldownSearch(event.target.value)}
+                onChange={(event) => {
+                  setDrilldownSearch(event.target.value);
+                  setDrilldownVisibleCount(DRILLDOWN_PAGE_SIZE);
+                }}
                 placeholder="Search matching transactions"
               />
             </label>
             <select
               className="input input--sm drilldown-sort"
               value={drilldownSort}
-              onChange={(event) => setDrilldownSort(event.target.value)}
+              onChange={(event) => {
+                setDrilldownSort(event.target.value);
+                setDrilldownVisibleCount(DRILLDOWN_PAGE_SIZE);
+              }}
             >
               <option value="date_desc">Newest first</option>
               <option value="date_asc">Oldest first</option>
@@ -724,8 +751,8 @@ export default function AnalyticsPage() {
               <option value="amount_asc">Lowest cost first</option>
             </select>
           </div>
-          <div className="drilldown-list">
-            {visibleDrilldownTransactions.slice(0, 25).map(transaction => (
+          <div className="drilldown-list drilldown-list--scrollable" onScroll={handleDrilldownScroll}>
+            {loadedDrilldownTransactions.map(transaction => (
               <div key={transaction.id} className="drilldown-row">
                 <span>{formatDate(transaction.date, 'medium')}</span>
                 <strong className="truncate">{transaction.merchant || transaction.description}</strong>
@@ -733,8 +760,8 @@ export default function AnalyticsPage() {
                 <span className={`amount ${getAmountClass(transaction.amount)}`}>{formatCurrency(transaction.amount, true)}</span>
               </div>
             ))}
-            {visibleDrilldownTransactions.length > 25 && (
-              <div className="drilldown-footer">Showing first 25 transactions.</div>
+            {hasMoreDrilldownTransactions && (
+              <div className="drilldown-footer">Scroll to load more transactions.</div>
             )}
             {visibleDrilldownTransactions.length === 0 && (
               <div className="drilldown-footer">No matching transactions for this filter.</div>
