@@ -106,7 +106,7 @@ export default function IncomeVsExpense({ transactions, groupMode = 'Auto', acco
       <ResponsiveContainer width="100%" height="100%">
         <BarChart
           data={data}
-          margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+          margin={{ top: 10, right: 10, left: 12, bottom: 0 }}
           style={{ cursor: 'pointer' }}
           onClick={(state) => {
             if (state?.activePayload?.[0]?.payload && onSelectPeriod) {
@@ -129,7 +129,7 @@ export default function IncomeVsExpense({ transactions, groupMode = 'Auto', acco
             fontSize={12}
             tickLine={false}
             axisLine={false}
-            dx={-10}
+            width={72}
           />
           <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(148, 163, 184, 0.05)' }} />
           <Legend 

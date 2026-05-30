@@ -81,7 +81,7 @@ export default function InvestmentTrends({ transactions, accountMap = {}, catego
       <ResponsiveContainer width="100%" height="100%">
         <BarChart
           data={data}
-          margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+          margin={{ top: 10, right: 10, left: 12, bottom: 0 }}
           onClick={(state) => {
             if (state?.activePayload?.[0]?.payload && onSelectPeriod) {
               onSelectPeriod(state.activePayload[0].payload);
@@ -103,7 +103,7 @@ export default function InvestmentTrends({ transactions, accountMap = {}, catego
             fontSize={12}
             tickLine={false}
             axisLine={false}
-            dx={-10}
+            width={72}
           />
           <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(245, 158, 11, 0.08)' }} />
           <Bar dataKey="Investments" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={44} />

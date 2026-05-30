@@ -126,7 +126,7 @@ export default function SpendingTrends({ transactions, categoryMap, accountMap =
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart
           data={data}
-          margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+          margin={{ top: 10, right: 10, left: 12, bottom: 0 }}
           style={{ cursor: 'pointer' }}
           onClick={(state) => {
             if (state?.activePayload?.[0]?.payload && onSelectPeriod) {
@@ -157,7 +157,7 @@ export default function SpendingTrends({ transactions, categoryMap, accountMap =
             fontSize={12}
             tickLine={false}
             axisLine={false}
-            dx={-10}
+            width={72}
           />
           <Tooltip content={<CustomTooltip />} />
           {activeCategories.map((cat, index) => (

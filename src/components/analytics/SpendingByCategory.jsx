@@ -73,7 +73,7 @@ export default function SpendingByCategory({ transactions, categoryMap, accountM
         <BarChart
           data={data}
           layout="vertical"
-          margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+          margin={{ top: 5, right: 30, left: 28, bottom: 5 }}
         >
           <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(148, 163, 184, 0.1)" />
           <XAxis 

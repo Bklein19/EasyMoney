@@ -38,8 +38,6 @@ const ANALYSIS_SCOPES = {
 };
 
 const toDateInput = (date) => format(date, 'yyyy-MM-dd');
-const toMonthInput = (date) => format(date, 'yyyy-MM');
-const monthInputToDate = (value) => parseISO(`${value}-01`);
 
 function getMonthSpan(startDate, endDate) {
   const start = parseISO(startDate);
@@ -341,43 +339,6 @@ export default function AnalyticsPage() {
     return `${format(parseISO(startDate), 'MMM d, yyyy')} - ${format(parseISO(endDate), 'MMM d, yyyy')}`;
   }, [startDate, endDate]);
 
-  const customStartMonth = customStartDate ? toMonthInput(parseISO(customStartDate)) : '';
-  const customEndMonth = customEndDate ? toMonthInput(parseISO(customEndDate)) : '';
-
-  const handleCustomStartMonthChange = (value) => {
-    if (!value) {
-      setCustomStartDate('');
-      resetAnalyticsSelection();
-      return;
-    }
-
-    const nextStart = startOfMonth(monthInputToDate(value));
-    setCustomStartDate(toDateInput(nextStart));
-
-    if (!customEndDate || parseISO(customEndDate) < nextStart) {
-      setCustomEndDate(toDateInput(endOfMonth(nextStart)));
-    }
-
-    resetAnalyticsSelection();
-  };
-
-  const handleCustomEndMonthChange = (value) => {
-    if (!value) {
-      setCustomEndDate('');
-      resetAnalyticsSelection();
-      return;
-    }
-
-    const nextEnd = endOfMonth(monthInputToDate(value));
-    setCustomEndDate(toDateInput(nextEnd));
-
-    if (!customStartDate || parseISO(customStartDate) > nextEnd) {
-      setCustomStartDate(toDateInput(startOfMonth(nextEnd)));
-    }
-
-    resetAnalyticsSelection();
-  };
-
   const handleInvestmentPeriodSelect = (period) => {
     openDrilldown({
       type: 'investmentPeriod',
@@ -478,28 +439,28 @@ export default function AnalyticsPage() {
           </div>
 
           {dateRange === DATE_RANGES.CUSTOM && (
-            <div className="date-range-selector date-range-selector--custom date-range-selector--month-range">
-              <label>
-                <span>From</span>
-                <input
-                  className="input input--sm"
-                  type="month"
-                  value={customStartMonth}
-                  onChange={(event) => handleCustomStartMonthChange(event.target.value)}
-                />
-              </label>
-              <label>
-                <span>Through</span>
-                <input
-                  className="input input--sm"
-                  type="month"
-                  value={customEndMonth}
-                  onChange={(event) => handleCustomEndMonthChange(event.target.value)}
-                />
-              </label>
-              <div className="date-range-selector__hint">
-                Uses the first day of the start month and the last day of the end month.
-              </div>
+            <div className="date-range-selector date-range-selector--custom">
+              <input
+                className="input input--sm"
+                type="date"
+                value={customStartDate}
+                onChange={(event) => {
+                  setCustomStartDate(event.target.value);
+                  resetAnalyticsSelection();
+                }}
+                aria-label="Start date"
+              />
+              <span>to</span>
+              <input
+                className="input input--sm"
+                type="date"
+                value={customEndDate}
+                onChange={(event) => {
+                  setCustomEndDate(event.target.value);
+                  resetAnalyticsSelection();
+                }}
+                aria-label="End date"
+              />
             </div>
           )}
 
