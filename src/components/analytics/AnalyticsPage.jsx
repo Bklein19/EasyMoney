@@ -476,14 +476,12 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
-      {(filteredInternalMovement > 0 || filteredInvestments > 0) && (
+      {filteredInternalMovement > 0 && (
         <div className="analytics-scope-note">
-          {filteredInternalMovement > 0 && (
-            <span>Internal movement totaling {formatCurrency(filteredInternalMovement)} is filtered from spending, including card payments and transfers between your own accounts.</span>
-          )}
-          {filteredInvestments > 0 && (
-            <span> Investments totaling {formatCurrency(filteredInvestments)} are tracked separately and excluded from spending and net flow.</span>
-          )}
+          <span>
+            Internal money movement totaling {formatCurrency(filteredInternalMovement)} is excluded from spending and net flow,
+            including credit card payments and transfers between your own accounts.
+          </span>
         </div>
       )}
 
