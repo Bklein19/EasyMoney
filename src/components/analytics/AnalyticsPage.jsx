@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react';
-import { addDays, endOfDay, endOfMonth, endOfQuarter, endOfYear, format, parseISO, startOfMonth, startOfQuarter, startOfYear, subDays, subMonths, subQuarters, differenceInCalendarDays } from 'date-fns';
+import { addMonths, endOfDay, endOfMonth, endOfYear, format, parseISO, startOfMonth, startOfYear, subMonths } from 'date-fns';
 import { Calendar, ChevronLeft, ChevronRight, Landmark, RotateCcw, Search, X } from 'lucide-react';
 import { useTransactions } from '../../hooks/useTransactions';
 import { useCategories } from '../../hooks/useCategories';
@@ -17,14 +17,8 @@ import InvestmentTrends from './InvestmentTrends';
 import './Analytics.css';
 
 const DATE_RANGES = {
-  LAST_7: 'Last 7 Days',
-  LAST_30: 'Last 30 Days',
-  LAST_90: 'Last 90 Days',
   THIS_MONTH: 'This Month',
   LAST_MONTH: 'Last Month',
-  THIS_QUARTER: 'This Quarter',
-  LAST_QUARTER: 'Last Quarter',
-  YEAR_TO_DATE: 'Year to Date',
   THIS_YEAR: 'This Year',
   CUSTOM: 'Custom',
   ALL_TIME: 'All Time'
@@ -44,6 +38,14 @@ const ANALYSIS_SCOPES = {
 };
 
 const toDateInput = (date) => format(date, 'yyyy-MM-dd');
+const toMonthInput = (date) => format(date, 'yyyy-MM');
+const monthInputToDate = (value) => parseISO(`${value}-01`);
+
+function getMonthSpan(startDate, endDate) {
+  const start = parseISO(startDate);
+  const end = parseISO(endDate);
+  return Math.max(1, ((end.getFullYear() - start.getFullYear()) * 12) + end.getMonth() - start.getMonth() + 1);
+}
 
 export default function AnalyticsPage() {
   const [dateRange, setDateRange] = useState(DATE_RANGES.THIS_MONTH);
@@ -62,26 +64,12 @@ export default function AnalyticsPage() {
   const { startDate, endDate } = useMemo(() => {
     const today = new Date();
     switch (dateRange) {
-      case DATE_RANGES.LAST_7:
-        return { startDate: subDays(today, 7).toISOString(), endDate: today.toISOString() };
-      case DATE_RANGES.LAST_30:
-        return { startDate: subDays(today, 30).toISOString(), endDate: today.toISOString() };
-      case DATE_RANGES.LAST_90:
-        return { startDate: subDays(today, 90).toISOString(), endDate: today.toISOString() };
       case DATE_RANGES.THIS_MONTH:
         return { startDate: startOfMonth(today).toISOString(), endDate: endOfMonth(today).toISOString() };
       case DATE_RANGES.LAST_MONTH: {
         const lastMonth = subMonths(today, 1);
         return { startDate: startOfMonth(lastMonth).toISOString(), endDate: endOfMonth(lastMonth).toISOString() };
       }
-      case DATE_RANGES.THIS_QUARTER:
-        return { startDate: startOfQuarter(today).toISOString(), endDate: endOfQuarter(today).toISOString() };
-      case DATE_RANGES.LAST_QUARTER: {
-        const lastQuarter = subQuarters(today, 1);
-        return { startDate: startOfQuarter(lastQuarter).toISOString(), endDate: endOfQuarter(lastQuarter).toISOString() };
-      }
-      case DATE_RANGES.YEAR_TO_DATE:
-        return { startDate: startOfYear(today).toISOString(), endDate: today.toISOString() };
       case DATE_RANGES.THIS_YEAR:
         return { startDate: startOfYear(today).toISOString(), endDate: endOfYear(today).toISOString() };
       case DATE_RANGES.CUSTOM:
@@ -318,18 +306,22 @@ export default function AnalyticsPage() {
   };
 
   const handleDateRangeChange = (nextRange) => {
+    if (nextRange === DATE_RANGES.CUSTOM && !customStartDate && !customEndDate) {
+      const today = new Date();
+      setCustomStartDate(toDateInput(startOfMonth(today)));
+      setCustomEndDate(toDateInput(endOfMonth(today)));
+    }
+
     setDateRange(nextRange);
     resetAnalyticsSelection();
   };
 
-  const handleShiftDateWindow = (direction) => {
+  const handleShiftMonthWindow = (direction) => {
     if (!startDate || !endDate) return;
 
-    const currentStart = parseISO(startDate);
-    const currentEnd = parseISO(endDate);
-    const spanDays = Math.max(1, differenceInCalendarDays(currentEnd, currentStart) + 1);
-    const nextStart = addDays(currentStart, direction * spanDays);
-    const nextEnd = addDays(currentEnd, direction * spanDays);
+    const spanMonths = getMonthSpan(startDate, endDate);
+    const nextStart = startOfMonth(addMonths(parseISO(startDate), direction * spanMonths));
+    const nextEnd = endOfMonth(addMonths(parseISO(endDate), direction * spanMonths));
 
     setCustomStartDate(toDateInput(nextStart));
     setCustomEndDate(toDateInput(nextEnd));
@@ -348,6 +340,43 @@ export default function AnalyticsPage() {
     if (!startDate || !endDate) return 'All available dates';
     return `${format(parseISO(startDate), 'MMM d, yyyy')} - ${format(parseISO(endDate), 'MMM d, yyyy')}`;
   }, [startDate, endDate]);
+
+  const customStartMonth = customStartDate ? toMonthInput(parseISO(customStartDate)) : '';
+  const customEndMonth = customEndDate ? toMonthInput(parseISO(customEndDate)) : '';
+
+  const handleCustomStartMonthChange = (value) => {
+    if (!value) {
+      setCustomStartDate('');
+      resetAnalyticsSelection();
+      return;
+    }
+
+    const nextStart = startOfMonth(monthInputToDate(value));
+    setCustomStartDate(toDateInput(nextStart));
+
+    if (!customEndDate || parseISO(customEndDate) < nextStart) {
+      setCustomEndDate(toDateInput(endOfMonth(nextStart)));
+    }
+
+    resetAnalyticsSelection();
+  };
+
+  const handleCustomEndMonthChange = (value) => {
+    if (!value) {
+      setCustomEndDate('');
+      resetAnalyticsSelection();
+      return;
+    }
+
+    const nextEnd = endOfMonth(monthInputToDate(value));
+    setCustomEndDate(toDateInput(nextEnd));
+
+    if (!customStartDate || parseISO(customStartDate) > nextEnd) {
+      setCustomStartDate(toDateInput(startOfMonth(nextEnd)));
+    }
+
+    resetAnalyticsSelection();
+  };
 
   const handleInvestmentPeriodSelect = (period) => {
     openDrilldown({
@@ -418,9 +447,9 @@ export default function AnalyticsPage() {
               className="btn btn--ghost btn--icon"
               type="button"
               disabled={!startDate || !endDate}
-              onClick={() => handleShiftDateWindow(-1)}
-              aria-label="Previous date window"
-              title="Previous matching period"
+              onClick={() => handleShiftMonthWindow(-1)}
+              aria-label="Previous month range"
+              title="Previous month range"
             >
               <ChevronLeft size={16} />
             </button>
@@ -431,9 +460,9 @@ export default function AnalyticsPage() {
               className="btn btn--ghost btn--icon"
               type="button"
               disabled={!startDate || !endDate}
-              onClick={() => handleShiftDateWindow(1)}
-              aria-label="Next date window"
-              title="Next matching period"
+              onClick={() => handleShiftMonthWindow(1)}
+              aria-label="Next month range"
+              title="Next month range"
             >
               <ChevronRight size={16} />
             </button>
@@ -449,28 +478,28 @@ export default function AnalyticsPage() {
           </div>
 
           {dateRange === DATE_RANGES.CUSTOM && (
-            <div className="date-range-selector date-range-selector--custom">
-              <input
-                className="input input--sm"
-                type="date"
-                value={customStartDate}
-                onChange={(event) => {
-                  setCustomStartDate(event.target.value);
-                  setPendingDrilldownCategoryValue(null);
-                  setDrilldown(null);
-                }}
-              />
-              <span>to</span>
-              <input
-                className="input input--sm"
-                type="date"
-                value={customEndDate}
-                onChange={(event) => {
-                  setCustomEndDate(event.target.value);
-                  setPendingDrilldownCategoryValue(null);
-                  setDrilldown(null);
-                }}
-              />
+            <div className="date-range-selector date-range-selector--custom date-range-selector--month-range">
+              <label>
+                <span>From</span>
+                <input
+                  className="input input--sm"
+                  type="month"
+                  value={customStartMonth}
+                  onChange={(event) => handleCustomStartMonthChange(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>Through</span>
+                <input
+                  className="input input--sm"
+                  type="month"
+                  value={customEndMonth}
+                  onChange={(event) => handleCustomEndMonthChange(event.target.value)}
+                />
+              </label>
+              <div className="date-range-selector__hint">
+                Uses the first day of the start month and the last day of the end month.
+              </div>
             </div>
           )}
 
