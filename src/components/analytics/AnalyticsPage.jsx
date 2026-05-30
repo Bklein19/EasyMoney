@@ -50,6 +50,7 @@ export default function AnalyticsPage() {
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
   const [accountId, setAccountId] = useState('');
+  const [categoryFilterId, setCategoryFilterId] = useState('');
   const [analysisScope, setAnalysisScope] = useState(ANALYSIS_SCOPES.CASH_FLOW);
   const [cashFlowGroup, setCashFlowGroup] = useState(CASH_FLOW_GROUPS.AUTO);
   const [drilldown, setDrilldown] = useState(null);
@@ -102,9 +103,17 @@ export default function AnalyticsPage() {
     });
   }, [transactions, analysisScope, accountMap]);
 
+  const categoryScopedTransactions = useMemo(() => {
+    if (!categoryFilterId) return scopedTransactions;
+    return scopedTransactions.filter(transaction => {
+      if (categoryFilterId === 'uncategorized') return !transaction.categoryId;
+      return String(transaction.categoryId) === categoryFilterId;
+    });
+  }, [scopedTransactions, categoryFilterId]);
+
   const analysisTransactions = useMemo(() => {
-    return scopedTransactions.filter(transaction => !isExcludedFromCashFlow(transaction, accountMap, categoryMap));
-  }, [scopedTransactions, accountMap, categoryMap]);
+    return categoryScopedTransactions.filter(transaction => !isExcludedFromCashFlow(transaction, accountMap, categoryMap));
+  }, [categoryScopedTransactions, accountMap, categoryMap]);
 
   // Derived Summary
   const { totalIncome, totalExpense, filteredInternalMovement, filteredInvestments } = useMemo(() => {
@@ -112,7 +121,7 @@ export default function AnalyticsPage() {
     let exp = 0;
     let internalMovement = 0;
     let investments = 0;
-    scopedTransactions.forEach(t => {
+    categoryScopedTransactions.forEach(t => {
       if (isInvestmentMovement(t, accountMap, categoryMap)) {
         investments += Math.abs(t.amount);
       } else if (isExcludedFromCashFlow(t, accountMap, categoryMap)) {
@@ -124,7 +133,7 @@ export default function AnalyticsPage() {
       else if (isExpense(t, accountMap, categoryMap)) exp += Math.abs(t.amount);
     });
     return { totalIncome: inc, totalExpense: exp, filteredInternalMovement: internalMovement, filteredInvestments: investments };
-  }, [scopedTransactions, analysisTransactions, accountMap, categoryMap]);
+  }, [categoryScopedTransactions, analysisTransactions, accountMap, categoryMap]);
 
   const cashFlowRows = useMemo(() => {
     if (analysisTransactions.length === 0) return [];
@@ -156,7 +165,7 @@ export default function AnalyticsPage() {
   const drilldownTransactions = useMemo(() => {
     if (!drilldown) return [];
 
-    const sourceTransactions = drilldown.type === 'investmentPeriod' ? scopedTransactions : analysisTransactions;
+    const sourceTransactions = drilldown.type === 'investmentPeriod' ? categoryScopedTransactions : analysisTransactions;
 
     return sourceTransactions.filter(t => {
       if (drilldown.type === 'category') {
@@ -177,7 +186,7 @@ export default function AnalyticsPage() {
       }
       return false;
     });
-  }, [analysisTransactions, scopedTransactions, drilldown, accountMap, categoryMap]);
+  }, [analysisTransactions, categoryScopedTransactions, drilldown, accountMap, categoryMap]);
 
   const visibleDrilldownTransactions = useMemo(() => {
     const query = drilldownSearch.trim().toLowerCase();
@@ -313,6 +322,11 @@ export default function AnalyticsPage() {
     resetAnalyticsSelection();
   };
 
+  const handleCategoryFilterChange = (nextCategoryId) => {
+    setCategoryFilterId(nextCategoryId);
+    resetAnalyticsSelection();
+  };
+
   const handleShiftMonthWindow = (direction) => {
     if (!startDate || !endDate) return;
 
@@ -385,6 +399,23 @@ export default function AnalyticsPage() {
             >
               {Object.values(ANALYSIS_SCOPES).map(scope => (
                 <option key={scope} value={scope}>{scope}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="date-range-selector">
+            <select
+              className="input input--sm"
+              value={categoryFilterId}
+              onChange={(event) => handleCategoryFilterChange(event.target.value)}
+              aria-label="Category filter"
+            >
+              <option value="">All Categories</option>
+              <option value="uncategorized">Uncategorized</option>
+              {categories
+                .filter(category => category.name.toLowerCase() !== 'uncategorized')
+                .map(category => (
+                <option key={category.id} value={category.id}>{category.name}</option>
               ))}
             </select>
           </div>
@@ -497,7 +528,7 @@ export default function AnalyticsPage() {
           <div className="kpi-card__label">Total Expense</div>
           <div className="kpi-card__value amount amount--negative">{formatCurrency(totalExpense)}</div>
         </div>
-        <div className="glass-card kpi-card kpi-card--investment">
+        <div className="glass-card kpi-card">
           <div className="kpi-card__label analytics-kpi-label">
             <span>Total Investments</span>
             <Tooltip
@@ -548,11 +579,7 @@ export default function AnalyticsPage() {
             transactions={analysisTransactions}
             categoryMap={categoryMap}
             accountMap={accountMap}
-            onSelectCategory={(category) => openDrilldown({
-              type: 'category',
-              id: category.id,
-              title: `${category.name} Transactions`
-            })}
+            onSelectCategory={(category) => handleCategoryFilterChange(String(category.id))}
           />
         </div>
         
@@ -591,7 +618,7 @@ export default function AnalyticsPage() {
         <div className="analytics-card glass-card">
           <h3 className="analytics-card__title">Investments Over Time</h3>
           <InvestmentTrends
-            transactions={scopedTransactions}
+            transactions={categoryScopedTransactions}
             accountMap={accountMap}
             categoryMap={categoryMap}
             groupMode={cashFlowGroup}

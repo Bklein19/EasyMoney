@@ -521,13 +521,6 @@
   background: var(--bg-hover);
 }
 
-.kpi-card--investment {
-  border-color: rgba(20, 184, 166, 0.24);
-  background:
-    linear-gradient(135deg, rgba(20, 184, 166, 0.10), rgba(16, 185, 129, 0.04)),
-    var(--glass-bg);
-}
-
 .amount--investment {
   color: #2dd4bf;
 }

@@ -1,14 +1,16 @@
 import { useMemo, useState } from 'react';
-import { GripVertical, HelpCircle, RotateCcw } from 'lucide-react';
+import { Check, GripVertical, HelpCircle, Pencil, RotateCcw, X } from 'lucide-react';
 import { isExpense } from '../../utils/transactionSemantics';
 import { applyManualStacks, groupMerchantTransactions } from '../../utils/merchantNormalizer';
 import { usePersistentStackMap } from '../../hooks/usePersistentStackMap';
 import Tooltip from '../shared/Tooltip';
 
 export default function TopMerchants({ transactions, accountMap = {}, categoryMap = {}, onSelectMerchant }) {
-  const { stackMap, stackGroup, undoStack } = usePersistentStackMap('vaultview:merchantStacks');
+  const { stackMap, labelMap, stackGroup, undoStack, renameStack } = usePersistentStackMap('vaultview:merchantStacks');
   const [draggingKey, setDraggingKey] = useState(null);
   const [dropTargetKey, setDropTargetKey] = useState(null);
+  const [editingKey, setEditingKey] = useState(null);
+  const [editingName, setEditingName] = useState('');
   const data = useMemo(() => {
     const expenseTransactions = transactions.filter(t => isExpense(t, accountMap, categoryMap));
     const totalExpenses = expenseTransactions.reduce((sum, t) => sum + Math.abs(t.amount), 0);
@@ -18,12 +20,12 @@ export default function TopMerchants({ transactions, accountMap = {}, categoryMa
       transaction => transaction.merchant || transaction.description || 'Unknown'
     );
 
-    const sorted = applyManualStacks(grouped, stackMap)
+    const sorted = applyManualStacks(grouped, stackMap, labelMap)
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 10);
 
     return { merchants: sorted, totalExpenses };
-  }, [transactions, accountMap, categoryMap, stackMap]);
+  }, [transactions, accountMap, categoryMap, stackMap, labelMap]);
 
   if (data.merchants.length === 0) {
     return (
@@ -36,6 +38,26 @@ export default function TopMerchants({ transactions, accountMap = {}, categoryMa
 
   const formatCurrency = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
   const isDragging = Boolean(draggingKey);
+
+  const beginRename = (event, merchant) => {
+    event.stopPropagation();
+    setEditingKey(merchant.normalized);
+    setEditingName(merchant.customName || merchant.name);
+  };
+
+  const cancelRename = (event) => {
+    event.stopPropagation();
+    setEditingKey(null);
+    setEditingName('');
+  };
+
+  const saveRename = (event, merchant) => {
+    event.preventDefault();
+    event.stopPropagation();
+    renameStack(merchant.normalized, editingName);
+    setEditingKey(null);
+    setEditingName('');
+  };
 
   return (
     <div className={`merchant-list merchant-list--stackable merchant-list--expense ${isDragging ? 'merchant-list--dragging' : ''}`}>
@@ -99,6 +121,7 @@ export default function TopMerchants({ transactions, accountMap = {}, categoryMa
             }}
             onClick={() => onSelectMerchant?.(merchant)}
             onKeyDown={(event) => {
+              if (editingKey === merchant.normalized) return;
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
                 onSelectMerchant?.(merchant);
@@ -114,10 +137,43 @@ export default function TopMerchants({ transactions, accountMap = {}, categoryMa
             />
             <div className="merchant-item__rank">#{index + 1}</div>
             <div className="merchant-item__info">
-              <div className="merchant-item__name" title={merchant.name}>{merchant.name}</div>
+              {editingKey === merchant.normalized ? (
+                <form className="merchant-item__rename" onSubmit={(event) => saveRename(event, merchant)}>
+                  <input
+                    className="input input--sm merchant-item__rename-input"
+                    value={editingName}
+                    onChange={(event) => setEditingName(event.target.value)}
+                    onClick={(event) => event.stopPropagation()}
+                    aria-label="Merchant group name"
+                    autoFocus
+                  />
+                  <button className="btn btn--ghost btn--icon" type="submit" aria-label="Save name">
+                    <Check size={14} />
+                  </button>
+                  <button className="btn btn--ghost btn--icon" type="button" onClick={cancelRename} aria-label="Cancel rename">
+                    <X size={14} />
+                  </button>
+                </form>
+              ) : (
+                <div className="merchant-item__name-row">
+                  <div className="merchant-item__name" title={merchant.name}>{merchant.name}</div>
+                  {merchant.manuallyStackedKeys.length > 0 && (
+                    <button
+                      className="merchant-item__icon-action"
+                      type="button"
+                      aria-label={`Rename ${merchant.name}`}
+                      title="Rename group"
+                      onClick={(event) => beginRename(event, merchant)}
+                    >
+                      <Pencil size={13} />
+                    </button>
+                  )}
+                </div>
+              )}
               <div className="merchant-item__count">
                 {merchant.count} transaction{merchant.count !== 1 ? 's' : ''}
                 {merchant.aliases.length > 1 ? ` across ${merchant.aliases.length} labels` : ''}
+                {merchant.customName ? ' - renamed' : ''}
               </div>
             </div>
             <div className="merchant-item__amount amount amount--negative">
