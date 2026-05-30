@@ -5,7 +5,7 @@ import { useTransactions } from '../../hooks/useTransactions';
 import { useCategories } from '../../hooks/useCategories';
 import { useAccounts } from '../../hooks/useAccounts';
 import { formatCurrency, formatDate, getAmountClass } from '../../utils/formatters';
-import { buildAccountMap, isCreditAccount, isExcludedFromCashFlow, isExpense, isIncome, isInvestmentMovement } from '../../utils/transactionSemantics';
+import { buildAccountMap, isExcludedFromCashFlow, isExpense, isIncome, isInvestmentMovement } from '../../utils/transactionSemantics';
 
 import SpendingByCategory from './SpendingByCategory';
 import SpendingTrends from './SpendingTrends';
@@ -31,12 +31,6 @@ const CASH_FLOW_GROUPS = {
   YEAR: 'Yearly'
 };
 
-const ANALYSIS_SCOPES = {
-  CASH_FLOW: 'All Accounts',
-  BANK: 'Bank Accounts Only',
-  CREDIT: 'Credit Cards Only'
-};
-
 const toDateInput = (date) => format(date, 'yyyy-MM-dd');
 
 function getMonthSpan(startDate, endDate) {
@@ -51,7 +45,6 @@ export default function AnalyticsPage() {
   const [customEndDate, setCustomEndDate] = useState('');
   const [accountId, setAccountId] = useState('');
   const [categoryFilterId, setCategoryFilterId] = useState('');
-  const [analysisScope, setAnalysisScope] = useState(ANALYSIS_SCOPES.CASH_FLOW);
   const [cashFlowGroup, setCashFlowGroup] = useState(CASH_FLOW_GROUPS.AUTO);
   const [drilldown, setDrilldown] = useState(null);
   const [drilldownSearch, setDrilldownSearch] = useState('');
@@ -94,22 +87,13 @@ export default function AnalyticsPage() {
     return map;
   }, [categories]);
 
-  const scopedTransactions = useMemo(() => {
-    return transactions.filter(transaction => {
-      const account = accountMap[transaction.accountId];
-      if (analysisScope === ANALYSIS_SCOPES.BANK) return !isCreditAccount(account);
-      if (analysisScope === ANALYSIS_SCOPES.CREDIT) return isCreditAccount(account);
-      return true;
-    });
-  }, [transactions, analysisScope, accountMap]);
-
   const categoryScopedTransactions = useMemo(() => {
-    if (!categoryFilterId) return scopedTransactions;
-    return scopedTransactions.filter(transaction => {
+    if (!categoryFilterId) return transactions;
+    return transactions.filter(transaction => {
       if (categoryFilterId === 'uncategorized') return !transaction.categoryId;
       return String(transaction.categoryId) === categoryFilterId;
     });
-  }, [scopedTransactions, categoryFilterId]);
+  }, [transactions, categoryFilterId]);
 
   const analysisTransactions = useMemo(() => {
     return categoryScopedTransactions.filter(transaction => !isExcludedFromCashFlow(transaction, accountMap, categoryMap));
@@ -383,22 +367,6 @@ export default function AnalyticsPage() {
               <option value="">All Accounts</option>
               {accounts.map(account => (
                 <option key={account.id} value={account.id}>{account.name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="date-range-selector">
-            <select
-              className="input input--sm"
-              value={analysisScope}
-              onChange={(e) => {
-                setAnalysisScope(e.target.value);
-                setPendingDrilldownCategoryValue(null);
-                setDrilldown(null);
-              }}
-            >
-              {Object.values(ANALYSIS_SCOPES).map(scope => (
-                <option key={scope} value={scope}>{scope}</option>
               ))}
             </select>
           </div>

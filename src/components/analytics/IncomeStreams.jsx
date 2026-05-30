@@ -91,7 +91,7 @@ export default function IncomeStreams({ transactions, accountMap = {}, categoryM
               isDropTarget ? 'merchant-item--drop-target' : ''
             ].filter(Boolean).join(' ')}
             title={stream.aliases.join('\n')}
-            draggable
+            draggable={editingKey !== stream.normalized}
             onDragStart={(event) => {
               event.dataTransfer.setData('text/plain', stream.normalized);
               event.dataTransfer.effectAllowed = 'move';
@@ -137,12 +137,18 @@ export default function IncomeStreams({ transactions, accountMap = {}, categoryM
             <div className="merchant-item__rank">#{index + 1}</div>
             <div className="merchant-item__info">
               {editingKey === stream.normalized ? (
-                <form className="merchant-item__rename" onSubmit={(event) => saveRename(event, stream)}>
+                <form
+                  className="merchant-item__rename"
+                  onSubmit={(event) => saveRename(event, stream)}
+                  onClick={(event) => event.stopPropagation()}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                  onDragStart={(event) => event.stopPropagation()}
+                >
                   <input
                     className="input input--sm merchant-item__rename-input"
                     value={editingName}
                     onChange={(event) => setEditingName(event.target.value)}
-                    onClick={(event) => event.stopPropagation()}
                     aria-label="Combination name"
                     autoFocus
                   />

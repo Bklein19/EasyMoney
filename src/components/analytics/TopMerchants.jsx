@@ -92,7 +92,7 @@ export default function TopMerchants({ transactions, accountMap = {}, categoryMa
               isDropTarget ? 'merchant-item--drop-target' : ''
             ].filter(Boolean).join(' ')}
             title={merchant.aliases.join('\n')}
-            draggable
+            draggable={editingKey !== merchant.normalized}
             onDragStart={(event) => {
               event.dataTransfer.setData('text/plain', merchant.normalized);
               event.dataTransfer.effectAllowed = 'move';
@@ -138,12 +138,18 @@ export default function TopMerchants({ transactions, accountMap = {}, categoryMa
             <div className="merchant-item__rank">#{index + 1}</div>
             <div className="merchant-item__info">
               {editingKey === merchant.normalized ? (
-                <form className="merchant-item__rename" onSubmit={(event) => saveRename(event, merchant)}>
+                <form
+                  className="merchant-item__rename"
+                  onSubmit={(event) => saveRename(event, merchant)}
+                  onClick={(event) => event.stopPropagation()}
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                  onDragStart={(event) => event.stopPropagation()}
+                >
                   <input
                     className="input input--sm merchant-item__rename-input"
                     value={editingName}
                     onChange={(event) => setEditingName(event.target.value)}
-                    onClick={(event) => event.stopPropagation()}
                     aria-label="Merchant group name"
                     autoFocus
                   />
