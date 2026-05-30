@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { addMonths, endOfDay, endOfMonth, endOfYear, format, parseISO, startOfMonth, startOfYear, subMonths } from 'date-fns';
-import { Calendar, ChevronLeft, ChevronRight, Landmark, RotateCcw, Search, X } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, HelpCircle, Landmark, RotateCcw, Search, X } from 'lucide-react';
 import { useTransactions } from '../../hooks/useTransactions';
 import { useCategories } from '../../hooks/useCategories';
 import { useAccounts } from '../../hooks/useAccounts';
@@ -13,6 +13,7 @@ import IncomeVsExpense from './IncomeVsExpense';
 import TopMerchants from './TopMerchants';
 import IncomeStreams from './IncomeStreams';
 import InvestmentTrends from './InvestmentTrends';
+import Tooltip from '../shared/Tooltip';
 
 import './Analytics.css';
 
@@ -31,7 +32,7 @@ const CASH_FLOW_GROUPS = {
 };
 
 const ANALYSIS_SCOPES = {
-  CASH_FLOW: 'Cash Flow',
+  CASH_FLOW: 'All Accounts',
   BANK: 'Bank Accounts Only',
   CREDIT: 'Credit Cards Only',
   ALL_ACTIVITY: 'All Activity'
@@ -349,7 +350,7 @@ export default function AnalyticsPage() {
 
   return (
     <div className="page analytics-page stagger-in">
-      <div className="page__header">
+      <div className="page__header analytics-page__header">
         <div>
           <h1 className="page__title">Analytics</h1>
           <p className="page__subtitle">Insights into your financial habits</p>
@@ -489,7 +490,7 @@ export default function AnalyticsPage() {
         </div>
       )}
 
-      <div className="analytics-summary grid-3">
+      <div className="analytics-summary grid-4">
         <div className="glass-card kpi-card">
           <div className="kpi-card__label">Total Income</div>
           <div className="kpi-card__value amount amount--positive">{formatCurrency(totalIncome)}</div>
@@ -497,6 +498,20 @@ export default function AnalyticsPage() {
         <div className="glass-card kpi-card">
           <div className="kpi-card__label">Total Expense</div>
           <div className="kpi-card__value amount amount--negative">{formatCurrency(totalExpense)}</div>
+        </div>
+        <div className="glass-card kpi-card">
+          <div className="kpi-card__label analytics-kpi-label">
+            <span>Total Investments</span>
+            <Tooltip
+              text="Investment transactions are tracked separately and do not subtract from net flow."
+              position="top"
+            >
+              <span className="analytics-help-icon" tabIndex={0} aria-label="Investment total help">
+                <HelpCircle size={14} />
+              </span>
+            </Tooltip>
+          </div>
+          <div className="kpi-card__value amount amount--neutral">{formatCurrency(filteredInvestments)}</div>
         </div>
         <div className="glass-card kpi-card">
           <div className="kpi-card__label">Net Flow</div>
