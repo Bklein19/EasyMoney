@@ -220,16 +220,21 @@
   justify-content: space-between;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-3);
-  border: 1px dashed rgba(16, 185, 129, 0.28);
+  border: 1px dashed rgba(148, 163, 184, 0.24);
   border-radius: var(--radius-md);
-  background: rgba(16, 185, 129, 0.07);
+  background: rgba(148, 163, 184, 0.06);
   color: var(--text-secondary);
   font-size: var(--text-xs);
   line-height: 1.4;
 }
 
-.merchant-list--dragging .merchant-list__hint {
+.merchant-list--income.merchant-list--dragging .merchant-list__hint {
   border-color: rgba(16, 185, 129, 0.55);
+  color: var(--text-primary);
+}
+
+.merchant-list--expense.merchant-list--dragging .merchant-list__hint {
+  border-color: rgba(239, 68, 68, 0.5);
   color: var(--text-primary);
 }
 
@@ -249,9 +254,19 @@
 
 .merchant-list__help:hover,
 .merchant-list__help:focus-visible {
+  outline: none;
+}
+
+.merchant-list--income .merchant-list__help:hover,
+.merchant-list--income .merchant-list__help:focus-visible {
   color: var(--color-success);
   border-color: rgba(16, 185, 129, 0.4);
-  outline: none;
+}
+
+.merchant-list--expense .merchant-list__help:hover,
+.merchant-list--expense .merchant-list__help:focus-visible {
+  color: var(--color-danger);
+  border-color: rgba(239, 68, 68, 0.4);
 }
 
 .merchant-item {
@@ -291,16 +306,34 @@
   background: rgba(16, 185, 129, 0.08);
 }
 
+.merchant-item--expense:hover {
+  background: rgba(239, 68, 68, 0.08);
+}
+
 .merchant-item--drag-source {
   opacity: 0.45;
   transform: scale(0.99);
 }
 
 .merchant-item--drop-target {
+  background: rgba(148, 163, 184, 0.12);
+  box-shadow:
+    inset 0 0 0 1px rgba(148, 163, 184, 0.35),
+    0 0 0 3px rgba(148, 163, 184, 0.1);
+}
+
+.merchant-item--income.merchant-item--drop-target {
   background: rgba(16, 185, 129, 0.16);
   box-shadow:
     inset 0 0 0 1px rgba(16, 185, 129, 0.5),
     0 0 0 3px rgba(16, 185, 129, 0.12);
+}
+
+.merchant-item--expense.merchant-item--drop-target {
+  background: rgba(239, 68, 68, 0.13);
+  box-shadow:
+    inset 0 0 0 1px rgba(239, 68, 68, 0.45),
+    0 0 0 3px rgba(239, 68, 68, 0.1);
 }
 
 .merchant-item--drop-target::after {
@@ -309,14 +342,24 @@
   right: var(--space-3);
   top: calc(100% - 6px);
   padding: 2px var(--space-2);
-  border: 1px solid rgba(16, 185, 129, 0.35);
+  border: 1px solid rgba(148, 163, 184, 0.35);
   border-radius: var(--radius-full);
   background: var(--bg-elevated);
-  color: var(--color-success);
+  color: var(--text-primary);
   font-size: var(--text-xs);
   font-weight: 700;
   pointer-events: none;
   z-index: 2;
+}
+
+.merchant-item--income.merchant-item--drop-target::after {
+  border-color: rgba(16, 185, 129, 0.35);
+  color: var(--color-success);
+}
+
+.merchant-item--expense.merchant-item--drop-target::after {
+  border-color: rgba(239, 68, 68, 0.35);
+  color: var(--color-danger);
 }
 
 .merchant-item__drag-handle {
@@ -329,8 +372,13 @@
 }
 
 .merchant-item--income:hover .merchant-item__drag-handle,
-.merchant-list--dragging .merchant-item__drag-handle {
+.merchant-list--income.merchant-list--dragging .merchant-item__drag-handle {
   color: var(--color-success);
+}
+
+.merchant-item--expense:hover .merchant-item__drag-handle,
+.merchant-list--expense.merchant-list--dragging .merchant-item__drag-handle {
+  color: var(--color-danger);
 }
 
 .merchant-item__bar {
@@ -439,8 +487,10 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-1);
-  padding: 2px var(--space-2);
-  border: 1px solid var(--glass-border);
+  max-width: 0;
+  overflow: hidden;
+  padding: 2px 0;
+  border: 1px solid transparent;
   border-radius: var(--radius-full);
   background: var(--bg-elevated);
   color: var(--text-secondary);
@@ -448,12 +498,38 @@
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(4px);
+  transition: all var(--transition-fast);
+}
+
+.merchant-item:hover .merchant-item__undo,
+.merchant-item:focus-within .merchant-item__undo,
+.merchant-item__undo:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
+  max-width: 92px;
+  padding: 2px var(--space-2);
+  border-color: var(--glass-border);
 }
 
 .merchant-item__undo:hover {
   color: var(--text-primary);
   border-color: var(--glass-border-hover);
   background: var(--bg-hover);
+}
+
+.kpi-card--investment {
+  border-color: rgba(20, 184, 166, 0.24);
+  background:
+    linear-gradient(135deg, rgba(20, 184, 166, 0.10), rgba(16, 185, 129, 0.04)),
+    var(--glass-bg);
+}
+
+.amount--investment {
+  color: #2dd4bf;
 }
 
 .cash-flow-table,

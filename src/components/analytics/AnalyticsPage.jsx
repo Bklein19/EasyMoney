@@ -497,7 +497,7 @@ export default function AnalyticsPage() {
           <div className="kpi-card__label">Total Expense</div>
           <div className="kpi-card__value amount amount--negative">{formatCurrency(totalExpense)}</div>
         </div>
-        <div className="glass-card kpi-card">
+        <div className="glass-card kpi-card kpi-card--investment">
           <div className="kpi-card__label analytics-kpi-label">
             <span>Total Investments</span>
             <Tooltip
@@ -509,7 +509,7 @@ export default function AnalyticsPage() {
               </span>
             </Tooltip>
           </div>
-          <div className="kpi-card__value amount amount--neutral">{formatCurrency(filteredInvestments)}</div>
+          <div className="kpi-card__value amount amount--investment">{formatCurrency(filteredInvestments)}</div>
         </div>
         <div className="glass-card kpi-card">
           <div className="kpi-card__label">Net Flow</div>

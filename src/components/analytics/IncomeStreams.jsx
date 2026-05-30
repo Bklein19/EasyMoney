@@ -60,7 +60,7 @@ export default function IncomeStreams({ transactions, accountMap = {}, categoryM
   };
 
   return (
-    <div className={`merchant-list merchant-list--stackable ${isDragging ? 'merchant-list--dragging' : ''}`}>
+    <div className={`merchant-list merchant-list--stackable merchant-list--income ${isDragging ? 'merchant-list--dragging' : ''}`}>
       <div className="merchant-list__hint">
         <span>Drag one income stream onto another to combine matching labels.</span>
         <Tooltip
