@@ -1,0 +1,53 @@
+.accounts-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.summary-cards {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.summary-card {
+  padding: var(--space-5);
+  flex: 1 1 260px;
+  max-width: 340px;
+}
+
+.summary-label {
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  margin-bottom: var(--space-2);
+  text-transform: uppercase;
+}
+
+.summary-value {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.accounts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--space-4);
+  align-items: stretch;
+}
+
+.accounts-grid .empty-state {
+  grid-column: 1 / -1;
+  min-height: 220px;
+  border: 1px dashed var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: rgba(148, 163, 184, 0.04);
+}
+
+@media (max-width: 768px) {
+  .summary-card {
+    max-width: none;
+  }
+}

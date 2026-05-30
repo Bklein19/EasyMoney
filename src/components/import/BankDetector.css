@@ -1,0 +1,53 @@
+.bank-detector {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  border-radius: 0.75rem;
+  margin-bottom: 1.5rem;
+  animation: slideDown 0.3s ease;
+}
+
+.bank-detector .content {
+  flex: 1;
+}
+
+.detector-action {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.bank-detector.success {
+  border-left: 4px solid #34d399;
+  background: rgba(52, 211, 153, 0.05);
+}
+
+.bank-detector.warning {
+  border-left: 4px solid #fbbf24;
+  background: rgba(251, 191, 36, 0.05);
+}
+
+.bank-detector .icon {
+  margin-top: 0.125rem;
+  flex-shrink: 0;
+}
+
+.success-icon { color: #34d399; }
+.warning-icon { color: #fbbf24; }
+
+.bank-detector .content h4 {
+  margin: 0 0 0.25rem 0;
+  font-size: 1rem;
+  color: var(--text-primary);
+}
+
+.bank-detector .content p {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
