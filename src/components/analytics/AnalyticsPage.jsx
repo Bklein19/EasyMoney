@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { addMonths, endOfDay, endOfMonth, endOfWeek, endOfYear, format, parseISO, startOfMonth, startOfWeek, startOfYear, subMonths, subWeeks } from 'date-fns';
-import { Calendar, ChevronLeft, ChevronRight, HelpCircle, Landmark, RotateCcw, Search, X } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, HelpCircle, Landmark, Maximize2, RotateCcw, Search, X } from 'lucide-react';
 import { useTransactions } from '../../hooks/useTransactions';
 import { useCategories } from '../../hooks/useCategories';
 import { useAccounts } from '../../hooks/useAccounts';
@@ -14,6 +14,7 @@ import TopMerchants from './TopMerchants';
 import IncomeStreams from './IncomeStreams';
 import InvestmentTrends from './InvestmentTrends';
 import Tooltip from '../shared/Tooltip';
+import Modal from '../shared/Modal';
 
 import './Analytics.css';
 
@@ -66,6 +67,8 @@ export default function AnalyticsPage() {
   const [newDrilldownCategoryName, setNewDrilldownCategoryName] = useState('');
   const [pendingDrilldownCategoryValue, setPendingDrilldownCategoryValue] = useState(null);
   const [drilldownVisibleCount, setDrilldownVisibleCount] = useState(DRILLDOWN_PAGE_SIZE);
+  const [expandedChart, setExpandedChart] = useState(null);
+  const [showTotalSpendTrend, setShowTotalSpendTrend] = useState(true);
   const drilldownRef = useRef(null);
   
   const { startDate, endDate } = useMemo(() => {
@@ -677,7 +680,17 @@ export default function AnalyticsPage() {
 
       <div className="analytics-grid">
         <div className="analytics-card glass-card">
-          <h3 className="analytics-card__title">Income vs Expense</h3>
+          <div className="analytics-chart-header">
+            <h3 className="analytics-card__title">Income vs Expense</h3>
+            <button
+              className="btn btn--ghost btn--icon btn--sm"
+              type="button"
+              onClick={() => setExpandedChart('incomeExpense')}
+              aria-label="Expand Income vs Expense chart"
+            >
+              <Maximize2 size={16} />
+            </button>
+          </div>
           <IncomeVsExpense
             transactions={analysisTransactions}
             groupMode={cashFlowGroup}
@@ -687,13 +700,34 @@ export default function AnalyticsPage() {
           />
         </div>
         
-        <div className="analytics-card glass-card analytics-card--wide analytics-card--trend">
-          <h3 className="analytics-card__title">Spending Trends</h3>
+        <div className="analytics-card glass-card">
+          <div className="analytics-chart-header">
+            <h3 className="analytics-card__title">Spending Trends</h3>
+            <div className="analytics-chart-actions">
+              <label className="analytics-chart-toggle">
+                <input
+                  type="checkbox"
+                  checked={showTotalSpendTrend}
+                  onChange={(event) => setShowTotalSpendTrend(event.target.checked)}
+                />
+                <span>Total Spend</span>
+              </label>
+              <button
+                className="btn btn--ghost btn--icon btn--sm"
+                type="button"
+                onClick={() => setExpandedChart('spendingTrends')}
+                aria-label="Expand Spending Trends chart"
+              >
+                <Maximize2 size={16} />
+              </button>
+            </div>
+          </div>
           <SpendingTrends
             transactions={analysisTransactions}
             categoryMap={categoryMap}
             accountMap={accountMap}
             groupMode={cashFlowGroup}
+            showTotalSpend={showTotalSpendTrend}
             onSelectPeriod={handlePeriodSelect}
           />
         </div>
@@ -925,6 +959,59 @@ export default function AnalyticsPage() {
           </div>
         </div>
       )}
+
+      <Modal
+        isOpen={expandedChart === 'incomeExpense'}
+        onClose={() => setExpandedChart(null)}
+        title="Income vs Expense"
+        maxWidth="calc(100vw - 48px)"
+        className="modal-container--fullscreen"
+      >
+        <div className="analytics-expanded-chart">
+          <IncomeVsExpense
+            transactions={analysisTransactions}
+            groupMode={cashFlowGroup}
+            accountMap={accountMap}
+            categoryMap={categoryMap}
+            onSelectPeriod={(period) => {
+              setExpandedChart(null);
+              handlePeriodSelect(period);
+            }}
+          />
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={expandedChart === 'spendingTrends'}
+        onClose={() => setExpandedChart(null)}
+        title="Spending Trends"
+        maxWidth="calc(100vw - 48px)"
+        className="modal-container--fullscreen"
+      >
+        <div className="analytics-modal-toolbar">
+          <label className="analytics-chart-toggle">
+            <input
+              type="checkbox"
+              checked={showTotalSpendTrend}
+              onChange={(event) => setShowTotalSpendTrend(event.target.checked)}
+            />
+            <span>Show Total Spend</span>
+          </label>
+        </div>
+        <div className="analytics-expanded-chart">
+          <SpendingTrends
+            transactions={analysisTransactions}
+            categoryMap={categoryMap}
+            accountMap={accountMap}
+            groupMode={cashFlowGroup}
+            showTotalSpend={showTotalSpendTrend}
+            onSelectPeriod={(period) => {
+              setExpandedChart(null);
+              handlePeriodSelect(period);
+            }}
+          />
+        </div>
+      </Modal>
     </div>
   );
 }

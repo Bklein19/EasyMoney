@@ -37,7 +37,7 @@ const resolveGrouping = (transactions, groupMode) => {
     : { labelFormat: 'week', keyFormat: 'week' };
 };
 
-const CustomTooltip = ({ active, payload }) => {
+const CustomTooltip = ({ active, payload, showTotalSpend }) => {
   if (active && payload && payload.length) {
     const totalPayload = payload.find(p => p.dataKey === TOTAL_SPEND_KEY);
     const activePayloads = payload
@@ -47,7 +47,7 @@ const CustomTooltip = ({ active, payload }) => {
     return (
       <div className="custom-tooltip">
         <div className="label">{payload[0].payload.displayLabel}</div>
-        {totalPayload && (
+        {showTotalSpend && totalPayload && (
           <div className="value-row" style={{ color: totalPayload.color }}>
             <span>Total Spend:</span>
             <span className="amount amount--negative">{formatCurrency(totalPayload.value)}</span>
@@ -65,7 +65,14 @@ const CustomTooltip = ({ active, payload }) => {
   return null;
 };
 
-export default function SpendingTrends({ transactions, categoryMap, accountMap = {}, groupMode = 'Auto', onSelectPeriod }) {
+export default function SpendingTrends({
+  transactions,
+  categoryMap,
+  accountMap = {},
+  groupMode = 'Auto',
+  showTotalSpend = true,
+  onSelectPeriod
+}) {
   const { data, activeCategories } = useMemo(() => {
     if (transactions.length === 0) return { data: [], activeCategories: [] };
 
@@ -170,23 +177,25 @@ export default function SpendingTrends({ transactions, categoryMap, accountMap =
             axisLine={false}
             width={72}
           />
-          <Tooltip content={<CustomTooltip />} />
+          <Tooltip content={<CustomTooltip showTotalSpend={showTotalSpend} />} />
           <Legend
             verticalAlign="top"
             align="left"
             iconType="plainline"
             wrapperStyle={{ color: 'var(--text-secondary)', fontSize: '12px', paddingBottom: '8px' }}
           />
-          <Line
-            key={TOTAL_SPEND_KEY}
-            type="monotone"
-            dataKey={TOTAL_SPEND_KEY}
-            name="Total Spend"
-            stroke={TOTAL_SPEND_COLOR}
-            strokeWidth={3}
-            dot={false}
-            activeDot={{ r: 5, strokeWidth: 0 }}
-          />
+          {showTotalSpend && (
+            <Line
+              key={TOTAL_SPEND_KEY}
+              type="monotone"
+              dataKey={TOTAL_SPEND_KEY}
+              name="Total Spend"
+              stroke={TOTAL_SPEND_COLOR}
+              strokeWidth={3}
+              dot={false}
+              activeDot={{ r: 5, strokeWidth: 0 }}
+            />
+          )}
           {activeCategories.map((cat, index) => (
             <Line
               key={cat}

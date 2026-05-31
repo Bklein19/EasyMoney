@@ -3,7 +3,7 @@ import { X } from 'lucide-react';
 import Button from './Button';
 import './Modal.css';
 
-const Modal = ({ isOpen, onClose, title, children, footer, maxWidth = '520px' }) => {
+const Modal = ({ isOpen, onClose, title, children, footer, maxWidth = '520px', className = '' }) => {
   const modalRef = useRef(null);
 
   useEffect(() => {
@@ -35,7 +35,7 @@ const Modal = ({ isOpen, onClose, title, children, footer, maxWidth = '520px' })
   return (
     <div className="modal-overlay" onClick={handleOverlayClick} aria-modal="true" role="dialog">
       <div 
-        className="modal-container" 
+        className={`modal-container ${className}`}
         ref={modalRef}
         style={{ maxWidth }}
       >

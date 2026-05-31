@@ -32,6 +32,11 @@
   animation: modal-in 300ms var(--transition-spring);
 }
 
+.modal-container--fullscreen {
+  width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+}
+
 @keyframes modal-in {
   from {
     opacity: 0;
