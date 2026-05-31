@@ -1,9 +1,28 @@
+import { useEffect, useState } from 'react';
 import { useCategories } from '../../hooks/useCategories';
 import { useAccounts } from '../../hooks/useAccounts';
 
 export default function TransactionFilters({ filters, setFilters }) {
   const { categories } = useCategories();
   const { accounts } = useAccounts();
+  const [searchDraft, setSearchDraft] = useState(filters.searchQuery || '');
+
+  useEffect(() => {
+    const trimmedSearch = searchDraft.trim();
+    const nextSearch = trimmedSearch || undefined;
+    const currentSearch = filters.searchQuery || undefined;
+
+    if (nextSearch === currentSearch) return undefined;
+
+    const timeoutId = window.setTimeout(() => {
+      setFilters(prev => ({
+        ...prev,
+        searchQuery: nextSearch
+      }));
+    }, 250);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [searchDraft, filters.searchQuery, setFilters]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -20,8 +39,8 @@ export default function TransactionFilters({ filters, setFilters }) {
         name="searchQuery"
         placeholder="Search transactions..."
         className="filter-input"
-        value={filters.searchQuery || ''}
-        onChange={handleChange}
+        value={searchDraft}
+        onChange={(event) => setSearchDraft(event.target.value)}
       />
       
       <select 

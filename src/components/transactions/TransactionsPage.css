@@ -107,6 +107,17 @@
   flex-direction: column;
 }
 
+.transactions-load-more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  border-top: 1px solid var(--glass-border);
+}
+
 .transaction-row {
   display: grid;
   grid-template-columns: 100px 1fr 200px 150px 120px 36px;
