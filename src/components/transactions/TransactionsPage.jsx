@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useDeferredValue, useMemo, useState } from 'react';
 import { useTransactions } from '../../hooks/useTransactions';
 import TransactionRow from './TransactionRow';
 import TransactionFilters from './TransactionFilters';
@@ -16,23 +16,33 @@ export default function TransactionsPage() {
   const { transactions, updateTransaction, deleteTransaction } = useTransactions(filters);
   const { accounts, updateBalance } = useAccounts();
   const { categories, addCategory } = useCategories();
-  const accountMap = useMemo(() => buildAccountMap(accounts), [accounts]);
+  const deferredTransactions = useDeferredValue(transactions);
+  const deferredAccounts = useDeferredValue(accounts);
+  const deferredCategories = useDeferredValue(categories);
+  const deferredFilters = useDeferredValue(filters);
+  const isTransactionsWorking =
+    transactions !== deferredTransactions ||
+    accounts !== deferredAccounts ||
+    categories !== deferredCategories ||
+    filters !== deferredFilters;
+  const currentAccountMap = useMemo(() => buildAccountMap(accounts), [accounts]);
+  const accountMap = useMemo(() => buildAccountMap(deferredAccounts), [deferredAccounts]);
   const categoryMap = useMemo(() => {
     const map = {};
-    categories.forEach(c => { map[c.id] = c; });
+    deferredCategories.forEach(c => { map[c.id] = c; });
     return map;
-  }, [categories]);
+  }, [deferredCategories]);
   const visibleTransactions = useMemo(() => {
-    const filtered = transactions.filter(tx => {
+    const filtered = deferredTransactions.filter(tx => {
       const account = accountMap[tx.accountId];
-      if (filters.accountKind === 'bank' && isCreditAccount(account)) return false;
-      if (filters.accountKind === 'credit' && !isCreditAccount(account)) return false;
-      if (filters.flowType && getTransactionFlow(tx, accountMap, categoryMap) !== filters.flowType) return false;
+      if (deferredFilters.accountKind === 'bank' && isCreditAccount(account)) return false;
+      if (deferredFilters.accountKind === 'credit' && !isCreditAccount(account)) return false;
+      if (deferredFilters.flowType && getTransactionFlow(tx, accountMap, categoryMap) !== deferredFilters.flowType) return false;
       return true;
     });
 
     return [...filtered].sort((a, b) => {
-      switch (filters.sortBy || 'date_desc') {
+      switch (deferredFilters.sortBy || 'date_desc') {
         case 'date_asc':
           return a.date.localeCompare(b.date);
         case 'amount_desc':
@@ -48,7 +58,7 @@ export default function TransactionsPage() {
           return b.date.localeCompare(a.date);
       }
     });
-  }, [transactions, filters.accountKind, filters.flowType, filters.sortBy, accountMap, categoryMap]);
+  }, [deferredTransactions, deferredFilters, accountMap, categoryMap]);
 
   const filteredCategoryValue = useMemo(() => {
     if (visibleTransactions.length === 0) return '';
@@ -127,7 +137,7 @@ export default function TransactionsPage() {
   };
 
   const handleDeleteTransaction = async (transaction) => {
-    const account = accountMap[transaction.accountId];
+    const account = currentAccountMap[transaction.accountId];
     await deleteTransaction(transaction.id);
 
     if (account) {
@@ -153,6 +163,12 @@ export default function TransactionsPage() {
           <h1 className="page__title">Transactions</h1>
           <p className="page__subtitle">View and categorize your transactions.</p>
         </div>
+        {isTransactionsWorking && (
+          <div className="transactions-working" role="status" aria-live="polite">
+            <span className="transactions-working__spinner" aria-hidden="true" />
+            <span>Updating transactions...</span>
+          </div>
+        )}
       </div>
 
       <div className="stagger-in">
