@@ -806,6 +806,7 @@ export default function AnalyticsPage() {
               onClick={() => openDrilldown({
                 type: 'period',
                 title: `${row.label} Cash Flow`,
+                scrollIntoView: true,
                 ids: new Set(analysisTransactions.filter(t => {
                   const dateObj = parseISO(t.date);
                   const key = row.groupMode === CASH_FLOW_GROUPS.YEAR
