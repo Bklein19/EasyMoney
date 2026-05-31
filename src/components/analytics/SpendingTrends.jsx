@@ -118,7 +118,7 @@ export default function SpendingTrends({ transactions, categoryMap, accountMap =
 
     const sortedData = Object.values(grouped).sort((a, b) => a.timeKey.localeCompare(b.timeKey));
     
-    // Fill in missing 0s for stacked area to render correctly
+    // Fill in missing 0s so lines stay continuous across periods.
     sortedData.forEach(d => {
       catSet.forEach(cat => {
         if (d[cat] === undefined) d[cat] = 0;
@@ -163,19 +163,8 @@ export default function SpendingTrends({ transactions, categoryMap, accountMap =
             dy={10}
           />
           <YAxis 
-            yAxisId="categories"
             tickFormatter={formatCurrency}
             stroke="#94a3b8"
-            fontSize={12}
-            tickLine={false}
-            axisLine={false}
-            width={72}
-          />
-          <YAxis
-            yAxisId="total"
-            orientation="right"
-            tickFormatter={formatCurrency}
-            stroke={TOTAL_SPEND_COLOR}
             fontSize={12}
             tickLine={false}
             axisLine={false}
@@ -190,7 +179,6 @@ export default function SpendingTrends({ transactions, categoryMap, accountMap =
           />
           <Line
             key={TOTAL_SPEND_KEY}
-            yAxisId="total"
             type="monotone"
             dataKey={TOTAL_SPEND_KEY}
             name="Total Spend"
@@ -202,7 +190,6 @@ export default function SpendingTrends({ transactions, categoryMap, accountMap =
           {activeCategories.map((cat, index) => (
             <Line
               key={cat}
-              yAxisId="categories"
               type="monotone"
               dataKey={cat}
               stroke={COLORS[index % COLORS.length]}

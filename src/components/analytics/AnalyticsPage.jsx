@@ -687,7 +687,7 @@ export default function AnalyticsPage() {
           />
         </div>
         
-        <div className="analytics-card glass-card">
+        <div className="analytics-card glass-card analytics-card--wide analytics-card--trend">
           <h3 className="analytics-card__title">Spending Trends</h3>
           <SpendingTrends
             transactions={analysisTransactions}
