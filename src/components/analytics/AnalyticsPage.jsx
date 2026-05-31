@@ -52,7 +52,10 @@ export default function AnalyticsPage() {
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
   const [accountId, setAccountId] = useState('');
-  const [categoryFilterIds, setCategoryFilterIds] = useState([]);
+  const [categoryFilterIdsByMode, setCategoryFilterIdsByMode] = useState({
+    [CATEGORY_FILTER_MODES.INCLUDE]: [],
+    [CATEGORY_FILTER_MODES.EXCLUDE]: []
+  });
   const [categoryFilterMode, setCategoryFilterMode] = useState(CATEGORY_FILTER_MODES.INCLUDE);
   const [pendingCategoryFilterId, setPendingCategoryFilterId] = useState('');
   const [cashFlowGroup, setCashFlowGroup] = useState(CASH_FLOW_GROUPS.AUTO);
@@ -94,6 +97,10 @@ export default function AnalyticsPage() {
   const { categories, addCategory } = useCategories();
   const { accounts } = useAccounts();
   const accountMap = useMemo(() => buildAccountMap(accounts), [accounts]);
+  const categoryFilterIds = useMemo(
+    () => categoryFilterIdsByMode[categoryFilterMode] || [],
+    [categoryFilterIdsByMode, categoryFilterMode]
+  );
 
   // Create a fast map for category lookup
   const categoryMap = useMemo(() => {
@@ -354,38 +361,48 @@ export default function AnalyticsPage() {
     resetAnalyticsSelection();
   };
 
-  const addCategoryFilter = (categoryId, mode = categoryFilterMode, options = {}) => {
+  const addCategoryFilter = (categoryId, mode = categoryFilterMode) => {
     if (!categoryId) return;
     setCategoryFilterMode(mode);
-    setCategoryFilterIds(previous => {
-      if (options.replaceOnModeChange && mode !== categoryFilterMode) return [categoryId];
-      return previous.includes(categoryId) ? previous : [...previous, categoryId];
+    setCategoryFilterIdsByMode(previous => {
+      const current = previous[mode] || [];
+      return {
+        ...previous,
+        [mode]: current.includes(categoryId) ? current : [...current, categoryId]
+      };
     });
     setPendingCategoryFilterId('');
     resetAnalyticsSelection();
   };
 
   const includeCategoryFromChart = (categoryId) => {
-    addCategoryFilter(categoryId, CATEGORY_FILTER_MODES.INCLUDE, { replaceOnModeChange: true });
+    addCategoryFilter(categoryId, CATEGORY_FILTER_MODES.INCLUDE);
   };
 
   const excludeCategoryFromChart = (categoryId) => {
-    addCategoryFilter(categoryId, CATEGORY_FILTER_MODES.EXCLUDE, { replaceOnModeChange: true });
+    addCategoryFilter(categoryId, CATEGORY_FILTER_MODES.EXCLUDE);
   };
 
   const removeCategoryFilter = (categoryId) => {
-    setCategoryFilterIds(previous => previous.filter(id => id !== categoryId));
+    setCategoryFilterIdsByMode(previous => ({
+      ...previous,
+      [categoryFilterMode]: (previous[categoryFilterMode] || []).filter(id => id !== categoryId)
+    }));
     resetAnalyticsSelection();
   };
 
   const clearCategoryFilters = () => {
-    setCategoryFilterIds([]);
+    setCategoryFilterIdsByMode(previous => ({
+      ...previous,
+      [categoryFilterMode]: []
+    }));
     setPendingCategoryFilterId('');
     resetAnalyticsSelection();
   };
 
   const handleCategoryFilterModeChange = (nextMode) => {
     setCategoryFilterMode(nextMode);
+    setPendingCategoryFilterId('');
     resetAnalyticsSelection();
   };
 

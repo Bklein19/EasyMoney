@@ -116,8 +116,8 @@
   border-radius: var(--radius-full);
   background: var(--bg-surface);
   color: var(--text-secondary);
-  font-size: var(--text-xs);
-  font-weight: 700;
+  font-size: var(--text-sm);
+  font-weight: 500;
   cursor: pointer;
   transition: all var(--transition-fast);
 }
@@ -295,9 +295,9 @@
 .category-bar-label {
   min-width: 0;
   overflow: hidden;
-  color: var(--text-secondary);
-  font-size: var(--text-xs);
-  font-weight: 700;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 500;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -319,8 +319,8 @@
 }
 
 .category-bar-value {
-  font-size: var(--text-xs);
-  font-weight: 800;
+  font-size: var(--text-sm);
+  font-weight: 600;
   text-align: right;
   white-space: nowrap;
 }
