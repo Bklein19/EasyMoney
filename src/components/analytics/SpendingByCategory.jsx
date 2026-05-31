@@ -36,8 +36,7 @@ export default function SpendingByCategory({
           amount,
         };
       })
-      .sort((a, b) => b.amount - a.amount)
-      .slice(0, 10); // Top 10 categories
+      .sort((a, b) => b.amount - a.amount);
   }, [transactions, categoryMap, accountMap]);
 
   if (data.length === 0) {

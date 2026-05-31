@@ -257,7 +257,11 @@
   flex-direction: column;
   gap: var(--space-3);
   min-height: 300px;
+  max-height: 520px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding-top: var(--space-1);
+  padding-right: var(--space-1);
 }
 
 .category-bar-row {
