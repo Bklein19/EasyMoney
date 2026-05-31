@@ -10,7 +10,6 @@ import './TransactionsPage.css';
 
 export default function TransactionsPage() {
   const [filters, setFilters] = useState({});
-  const [isSearchPending, setIsSearchPending] = useState(false);
   const [isFilterPending, startFilterTransition] = useTransition();
   const [isCreatingBulkCategory, setIsCreatingBulkCategory] = useState(false);
   const [newBulkCategoryName, setNewBulkCategoryName] = useState('');
@@ -23,7 +22,6 @@ export default function TransactionsPage() {
   const deferredAccounts = useDeferredValue(accounts);
   const deferredCategories = useDeferredValue(categories);
   const isTransactionsWorking =
-    isSearchPending ||
     isFilterPending ||
     transactions !== deferredTransactions ||
     accounts !== deferredAccounts ||
@@ -181,7 +179,6 @@ export default function TransactionsPage() {
         <TransactionFilters
           filters={filters}
           setFilters={handleFilterChange}
-          setSearchPending={setIsSearchPending}
         />
 
         <div className="transactions-container">

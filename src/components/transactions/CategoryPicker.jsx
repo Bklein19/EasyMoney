@@ -41,6 +41,8 @@ export default function CategoryPicker({ categoryId, onChange, disabled, categor
   };
 
   useEffect(() => {
+    if (!isOpen) return undefined;
+
     function handleClickOutside(event) {
       if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
         setIsOpen(false);
@@ -48,7 +50,7 @@ export default function CategoryPicker({ categoryId, onChange, disabled, categor
     }
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [isOpen]);
 
   return (
     <div className="category-picker-wrapper" ref={wrapperRef}>

@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { useCategories } from '../../hooks/useCategories';
 import { useAccounts } from '../../hooks/useAccounts';
 
-export default function TransactionFilters({ filters, setFilters, setSearchPending }) {
+const SEARCH_APPLY_DELAY_MS = 250;
+
+export default function TransactionFilters({ filters, setFilters }) {
   const { categories } = useCategories();
   const { accounts } = useAccounts();
   const [searchDraft, setSearchDraft] = useState(filters.searchQuery || '');
@@ -14,20 +16,15 @@ export default function TransactionFilters({ filters, setFilters, setSearchPendi
 
     if (nextSearch === currentSearch) return undefined;
 
-    setSearchPending(true);
     const timeoutId = window.setTimeout(() => {
       setFilters(prev => ({
         ...prev,
         searchQuery: nextSearch
       }));
-      setSearchPending(false);
-    }, 1500);
+    }, SEARCH_APPLY_DELAY_MS);
 
-    return () => {
-      window.clearTimeout(timeoutId);
-      setSearchPending(false);
-    };
-  }, [searchDraft, filters.searchQuery, setFilters, setSearchPending]);
+    return () => window.clearTimeout(timeoutId);
+  }, [searchDraft, filters.searchQuery, setFilters]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -39,14 +36,19 @@ export default function TransactionFilters({ filters, setFilters, setSearchPendi
 
   return (
     <div className="filters-container">
-      <input
-        type="text"
-        name="searchQuery"
-        placeholder="Search transactions..."
-        className="filter-input"
-        value={searchDraft}
-        onChange={(event) => setSearchDraft(event.target.value)}
-      />
+      <div className="transaction-search-control">
+        <input
+          type="text"
+          name="searchQuery"
+          placeholder="Search transactions..."
+          className="filter-input"
+          value={searchDraft}
+          onChange={(event) => setSearchDraft(event.target.value)}
+        />
+        {(searchDraft.trim() || undefined) !== (filters.searchQuery || undefined) && (
+          <span className="transaction-search-control__spinner" aria-label="Search pending" />
+        )}
+      </div>
       
       <select 
         name="accountId" 

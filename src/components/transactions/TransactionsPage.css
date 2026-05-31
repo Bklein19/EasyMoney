@@ -226,6 +226,28 @@ select.filter-input {
   border-color: var(--accent-blue);
 }
 
+.transaction-search-control {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.transaction-search-control .filter-input {
+  padding-right: 34px;
+}
+
+.transaction-search-control__spinner {
+  position: absolute;
+  right: var(--space-3);
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(59, 130, 246, 0.22);
+  border-top-color: var(--accent-blue);
+  border-radius: 50%;
+  animation: transactions-spinner 700ms linear infinite;
+  pointer-events: none;
+}
+
 .category-picker-wrapper {
   position: relative;
 }
