@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useMemo, useState } from 'react';
+import { useCallback, useDeferredValue, useMemo, useState, useTransition } from 'react';
 import { useTransactions } from '../../hooks/useTransactions';
 import TransactionRow from './TransactionRow';
 import TransactionFilters from './TransactionFilters';
@@ -8,22 +8,23 @@ import { useCategories } from '../../hooks/useCategories';
 import { buildAccountMap, getTransactionFlow, isCreditAccount, isExcludedFromCashFlow, isExpense, isIncome, isInvestmentMovement } from '../../utils/transactionSemantics';
 import './TransactionsPage.css';
 
-const TRANSACTION_PAGE_SIZE = 250;
-
 export default function TransactionsPage() {
   const [filters, setFilters] = useState({});
-  const [visibleRowCount, setVisibleRowCount] = useState(TRANSACTION_PAGE_SIZE);
+  const [isSearchPending, setIsSearchPending] = useState(false);
+  const [isFilterPending, startFilterTransition] = useTransition();
   const [isCreatingBulkCategory, setIsCreatingBulkCategory] = useState(false);
   const [newBulkCategoryName, setNewBulkCategoryName] = useState('');
   const [pendingBulkCategoryValue, setPendingBulkCategoryValue] = useState(null);
-  const { transactions, updateTransaction, deleteTransaction } = useTransactions(filters);
+  const deferredFilters = useDeferredValue(filters);
+  const { transactions, updateTransaction, deleteTransaction } = useTransactions(deferredFilters);
   const { accounts, updateBalance } = useAccounts();
   const { categories, addCategory } = useCategories();
   const deferredTransactions = useDeferredValue(transactions);
   const deferredAccounts = useDeferredValue(accounts);
   const deferredCategories = useDeferredValue(categories);
-  const deferredFilters = useDeferredValue(filters);
   const isTransactionsWorking =
+    isSearchPending ||
+    isFilterPending ||
     transactions !== deferredTransactions ||
     accounts !== deferredAccounts ||
     categories !== deferredCategories ||
@@ -71,11 +72,6 @@ export default function TransactionsPage() {
   }, [visibleTransactions]);
 
   const bulkCategorySelectValue = pendingBulkCategoryValue ?? filteredCategoryValue;
-  const displayedTransactions = useMemo(
-    () => visibleTransactions.slice(0, visibleRowCount),
-    [visibleTransactions, visibleRowCount]
-  );
-  const hasMoreTransactions = displayedTransactions.length < visibleTransactions.length;
 
   const confirmLargeBulkChange = (count, categoryName) => {
     if (count <= 50) return true;
@@ -140,9 +136,10 @@ export default function TransactionsPage() {
   };
 
   const handleFilterChange = useCallback((nextFilters) => {
-    setPendingBulkCategoryValue(null);
-    setVisibleRowCount(TRANSACTION_PAGE_SIZE);
-    setFilters(nextFilters);
+    startFilterTransition(() => {
+      setPendingBulkCategoryValue(null);
+      setFilters(nextFilters);
+    });
   }, []);
 
   const handleDeleteTransaction = async (transaction) => {
@@ -181,7 +178,11 @@ export default function TransactionsPage() {
       </div>
 
       <div className="stagger-in">
-        <TransactionFilters filters={filters} setFilters={handleFilterChange} />
+        <TransactionFilters
+          filters={filters}
+          setFilters={handleFilterChange}
+          setSearchPending={setIsSearchPending}
+        />
 
         <div className="transactions-container">
           <div className="transactions-header">
@@ -274,7 +275,7 @@ export default function TransactionsPage() {
           
           <div className="transactions-list">
             {visibleTransactions.length > 0 ? (
-              displayedTransactions.map(tx => (
+              visibleTransactions.map(tx => (
                 <TransactionRow 
                   key={tx.id} 
                   transaction={tx} 
@@ -288,20 +289,6 @@ export default function TransactionsPage() {
             ) : (
               <div className="empty-state-simple" style={{ height: 200 }}>
                 No transactions found for the selected filters.
-              </div>
-            )}
-            {hasMoreTransactions && (
-              <div className="transactions-load-more">
-                <button
-                  className="btn btn--secondary btn--sm"
-                  type="button"
-                  onClick={() => setVisibleRowCount(count => count + TRANSACTION_PAGE_SIZE)}
-                >
-                  Load {Math.min(TRANSACTION_PAGE_SIZE, visibleTransactions.length - displayedTransactions.length)} more
-                </button>
-                <span>
-                  Showing {displayedTransactions.length} of {visibleTransactions.length}
-                </span>
               </div>
             )}
           </div>

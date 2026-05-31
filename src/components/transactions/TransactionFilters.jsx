@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useCategories } from '../../hooks/useCategories';
 import { useAccounts } from '../../hooks/useAccounts';
 
-export default function TransactionFilters({ filters, setFilters }) {
+export default function TransactionFilters({ filters, setFilters, setSearchPending }) {
   const { categories } = useCategories();
   const { accounts } = useAccounts();
   const [searchDraft, setSearchDraft] = useState(filters.searchQuery || '');
@@ -14,15 +14,20 @@ export default function TransactionFilters({ filters, setFilters }) {
 
     if (nextSearch === currentSearch) return undefined;
 
+    setSearchPending(true);
     const timeoutId = window.setTimeout(() => {
       setFilters(prev => ({
         ...prev,
         searchQuery: nextSearch
       }));
-    }, 250);
+      setSearchPending(false);
+    }, 1500);
 
-    return () => window.clearTimeout(timeoutId);
-  }, [searchDraft, filters.searchQuery, setFilters]);
+    return () => {
+      window.clearTimeout(timeoutId);
+      setSearchPending(false);
+    };
+  }, [searchDraft, filters.searchQuery, setFilters, setSearchPending]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
