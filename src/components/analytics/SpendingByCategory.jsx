@@ -1,15 +1,6 @@
 import { useMemo } from 'react';
+import { X } from 'lucide-react';
 import { isExpense } from '../../utils/transactionSemantics';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  Cell
-} from 'recharts';
 
 // A palette of nice colors from index.css for categories if they don't have a specific color
 const COLORS = [
@@ -19,22 +10,13 @@ const COLORS = [
 
 const formatCurrency = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val);
 
-const CustomTooltip = ({ active, payload }) => {
-  if (active && payload && payload.length) {
-    return (
-      <div className="custom-tooltip">
-        <div className="label">{payload[0].payload.name}</div>
-        <div className="value-row">
-          <span>Spent:</span>
-          <span className="amount amount--negative">{formatCurrency(payload[0].value)}</span>
-        </div>
-      </div>
-    );
-  }
-  return null;
-};
-
-export default function SpendingByCategory({ transactions, categoryMap, accountMap = {}, onSelectCategory }) {
+export default function SpendingByCategory({
+  transactions,
+  categoryMap,
+  accountMap = {},
+  onSelectCategory,
+  onExcludeCategory
+}) {
   const data = useMemo(() => {
     const expensesMap = {};
     
@@ -67,45 +49,45 @@ export default function SpendingByCategory({ transactions, categoryMap, accountM
     );
   }
 
+  const maxAmount = Math.max(...data.map((entry) => entry.amount), 1);
+
   return (
-    <div className="chart-container">
-      <ResponsiveContainer width="100%" height="100%">
-        <BarChart
-          data={data}
-          layout="vertical"
-          margin={{ top: 5, right: 30, left: 28, bottom: 5 }}
-        >
-          <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="rgba(148, 163, 184, 0.1)" />
-          <XAxis 
-            type="number" 
-            tickFormatter={formatCurrency}
-            stroke="#94a3b8"
-            fontSize={12}
-            tickLine={false}
-            axisLine={false}
-          />
-          <YAxis 
-            dataKey="name" 
-            type="category" 
-            width={100}
-            stroke="#94a3b8"
-            fontSize={12}
-            tickLine={false}
-            axisLine={false}
-          />
-          <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(148, 163, 184, 0.05)' }} />
-          <Bar dataKey="amount" radius={[0, 4, 4, 0]} maxBarSize={32}>
-            {data.map((entry, index) => (
-              <Cell
-                key={`cell-${index}`}
-                fill={COLORS[index % COLORS.length]}
-                cursor={onSelectCategory ? 'pointer' : 'default'}
-                onClick={() => onSelectCategory?.(entry)}
-              />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
+    <div className="category-bar-list" role="list" aria-label="Spending by category">
+      {data.map((entry, index) => {
+        const width = `${Math.max(4, (entry.amount / maxAmount) * 100)}%`;
+        const color = COLORS[index % COLORS.length];
+
+        return (
+          <div className="category-bar-row" role="listitem" key={entry.id}>
+            <button
+              className="category-bar-button"
+              type="button"
+              onClick={() => onSelectCategory?.(entry)}
+              aria-label={`Include ${entry.name} in analytics filters`}
+            >
+              <span className="category-bar-label">{entry.name}</span>
+              <span className="category-bar-track" aria-hidden="true">
+                <span
+                  className="category-bar-fill"
+                  style={{ width, backgroundColor: color }}
+                />
+              </span>
+              <span className="category-bar-value amount amount--negative">
+                {formatCurrency(entry.amount)}
+              </span>
+            </button>
+            <button
+              className="category-bar-exclude"
+              type="button"
+              onClick={() => onExcludeCategory?.(entry)}
+              aria-label={`Exclude ${entry.name} from analytics filters`}
+              title={`Exclude ${entry.name}`}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }

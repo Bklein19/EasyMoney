@@ -354,11 +354,23 @@ export default function AnalyticsPage() {
     resetAnalyticsSelection();
   };
 
-  const addCategoryFilter = (categoryId) => {
+  const addCategoryFilter = (categoryId, mode = categoryFilterMode, options = {}) => {
     if (!categoryId) return;
-    setCategoryFilterIds(previous => previous.includes(categoryId) ? previous : [...previous, categoryId]);
+    setCategoryFilterMode(mode);
+    setCategoryFilterIds(previous => {
+      if (options.replaceOnModeChange && mode !== categoryFilterMode) return [categoryId];
+      return previous.includes(categoryId) ? previous : [...previous, categoryId];
+    });
     setPendingCategoryFilterId('');
     resetAnalyticsSelection();
+  };
+
+  const includeCategoryFromChart = (categoryId) => {
+    addCategoryFilter(categoryId, CATEGORY_FILTER_MODES.INCLUDE, { replaceOnModeChange: true });
+  };
+
+  const excludeCategoryFromChart = (categoryId) => {
+    addCategoryFilter(categoryId, CATEGORY_FILTER_MODES.EXCLUDE, { replaceOnModeChange: true });
   };
 
   const removeCategoryFilter = (categoryId) => {
@@ -656,14 +668,15 @@ export default function AnalyticsPage() {
           <div className="analytics-card__heading">
             <h3 className="analytics-card__title">Spending by Category</h3>
             <p>
-              Click a category to {categoryFilterMode === CATEGORY_FILTER_MODES.EXCLUDE ? 'exclude it from' : 'filter it into'} the analytics set.
+              Click a category to include it. Hover and use X to exclude it.
             </p>
           </div>
           <SpendingByCategory
             transactions={analysisTransactions}
             categoryMap={categoryMap}
             accountMap={accountMap}
-            onSelectCategory={(category) => addCategoryFilter(String(category.id))}
+            onSelectCategory={(category) => includeCategoryFromChart(String(category.id))}
+            onExcludeCategory={(category) => excludeCategoryFromChart(String(category.id))}
           />
         </div>
         
