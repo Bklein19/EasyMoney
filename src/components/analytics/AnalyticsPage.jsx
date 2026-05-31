@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { addMonths, endOfDay, endOfMonth, endOfWeek, endOfYear, format, parseISO, startOfMonth, startOfWeek, startOfYear, subMonths, subWeeks } from 'date-fns';
 import { Calendar, ChevronLeft, ChevronRight, HelpCircle, Landmark, Maximize2, RotateCcw, Search, X } from 'lucide-react';
 import { useTransactions } from '../../hooks/useTransactions';
@@ -100,28 +100,41 @@ export default function AnalyticsPage() {
   const { transactions, updateTransaction } = useTransactions({ startDate, endDate, accountId });
   const { categories, addCategory } = useCategories();
   const { accounts } = useAccounts();
-  const accountMap = useMemo(() => buildAccountMap(accounts), [accounts]);
   const categoryFilterIds = useMemo(
     () => categoryFilterIdsByMode[categoryFilterMode] || [],
     [categoryFilterIdsByMode, categoryFilterMode]
   );
+  const deferredTransactions = useDeferredValue(transactions);
+  const deferredAccounts = useDeferredValue(accounts);
+  const deferredCategories = useDeferredValue(categories);
+  const deferredCategoryFilterIds = useDeferredValue(categoryFilterIds);
+  const deferredCategoryFilterMode = useDeferredValue(categoryFilterMode);
+  const deferredCashFlowGroup = useDeferredValue(cashFlowGroup);
+  const isAnalyticsWorking =
+    transactions !== deferredTransactions ||
+    accounts !== deferredAccounts ||
+    categories !== deferredCategories ||
+    categoryFilterIds !== deferredCategoryFilterIds ||
+    categoryFilterMode !== deferredCategoryFilterMode ||
+    cashFlowGroup !== deferredCashFlowGroup;
+  const accountMap = useMemo(() => buildAccountMap(deferredAccounts), [deferredAccounts]);
 
   // Create a fast map for category lookup
   const categoryMap = useMemo(() => {
     const map = {};
-    categories.forEach(c => { map[c.id] = c; });
+    deferredCategories.forEach(c => { map[c.id] = c; });
     return map;
-  }, [categories]);
+  }, [deferredCategories]);
 
   const categoryScopedTransactions = useMemo(() => {
-    if (categoryFilterIds.length === 0) return transactions;
-    const selected = new Set(categoryFilterIds);
-    return transactions.filter(transaction => {
+    if (deferredCategoryFilterIds.length === 0) return deferredTransactions;
+    const selected = new Set(deferredCategoryFilterIds);
+    return deferredTransactions.filter(transaction => {
       const categoryKey = transaction.categoryId ? String(transaction.categoryId) : 'uncategorized';
       const isSelected = selected.has(categoryKey);
-      return categoryFilterMode === CATEGORY_FILTER_MODES.INCLUDE ? isSelected : !isSelected;
+      return deferredCategoryFilterMode === CATEGORY_FILTER_MODES.INCLUDE ? isSelected : !isSelected;
     });
-  }, [transactions, categoryFilterIds, categoryFilterMode]);
+  }, [deferredTransactions, deferredCategoryFilterIds, deferredCategoryFilterMode]);
 
   const analysisTransactions = useMemo(() => {
     return categoryScopedTransactions.filter(transaction => !isExcludedFromCashFlow(transaction, accountMap, categoryMap));
@@ -152,9 +165,9 @@ export default function AnalyticsPage() {
 
     const dates = analysisTransactions.map(t => new Date(t.date).getTime());
     const diffDays = (Math.max(...dates) - Math.min(...dates)) / (1000 * 60 * 60 * 24);
-    const groupMode = cashFlowGroup === CASH_FLOW_GROUPS.AUTO
+    const groupMode = deferredCashFlowGroup === CASH_FLOW_GROUPS.AUTO
       ? (diffDays > 400 ? CASH_FLOW_GROUPS.YEAR : diffDays > 60 ? CASH_FLOW_GROUPS.MONTH : CASH_FLOW_GROUPS.WEEK)
-      : cashFlowGroup;
+      : deferredCashFlowGroup;
 
     const grouped = {};
     analysisTransactions.forEach(t => {
@@ -184,7 +197,7 @@ export default function AnalyticsPage() {
     });
 
     return Object.values(grouped).sort((a, b) => b.key.localeCompare(a.key));
-  }, [analysisTransactions, cashFlowGroup, accountMap, categoryMap]);
+  }, [analysisTransactions, deferredCashFlowGroup, accountMap, categoryMap]);
 
   const drilldownTransactions = useMemo(() => {
     if (!drilldown) return [];
@@ -631,6 +644,13 @@ export default function AnalyticsPage() {
     </div>
   );
 
+  const renderAnalyticsWorking = () => isAnalyticsWorking && (
+    <div className="analytics-working" role="status" aria-live="polite">
+      <span className="analytics-working__spinner" aria-hidden="true" />
+      <span>Recalculating analytics...</span>
+    </div>
+  );
+
   return (
     <div className="page analytics-page stagger-in">
       <div className="page__header analytics-page__header">
@@ -640,6 +660,7 @@ export default function AnalyticsPage() {
         </div>
 
         {renderAnalyticsFilters()}
+        {renderAnalyticsWorking()}
       </div>
 
       {filteredInternalMovement > 0 && (
@@ -697,7 +718,7 @@ export default function AnalyticsPage() {
           </div>
           <IncomeVsExpense
             transactions={analysisTransactions}
-            groupMode={cashFlowGroup}
+            groupMode={deferredCashFlowGroup}
             accountMap={accountMap}
             categoryMap={categoryMap}
             onSelectPeriod={handlePeriodSelect}
@@ -730,7 +751,7 @@ export default function AnalyticsPage() {
             transactions={analysisTransactions}
             categoryMap={categoryMap}
             accountMap={accountMap}
-            groupMode={cashFlowGroup}
+            groupMode={deferredCashFlowGroup}
             showTotalSpend={showTotalSpendTrend}
             onSelectPeriod={handlePeriodSelect}
           />
@@ -790,7 +811,7 @@ export default function AnalyticsPage() {
             transactions={categoryScopedTransactions}
             accountMap={accountMap}
             categoryMap={categoryMap}
-            groupMode={cashFlowGroup}
+            groupMode={deferredCashFlowGroup}
             onSelectPeriod={handleInvestmentPeriodSelect}
           />
         </div>
@@ -973,10 +994,11 @@ export default function AnalyticsPage() {
         className="modal-container--fullscreen"
       >
         {renderAnalyticsFilters('modal')}
+        {renderAnalyticsWorking()}
         <div className="analytics-expanded-chart">
           <IncomeVsExpense
             transactions={analysisTransactions}
-            groupMode={cashFlowGroup}
+            groupMode={deferredCashFlowGroup}
             accountMap={accountMap}
             categoryMap={categoryMap}
             onSelectPeriod={(period) => {
@@ -995,6 +1017,7 @@ export default function AnalyticsPage() {
         className="modal-container--fullscreen"
       >
         {renderAnalyticsFilters('modal')}
+        {renderAnalyticsWorking()}
         <div className="analytics-modal-toolbar">
           <label className="analytics-chart-toggle">
             <input
@@ -1010,7 +1033,7 @@ export default function AnalyticsPage() {
             transactions={analysisTransactions}
             categoryMap={categoryMap}
             accountMap={accountMap}
-            groupMode={cashFlowGroup}
+            groupMode={deferredCashFlowGroup}
             showTotalSpend={showTotalSpendTrend}
             onSelectPeriod={(period) => {
               setExpandedChart(null);
