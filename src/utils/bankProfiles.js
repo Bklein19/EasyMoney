@@ -25,6 +25,17 @@ export const BANK_PROFILES = [
     categoryColumn: null,
   },
   {
+    name: 'Wells Fargo Credit Card',
+    headerFingerprint: ['DATE', 'DESCRIPTION', 'AMOUNT', 'CHECK #', 'STATUS'],
+    statementType: 'credit_card',
+    dateColumns: ['DATE'],
+    dateFormats: ['MM/dd/yyyy'],
+    descriptionColumn: 'DESCRIPTION',
+    merchantColumn: 'DESCRIPTION',
+    amountConfig: { type: 'single', column: 'AMOUNT', positiveIsCharge: false },
+    categoryColumn: null,
+  },
+  {
     name: 'Wells Fargo',
     headerFingerprint: ['Date', 'Description', 'Deposits', 'Withdrawals'],
     dateColumns: ['Date'],
@@ -93,6 +104,36 @@ function findHeader(headers, hints) {
   return '';
 }
 
+function resolveHeader(headers, configuredHeader) {
+  if (!configuredHeader) return configuredHeader;
+  const exact = headers.find(header => header === configuredHeader);
+  if (exact) return exact;
+
+  const normalizedConfigured = normalizeHeader(configuredHeader);
+  return headers.find(header => normalizeHeader(header) === normalizedConfigured) || configuredHeader;
+}
+
+function resolveProfileHeaders(profile, headers = []) {
+  if (!profile) return profile;
+  const amountConfig = profile.amountConfig || {};
+  const resolvedAmountConfig = { ...amountConfig };
+
+  for (const key of ['column', 'debitColumn', 'creditColumn', 'chargeColumn', 'paymentColumn']) {
+    if (resolvedAmountConfig[key]) {
+      resolvedAmountConfig[key] = resolveHeader(headers, resolvedAmountConfig[key]);
+    }
+  }
+
+  return {
+    ...profile,
+    dateColumns: profile.dateColumns?.map(column => resolveHeader(headers, column)) || [],
+    descriptionColumn: resolveHeader(headers, profile.descriptionColumn),
+    merchantColumn: resolveHeader(headers, profile.merchantColumn),
+    categoryColumn: resolveHeader(headers, profile.categoryColumn),
+    amountConfig: resolvedAmountConfig
+  };
+}
+
 export function inferMappingFromHeaders(headers = []) {
   const merchantColumn = findHeader(headers, HEADER_HINTS.merchant);
   const categoryColumn = findHeader(headers, HEADER_HINTS.category);
@@ -110,8 +151,9 @@ export function inferMappingFromHeaders(headers = []) {
 
 export function enhanceProfileWithHeaders(profile, headers = []) {
   if (!profile) return profile;
+  const resolvedProfile = resolveProfileHeaders(profile, headers);
   const inferred = inferMappingFromHeaders(headers);
-  const amountConfig = profile.amountConfig || {};
+  const amountConfig = resolvedProfile.amountConfig || {};
   const enhancedAmountConfig = { ...amountConfig };
 
   if (amountConfig.type === 'single' && inferred.amountColumn && !headers.includes(amountConfig.column)) {
@@ -130,11 +172,11 @@ export function enhanceProfileWithHeaders(profile, headers = []) {
   }
 
   return {
-    ...profile,
-    dateColumns: profile.dateColumns?.length ? profile.dateColumns : [inferred.dateColumn].filter(Boolean),
-    descriptionColumn: profile.descriptionColumn || inferred.descriptionColumn || inferred.merchantColumn,
-    merchantColumn: inferred.merchantColumn || profile.merchantColumn || profile.descriptionColumn,
-    categoryColumn: inferred.categoryColumn || profile.categoryColumn || null,
+    ...resolvedProfile,
+    dateColumns: resolvedProfile.dateColumns?.length ? resolvedProfile.dateColumns : [inferred.dateColumn].filter(Boolean),
+    descriptionColumn: resolvedProfile.descriptionColumn || inferred.descriptionColumn || inferred.merchantColumn,
+    merchantColumn: inferred.merchantColumn || resolvedProfile.merchantColumn || resolvedProfile.descriptionColumn,
+    categoryColumn: inferred.categoryColumn || resolvedProfile.categoryColumn || null,
     amountConfig: enhancedAmountConfig
   };
 }
