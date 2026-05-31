@@ -464,6 +464,173 @@ export default function AnalyticsPage() {
     });
   };
 
+  const renderAnalyticsFilters = (variant = 'page') => (
+    <div className={`analytics-controls analytics-controls--${variant}`}>
+      <div className="date-range-selector">
+        <Landmark size={18} className="text-muted" />
+        <select
+          className="input input--sm"
+          value={accountId}
+          onChange={(e) => {
+            setAccountId(e.target.value);
+            setPendingDrilldownCategoryValue(null);
+            setDrilldown(null);
+          }}
+        >
+          <option value="">All Accounts</option>
+          {accounts.map(account => (
+            <option key={account.id} value={account.id}>{account.name}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="category-filter-control">
+        <div className="category-filter-control__row">
+          <select
+            className="input input--sm"
+            value={categoryFilterMode}
+            onChange={(event) => handleCategoryFilterModeChange(event.target.value)}
+            aria-label="Category filter mode"
+          >
+            <option value={CATEGORY_FILTER_MODES.INCLUDE}>Include categories</option>
+            <option value={CATEGORY_FILTER_MODES.EXCLUDE}>Exclude categories</option>
+          </select>
+          <select
+            className="input input--sm"
+            value={pendingCategoryFilterId}
+            onChange={(event) => addCategoryFilter(event.target.value)}
+            aria-label="Add category filter"
+          >
+            <option value="">
+              {categoryFilterIds.length === 0 ? 'All Categories' : 'Add Category'}
+            </option>
+            <option value="uncategorized" disabled={categoryFilterIds.includes('uncategorized')}>
+              Uncategorized
+            </option>
+            {categories
+              .filter(category => category.name.toLowerCase() !== 'uncategorized')
+              .map(category => {
+                const id = String(category.id);
+                return (
+                  <option key={category.id} value={id} disabled={categoryFilterIds.includes(id)}>
+                    {category.name}
+                  </option>
+                );
+              })}
+          </select>
+        </div>
+        {categoryFilterIds.length > 0 && (
+          <div className="category-filter-chips" aria-label="Active category filters">
+            {categoryFilterIds.map(categoryId => (
+              <button
+                key={categoryId}
+                className="category-filter-chip"
+                type="button"
+                onClick={() => removeCategoryFilter(categoryId)}
+                aria-label={`Remove ${getCategoryFilterLabel(categoryId)} category filter`}
+              >
+                <span>
+                  {categoryFilterMode === CATEGORY_FILTER_MODES.EXCLUDE ? 'Excluding ' : ''}
+                  {getCategoryFilterLabel(categoryId)}
+                </span>
+                <X size={13} />
+              </button>
+            ))}
+            <button className="category-filter-clear" type="button" onClick={clearCategoryFilters}>
+              Clear
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="date-range-selector">
+        <Calendar size={18} className="text-muted" />
+        <select
+          className="input input--sm"
+          value={dateRange}
+          onChange={(e) => handleDateRangeChange(e.target.value)}
+        >
+          {Object.values(DATE_RANGES).map(range => (
+            <option key={range} value={range}>{range}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="date-navigator" aria-label="Date range navigation">
+        <button
+          className="btn btn--ghost btn--icon"
+          type="button"
+          disabled={!startDate || !endDate}
+          onClick={() => handleShiftMonthWindow(-1)}
+          aria-label="Previous month range"
+          title="Previous month range"
+        >
+          <ChevronLeft size={16} />
+        </button>
+        <div className="date-navigator__label" title={activeDateLabel}>
+          {activeDateLabel}
+        </div>
+        <button
+          className="btn btn--ghost btn--icon"
+          type="button"
+          disabled={!startDate || !endDate}
+          onClick={() => handleShiftMonthWindow(1)}
+          aria-label="Next month range"
+          title="Next month range"
+        >
+          <ChevronRight size={16} />
+        </button>
+        <button
+          className="btn btn--ghost btn--icon"
+          type="button"
+          onClick={handleResetToCurrentMonth}
+          aria-label="Reset to this month"
+          title="Reset to this month"
+        >
+          <RotateCcw size={15} />
+        </button>
+      </div>
+
+      {dateRange === DATE_RANGES.CUSTOM && (
+        <div className="date-range-selector date-range-selector--custom">
+          <input
+            className="input input--sm"
+            type="date"
+            value={customStartDate}
+            onChange={(event) => {
+              setCustomStartDate(event.target.value);
+              resetAnalyticsSelection();
+            }}
+            aria-label="Start date"
+          />
+          <span>to</span>
+          <input
+            className="input input--sm"
+            type="date"
+            value={customEndDate}
+            onChange={(event) => {
+              setCustomEndDate(event.target.value);
+              resetAnalyticsSelection();
+            }}
+            aria-label="End date"
+          />
+        </div>
+      )}
+
+      <div className="date-range-selector">
+        <select
+          className="input input--sm"
+          value={cashFlowGroup}
+          onChange={(e) => setCashFlowGroup(e.target.value)}
+        >
+          {Object.values(CASH_FLOW_GROUPS).map(group => (
+            <option key={group} value={group}>{group}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+
   return (
     <div className="page analytics-page stagger-in">
       <div className="page__header analytics-page__header">
@@ -471,171 +638,8 @@ export default function AnalyticsPage() {
           <h1 className="page__title">Analytics</h1>
           <p className="page__subtitle">Insights into your financial habits</p>
         </div>
-        
-        <div className="analytics-controls">
-          <div className="date-range-selector">
-            <Landmark size={18} className="text-muted" />
-            <select
-              className="input input--sm"
-              value={accountId}
-              onChange={(e) => {
-                setAccountId(e.target.value);
-                setPendingDrilldownCategoryValue(null);
-                setDrilldown(null);
-              }}
-            >
-              <option value="">All Accounts</option>
-              {accounts.map(account => (
-                <option key={account.id} value={account.id}>{account.name}</option>
-              ))}
-            </select>
-          </div>
 
-          <div className="category-filter-control">
-            <div className="category-filter-control__row">
-              <select
-                className="input input--sm"
-                value={categoryFilterMode}
-                onChange={(event) => handleCategoryFilterModeChange(event.target.value)}
-                aria-label="Category filter mode"
-              >
-                <option value={CATEGORY_FILTER_MODES.INCLUDE}>Include categories</option>
-                <option value={CATEGORY_FILTER_MODES.EXCLUDE}>Exclude categories</option>
-              </select>
-              <select
-                className="input input--sm"
-                value={pendingCategoryFilterId}
-                onChange={(event) => addCategoryFilter(event.target.value)}
-                aria-label="Add category filter"
-              >
-                <option value="">
-                  {categoryFilterIds.length === 0 ? 'All Categories' : 'Add Category'}
-                </option>
-                <option value="uncategorized" disabled={categoryFilterIds.includes('uncategorized')}>
-                  Uncategorized
-                </option>
-                {categories
-                  .filter(category => category.name.toLowerCase() !== 'uncategorized')
-                  .map(category => {
-                    const id = String(category.id);
-                    return (
-                      <option key={category.id} value={id} disabled={categoryFilterIds.includes(id)}>
-                        {category.name}
-                      </option>
-                    );
-                  })}
-              </select>
-            </div>
-            {categoryFilterIds.length > 0 && (
-              <div className="category-filter-chips" aria-label="Active category filters">
-                {categoryFilterIds.map(categoryId => (
-                  <button
-                    key={categoryId}
-                    className="category-filter-chip"
-                    type="button"
-                    onClick={() => removeCategoryFilter(categoryId)}
-                    aria-label={`Remove ${getCategoryFilterLabel(categoryId)} category filter`}
-                  >
-                    <span>
-                      {categoryFilterMode === CATEGORY_FILTER_MODES.EXCLUDE ? 'Excluding ' : ''}
-                      {getCategoryFilterLabel(categoryId)}
-                    </span>
-                    <X size={13} />
-                  </button>
-                ))}
-                <button className="category-filter-clear" type="button" onClick={clearCategoryFilters}>
-                  Clear
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="date-range-selector">
-            <Calendar size={18} className="text-muted" />
-            <select 
-              className="input input--sm"
-              value={dateRange}
-              onChange={(e) => handleDateRangeChange(e.target.value)}
-            >
-              {Object.values(DATE_RANGES).map(range => (
-                <option key={range} value={range}>{range}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="date-navigator" aria-label="Date range navigation">
-            <button
-              className="btn btn--ghost btn--icon"
-              type="button"
-              disabled={!startDate || !endDate}
-              onClick={() => handleShiftMonthWindow(-1)}
-              aria-label="Previous month range"
-              title="Previous month range"
-            >
-              <ChevronLeft size={16} />
-            </button>
-            <div className="date-navigator__label" title={activeDateLabel}>
-              {activeDateLabel}
-            </div>
-            <button
-              className="btn btn--ghost btn--icon"
-              type="button"
-              disabled={!startDate || !endDate}
-              onClick={() => handleShiftMonthWindow(1)}
-              aria-label="Next month range"
-              title="Next month range"
-            >
-              <ChevronRight size={16} />
-            </button>
-            <button
-              className="btn btn--ghost btn--icon"
-              type="button"
-              onClick={handleResetToCurrentMonth}
-              aria-label="Reset to this month"
-              title="Reset to this month"
-            >
-              <RotateCcw size={15} />
-            </button>
-          </div>
-
-          {dateRange === DATE_RANGES.CUSTOM && (
-            <div className="date-range-selector date-range-selector--custom">
-              <input
-                className="input input--sm"
-                type="date"
-                value={customStartDate}
-                onChange={(event) => {
-                  setCustomStartDate(event.target.value);
-                  resetAnalyticsSelection();
-                }}
-                aria-label="Start date"
-              />
-              <span>to</span>
-              <input
-                className="input input--sm"
-                type="date"
-                value={customEndDate}
-                onChange={(event) => {
-                  setCustomEndDate(event.target.value);
-                  resetAnalyticsSelection();
-                }}
-                aria-label="End date"
-              />
-            </div>
-          )}
-
-          <div className="date-range-selector">
-            <select
-              className="input input--sm"
-              value={cashFlowGroup}
-              onChange={(e) => setCashFlowGroup(e.target.value)}
-            >
-              {Object.values(CASH_FLOW_GROUPS).map(group => (
-                <option key={group} value={group}>{group}</option>
-              ))}
-            </select>
-          </div>
-        </div>
+        {renderAnalyticsFilters()}
       </div>
 
       {filteredInternalMovement > 0 && (
@@ -967,6 +971,7 @@ export default function AnalyticsPage() {
         maxWidth="calc(100vw - 48px)"
         className="modal-container--fullscreen"
       >
+        {renderAnalyticsFilters('modal')}
         <div className="analytics-expanded-chart">
           <IncomeVsExpense
             transactions={analysisTransactions}
@@ -988,6 +993,7 @@ export default function AnalyticsPage() {
         maxWidth="calc(100vw - 48px)"
         className="modal-container--fullscreen"
       >
+        {renderAnalyticsFilters('modal')}
         <div className="analytics-modal-toolbar">
           <label className="analytics-chart-toggle">
             <input

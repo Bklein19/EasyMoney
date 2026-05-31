@@ -21,6 +21,10 @@
   width: 100%;
 }
 
+.analytics-controls--modal {
+  margin-bottom: var(--space-4);
+}
+
 .analytics-kpi-label {
   display: flex;
   align-items: center;
@@ -287,8 +291,8 @@
 }
 
 .analytics-expanded-chart {
-  height: min(72vh, 760px);
-  min-height: 520px;
+  height: min(62vh, 700px);
+  min-height: 440px;
 }
 
 .analytics-modal-toolbar {

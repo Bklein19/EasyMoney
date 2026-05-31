@@ -37,6 +37,12 @@
   max-height: calc(100vh - 48px);
 }
 
+.modal-container--fullscreen .modal-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 @keyframes modal-in {
   from {
     opacity: 0;
