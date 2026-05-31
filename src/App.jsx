@@ -5,6 +5,7 @@ import TransactionsPage from './components/transactions/TransactionsPage';
 import AccountsPage from './components/accounts/AccountsPage';
 import Sidebar from './components/layout/Sidebar';
 import AnalyticsPage from './components/analytics/AnalyticsPage';
+import HowToUsePage from './components/help/HowToUsePage';
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
               <Route path="/accounts" element={<AccountsPage />} />
               <Route path="/import" element={<ImportPage />} />
               <Route path="/analytics" element={<AnalyticsPage />} />
+              <Route path="/how-to-use" element={<HowToUsePage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </main>

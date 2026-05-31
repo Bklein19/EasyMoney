@@ -5,7 +5,8 @@ import {
   WalletCards, 
   Upload, 
   PieChart,
-  Wallet
+  Wallet,
+  CircleHelp
 } from 'lucide-react';
 import './Sidebar.css';
 
@@ -16,6 +17,7 @@ const Sidebar = ({ isMobileOpen, onClose }) => {
     { path: '/accounts', label: 'Accounts', icon: WalletCards },
     { path: '/analytics', label: 'Analytics', icon: PieChart },
     { path: '/import', label: 'Import', icon: Upload },
+    { path: '/how-to-use', label: 'How To Use', icon: CircleHelp },
   ];
 
   return (
