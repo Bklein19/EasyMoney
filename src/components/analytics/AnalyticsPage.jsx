@@ -252,6 +252,10 @@ export default function AnalyticsPage() {
     return visibleDrilldownTransactions.slice(0, drilldownVisibleCount);
   }, [visibleDrilldownTransactions, drilldownVisibleCount]);
 
+  const drilldownFilteredTotal = useMemo(() => {
+    return visibleDrilldownTransactions.reduce((sum, transaction) => sum + transaction.amount, 0);
+  }, [visibleDrilldownTransactions]);
+
   const hasMoreDrilldownTransactions = drilldownVisibleCount < visibleDrilldownTransactions.length;
 
   useEffect(() => {
@@ -799,6 +803,12 @@ export default function AnalyticsPage() {
                 {visibleDrilldownTransactions.length !== drilldownTransactions.length && ` of ${drilldownTransactions.length}`}
                 {' '}matching transaction{visibleDrilldownTransactions.length === 1 ? '' : 's'}
               </p>
+              <div className="drilldown-total">
+                <span>Filtered total</span>
+                <strong className={`amount ${getAmountClass(drilldownFilteredTotal)}`}>
+                  {formatCurrency(drilldownFilteredTotal, true)}
+                </strong>
+              </div>
               {drilldown.aliases?.length > 1 && (
                 <div className="drilldown-aliases">
                   {drilldown.aliases.slice(0, 6).map(alias => (
