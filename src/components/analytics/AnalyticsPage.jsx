@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { addMonths, endOfDay, endOfMonth, endOfWeek, endOfYear, format, parseISO, startOfMonth, startOfWeek, startOfYear, subMonths, subWeeks } from 'date-fns';
 import { Calendar, ChevronLeft, ChevronRight, HelpCircle, Landmark, RotateCcw, Search, X } from 'lucide-react';
 import { useTransactions } from '../../hooks/useTransactions';
@@ -66,6 +66,7 @@ export default function AnalyticsPage() {
   const [newDrilldownCategoryName, setNewDrilldownCategoryName] = useState('');
   const [pendingDrilldownCategoryValue, setPendingDrilldownCategoryValue] = useState(null);
   const [drilldownVisibleCount, setDrilldownVisibleCount] = useState(DRILLDOWN_PAGE_SIZE);
+  const drilldownRef = useRef(null);
   
   const { startDate, endDate } = useMemo(() => {
     const today = new Date();
@@ -253,6 +254,11 @@ export default function AnalyticsPage() {
 
   const hasMoreDrilldownTransactions = drilldownVisibleCount < visibleDrilldownTransactions.length;
 
+  useEffect(() => {
+    if (!drilldown?.scrollIntoView) return;
+    drilldownRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [drilldown]);
+
   const confirmLargeDrilldownChange = (count, categoryName) => {
     if (count <= 50) return true;
     return window.confirm(
@@ -361,7 +367,7 @@ export default function AnalyticsPage() {
     resetAnalyticsSelection();
   };
 
-  const addCategoryFilter = (categoryId, mode = categoryFilterMode) => {
+  const addCategoryFilter = (categoryId, mode = categoryFilterMode, options = {}) => {
     if (!categoryId) return;
     setCategoryFilterMode(mode);
     setCategoryFilterIdsByMode(previous => {
@@ -372,11 +378,18 @@ export default function AnalyticsPage() {
       };
     });
     setPendingCategoryFilterId('');
-    resetAnalyticsSelection();
+    if (options.resetSelection !== false) resetAnalyticsSelection();
   };
 
-  const includeCategoryFromChart = (categoryId) => {
-    addCategoryFilter(categoryId, CATEGORY_FILTER_MODES.INCLUDE);
+  const includeCategoryFromChart = (category) => {
+    const categoryId = String(category.id);
+    addCategoryFilter(categoryId, CATEGORY_FILTER_MODES.INCLUDE, { resetSelection: false });
+    openDrilldown({
+      type: 'category',
+      id: categoryId,
+      title: `${category.name} Spending`,
+      scrollIntoView: true
+    });
   };
 
   const excludeCategoryFromChart = (categoryId) => {
@@ -692,7 +705,7 @@ export default function AnalyticsPage() {
             transactions={analysisTransactions}
             categoryMap={categoryMap}
             accountMap={accountMap}
-            onSelectCategory={(category) => includeCategoryFromChart(String(category.id))}
+            onSelectCategory={(category) => includeCategoryFromChart(category)}
             onExcludeCategory={(category) => excludeCategoryFromChart(String(category.id))}
           />
         </div>
@@ -777,7 +790,7 @@ export default function AnalyticsPage() {
       </div>
 
       {drilldown && (
-        <div className="analytics-card glass-card analytics-drilldown">
+        <div className="analytics-card glass-card analytics-drilldown" ref={drilldownRef}>
           <div className="analytics-drilldown__header">
             <div>
               <h3 className="analytics-card__title">{drilldown.title}</h3>
