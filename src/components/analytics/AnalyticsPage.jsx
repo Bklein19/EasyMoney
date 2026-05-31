@@ -68,7 +68,7 @@ export default function AnalyticsPage() {
   const [pendingDrilldownCategoryValue, setPendingDrilldownCategoryValue] = useState(null);
   const [drilldownVisibleCount, setDrilldownVisibleCount] = useState(DRILLDOWN_PAGE_SIZE);
   const [expandedChart, setExpandedChart] = useState(null);
-  const [showTotalSpendTrend, setShowTotalSpendTrend] = useState(true);
+  const [showTotalSpendTrend, setShowTotalSpendTrend] = useState(false);
   const drilldownRef = useRef(null);
   
   const { startDate, endDate } = useMemo(() => {
