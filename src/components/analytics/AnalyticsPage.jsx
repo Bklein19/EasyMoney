@@ -36,6 +36,10 @@ const CASH_FLOW_GROUPS = {
 
 const toDateInput = (date) => format(date, 'yyyy-MM-dd');
 const DRILLDOWN_PAGE_SIZE = 20;
+const CATEGORY_FILTER_MODES = {
+  INCLUDE: 'include',
+  EXCLUDE: 'exclude'
+};
 
 function getMonthSpan(startDate, endDate) {
   const start = parseISO(startDate);
@@ -48,7 +52,9 @@ export default function AnalyticsPage() {
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
   const [accountId, setAccountId] = useState('');
-  const [categoryFilterId, setCategoryFilterId] = useState('');
+  const [categoryFilterIds, setCategoryFilterIds] = useState([]);
+  const [categoryFilterMode, setCategoryFilterMode] = useState(CATEGORY_FILTER_MODES.INCLUDE);
+  const [pendingCategoryFilterId, setPendingCategoryFilterId] = useState('');
   const [cashFlowGroup, setCashFlowGroup] = useState(CASH_FLOW_GROUPS.AUTO);
   const [drilldown, setDrilldown] = useState(null);
   const [drilldownSearch, setDrilldownSearch] = useState('');
@@ -97,12 +103,14 @@ export default function AnalyticsPage() {
   }, [categories]);
 
   const categoryScopedTransactions = useMemo(() => {
-    if (!categoryFilterId) return transactions;
+    if (categoryFilterIds.length === 0) return transactions;
+    const selected = new Set(categoryFilterIds);
     return transactions.filter(transaction => {
-      if (categoryFilterId === 'uncategorized') return !transaction.categoryId;
-      return String(transaction.categoryId) === categoryFilterId;
+      const categoryKey = transaction.categoryId ? String(transaction.categoryId) : 'uncategorized';
+      const isSelected = selected.has(categoryKey);
+      return categoryFilterMode === CATEGORY_FILTER_MODES.INCLUDE ? isSelected : !isSelected;
     });
-  }, [transactions, categoryFilterId]);
+  }, [transactions, categoryFilterIds, categoryFilterMode]);
 
   const analysisTransactions = useMemo(() => {
     return categoryScopedTransactions.filter(transaction => !isExcludedFromCashFlow(transaction, accountMap, categoryMap));
@@ -346,9 +354,32 @@ export default function AnalyticsPage() {
     resetAnalyticsSelection();
   };
 
-  const handleCategoryFilterChange = (nextCategoryId) => {
-    setCategoryFilterId(nextCategoryId);
+  const addCategoryFilter = (categoryId) => {
+    if (!categoryId) return;
+    setCategoryFilterIds(previous => previous.includes(categoryId) ? previous : [...previous, categoryId]);
+    setPendingCategoryFilterId('');
     resetAnalyticsSelection();
+  };
+
+  const removeCategoryFilter = (categoryId) => {
+    setCategoryFilterIds(previous => previous.filter(id => id !== categoryId));
+    resetAnalyticsSelection();
+  };
+
+  const clearCategoryFilters = () => {
+    setCategoryFilterIds([]);
+    setPendingCategoryFilterId('');
+    resetAnalyticsSelection();
+  };
+
+  const handleCategoryFilterModeChange = (nextMode) => {
+    setCategoryFilterMode(nextMode);
+    resetAnalyticsSelection();
+  };
+
+  const getCategoryFilterLabel = (categoryId) => {
+    if (categoryId === 'uncategorized') return 'Uncategorized';
+    return categories.find(category => String(category.id) === categoryId)?.name || 'Unknown category';
   };
 
   const handleShiftMonthWindow = (direction) => {
@@ -411,21 +442,63 @@ export default function AnalyticsPage() {
             </select>
           </div>
 
-          <div className="date-range-selector">
-            <select
-              className="input input--sm"
-              value={categoryFilterId}
-              onChange={(event) => handleCategoryFilterChange(event.target.value)}
-              aria-label="Category filter"
-            >
-              <option value="">All Categories</option>
-              <option value="uncategorized">Uncategorized</option>
-              {categories
-                .filter(category => category.name.toLowerCase() !== 'uncategorized')
-                .map(category => (
-                <option key={category.id} value={category.id}>{category.name}</option>
-              ))}
-            </select>
+          <div className="category-filter-control">
+            <div className="category-filter-control__row">
+              <select
+                className="input input--sm"
+                value={categoryFilterMode}
+                onChange={(event) => handleCategoryFilterModeChange(event.target.value)}
+                aria-label="Category filter mode"
+              >
+                <option value={CATEGORY_FILTER_MODES.INCLUDE}>Include categories</option>
+                <option value={CATEGORY_FILTER_MODES.EXCLUDE}>Exclude categories</option>
+              </select>
+              <select
+                className="input input--sm"
+                value={pendingCategoryFilterId}
+                onChange={(event) => addCategoryFilter(event.target.value)}
+                aria-label="Add category filter"
+              >
+                <option value="">
+                  {categoryFilterIds.length === 0 ? 'All Categories' : 'Add Category'}
+                </option>
+                <option value="uncategorized" disabled={categoryFilterIds.includes('uncategorized')}>
+                  Uncategorized
+                </option>
+                {categories
+                  .filter(category => category.name.toLowerCase() !== 'uncategorized')
+                  .map(category => {
+                    const id = String(category.id);
+                    return (
+                      <option key={category.id} value={id} disabled={categoryFilterIds.includes(id)}>
+                        {category.name}
+                      </option>
+                    );
+                  })}
+              </select>
+            </div>
+            {categoryFilterIds.length > 0 && (
+              <div className="category-filter-chips" aria-label="Active category filters">
+                {categoryFilterIds.map(categoryId => (
+                  <button
+                    key={categoryId}
+                    className="category-filter-chip"
+                    type="button"
+                    onClick={() => removeCategoryFilter(categoryId)}
+                    aria-label={`Remove ${getCategoryFilterLabel(categoryId)} category filter`}
+                  >
+                    <span>
+                      {categoryFilterMode === CATEGORY_FILTER_MODES.EXCLUDE ? 'Excluding ' : ''}
+                      {getCategoryFilterLabel(categoryId)}
+                    </span>
+                    <X size={13} />
+                  </button>
+                ))}
+                <button className="category-filter-clear" type="button" onClick={clearCategoryFilters}>
+                  Clear
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="date-range-selector">
@@ -585,7 +658,7 @@ export default function AnalyticsPage() {
             transactions={analysisTransactions}
             categoryMap={categoryMap}
             accountMap={accountMap}
-            onSelectCategory={(category) => handleCategoryFilterChange(String(category.id))}
+            onSelectCategory={(category) => addCategoryFilter(String(category.id))}
           />
         </div>
         
