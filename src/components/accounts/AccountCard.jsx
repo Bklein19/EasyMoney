@@ -1,4 +1,5 @@
-import { Building2, CreditCard, Landmark, PiggyBank, Trash2 } from 'lucide-react';
+import { useState } from 'react';
+import { Building2, Check, CreditCard, Edit3, Landmark, PiggyBank, Trash2, X } from 'lucide-react';
 import { useAccounts } from '../../hooks/useAccounts';
 import { getAccountTypeLabel } from '../../utils/formatters';
 import './AccountCard.css';
@@ -14,11 +15,54 @@ const getAccountIcon = (type) => {
 };
 
 export default function AccountCard({ account }) {
-  const { deleteAccount } = useAccounts();
+  const { deleteAccount, updateAccount } = useAccounts();
+  const [isEditing, setIsEditing] = useState(false);
+  const [draftName, setDraftName] = useState(account.name || '');
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState('');
 
   const handleDelete = () => {
     if (window.confirm(`Are you sure you want to delete ${account.name}? This will also delete all associated transactions.`)) {
       deleteAccount(account.id);
+    }
+  };
+
+  const handleStartEdit = () => {
+    setDraftName(account.name || '');
+    setError('');
+    setIsEditing(true);
+  };
+
+  const handleCancelEdit = () => {
+    setDraftName(account.name || '');
+    setError('');
+    setIsEditing(false);
+  };
+
+  const handleSaveName = async (event) => {
+    event.preventDefault();
+    const nextName = draftName.trim();
+
+    if (!nextName) {
+      setError('Account name is required.');
+      return;
+    }
+
+    if (nextName === account.name) {
+      setIsEditing(false);
+      return;
+    }
+
+    setIsSaving(true);
+    setError('');
+
+    try {
+      await updateAccount(account.id, { name: nextName });
+      setIsEditing(false);
+    } catch (saveError) {
+      setError(saveError?.message || 'Could not update account name.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -31,14 +75,43 @@ export default function AccountCard({ account }) {
           {getAccountIcon(account.type)}
         </div>
         <div className="account-actions">
-          <button className="icon-btn delete-btn" onClick={handleDelete} title="Delete account">
+          <button className="icon-btn" onClick={handleStartEdit} title="Edit account name" disabled={isEditing}>
+            <Edit3 size={16} />
+          </button>
+          <button className="icon-btn delete-btn" onClick={handleDelete} title="Delete account" disabled={isEditing}>
             <Trash2 size={16} />
           </button>
         </div>
       </div>
       
       <div className="account-info">
-        <h3 className="account-name">{account.name}</h3>
+        {isEditing ? (
+          <form className="account-edit-form" onSubmit={handleSaveName}>
+            <label className="sr-only" htmlFor={`account-name-${account.id}`}>Account name</label>
+            <input
+              id={`account-name-${account.id}`}
+              className="input account-name-input"
+              value={draftName}
+              onChange={(event) => {
+                setDraftName(event.target.value);
+                if (error) setError('');
+              }}
+              autoFocus
+              disabled={isSaving}
+            />
+            <div className="account-edit-actions">
+              <button className="icon-btn save-btn" type="submit" title="Save account name" disabled={isSaving}>
+                <Check size={16} />
+              </button>
+              <button className="icon-btn" type="button" onClick={handleCancelEdit} title="Cancel edit" disabled={isSaving}>
+                <X size={16} />
+              </button>
+            </div>
+            {error && <div className="account-edit-error">{error}</div>}
+          </form>
+        ) : (
+          <h3 className="account-name">{account.name}</h3>
+        )}
         <p className="account-institution">{account.institution || 'No Institution'}</p>
         <span className="account-type-badge">{getAccountTypeLabel(account.type)}</span>
       </div>
