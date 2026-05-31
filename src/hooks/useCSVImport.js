@@ -40,7 +40,8 @@ export function useCSVImport() {
     });
   }, []);
 
-  const processImport = useCallback(async (file, customProfile = null) => {
+  const processImport = useCallback(async (file, customProfile = null, options = {}) => {
+    const inferCategories = options.inferCategories !== false;
     try {
       const parsed = await parseCSV(file);
       if (!parsed.data || parsed.data.length === 0) {
@@ -48,7 +49,7 @@ export function useCSVImport() {
       }
 
       const headers = parsed.meta.fields || Object.keys(parsed.data[0]);
-      const detectedProfile = detectBank(headers);
+      const detectedProfile = detectBank(headers, file.name);
       const profile = customProfile || enhanceProfileWithHeaders(detectedProfile, headers);
 
       if (!profile) {
@@ -70,7 +71,7 @@ export function useCSVImport() {
       }
 
       // Auto-categorize
-      if (rules && categories) {
+      if (inferCategories && rules && categories) {
         normalized = categorizeTransactions(normalized, rules, categories);
       }
 
@@ -80,6 +81,7 @@ export function useCSVImport() {
         profile,
         headers,
         previewData: parsed.data.slice(0, 5),
+        inferCategories,
         transactions: normalized
       };
     } catch (err) {

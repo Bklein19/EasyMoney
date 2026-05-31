@@ -5,14 +5,25 @@ import { parse, isValid } from 'date-fns';
  */
 export const BANK_PROFILES = [
   {
-    name: 'Chase',
+    name: 'Chase Credit Card',
     headerFingerprint: ['Transaction Date', 'Post Date', 'Description', 'Category', 'Type', 'Amount'],
+    statementType: 'credit_card',
     dateColumns: ['Transaction Date'],
     dateFormats: ['MM/dd/yyyy'],
     descriptionColumn: 'Description',
     merchantColumn: 'Description',
-    amountConfig: { type: 'single', column: 'Amount', negativeIsDebit: true },
+    amountConfig: { type: 'single', column: 'Amount', positiveIsCharge: false },
     categoryColumn: 'Category',
+  },
+  {
+    name: 'Wells Fargo Checking',
+    headerFingerprint: ['Date', 'Description', 'Amount', 'CheckNumber', 'Status'],
+    dateColumns: ['Date'],
+    dateFormats: ['MM/dd/yyyy'],
+    descriptionColumn: 'Description',
+    merchantColumn: 'Description',
+    amountConfig: { type: 'single', column: 'Amount', negativeIsDebit: true },
+    categoryColumn: null,
   },
   {
     name: 'Bank of America',
@@ -34,6 +45,41 @@ export const BANK_PROFILES = [
     merchantColumn: 'DESCRIPTION',
     amountConfig: { type: 'single', column: 'AMOUNT', positiveIsCharge: false },
     categoryColumn: null,
+  },
+  {
+    name: 'Robinhood Credit Card',
+    headerFingerprint: ['Date', 'Time', 'Cardholder', 'Amount', 'Points', 'Balance', 'Status', 'Type', 'Merchant', 'Description'],
+    statementType: 'credit_card',
+    dateColumns: ['Date'],
+    dateFormats: ['yyyy-MM-dd'],
+    descriptionColumn: 'Description',
+    merchantColumn: 'Merchant',
+    amountConfig: { type: 'single', column: 'Amount', positiveIsCharge: true },
+    categoryColumn: null,
+  },
+  {
+    name: 'American Express Credit Card',
+    headerFingerprint: ['Date', 'Description', 'Amount'],
+    fileNamePatterns: ['amex', 'american express'],
+    requireFileNameMatch: true,
+    statementType: 'credit_card',
+    dateColumns: ['Date'],
+    dateFormats: ['MM/dd/yyyy'],
+    descriptionColumn: 'Description',
+    merchantColumn: 'Description',
+    amountConfig: { type: 'single', column: 'Amount', positiveIsCharge: true },
+    categoryColumn: null,
+  },
+  {
+    name: 'Apple Card',
+    headerFingerprint: ['Transaction Date', 'Clearing Date', 'Description', 'Merchant', 'Category', 'Type', 'Amount (USD)', 'Purchased By'],
+    statementType: 'credit_card',
+    dateColumns: ['Transaction Date'],
+    dateFormats: ['MM/dd/yyyy'],
+    descriptionColumn: 'Description',
+    merchantColumn: 'Merchant',
+    amountConfig: { type: 'single', column: 'Amount (USD)', positiveIsCharge: true },
+    categoryColumn: 'Category',
   },
   {
     name: 'Wells Fargo',
@@ -186,18 +232,23 @@ export function enhanceProfileWithHeaders(profile, headers = []) {
  * @param {string[]} headers - Array of column header names from the CSV
  * @returns {object|null} Matching bank profile, or null if no match
  */
-export function detectBank(headers) {
+export function detectBank(headers, fileName = '') {
   const normalized = headers.map(h => h.trim());
+  const normalizedFileName = fileName.toLowerCase();
 
   let bestMatch = null;
   let bestScore = 0;
 
   for (const profile of BANK_PROFILES) {
+    const fileNameMatches = !profile.fileNamePatterns?.length ||
+      profile.fileNamePatterns.some(pattern => normalizedFileName.includes(pattern));
+    if (profile.requireFileNameMatch && !fileNameMatches) continue;
+
     const matchCount = profile.headerFingerprint.filter(fp =>
       normalized.some(h => h.toLowerCase() === fp.toLowerCase())
     ).length;
 
-    const score = matchCount / profile.headerFingerprint.length;
+    const score = (matchCount / profile.headerFingerprint.length) + (fileNameMatches && profile.fileNamePatterns?.length ? 0.05 : 0);
 
     if (score > bestScore && score >= 0.6) {
       bestScore = score;
@@ -272,9 +323,13 @@ export function normalizeTransaction(row, profile) {
   if (!date) return null;
 
   // Parse description
-  const description = (row[profile.descriptionColumn] || '').trim();
+  const rawDescription = (row[profile.descriptionColumn] || '').trim();
+  const rawMerchant = profile.merchantColumn
+    ? (row[profile.merchantColumn] || '').trim()
+    : '';
+  const description = rawDescription || rawMerchant;
   const merchant = profile.merchantColumn
-    ? (row[profile.merchantColumn] || description).trim()
+    ? rawMerchant || description
     : description;
 
   // Parse amount

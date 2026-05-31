@@ -133,6 +133,11 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
               {importingToCreditCard ? 'Credit card mode' : `${getAccountTypeLabel(selectedAccount.type)} mode`}
             </span>
           )}
+          {importMeta?.inferCategories === false && (
+            <span className="account-kind-badge manual">
+              Category inference off
+            </span>
+          )}
         </div>
       </div>
 
