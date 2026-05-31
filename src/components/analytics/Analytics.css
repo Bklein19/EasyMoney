@@ -227,6 +227,22 @@
   margin-bottom: var(--space-2);
 }
 
+.analytics-card__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.analytics-card__heading .analytics-card__title {
+  margin-bottom: 0;
+}
+
+.analytics-card__heading p {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
 /* Common chart container */
 .chart-container {
   flex: 1;

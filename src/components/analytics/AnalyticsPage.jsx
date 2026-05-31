@@ -653,7 +653,12 @@ export default function AnalyticsPage() {
         </div>
 
         <div className="analytics-card glass-card">
-          <h3 className="analytics-card__title">Spending by Category</h3>
+          <div className="analytics-card__heading">
+            <h3 className="analytics-card__title">Spending by Category</h3>
+            <p>
+              Click a category to {categoryFilterMode === CATEGORY_FILTER_MODES.EXCLUDE ? 'exclude it from' : 'filter it into'} the analytics set.
+            </p>
+          </div>
           <SpendingByCategory
             transactions={analysisTransactions}
             categoryMap={categoryMap}
