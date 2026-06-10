@@ -31,6 +31,14 @@ function EventLog({ events }: { events: AgentEvent[] }) {
   return (
     <div className="event-log">
       {events.map((e, i) => {
+        if (e.type === "message") {
+          return (
+            <div key={i} className="event event-message">
+              <span className="event-icon">✦</span>
+              <span className="event-args" style={{ color: "#aaa", whiteSpace: "pre-wrap" }}>{e.text}</span>
+            </div>
+          );
+        }
         if (e.type === "tool_call") {
           const summary = e.args ? argsSummary(e.args) : "";
           return (

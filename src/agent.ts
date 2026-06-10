@@ -1,4 +1,4 @@
-import { Agent, tool, run } from "@openai/agents";
+import { Agent, tool, run, RunItemStreamEvent } from "@openai/agents";
 import { readFile, writeFile, readdir } from "fs/promises";
 import { join } from "path";
 import { validate } from "./validate";
@@ -253,8 +253,24 @@ export async function runIngestionAgent(
     toolUseBehavior: "run_llm_again",
   });
 
-  const result = await run(agent, `Import this file: ${filePath}`, { maxTurns: 128 });
-  console.log("[agent] run complete, finalOutput:", result.finalOutput);
+  const stream = await run(agent, `Import this file: ${filePath}`, { maxTurns: 128, stream: true });
+
+  for await (const event of stream) {
+    if (event instanceof RunItemStreamEvent && event.name === "message_output_created") {
+      const item = event.item as { content?: Array<{ type: string; text?: string }> };
+      const text = item.content
+        ?.filter((c) => c.type === "output_text")
+        .map((c) => c.text)
+        .join("")
+        .trim();
+      if (text) {
+        console.log("[agent] message:", text);
+        emit({ type: "message", text });
+      }
+    }
+  }
+
+  await stream.completed;
 
   if (!lastValidResult) {
     throw new Error("Ingestion agent completed without a validated parse result");
