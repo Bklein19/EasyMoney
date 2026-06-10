@@ -234,12 +234,10 @@ export async function runIngestionAgent(
       const { parser_id } = args;
       emit({ type: "tool_call", tool: "finish", args });
       if (!lastValidResult) {
-        const result = { ok: false, error: "No validated parse result found. Run run_parser successfully first." };
-        emit({ type: "tool_result", tool: "finish", result });
-        return result;
+        throw new Error("finish() called before run_parser succeeded — run run_parser first");
       }
       lastValidResult = { ...lastValidResult, parserId: parser_id };
-      const result = { ok: true };
+      const result = { ok: true, parser_id };
       emit({ type: "tool_result", tool: "finish", result });
       return result;
     },
@@ -250,7 +248,7 @@ export async function runIngestionAgent(
     instructions: SYSTEM_PROMPT,
     model: "gpt-4o",
     tools: [readFileSample, readPdfText, listParsers, readParser, writeParser, runParser, finish],
-    toolUseBehavior: "run_llm_again",
+    toolUseBehavior: { stopAtToolNames: ["finish"] },
   });
 
   const stream = await run(agent, `Import this file: ${filePath}`, { maxTurns: 128, stream: true });
