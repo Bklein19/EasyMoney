@@ -91,6 +91,7 @@ export function getNetWorthReport(): NetWorthReport {
 
   for (const account of accounts) {
     let prevBalance: number | null = null;
+    let prevBalanceMonth: string | null = null;
     for (const month of sortedMonths) {
       const f = flows.get(flowKey(month, account.id)) ?? {
         contributions: 0,
@@ -100,12 +101,26 @@ export function getNetWorthReport(): NetWorthReport {
       const endBalance = balanceMap.get(flowKey(month, account.id)) ?? null;
 
       // Market gains are the residual: change in value minus everything we can attribute.
-      // Only computable when we have consecutive balance snapshots.
+      // When balance snapshots aren't consecutive months, sum all flows in the gap so
+      // contributions between snapshots don't get misattributed as gains.
       let gains: number | null = null;
-      if (endBalance !== null && prevBalance !== null) {
-        gains = endBalance - prevBalance - f.contributions - f.dividends - f.interest;
+      if (endBalance !== null && prevBalance !== null && prevBalanceMonth !== null) {
+        let totalContributions = 0, totalDividends = 0, totalInterest = 0;
+        for (const m of sortedMonths) {
+          if (m <= prevBalanceMonth || m > month) continue;
+          const mf = flows.get(flowKey(m, account.id));
+          if (mf) {
+            totalContributions += mf.contributions;
+            totalDividends += mf.dividends;
+            totalInterest += mf.interest;
+          }
+        }
+        gains = endBalance - prevBalance - totalContributions - totalDividends - totalInterest;
       }
-      if (endBalance !== null) prevBalance = endBalance;
+      if (endBalance !== null) {
+        prevBalance = endBalance;
+        prevBalanceMonth = month;
+      }
 
       const hasActivity =
         f.contributions !== 0 || f.dividends !== 0 || f.interest !== 0 || endBalance !== null;
