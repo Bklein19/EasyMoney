@@ -239,7 +239,7 @@ export async function runIngestionAgent(
       const { parser_id } = args;
       emit({ type: "tool_call", tool: "finish", args });
       if (!lastValidResult) {
-        throw new Error("finish() called before run_parser succeeded — run run_parser first");
+        throw new Error("You must call run_parser successfully before calling finish(). Call write_parser then run_parser first.");
       }
       lastValidResult = { ...lastValidResult, parserId: parser_id };
       const result = { ok: true, parser_id };
