@@ -34,6 +34,7 @@ The parser file must:
 - import { createHash } from "crypto" for deterministic row IDs
 - use Bun.file(filePath).text() to read files, or pdfjs-dist for PDFs
 - only use npm packages: papaparse (CSV) or pdfjs-dist (PDF)
+- for pdfjs-dist, import like this EXACTLY: `import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs"` — the default index uses browser APIs (DOMMatrix etc) that crash in Bun; the legacy build is the server-safe version. Never import PDFDocument, it doesn't exist.
 
 ParseResult shape:
 \`\`\`ts
@@ -246,7 +247,7 @@ export async function runIngestionAgent(
   const agent = new Agent({
     name: "IngestionAgent",
     instructions: SYSTEM_PROMPT,
-    model: "gpt-4o",
+    model: "gpt-5.4",
     tools: [readFileSample, readPdfText, listParsers, readParser, writeParser, runParser, finish],
     toolUseBehavior: { stopAtToolNames: ["finish"] },
   });
