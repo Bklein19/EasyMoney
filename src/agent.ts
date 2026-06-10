@@ -7,38 +7,65 @@ import { z } from "zod";
 
 const PARSERS_DIR = join(import.meta.dir, "../parsers");
 
-const SYSTEM_PROMPT = `You are a financial data parser agent. Your job is to produce a working TypeScript parser for a given financial data file and confirm it imports correctly.
+const SYSTEM_PROMPT = `You are a financial data parser agent. You communicate ONLY through tool calls — never respond with plain text.
 
-Workflow:
-1. Read a sample of the file to identify the institution and format
-   - For PDFs, use read_pdf_text instead of read_file_sample
-2. Check if a matching parser already exists with list_parsers / read_parser
-3. If yes, run it — if validation passes, call finish()
-4. If no match (or validation fails), write a new or fixed parser, then run and validate again
-5. Iterate until validation passes, then call finish()
+Every turn you must call exactly one tool. Keep calling tools until finish() succeeds.
 
-Parser file requirements:
-- parser_id format: <institution>-<file-type>  (e.g. chase-checking-csv, fidelity-brokerage-pdf)
-- Must export a default async function: export default async function parse(filePath: string): Promise<ParseResult>
-- Use only Bun built-ins — no npm imports except 'papaparse' for CSV or 'pdfjs-dist' for PDF
-- ParseResult shape:
-  {
-    transactions: Array<{
-      id: string;           // deterministic SHA-256 hash of the row
-      date: string;         // YYYY-MM-DD
-      amount_cents: number; // integer; positive=credit, negative=debit
-      description: string;
-      account: string;
-      institution: string;
-      raw: Record<string, unknown>;
-    }>;
-    balances: Array<{
-      date: string;
-      account: string;
-      institution: string;
-      balance_cents: number;
-    }>;
-  }`;
+## Required sequence
+
+1. Call read_pdf_text (for .pdf) or read_file_sample (for everything else) to read the file
+2. Call list_parsers to see what already exists
+3. If a matching parser exists, call run_parser with it
+   - If run_parser returns ok:true → call finish()
+   - If run_parser returns ok:false → call write_parser with a fixed version, then run_parser again
+4. If no matching parser exists, call write_parser with a new parser, then call run_parser
+   - If run_parser returns ok:true → call finish()
+   - If run_parser returns ok:false → call write_parser with a fixed version, then run_parser again
+5. Repeat write_parser → run_parser until ok:true, then call finish()
+
+## You MUST call finish() to complete the job. Never stop without calling finish().
+
+## Parser requirements
+
+parser_id format: <institution>-<file-type>  (e.g. chase-checking-csv, fidelity-activity-pdf)
+
+The parser file must:
+- export default async function parse(filePath: string): Promise<ParseResult>
+- import { createHash } from "crypto" for deterministic row IDs
+- use Bun.file(filePath).text() to read files, or pdfjs-dist for PDFs
+- only use npm packages: papaparse (CSV) or pdfjs-dist (PDF)
+
+ParseResult shape:
+\`\`\`ts
+interface ParseResult {
+  transactions: Array<{
+    id: string;           // createHash('sha256').update(JSON.stringify(rawRow)).digest('hex')
+    date: string;         // YYYY-MM-DD
+    amount_cents: number; // integer cents; positive=credit, negative=debit
+    description: string;
+    account: string;      // account name or number
+    institution: string;  // e.g. "Fidelity", "Chase"
+    raw: Record<string, unknown>;
+  }>;
+  balances: Array<{
+    date: string;
+    account: string;
+    institution: string;
+    balance_cents: number;
+  }>;
+}
+\`\`\`
+
+## When run_parser fails
+
+Read the error carefully. Common fixes:
+- Wrong date format → parse to YYYY-MM-DD
+- amount_cents not integer → use Math.round(parseFloat(x) * 100)
+- Missing required field → map from a different column
+- Import error → check the import path and syntax
+- Empty results → read more pages or adjust column parsing
+
+After fixing, call write_parser with the corrected code, then call run_parser again.`;
 
 export interface AgentEvent {
   type: "tool_call" | "tool_result" | "message";
@@ -60,6 +87,13 @@ export async function runIngestionAgent(
   let lastValidResult: AgentResult | null = null;
 
   function emit(event: AgentEvent) {
+    if (event.type === "tool_call") {
+      const argStr = event.args ? JSON.stringify(event.args).slice(0, 120) : "";
+      console.log(`[agent] → ${event.tool} ${argStr}`);
+    } else if (event.type === "tool_result") {
+      const resStr = JSON.stringify(event.result).slice(0, 120);
+      console.log(`[agent] ← ${event.tool} ${resStr}`);
+    }
     onEvent?.(event);
   }
 
@@ -216,9 +250,11 @@ export async function runIngestionAgent(
     instructions: SYSTEM_PROMPT,
     model: "gpt-4o",
     tools: [readFileSample, readPdfText, listParsers, readParser, writeParser, runParser, finish],
+    toolUseBehavior: "run_llm_again",
   });
 
-  await run(agent, `Import this file: ${filePath}`);
+  const result = await run(agent, `Import this file: ${filePath}`, { maxTurns: 128 });
+  console.log("[agent] run complete, finalOutput:", result.finalOutput);
 
   if (!lastValidResult) {
     throw new Error("Ingestion agent completed without a validated parse result");
