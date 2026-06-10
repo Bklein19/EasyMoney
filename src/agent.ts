@@ -79,6 +79,8 @@ interface ParseResult {
     institution: string;
     balance_cents: number;
   }>;
+  covered_from: string; // YYYY-MM-DD — earliest date this file covers (set explicitly from file header/title if available, otherwise min transaction date)
+  covered_to: string;   // YYYY-MM-DD — latest date this file covers (set explicitly from file header/title if available, otherwise max transaction date)
 }
 
 ## When run_parser fails

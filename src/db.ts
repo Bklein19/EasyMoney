@@ -15,7 +15,7 @@ export function getDb(): Database {
   return _db;
 }
 
-const MIGRATIONS: Array<(db: Database) => void> = [migration1Base, migration2Accounts];
+const MIGRATIONS: Array<(db: Database) => void> = [migration1Base, migration2Accounts, migration3CoveredRange];
 
 function migrate(db: Database) {
   const version = (db.query<{ user_version: number }, []>("PRAGMA user_version").get())!.user_version;
@@ -74,6 +74,11 @@ function migration1Base(db: Database) {
       UNIQUE(date, account, institution)
     )
   `);
+}
+
+function migration3CoveredRange(db: Database) {
+  db.run("ALTER TABLE import_files ADD COLUMN covered_from TEXT");
+  db.run("ALTER TABLE import_files ADD COLUMN covered_to TEXT");
 }
 
 function migration2Accounts(db: Database) {

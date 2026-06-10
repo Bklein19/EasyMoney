@@ -18,6 +18,10 @@ export interface ParsedBalance {
 export interface ParseResult {
   transactions: ParsedTransaction[];
   balances: ParsedBalance[];
+  // Inclusive date range of data covered by this file. If omitted, inferred from
+  // the min/max dates in transactions + balances by the importer before committing.
+  covered_from?: string; // YYYY-MM-DD
+  covered_to?: string;   // YYYY-MM-DD
 }
 
 export interface Parser {
