@@ -365,8 +365,9 @@ export async function runIngestionAgent(
   for await (const event of stream) {
     if (event instanceof RunItemStreamEvent && event.name === "message_output_created") {
       const item = event.item as { content?: Array<{ type: string; text?: string }> };
-      const text = item.content
-        ?.filter((c) => c.type === "output_text")
+      const content = Array.isArray(item.content) ? item.content : [];
+      const text = content
+        .filter((c) => c.type === "output_text")
         .map((c) => c.text)
         .join("")
         .trim();
