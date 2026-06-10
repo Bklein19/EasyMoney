@@ -33,8 +33,12 @@ The parser file must:
 - export default async function parse(filePath: string): Promise<ParseResult>
 - import { createHash } from "crypto" for deterministic row IDs
 - use Bun.file(filePath).text() to read files, or pdfjs-dist for PDFs
-- only use npm packages: papaparse (CSV) or pdfjs-dist (PDF)
-- for pdfjs-dist, import like this EXACTLY: `import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs"` — the default index uses browser APIs (DOMMatrix etc) that crash in Bun; the legacy build is the server-safe version. Never import PDFDocument, it doesn't exist.
+- only use npm packages: papaparse (CSV) or unpdf (PDF)
+- for PDFs use this pattern exactly:
+  import { getDocumentProxy, extractText } from "unpdf"
+  const pdf = await getDocumentProxy(new Uint8Array(await Bun.file(filePath).arrayBuffer()))
+  const { totalPages, text: pageTexts } = await extractText(pdf)  // text is string[], one entry per page
+  const pageText = pageTexts[0]  // page 1
 
 ParseResult shape:
 \`\`\`ts
@@ -125,17 +129,14 @@ export async function runIngestionAgent(
     execute: async (args) => {
       const { start_page = 1, end_page } = args;
       emit({ type: "tool_call", tool: "read_pdf_text", args });
-      const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+      const { getDocumentProxy, extractText } = await import("unpdf");
       const data = await readFile(filePath);
-      const pdf = await getDocument({ data }).promise;
-      const totalPages = pdf.numPages;
+      const pdf = await getDocumentProxy(new Uint8Array(data));
+      const { totalPages, text: pageTexts } = await extractText(pdf);
       const last = Math.min(end_page ?? Math.min(start_page + 4, totalPages), totalPages);
       const pages: string[] = [];
       for (let i = start_page; i <= last; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        const text = content.items.map((item) => ("str" in item ? item.str : "")).join(" ");
-        pages.push(`--- Page ${i} ---\n${text}`);
+        pages.push(`--- Page ${i} ---\n${(pageTexts as string[])[i - 1] ?? ""}`);
       }
       const result = { total_pages: totalPages, pages };
       emit({ type: "tool_result", tool: "read_pdf_text", result });

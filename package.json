@@ -15,8 +15,8 @@
   "dependencies": {
     "@openai/agents": "^0.11.6",
     "openai": "^6.42.0",
-    "pdfjs-dist": "^6.0.227",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "unpdf": "^1.6.2"
   }
 }
