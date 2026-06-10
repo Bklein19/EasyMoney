@@ -2,6 +2,7 @@ import { Agent, tool, run, RunItemStreamEvent } from "@openai/agents";
 import { readFile } from "fs/promises";
 import { validate } from "./validate";
 import { listParserIds, getParser, upsertParser, executeParser } from "./parserStore";
+import { listAccountsWithAliases, lookupAlias, createAccount, createAlias } from "./accounts";
 import type { ParseResult } from "./types";
 import { z } from "zod";
 
@@ -14,17 +15,36 @@ Every turn you must call exactly one tool. Keep calling tools until finish() suc
 1. Call read_pdf_text (for .pdf) or read_file_sample (for everything else) to read the file
 2. Call list_parsers to see what already exists
 3. If a matching parser exists, call run_parser with it
-   - If run_parser returns ok:true → call finish()
+   - If run_parser returns ok:true → proceed to account mapping (step 4)
    - If run_parser returns ok:false → call write_parser with a fixed version, then run_parser again
 4. If no matching parser exists, call write_parser with a new parser, then IMMEDIATELY call run_parser
-   - If run_parser returns ok:true → call finish()
+   - If run_parser returns ok:true → proceed to account mapping
    - If run_parser returns ok:false → call write_parser with a fixed version, then run_parser again
-5. Repeat write_parser → run_parser until ok:true, then call finish()
+5. Repeat write_parser → run_parser until ok:true
+6. Call list_accounts to see existing canonical accounts
+7. For each (institution, account) pair in the parse result, check if it already has an alias mapped.
+   - finish() will tell you which pairs are unmapped — call finish() to see the list, then map them
+   - If an existing account clearly matches (same institution + recognizable name/number), call map_account to add the alias
+   - If no existing account matches, call create_account with appropriate type, classification, and tax_treatment, then call map_account
+8. Once all accounts are mapped, call finish() — it will succeed when everything is mapped
 
 ## CRITICAL RULES
 - You MUST call run_parser after every write_parser — never call finish() without a successful run_parser first
 - You MUST call finish() to complete the job — never stop without calling finish()
 - Never call finish() unless the most recent run_parser returned ok:true
+
+## Account classification guide
+
+type: checking | savings | brokerage | retirement | credit-card | loan | unknown
+classification: asset (money you own) | liability (money you owe)
+tax_treatment: taxable | traditional (pre-tax 401k/IRA) | roth | hsa | none (checking/savings/loans)
+
+Examples:
+- Vanguard brokerage account → type:brokerage, classification:asset, tax_treatment:taxable
+- Vanguard 401(k) → type:retirement, classification:asset, tax_treatment:traditional
+- Roth IRA → type:retirement, classification:asset, tax_treatment:roth
+- Chase checking → type:checking, classification:asset, tax_treatment:none
+- Credit card → type:credit-card, classification:liability, tax_treatment:none
 
 ## Parser requirements
 
@@ -43,7 +63,6 @@ The parser file must:
   const pageText = pageTexts[0]  // page 1
 
 ParseResult shape:
-\`\`\`ts
 interface ParseResult {
   transactions: Array<{
     id: string;           // createHash('sha256').update(JSON.stringify(rawRow)).digest('hex')
@@ -61,7 +80,6 @@ interface ParseResult {
     balance_cents: number;
   }>;
 }
-\`\`\`
 
 ## When run_parser fails
 
@@ -226,9 +244,57 @@ export async function runIngestionAgent(
     },
   });
 
+  const listAccounts = tool({
+    name: "list_accounts",
+    description: "List all canonical accounts with their existing alias strings.",
+    parameters: z.object({}),
+    execute: async (args) => {
+      emit({ type: "tool_call", tool: "list_accounts", args });
+      const result = listAccountsWithAliases();
+      emit({ type: "tool_result", tool: "list_accounts", result });
+      return result;
+    },
+  });
+
+  const createAccountTool = tool({
+    name: "create_account",
+    description: "Create a new canonical account. Returns the new account id.",
+    parameters: z.object({
+      name: z.string().describe("Human-readable account name, e.g. 'Brokerage - 34702059'"),
+      institution: z.string().describe("Institution name, e.g. 'Vanguard'"),
+      type: z.enum(["checking", "savings", "brokerage", "retirement", "credit-card", "loan", "unknown"]),
+      classification: z.enum(["asset", "liability"]),
+      tax_treatment: z.enum(["taxable", "traditional", "roth", "hsa", "none"]),
+    }),
+    execute: async (args) => {
+      emit({ type: "tool_call", tool: "create_account", args });
+      const id = createAccount(args);
+      const result = { ok: true, account_id: id };
+      emit({ type: "tool_result", tool: "create_account", result });
+      return result;
+    },
+  });
+
+  const mapAccount = tool({
+    name: "map_account",
+    description: "Map a parser-emitted (institution, account string) pair to a canonical account id.",
+    parameters: z.object({
+      institution: z.string().describe("Institution as emitted by the parser"),
+      alias: z.string().describe("Account string as emitted by the parser"),
+      account_id: z.number().describe("Canonical account id to map to"),
+    }),
+    execute: async (args) => {
+      emit({ type: "tool_call", tool: "map_account", args });
+      createAlias(args.institution, args.alias, args.account_id);
+      const result = { ok: true };
+      emit({ type: "tool_result", tool: "map_account", result });
+      return result;
+    },
+  });
+
   const finish = tool({
     name: "finish",
-    description: "Signal that the parser is working correctly and the import should proceed. Only call after run_parser returns ok: true.",
+    description: "Signal that parsing and account mapping are complete. Returns ok:true when all accounts are mapped, or lists unmapped pairs so you can map them.",
     parameters: z.object({
       parser_id: z.string().describe("The validated parser id"),
     }),
@@ -236,8 +302,37 @@ export async function runIngestionAgent(
       const { parser_id } = args;
       emit({ type: "tool_call", tool: "finish", args });
       if (!lastValidResult) {
-        throw new Error("You must call run_parser successfully before calling finish(). Call write_parser then run_parser first.");
+        const result = { ok: false, error: "You must call run_parser successfully before calling finish(). Call write_parser then run_parser first." };
+        emit({ type: "tool_result", tool: "finish", result });
+        return result;
       }
+
+      // Collect all (institution, account) pairs from the parse result
+      const pairs = new Map<string, { institution: string; account: string }>();
+      for (const t of lastValidResult.parseResult.transactions) {
+        pairs.set(`${t.institution}\0${t.account}`, { institution: t.institution, account: t.account });
+      }
+      for (const b of lastValidResult.parseResult.balances) {
+        pairs.set(`${b.institution}\0${b.account}`, { institution: b.institution, account: b.account });
+      }
+
+      const unmapped: Array<{ institution: string; account: string }> = [];
+      for (const { institution, account } of pairs.values()) {
+        if (lookupAlias(institution, account) === null) {
+          unmapped.push({ institution, account });
+        }
+      }
+
+      if (unmapped.length > 0) {
+        const result = {
+          ok: false,
+          error: `${unmapped.length} account(s) not yet mapped. Call list_accounts, then map_account (or create_account + map_account) for each.`,
+          unmapped,
+        };
+        emit({ type: "tool_result", tool: "finish", result });
+        return result;
+      }
+
       lastValidResult = { ...lastValidResult, parserId: parser_id };
       const result = { ok: true, parser_id };
       emit({ type: "tool_result", tool: "finish", result });
@@ -249,8 +344,18 @@ export async function runIngestionAgent(
     name: "IngestionAgent",
     instructions: SYSTEM_PROMPT,
     model: "gpt-5.4",
-    tools: [readFileSample, readPdfText, listParsers, readParser, writeParser, runParser, finish],
-    toolUseBehavior: { stopAtToolNames: ["finish"] },
+    tools: [readFileSample, readPdfText, listParsers, readParser, writeParser, runParser, listAccounts, createAccountTool, mapAccount, finish],
+    toolUseBehavior: (_ctx, toolResults) => {
+      for (const r of toolResults) {
+        if (r.type === "function_output" && r.tool.name === "finish") {
+          try {
+            const output = JSON.parse(r.output as string) as { ok: boolean };
+            if (output.ok) return { isFinalOutput: true, isInterrupted: undefined, finalOutput: r.output as string };
+          } catch {}
+        }
+      }
+      return { isFinalOutput: false, isInterrupted: undefined };
+    },
   });
 
   const stream = await run(agent, `Import this file: ${filePath}`, { maxTurns: 128, stream: true });
