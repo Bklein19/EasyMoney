@@ -15,7 +15,7 @@ export function getDb(): Database {
   return _db;
 }
 
-const MIGRATIONS: Array<(db: Database) => void> = [migration1Base, migration2Accounts, migration3CoveredRange];
+const MIGRATIONS: Array<(db: Database) => void> = [migration1Base, migration2Accounts, migration3CoveredRange, migration4TxDedup];
 
 function migrate(db: Database) {
   const version = (db.query<{ user_version: number }, []>("PRAGMA user_version").get())!.user_version;
@@ -73,6 +73,16 @@ function migration1Base(db: Database) {
       balance_cents INTEGER NOT NULL,
       UNIQUE(date, account, institution)
     )
+  `);
+}
+
+function migration4TxDedup(db: Database) {
+  // Add a logical uniqueness constraint so INSERT OR IGNORE catches duplicates
+  // even when the raw field differs between parser versions.
+  db.run(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_transactions_logical
+    ON transactions (date, amount_cents, description, account_id)
+    WHERE account_id IS NOT NULL
   `);
 }
 
