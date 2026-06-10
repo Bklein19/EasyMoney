@@ -15,7 +15,19 @@ export function getDb(): Database {
   return _db;
 }
 
+const MIGRATIONS: Array<(db: Database) => void> = [migration1Base, migration2Accounts];
+
 function migrate(db: Database) {
+  const version = (db.query<{ user_version: number }, []>("PRAGMA user_version").get())!.user_version;
+  for (let i = version; i < MIGRATIONS.length; i++) {
+    db.transaction(() => {
+      MIGRATIONS[i]!(db);
+      db.run(`PRAGMA user_version = ${i + 1}`);
+    })();
+  }
+}
+
+function migration1Base(db: Database) {
   db.run(`
     CREATE TABLE IF NOT EXISTS import_files (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -62,4 +74,67 @@ function migrate(db: Database) {
       UNIQUE(date, account, institution)
     )
   `);
+}
+
+function migration2Accounts(db: Database) {
+  db.run(`
+    CREATE TABLE accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      institution TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'unknown'
+        CHECK (type IN ('checking', 'savings', 'brokerage', 'retirement', 'credit-card', 'loan', 'unknown')),
+      classification TEXT NOT NULL DEFAULT 'asset'
+        CHECK (classification IN ('asset', 'liability')),
+      tax_treatment TEXT NOT NULL DEFAULT 'taxable'
+        CHECK (tax_treatment IN ('taxable', 'traditional', 'roth', 'hsa', 'none')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(name, institution)
+    )
+  `);
+
+  db.run(`
+    CREATE TABLE account_aliases (
+      alias TEXT NOT NULL,
+      institution TEXT NOT NULL,
+      account_id INTEGER NOT NULL REFERENCES accounts(id),
+      PRIMARY KEY (alias, institution)
+    )
+  `);
+
+  db.run("ALTER TABLE transactions ADD COLUMN account_id INTEGER REFERENCES accounts(id)");
+  db.run("ALTER TABLE account_balances ADD COLUMN account_id INTEGER REFERENCES accounts(id)");
+
+  // Backfill: create an account + alias for each distinct (institution, account) string pair
+  const pairs = db
+    .query<{ account: string; institution: string }, []>(
+      `SELECT DISTINCT account, institution FROM transactions
+       UNION
+       SELECT DISTINCT account, institution FROM account_balances`
+    )
+    .all();
+
+  for (const { account, institution } of pairs) {
+    db.run(
+      "INSERT OR IGNORE INTO accounts (name, institution) VALUES (?, ?)",
+      [account, institution]
+    );
+    const accountId = (db
+      .query<{ id: number }, [string, string]>(
+        "SELECT id FROM accounts WHERE name = ? AND institution = ?"
+      )
+      .get(account, institution))!.id;
+    db.run(
+      "INSERT OR IGNORE INTO account_aliases (alias, institution, account_id) VALUES (?, ?, ?)",
+      [account, institution, accountId]
+    );
+    db.run(
+      "UPDATE transactions SET account_id = ? WHERE account = ? AND institution = ?",
+      [accountId, account, institution]
+    );
+    db.run(
+      "UPDATE account_balances SET account_id = ? WHERE account = ? AND institution = ?",
+      [accountId, account, institution]
+    );
+  }
 }
