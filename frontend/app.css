@@ -1,0 +1,114 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #0f0f0f;
+  color: #e8e8e8;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 48px 24px;
+}
+
+h1 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #fff;
+  margin-bottom: 40px;
+}
+
+.drop-zone {
+  width: 100%;
+  max-width: 480px;
+  border: 1.5px dashed #333;
+  border-radius: 12px;
+  padding: 48px 32px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.drop-zone:hover,
+.drop-zone.over {
+  border-color: #555;
+  background: #161616;
+}
+
+.drop-zone input { display: none; }
+
+.drop-icon {
+  font-size: 2rem;
+  margin-bottom: 12px;
+}
+
+.drop-label {
+  font-size: 0.95rem;
+  color: #888;
+}
+
+.drop-label span {
+  color: #ccc;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.drop-hint {
+  font-size: 0.8rem;
+  color: #555;
+  margin-top: 8px;
+}
+
+.status {
+  margin-top: 32px;
+  width: 100%;
+  max-width: 480px;
+}
+
+.status-item {
+  background: #161616;
+  border: 1px solid #222;
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.status-item .filename {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #ddd;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-item .meta {
+  font-size: 0.78rem;
+  color: #666;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.badge.pending  { background: #1e1e00; color: #aaa800; }
+.badge.running  { background: #001a2e; color: #3b9eff; }
+.badge.done     { background: #001a0e; color: #2dca6e; }
+.badge.error    { background: #1e0000; color: #e05252; }
+
+.stats {
+  font-size: 0.8rem;
+  color: #555;
+}
+
+.stats strong { color: #888; }
