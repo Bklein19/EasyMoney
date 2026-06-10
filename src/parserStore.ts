@@ -36,7 +36,10 @@ export function insertParser(parser: StoredParser): void {
     .get(parser.id);
   if (existing) {
     throw new Error(
-      `Parser "${parser.id}" already exists. Use a different id (e.g. "${parser.id}-v2" or "${parser.id}-${new Date().toISOString().slice(0, 10)}").`
+      `Parser "${parser.id}" already exists. Read it with read_parser first. ` +
+      `If it handles exactly the same kind of document, use it as-is instead of writing a new one. ` +
+      `If it handles a different document type, choose a name that reflects the difference (e.g. vanguard-statement-pdf vs vanguard-activity-pdf). ` +
+      `If the institution updated their document format and you need a new version, use a date-suffixed id (e.g. "${parser.id}-${new Date().toISOString().slice(0, 10)}").`
     );
   }
   db.run(
