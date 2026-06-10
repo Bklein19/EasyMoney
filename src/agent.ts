@@ -18,12 +18,15 @@ Every turn you must call exactly one tool. Keep calling tools until finish() suc
 3. If a matching parser exists, call run_parser with it
    - If run_parser returns ok:true → call finish()
    - If run_parser returns ok:false → call write_parser with a fixed version, then run_parser again
-4. If no matching parser exists, call write_parser with a new parser, then call run_parser
+4. If no matching parser exists, call write_parser with a new parser, then IMMEDIATELY call run_parser
    - If run_parser returns ok:true → call finish()
    - If run_parser returns ok:false → call write_parser with a fixed version, then run_parser again
 5. Repeat write_parser → run_parser until ok:true, then call finish()
 
-## You MUST call finish() to complete the job. Never stop without calling finish().
+## CRITICAL RULES
+- You MUST call run_parser after every write_parser — never call finish() without a successful run_parser first
+- You MUST call finish() to complete the job — never stop without calling finish()
+- Never call finish() unless the most recent run_parser returned ok:true
 
 ## Parser requirements
 

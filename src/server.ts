@@ -6,16 +6,6 @@ import index from "../index.html";
 
 const UPLOAD_TMP = join(import.meta.dir, "../imports/tmp");
 
-function sse(stream: ReadableStream) {
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
-    },
-  });
-}
-
 function sseMessage(event: string, data: unknown) {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
@@ -23,6 +13,7 @@ function sseMessage(event: string, data: unknown) {
 export function startServer(port = Number(process.env["PORT"] ?? 3000)) {
   return Bun.serve({
     port,
+    idleTimeout: 0, // disable timeout — imports can take minutes
     routes: {
       "/": index,
       "/api/import": {
@@ -38,25 +29,41 @@ export function startServer(port = Number(process.env["PORT"] ?? 3000)) {
           await writeFile(tmpPath, Buffer.from(await file.arrayBuffer()));
 
           let controller: ReadableStreamDefaultController<string>;
+          let closed = false;
+
           const stream = new ReadableStream<string>({
             start(c) { controller = c; },
           });
 
+          const safeEnqueue = (msg: string) => {
+            if (!closed) controller!.enqueue(msg);
+          };
+
+          const safeClose = () => {
+            if (!closed) { closed = true; controller!.close(); }
+          };
+
           const onEvent = (event: AgentEvent) => {
-            controller!.enqueue(sseMessage("agent_event", event));
+            safeEnqueue(sseMessage("agent_event", event));
           };
 
           importFile(tmpPath, onEvent)
             .then((report) => {
-              controller!.enqueue(sseMessage("done", report));
-              controller!.close();
+              safeEnqueue(sseMessage("done", report));
+              safeClose();
             })
             .catch((err) => {
-              controller!.enqueue(sseMessage("error", { error: String(err) }));
-              controller!.close();
+              safeEnqueue(sseMessage("error", { error: String(err) }));
+              safeClose();
             });
 
-          return sse(stream);
+          return new Response(stream, {
+            headers: {
+              "Content-Type": "text/event-stream",
+              "Cache-Control": "no-cache",
+              Connection: "keep-alive",
+            },
+          });
         },
       },
     },
