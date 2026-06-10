@@ -90,8 +90,57 @@ export function getNetWorthReport(): NetWorthReport {
   const rows: MonthlyRow[] = [];
 
   for (const account of accounts) {
+    // --- Pass 1: identify snapshot gaps and compute total gains per gap ---
+    // gainsByMonth[month] = gains_cents to attribute to that month (spread evenly across gap)
+    const gainsByMonth = new Map<string, number>();
+
     let prevBalance: number | null = null;
     let prevBalanceMonth: string | null = null;
+    for (const month of sortedMonths) {
+      const endBalance = balanceMap.get(flowKey(month, account.id)) ?? null;
+      if (endBalance !== null && prevBalance !== null && prevBalanceMonth !== null) {
+        // Sum all flows between the two snapshots (exclusive of prevBalanceMonth, inclusive of month)
+        let totalFlows = 0;
+        const gapMonths: string[] = [];
+        for (const m of sortedMonths) {
+          if (m <= prevBalanceMonth || m > month) continue;
+          gapMonths.push(m);
+          const mf = flows.get(flowKey(m, account.id));
+          if (mf) totalFlows += mf.contributions + mf.dividends + mf.interest;
+        }
+        const totalGains = endBalance - prevBalance - totalFlows;
+        // Spread gains exponentially across the gap: assume a constant monthly growth rate r
+        // such that prevBalance * (1+r)^n = endBalance (ignoring flows for the rate estimate).
+        // Each month's gain slice is proportional to the account value at the start of that month.
+        const n = gapMonths.length;
+        if (n > 0) {
+          // Monthly growth rate from balance ratio (flows affect absolute values but not the rate shape)
+          const r = Math.pow(endBalance / Math.max(prevBalance, 1), 1 / n) - 1;
+          // Simulated balance at start of each month (just for weighting, ignoring intra-gap flows)
+          const weights: number[] = [];
+          let sim = prevBalance;
+          for (let i = 0; i < n; i++) {
+            weights.push(sim * r); // gain attributed to this month ∝ balance * rate
+            sim *= (1 + r);
+          }
+          const weightSum = weights.reduce((a, b) => a + b, 0);
+          let distributed = 0;
+          for (let i = 0; i < n; i++) {
+            const slice = i < n - 1
+              ? Math.round(totalGains * (weightSum === 0 ? 1 / n : weights[i]! / weightSum))
+              : totalGains - distributed;
+            gainsByMonth.set(gapMonths[i]!, (gainsByMonth.get(gapMonths[i]!) ?? 0) + slice);
+            if (i < n - 1) distributed += slice;
+          }
+        }
+      }
+      if (endBalance !== null) {
+        prevBalance = endBalance;
+        prevBalanceMonth = month;
+      }
+    }
+
+    // --- Pass 2: emit rows ---
     for (const month of sortedMonths) {
       const f = flows.get(flowKey(month, account.id)) ?? {
         contributions: 0,
@@ -99,31 +148,12 @@ export function getNetWorthReport(): NetWorthReport {
         interest: 0,
       };
       const endBalance = balanceMap.get(flowKey(month, account.id)) ?? null;
-
-      // Market gains are the residual: change in value minus everything we can attribute.
-      // When balance snapshots aren't consecutive months, sum all flows in the gap so
-      // contributions between snapshots don't get misattributed as gains.
-      let gains: number | null = null;
-      if (endBalance !== null && prevBalance !== null && prevBalanceMonth !== null) {
-        let totalContributions = 0, totalDividends = 0, totalInterest = 0;
-        for (const m of sortedMonths) {
-          if (m <= prevBalanceMonth || m > month) continue;
-          const mf = flows.get(flowKey(m, account.id));
-          if (mf) {
-            totalContributions += mf.contributions;
-            totalDividends += mf.dividends;
-            totalInterest += mf.interest;
-          }
-        }
-        gains = endBalance - prevBalance - totalContributions - totalDividends - totalInterest;
-      }
-      if (endBalance !== null) {
-        prevBalance = endBalance;
-        prevBalanceMonth = month;
-      }
+      // gains_cents is null for months outside any snapshot gap (no balance data at all)
+      const gains = gainsByMonth.has(month) ? gainsByMonth.get(month)! : null;
 
       const hasActivity =
-        f.contributions !== 0 || f.dividends !== 0 || f.interest !== 0 || endBalance !== null;
+        f.contributions !== 0 || f.dividends !== 0 || f.interest !== 0 ||
+        endBalance !== null || gains !== null;
       if (!hasActivity) continue;
 
       rows.push({
