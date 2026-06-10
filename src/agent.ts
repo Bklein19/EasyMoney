@@ -1,11 +1,9 @@
 import { Agent, tool, run, RunItemStreamEvent } from "@openai/agents";
-import { readFile, writeFile, readdir } from "fs/promises";
-import { join } from "path";
+import { readFile } from "fs/promises";
 import { validate } from "./validate";
+import { listParserIds, getParser, upsertParser, executeParser } from "./parserStore";
 import type { ParseResult } from "./types";
 import { z } from "zod";
-
-const PARSERS_DIR = join(import.meta.dir, "../parsers");
 
 const SYSTEM_PROMPT = `You are a financial data parser agent. You communicate ONLY through tool calls — never respond with plain text.
 
@@ -31,6 +29,7 @@ Every turn you must call exactly one tool. Keep calling tools until finish() suc
 ## Parser requirements
 
 parser_id format: <institution>-<file-type>  (e.g. chase-checking-csv, fidelity-activity-pdf)
+write_parser also requires institution (e.g. "Chase") and file_type (e.g. "checking-csv") as separate fields.
 
 The parser file must:
 - export default async function parse(filePath: string): Promise<ParseResult>
@@ -153,10 +152,7 @@ export async function runIngestionAgent(
     parameters: z.object({}),
     execute: async (args) => {
       emit({ type: "tool_call", tool: "list_parsers", args });
-      const files = await readdir(PARSERS_DIR);
-      const result = files
-        .filter((f) => f.endsWith(".ts") && f !== ".gitkeep")
-        .map((f) => f.replace(/\.ts$/, ""));
+      const result = listParserIds();
       emit({ type: "tool_result", tool: "list_parsers", result });
       return result;
     },
@@ -166,27 +162,30 @@ export async function runIngestionAgent(
     name: "read_parser",
     description: "Read the source code of an existing parser.",
     parameters: z.object({
-      parser_id: z.string().describe("Parser id (filename without .ts)"),
+      parser_id: z.string().describe("Parser id"),
     }),
     execute: async (args) => {
       emit({ type: "tool_call", tool: "read_parser", args });
-      const result = await readFile(join(PARSERS_DIR, `${args.parser_id}.ts`), "utf8");
-      emit({ type: "tool_result", tool: "read_parser", result });
-      return result;
+      const parser = getParser(args.parser_id);
+      if (!parser) throw new Error(`Parser not found: ${args.parser_id}`);
+      emit({ type: "tool_result", tool: "read_parser", result: parser.code });
+      return parser.code;
     },
   });
 
   const writeParser = tool({
     name: "write_parser",
-    description: "Write or overwrite a parser file.",
+    description: "Write or overwrite a parser in the database.",
     parameters: z.object({
-      parser_id: z.string().describe("Parser id (filename without .ts)"),
+      parser_id: z.string().describe("Parser id in the form <institution>-<file-type>"),
+      institution: z.string().describe("Institution name, e.g. Vanguard, Chase"),
+      file_type: z.string().describe("File type, e.g. activity-pdf, checking-csv"),
       code: z.string().describe("Complete TypeScript source for the parser"),
     }),
     execute: async (args) => {
-      const { parser_id, code } = args;
-      emit({ type: "tool_call", tool: "write_parser", args: { parser_id } }); // omit code from display
-      await writeFile(join(PARSERS_DIR, `${parser_id}.ts`), code, "utf8");
+      const { parser_id, institution, file_type, code } = args;
+      emit({ type: "tool_call", tool: "write_parser", args: { parser_id, institution, file_type } }); // omit code from display
+      upsertParser({ id: parser_id, institution, file_type, code });
       const result = { ok: true, parser_id };
       emit({ type: "tool_result", tool: "write_parser", result });
       return result;
@@ -202,11 +201,9 @@ export async function runIngestionAgent(
     execute: async (args) => {
       const { parser_id } = args;
       emit({ type: "tool_call", tool: "run_parser", args });
-      const parserPath = join(PARSERS_DIR, `${parser_id}.ts`);
       let parseResult: ParseResult;
       try {
-        const mod = await import(`${parserPath}?t=${Date.now()}`);
-        parseResult = await (mod.default ?? mod.parse)(filePath);
+        parseResult = await executeParser(parser_id, filePath);
       } catch (err) {
         const result = { ok: false, error: String(err), transaction_count: 0, balance_count: 0, errors: [] };
         emit({ type: "tool_result", tool: "run_parser", result });
