@@ -29,16 +29,18 @@ export function getParser(id: string): StoredParser | null {
     .get(id);
 }
 
-export function upsertParser(parser: StoredParser): void {
+export function insertParser(parser: StoredParser): void {
   const db = getDb();
+  const existing = db
+    .query<{ id: string }, [string]>("SELECT id FROM parsers WHERE id = ?")
+    .get(parser.id);
+  if (existing) {
+    throw new Error(
+      `Parser "${parser.id}" already exists. Use a different id (e.g. "${parser.id}-v2" or "${parser.id}-${new Date().toISOString().slice(0, 10)}").`
+    );
+  }
   db.run(
-    `INSERT INTO parsers (id, institution, file_type, code)
-     VALUES (?, ?, ?, ?)
-     ON CONFLICT(id) DO UPDATE SET
-       institution = excluded.institution,
-       file_type = excluded.file_type,
-       code = excluded.code,
-       updated_at = datetime('now')`,
+    "INSERT INTO parsers (id, institution, file_type, code) VALUES (?, ?, ?, ?)",
     [parser.id, parser.institution, parser.file_type, parser.code]
   );
 }

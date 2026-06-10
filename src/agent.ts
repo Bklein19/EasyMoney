@@ -1,7 +1,7 @@
 import { Agent, tool, run, RunItemStreamEvent } from "@openai/agents";
 import { readFile } from "fs/promises";
 import { validate } from "./validate";
-import { listParserIds, getParser, upsertParser, executeParser } from "./parserStore";
+import { listParserIds, getParser, insertParser, executeParser } from "./parserStore";
 import { listAccountsWithAliases, lookupAlias, createAccount, createAlias } from "./accounts";
 import type { ParseResult } from "./types";
 import { z } from "zod";
@@ -50,6 +50,7 @@ Examples:
 
 parser_id format: <institution>-<file-type>  (e.g. chase-checking-csv, fidelity-activity-pdf)
 write_parser also requires institution (e.g. "Chase") and file_type (e.g. "checking-csv") as separate fields.
+write_parser will error if the id already exists — parsers are immutable once written. If you need to fix a broken parser, use a new id (e.g. append -v2 or the date: vanguard-activity-pdf-20260610). Never reuse an existing id.
 
 The parser file must:
 - export default async function parse(filePath: string): Promise<ParseResult>
@@ -204,8 +205,14 @@ export async function runIngestionAgent(
     }),
     execute: async (args) => {
       const { parser_id, institution, file_type, code } = args;
-      emit({ type: "tool_call", tool: "write_parser", args: { parser_id, institution, file_type } }); // omit code from display
-      upsertParser({ id: parser_id, institution, file_type, code });
+      emit({ type: "tool_call", tool: "write_parser", args: { parser_id, institution, file_type } });
+      try {
+        insertParser({ id: parser_id, institution, file_type, code });
+      } catch (err) {
+        const result = { ok: false, error: String(err) };
+        emit({ type: "tool_result", tool: "write_parser", result });
+        return result;
+      }
       const result = { ok: true, parser_id };
       emit({ type: "tool_result", tool: "write_parser", result });
       return result;
