@@ -1,4 +1,5 @@
 import { importFile } from "./importer";
+import { getNetWorthReport } from "./networth";
 import type { AgentEvent } from "./agent";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
@@ -16,6 +17,9 @@ export function startServer(port = Number(process.env["PORT"] ?? 3000)) {
     idleTimeout: 0, // disable timeout — imports can take minutes
     routes: {
       "/": index,
+      "/api/networth": {
+        GET: () => Response.json(getNetWorthReport()),
+      },
       "/api/import": {
         POST: async (req) => {
           const form = await req.formData();
