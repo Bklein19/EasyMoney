@@ -2,13 +2,10 @@ import { createHash } from "crypto";
 import { copyFile, readFile, mkdir } from "fs/promises";
 import { join, basename } from "path";
 import { getDb } from "./db";
-import { validate } from "./validate";
-import { identifyAndGetParser, retryWithErrors } from "./agent";
+import { runIngestionAgent } from "./agent";
 import type { ParseResult } from "./types";
 
 const RAW_DIR = join(import.meta.dir, "../imports/raw");
-const PARSERS_DIR = join(import.meta.dir, "../parsers");
-const MAX_RETRIES = 3;
 
 export interface ImportReport {
   fileId: number;
@@ -29,7 +26,6 @@ export async function importFile(sourcePath: string): Promise<ImportReport> {
 
   const db = getDb();
 
-  // Idempotency: if already imported successfully, return early
   const existing = db
     .query<{ id: number; parser_id: string | null; status: string }, [string]>(
       "SELECT id, parser_id, status FROM import_files WHERE sha256 = ?"
@@ -42,60 +38,28 @@ export async function importFile(sourcePath: string): Promise<ImportReport> {
 
   const fileId = existing?.id ?? insertImportFile(sha256, filename);
 
-  let parserId = existing?.parser_id ?? undefined;
-  let result: ParseResult | null = null;
-  let lastErrors = "";
+  let parserId: string;
+  let parseResult: ParseResult;
 
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    try {
-      if (attempt === 0) {
-        parserId = await identifyAndGetParser(destPath, parserId);
-      } else {
-        parserId = await retryWithErrors(destPath, parserId!, lastErrors, attempt);
-      }
-
-      db.run("UPDATE import_files SET parser_id = ? WHERE id = ?", [parserId, fileId]);
-
-      result = await runParser(destPath, parserId);
-      const validation = validate(result);
-
-      if (validation.ok) break;
-
-      lastErrors = validation.errors
-        .map((e) => (e.row != null ? `Row ${e.row} [${e.field}]: ${e.message}` : `[${e.field}]: ${e.message}`))
-        .join("\n");
-
-      console.error(`Validation failed (attempt ${attempt + 1}):\n${lastErrors}`);
-      result = null;
-    } catch (err) {
-      lastErrors = String(err);
-      console.error(`Parse attempt ${attempt + 1} threw:`, err);
-      result = null;
-    }
-  }
-
-  if (!result) {
+  try {
+    ({ parserId, parseResult } = await runIngestionAgent(destPath));
+  } catch (err) {
     db.run("UPDATE import_files SET status = 'failed' WHERE id = ?", [fileId]);
-    throw new Error(`Import failed after ${MAX_RETRIES} attempts.\nLast errors:\n${lastErrors}`);
+    throw err;
   }
 
-  const { transactionsInserted, balancesInserted } = commitToDb(fileId, result);
+  db.run("UPDATE import_files SET parser_id = ? WHERE id = ?", [parserId, fileId]);
+
+  const { transactionsInserted, balancesInserted } = commitToDb(fileId, parseResult);
   db.run("UPDATE import_files SET status = 'ok' WHERE id = ?", [fileId]);
 
-  return { fileId, parserId: parserId!, transactionsInserted, balancesInserted };
+  return { fileId, parserId, transactionsInserted, balancesInserted };
 }
 
 function insertImportFile(sha256: string, filename: string): number {
   const db = getDb();
   db.run("INSERT INTO import_files (sha256, filename) VALUES (?, ?)", [sha256, filename]);
-  return (db.query<{ id: number }, []>("SELECT last_insert_rowid() as id").get()?.id)!;
-}
-
-async function runParser(filePath: string, parserId: string): Promise<ParseResult> {
-  const parserPath = join(PARSERS_DIR, `${parserId}.ts`);
-  // Dynamic import with cache-busting so updated parsers are picked up
-  const mod = await import(`${parserPath}?t=${Date.now()}`);
-  return mod.default(filePath) as Promise<ParseResult>;
+  return db.query<{ id: number }, []>("SELECT last_insert_rowid() as id").get()!.id;
 }
 
 function commitToDb(
