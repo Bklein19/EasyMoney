@@ -41,6 +41,7 @@ interface ChartPoint {
   interest: number;
   gains: number;
   cumulative: number;
+  hasBalance: boolean; // true when cumulative is anchored to a real balance snapshot
 }
 
 const fmtUsd = (v: number) =>
@@ -71,8 +72,10 @@ export function NetWorthPage() {
     const byMonth = new Map<string, ChartPoint>();
     const months = [...new Set(report.rows.map((r) => r.month))].sort();
     for (const month of months) {
-      byMonth.set(month, { month, contributions: 0, dividends: 0, interest: 0, gains: 0, cumulative: 0 });
+      byMonth.set(month, { month, contributions: 0, dividends: 0, interest: 0, gains: 0, cumulative: 0, hasBalance: false });
     }
+    // Track the total balance snapshot per month across selected accounts
+    const balanceByMonth = new Map<string, number>();
     for (const row of report.rows) {
       if (!selectedIds.has(row.account_id)) continue;
       const point = byMonth.get(row.month)!;
@@ -80,11 +83,21 @@ export function NetWorthPage() {
       point.dividends += row.dividends_cents / 100;
       point.interest += row.interest_cents / 100;
       point.gains += (row.gains_cents ?? 0) / 100;
+      if (row.end_balance_cents !== null) {
+        balanceByMonth.set(row.month, (balanceByMonth.get(row.month) ?? 0) + row.end_balance_cents / 100);
+      }
     }
     let running = 0;
     const points = [...byMonth.values()];
     for (const p of points) {
-      running += p.contributions + p.dividends + p.interest + p.gains;
+      const snapped = balanceByMonth.get(p.month);
+      if (snapped !== undefined) {
+        // Anchor to the real balance — ground truth beats running sum
+        running = snapped;
+        p.hasBalance = true;
+      } else {
+        running += p.contributions + p.dividends + p.interest + p.gains;
+      }
       p.cumulative = running;
     }
     return points;
