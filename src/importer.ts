@@ -3,6 +3,7 @@ import { copyFile, readFile, mkdir } from "fs/promises";
 import { join, basename } from "path";
 import { getDb } from "./db";
 import { runIngestionAgent } from "./agent";
+import type { AgentEvent } from "./agent";
 import type { ParseResult } from "./types";
 
 const RAW_DIR = join(import.meta.dir, "../imports/raw");
@@ -14,7 +15,10 @@ export interface ImportReport {
   balancesInserted: number;
 }
 
-export async function importFile(sourcePath: string): Promise<ImportReport> {
+export async function importFile(
+  sourcePath: string,
+  onEvent?: (event: AgentEvent) => void
+): Promise<ImportReport> {
   await mkdir(RAW_DIR, { recursive: true });
 
   const contents = await readFile(sourcePath);
@@ -42,7 +46,7 @@ export async function importFile(sourcePath: string): Promise<ImportReport> {
   let parseResult: ParseResult;
 
   try {
-    ({ parserId, parseResult } = await runIngestionAgent(destPath));
+    ({ parserId, parseResult } = await runIngestionAgent(destPath, onEvent));
   } catch (err) {
     db.run("UPDATE import_files SET status = 'failed' WHERE id = ?", [fileId]);
     throw err;
