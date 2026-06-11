@@ -98,6 +98,15 @@ export function getNetWorthReport(): NetWorthReport {
   const sortedMonths = [...months].sort();
   const rows: MonthlyRow[] = [];
 
+  interface AccountAttribution {
+    gainsByMonth: Map<string, number>;
+    contribAdjust: Map<string, number>;
+    gainsAdjust: Map<string, number>;
+    firstMonth: string | null;
+    startingAmount: number;
+  }
+  const perAccount = new Map<number, AccountAttribution>();
+
   for (const account of accounts) {
     // --- Pass 1: identify snapshot gaps and compute total gains per gap ---
     // gainsByMonth[month] = gains_cents to attribute to that month (spread evenly across gap)
@@ -153,6 +162,7 @@ export function getNetWorthReport(): NetWorthReport {
     // The first snapshot's level, minus any flows we already know about up to that
     // month, represents money the user put in before imports began.
     const contribAdjust = new Map<string, number>();
+    const gainsAdjust = new Map<string, number>();
     let firstMonth: string | null = null;
     let firstBalance = 0;
     for (const month of sortedMonths) {
@@ -163,6 +173,7 @@ export function getNetWorthReport(): NetWorthReport {
         break;
       }
     }
+    let startingAmount = 0;
     if (firstMonth !== null) {
       let flowsThrough = 0;
       for (const m of sortedMonths) {
@@ -170,8 +181,8 @@ export function getNetWorthReport(): NetWorthReport {
         const mf = flows.get(flowKey(m, account.id));
         if (mf) flowsThrough += mf.contributions + mf.dividends + mf.interest;
       }
-      const starting = firstBalance - flowsThrough;
-      if (starting !== 0) contribAdjust.set(firstMonth, starting);
+      startingAmount = firstBalance - flowsThrough;
+      if (startingAmount !== 0) contribAdjust.set(firstMonth, startingAmount);
     }
 
     // --- Pass-through accounts: unexplained changes are contributions, never gains ---
@@ -182,17 +193,73 @@ export function getNetWorthReport(): NetWorthReport {
       }
     }
 
-    // --- Pass 2: emit rows ---
+    perAccount.set(account.id, { gainsByMonth, contribAdjust, gainsAdjust, firstMonth, startingAmount });
+  }
+
+  // --- In-kind transfer linking ---
+  // When an account's starting balance matches another account's transfer-out in the
+  // same (or previous) month, the money isn't new: carry the source's cost basis over.
+  // The source's cumulative contributions arrive as contributions; the rest is gains
+  // that transferred with the position.
+  const monthBefore = (m: string) => sortedMonths[sortedMonths.indexOf(m) - 1] ?? null;
+
+  // Cumulative contributions for an account through the end of `beforeMonth` (exclusive),
+  // with return-of-capital ordering (never below zero).
+  const basisThrough = (accountId: number, beforeMonth: string): number => {
+    const pa = perAccount.get(accountId)!;
+    let cum = 0;
+    for (const m of sortedMonths) {
+      if (m >= beforeMonth) break;
+      const f = flows.get(flowKey(m, accountId));
+      cum += (f?.contributions ?? 0) + (pa.contribAdjust.get(m) ?? 0);
+      if (cum < 0) cum = 0;
+    }
+    return cum;
+  };
+
+  for (const account of accounts) {
+    const pa = perAccount.get(account.id)!;
+    if (pa.firstMonth === null || pa.startingAmount < 100_000) continue; // ignore < $1k
+
+    // Candidate sources: accounts with a matching net transfer-out around the start month
+    const candidates: Array<{ id: number; outflowMonth: string }> = [];
+    for (const other of accounts) {
+      if (other.id === account.id) continue;
+      for (const m of [pa.firstMonth, monthBefore(pa.firstMonth)]) {
+        if (!m) continue;
+        const out = flows.get(flowKey(m, other.id))?.contributions ?? 0;
+        if (out < 0 && Math.abs(out) >= pa.startingAmount * 0.7 && Math.abs(out) <= pa.startingAmount * 1.3) {
+          candidates.push({ id: other.id, outflowMonth: m });
+          break;
+        }
+      }
+    }
+    if (candidates.length !== 1) continue;
+
+    const source = candidates[0]!;
+    const sourceBasis = basisThrough(source.id, source.outflowMonth);
+    const basisCarried = Math.min(pa.startingAmount, sourceBasis);
+    const gainsCarried = pa.startingAmount - basisCarried;
+
+    pa.contribAdjust.set(pa.firstMonth, basisCarried);
+    if (gainsCarried !== 0) pa.gainsAdjust.set(pa.firstMonth, gainsCarried);
+  }
+
+  // --- Emit rows ---
+  for (const account of accounts) {
+    const pa = perAccount.get(account.id)!;
     for (const month of sortedMonths) {
       const f = flows.get(flowKey(month, account.id)) ?? {
         contributions: 0,
         dividends: 0,
         interest: 0,
       };
-      const adjust = contribAdjust.get(month) ?? 0;
+      const adjust = pa.contribAdjust.get(month) ?? 0;
+      const gAdjust = pa.gainsAdjust.get(month) ?? 0;
       const endBalance = balanceMap.get(flowKey(month, account.id)) ?? null;
       // gains_cents is null for months outside any snapshot gap (no balance data at all)
-      const gains = gainsByMonth.has(month) ? gainsByMonth.get(month)! : null;
+      const gapGains = pa.gainsByMonth.has(month) ? pa.gainsByMonth.get(month)! : null;
+      const gains = gAdjust !== 0 ? (gapGains ?? 0) + gAdjust : gapGains;
 
       const hasActivity =
         f.contributions !== 0 || f.dividends !== 0 || f.interest !== 0 ||
