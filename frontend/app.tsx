@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ImportPage } from "./ImportPage";
 import { ImportsPage } from "./ImportsPage";
@@ -7,14 +7,32 @@ import "./app.css";
 
 type Page = "import" | "imports" | "networth";
 
+const PAGES: Page[] = ["import", "imports", "networth"];
+
 const NAV: Array<{ id: Page; label: string; icon: string }> = [
   { id: "import", label: "Import", icon: "↑" },
   { id: "imports", label: "Imports", icon: "≡" },
   { id: "networth", label: "Net Worth", icon: "◆" },
 ];
 
+function getPageFromHash(): Page {
+  const hash = location.hash.slice(1) as Page;
+  return PAGES.includes(hash) ? hash : "networth";
+}
+
 function App() {
-  const [page, setPage] = useState<Page>("import");
+  const [page, setPage] = useState<Page>(getPageFromHash);
+
+  useEffect(() => {
+    const handler = () => setPage(getPageFromHash());
+    window.addEventListener("hashchange", handler);
+    return () => window.removeEventListener("hashchange", handler);
+  }, []);
+
+  const navigate = (id: Page) => {
+    location.hash = id;
+    setPage(id);
+  };
 
   return (
     <div className="layout">
@@ -24,7 +42,7 @@ function App() {
           <button
             key={item.id}
             className={`nav-item${page === item.id ? " active" : ""}`}
-            onClick={() => setPage(item.id)}
+            onClick={() => navigate(item.id)}
           >
             <span className="nav-icon">{item.icon}</span>
             {item.label}

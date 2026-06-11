@@ -141,13 +141,12 @@ export function NetWorthPage() {
         ))}
       </div>
 
-      <div className="networth-headline">
-        <div className="networth-label">Net worth</div>
-        <div className="networth-value">{fmtUsd(data[data.length - 1]?.cumulative ?? 0)}</div>
-        <div className="networth-asof">as of {data[data.length - 1]?.month ?? "—"}</div>
-      </div>
-
       <div className="totals-row">
+        <div className="total-card total-card-highlight">
+          <div className="total-label">Net worth</div>
+          <div className="total-value">{fmtUsd(data[data.length - 1]?.cumulative ?? 0)}</div>
+          <div className="total-asof">as of {data[data.length - 1]?.month ?? "—"}</div>
+        </div>
         <div className="total-card">
           <div className="total-label">Contributions</div>
           <div className="total-value">{fmtUsd(totals.contributions)}</div>
