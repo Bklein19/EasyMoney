@@ -15,7 +15,7 @@ export function getDb(): Database {
   return _db;
 }
 
-const MIGRATIONS: Array<(db: Database) => void> = [migration1Base, migration2Accounts, migration3CoveredRange, migration4TxDedup, migration5ManualBalances];
+const MIGRATIONS: Array<(db: Database) => void> = [migration1Base, migration2Accounts, migration3CoveredRange, migration4TxDedup, migration5ManualBalances, migration6FlowTreatment];
 
 function migrate(db: Database) {
   const version = (db.query<{ user_version: number }, []>("PRAGMA user_version").get())!.user_version;
@@ -73,6 +73,17 @@ function migration1Base(db: Database) {
       balance_cents INTEGER NOT NULL,
       UNIQUE(date, account, institution)
     )
+  `);
+}
+
+// flow_treatment: 'normal' computes market gains from balance deltas minus flows.
+// 'contributions' treats all unexplained balance changes as contributions — for
+// pass-through accounts (e.g. backdoor Roth conduits) that never hold investments
+// long enough to have real gains.
+function migration6FlowTreatment(db: Database) {
+  db.run(`
+    ALTER TABLE accounts ADD COLUMN flow_treatment TEXT NOT NULL DEFAULT 'normal'
+      CHECK (flow_treatment IN ('normal', 'contributions'))
   `);
 }
 

@@ -6,6 +6,7 @@ export interface AccountSummary {
   institution: string;
   type: string;
   classification: string;
+  flow_treatment: string;
 }
 
 export interface MonthlyRow {
@@ -25,11 +26,15 @@ export interface NetWorthReport {
 
 // Classify a transaction as an external flow or investment income based on its description.
 // "internal" covers buys, sells, sweeps, reinvestments — money moving within the account.
+// Transfers between own accounts count as (signed) contributions on both sides so they
+// cancel in aggregate: out of one account (−), into the other (+).
 function classify(description: string): "contribution" | "dividend" | "interest" | "internal" {
   const d = description.toLowerCase();
-  if (d.includes("dividend")) return "dividend";
+  if (/dividend|cap gain rein|cg rein|income rein/.test(d)) return "dividend";
   if (d.includes("interest")) return "interest";
-  if (/funds received|transfer (in|from)|contribution|rollover|\beft\b|\bach\b|direct deposit/.test(d)) {
+  if (
+    /funds received|funds transferred|transfer (in|out|from)|contribution|conversion|rollover|broker to broker|journaled|rsu vest|espp purchase|shares purchased|shares redeemed|fund purchase|\beft\b|\bach\b|direct deposit/.test(d)
+  ) {
     return "contribution";
   }
   return "internal";
@@ -40,7 +45,7 @@ export function getNetWorthReport(): NetWorthReport {
 
   const accounts = db
     .query<AccountSummary, []>(
-      "SELECT id, name, institution, type, classification FROM accounts ORDER BY institution, name"
+      "SELECT id, name, institution, type, classification, flow_treatment FROM accounts ORDER BY institution, name"
     )
     .all();
 
@@ -144,6 +149,39 @@ export function getNetWorthReport(): NetWorthReport {
       }
     }
 
+    // --- Starting balance: history predating our data is contributions, not gains ---
+    // The first snapshot's level, minus any flows we already know about up to that
+    // month, represents money the user put in before imports began.
+    const contribAdjust = new Map<string, number>();
+    let firstMonth: string | null = null;
+    let firstBalance = 0;
+    for (const month of sortedMonths) {
+      const b = balanceMap.get(flowKey(month, account.id));
+      if (b !== undefined) {
+        firstMonth = month;
+        firstBalance = b;
+        break;
+      }
+    }
+    if (firstMonth !== null) {
+      let flowsThrough = 0;
+      for (const m of sortedMonths) {
+        if (m > firstMonth) break;
+        const mf = flows.get(flowKey(m, account.id));
+        if (mf) flowsThrough += mf.contributions + mf.dividends + mf.interest;
+      }
+      const starting = firstBalance - flowsThrough;
+      if (starting !== 0) contribAdjust.set(firstMonth, starting);
+    }
+
+    // --- Pass-through accounts: unexplained changes are contributions, never gains ---
+    if (account.flow_treatment === "contributions") {
+      for (const [m, g] of gainsByMonth) {
+        if (g !== 0) contribAdjust.set(m, (contribAdjust.get(m) ?? 0) + g);
+        gainsByMonth.set(m, 0);
+      }
+    }
+
     // --- Pass 2: emit rows ---
     for (const month of sortedMonths) {
       const f = flows.get(flowKey(month, account.id)) ?? {
@@ -151,19 +189,20 @@ export function getNetWorthReport(): NetWorthReport {
         dividends: 0,
         interest: 0,
       };
+      const adjust = contribAdjust.get(month) ?? 0;
       const endBalance = balanceMap.get(flowKey(month, account.id)) ?? null;
       // gains_cents is null for months outside any snapshot gap (no balance data at all)
       const gains = gainsByMonth.has(month) ? gainsByMonth.get(month)! : null;
 
       const hasActivity =
         f.contributions !== 0 || f.dividends !== 0 || f.interest !== 0 ||
-        endBalance !== null || gains !== null;
+        adjust !== 0 || endBalance !== null || gains !== null;
       if (!hasActivity) continue;
 
       rows.push({
         month,
         account_id: account.id,
-        contributions_cents: f.contributions,
+        contributions_cents: f.contributions + adjust,
         dividends_cents: f.dividends,
         interest_cents: f.interest,
         gains_cents: gains,
