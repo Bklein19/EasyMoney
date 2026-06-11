@@ -1,0 +1,219 @@
+import React, { useEffect, useState, useCallback } from "react";
+
+interface Account {
+  id: number;
+  name: string;
+  institution: string;
+  type: string;
+  classification: string;
+  tax_treatment: string;
+  latest_balance_cents: number | null;
+  latest_balance_date: string | null;
+}
+
+interface ManualBalance {
+  id: number;
+  account_id: number;
+  date: string;
+  balance_cents: number;
+  note: string | null;
+}
+
+const fmtUsd = (v: number) =>
+  v.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+
+function AddBalanceForm({ account, onSaved }: { account: Account; onSaved: () => void }) {
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    const dollars = parseFloat(amount.replace(/[^0-9.-]/g, ""));
+    if (isNaN(dollars)) return;
+    setSaving(true);
+    await fetch("/api/accounts/manual-balance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account_id: account.id,
+        date,
+        balance_cents: Math.round(dollars * 100),
+        note: note || null,
+      }),
+    });
+    setSaving(false);
+    setAmount("");
+    setNote("");
+    onSaved();
+  };
+
+  const markClosed = async () => {
+    setSaving(true);
+    await fetch("/api/accounts/manual-balance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account_id: account.id,
+        date,
+        balance_cents: 0,
+        note: "Account closed",
+      }),
+    });
+    setSaving(false);
+    onSaved();
+  };
+
+  return (
+    <div className="override-form">
+      <div className="field">
+        <label>As of</label>
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+      </div>
+      <div className="field">
+        <label>Balance</label>
+        <input
+          type="text"
+          placeholder="12,345.67"
+          value={amount}
+          onChange={(e) => setAmount(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && save()}
+          style={{ width: 130 }}
+        />
+      </div>
+      <div className="field" style={{ flex: 1, minWidth: 140 }}>
+        <label>Note</label>
+        <input
+          type="text"
+          placeholder="optional"
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
+      </div>
+      <button className="btn-primary" onClick={save} disabled={saving || !amount}>
+        Save
+      </button>
+      <button className="btn-subtle" onClick={markClosed} disabled={saving}>
+        Mark closed
+      </button>
+    </div>
+  );
+}
+
+export function AccountsPage() {
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [manualBalances, setManualBalances] = useState<ManualBalance[]>([]);
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const reload = useCallback(() => {
+    fetch("/api/accounts")
+      .then((r) => r.json())
+      .then((data: { accounts: Account[]; manualBalances: ManualBalance[] }) => {
+        setAccounts(data.accounts);
+        setManualBalances(data.manualBalances);
+        setLoading(false);
+      });
+  }, []);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const deleteManual = async (id: number) => {
+    await fetch("/api/accounts/manual-balance", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    reload();
+  };
+
+  if (loading) return <div className="page page-accounts"><div className="empty-state">Loading…</div></div>;
+
+  const total = accounts.reduce((sum, a) => sum + (a.latest_balance_cents ?? 0), 0);
+
+  return (
+    <div className="page page-accounts">
+      <h2 className="page-title">
+        Accounts <span className="count">{accounts.length} · {fmtUsd(total / 100)}</span>
+      </h2>
+      <table className="accounts-table">
+        <colgroup>
+          <col className="c-account" />
+          <col className="c-type" />
+          <col className="c-tax" />
+          <col className="c-balance" />
+          <col className="c-asof" />
+          <col className="c-action" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Account</th>
+            <th>Type</th>
+            <th>Tax</th>
+            <th className="num">Balance</th>
+            <th>As of</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {accounts.map((a) => {
+            const accountManual = manualBalances.filter((m) => m.account_id === a.id);
+            const isExpanded = expanded === a.id;
+            const isClosed = a.latest_balance_cents === 0;
+            return (
+              <React.Fragment key={a.id}>
+                <tr className={isClosed && !isExpanded ? "closed" : ""}>
+                  <td>
+                    <div className="acct-name" title={a.name}>
+                      <span className="name-text">{a.name}</span>
+                      {isClosed && <span className="closed-badge">closed</span>}
+                    </div>
+                    <div className="acct-institution">{a.institution}</div>
+                  </td>
+                  <td><span className="acct-chip">{a.type}</span></td>
+                  <td><span className="acct-chip">{a.tax_treatment}</span></td>
+                  <td className={`acct-balance${isClosed ? " zero" : ""}`}>
+                    {a.latest_balance_cents !== null ? fmtUsd(a.latest_balance_cents / 100) : "—"}
+                  </td>
+                  <td className="acct-asof">{a.latest_balance_date ?? "—"}</td>
+                  <td style={{ textAlign: "right" }}>
+                    <button
+                      className={`btn-ghost${isExpanded ? " active" : ""}`}
+                      onClick={() => setExpanded(isExpanded ? null : a.id)}
+                    >
+                      {isExpanded ? "Close" : "Edit"}
+                    </button>
+                  </td>
+                </tr>
+                {isExpanded && (
+                  <tr className="expanded-row">
+                    <td colSpan={6} style={{ padding: "4px 0 12px", borderBottom: "1px solid #1c1c1c" }}>
+                      <div className="override-panel">
+                        <AddBalanceForm account={a} onSaved={reload} />
+                        {accountManual.length > 0 && (
+                          <div className="manual-entries">
+                            <div className="manual-entries-title">Manual entries</div>
+                            {accountManual.map((m) => (
+                              <div key={m.id} className="manual-entry">
+                                <span className="amount">{fmtUsd(m.balance_cents / 100)}</span>
+                                <span>{m.date}</span>
+                                {m.note && <span className="note">{m.note}</span>}
+                                <button className="delete" onClick={() => deleteManual(m.id)} title="Delete entry">
+                                  ✕
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}

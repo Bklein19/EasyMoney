@@ -80,6 +80,7 @@ body {
 }
 
 .page-wide { max-width: 900px; }
+.page-accounts { max-width: 1000px; }
 
 /* Import page */
 
@@ -321,3 +322,258 @@ body {
   color: #555;
   font-size: 0.9rem;
 }
+
+/* Accounts page */
+
+.page-title {
+  width: 100%;
+  margin: 0 0 20px;
+  font-size: 1.15rem;
+  font-weight: 600;
+  text-align: left;
+}
+
+.page-title .count {
+  color: #666;
+  font-weight: 400;
+  font-size: 0.9rem;
+  margin-left: 6px;
+}
+
+.accounts-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  table-layout: fixed;
+}
+
+.accounts-table col.c-account { width: 42%; }
+.accounts-table col.c-type    { width: 11%; }
+.accounts-table col.c-tax     { width: 12%; }
+.accounts-table col.c-balance { width: 12%; }
+.accounts-table col.c-asof    { width: 13%; }
+.accounts-table col.c-action  { width: 10%; }
+
+.accounts-table th {
+  padding: 8px 14px;
+  font-weight: 500;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #666;
+  text-align: left;
+  border-bottom: 1px solid #2a2a2a;
+  white-space: nowrap;
+}
+
+.accounts-table th.num { text-align: right; }
+
+.accounts-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid #1c1c1c;
+  vertical-align: middle;
+}
+
+.accounts-table tr.closed td { opacity: 0.45; }
+.accounts-table tr.expanded-row td { opacity: 1; }
+
+.acct-name {
+  display: flex;
+  align-items: center;
+  color: #e8e8e8;
+  font-weight: 500;
+  white-space: nowrap;
+  max-width: none; /* overrides the stale app.css asset some dev servers keep cached */
+}
+
+.acct-name .name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.acct-name .closed-badge { flex-shrink: 0; }
+
+.acct-institution {
+  color: #5a5a5a;
+  font-size: 0.74rem;
+  margin-top: 2px;
+}
+
+.acct-chip {
+  display: inline-block;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #777;
+  background: #1c1c1c;
+  border: 1px solid #262626;
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.acct-balance {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: #e8e8e8;
+  white-space: nowrap;
+}
+
+.acct-balance.zero { color: #555; font-weight: 400; }
+
+.acct-asof {
+  color: #555;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.closed-badge {
+  display: inline-block;
+  font-size: 0.66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #777;
+  background: #1e1e1e;
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-left: 8px;
+  vertical-align: 1px;
+}
+
+.btn-ghost {
+  background: none;
+  border: 1px solid #2c2c2c;
+  color: #888;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.btn-ghost:hover { border-color: #444; color: #ccc; }
+.btn-ghost.active { border-color: #4a8fff; color: #ccc; }
+
+/* Override panel */
+
+.override-panel {
+  background: #141414;
+  border: 1px solid #222;
+  border-radius: 10px;
+  padding: 16px;
+  margin: 4px 0 8px;
+}
+
+.override-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.field label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #666;
+}
+
+.field input {
+  background: #1a1a1a;
+  border: 1px solid #2c2c2c;
+  color: #e8e8e8;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-family: inherit;
+  color-scheme: dark;
+}
+
+.field input:focus {
+  outline: none;
+  border-color: #4a8fff;
+}
+
+.field input::placeholder { color: #4a4a4a; }
+
+.btn-primary {
+  background: #2a5adf;
+  border: none;
+  color: #fff;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.btn-primary:hover { background: #3568f0; }
+.btn-primary:disabled { background: #1e2a4a; color: #667; cursor: default; }
+
+.btn-subtle {
+  background: none;
+  border: 1px solid #2c2c2c;
+  color: #777;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.btn-subtle:hover { border-color: #5a3a3a; color: #c08a8a; }
+
+.manual-entries {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #1e1e1e;
+}
+
+.manual-entries-title {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.manual-entry {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 0.82rem;
+  color: #888;
+  padding: 4px 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.manual-entry .amount { color: #e8e8e8; font-weight: 500; min-width: 80px; }
+.manual-entry .note { color: #5a5a5a; font-style: italic; }
+
+.manual-entry .delete {
+  background: none;
+  border: none;
+  color: #555;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: auto;
+}
+
+.manual-entry .delete:hover { color: #e05252; background: #1e1414; }

@@ -3,8 +3,8 @@ import { createRoot } from "react-dom/client";
 import { ImportPage } from "./ImportPage";
 import { ImportsPage } from "./ImportsPage";
 import { NetWorthPage } from "./NetWorthPage";
-import { AccountsPage } from "./AccountsPage";
-import "./app.css";
+import { AccountsPage } from "./Accounts";
+import "./styles.css";
 
 type Page = "import" | "imports" | "networth" | "accounts";
 
@@ -63,3 +63,4 @@ function App() {
 
 const root = createRoot(document.body);
 root.render(<App />);
+
