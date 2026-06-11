@@ -3,16 +3,18 @@ import { createRoot } from "react-dom/client";
 import { ImportPage } from "./ImportPage";
 import { ImportsPage } from "./ImportsPage";
 import { NetWorthPage } from "./NetWorthPage";
+import { AccountsPage } from "./AccountsPage";
 import "./app.css";
 
-type Page = "import" | "imports" | "networth";
+type Page = "import" | "imports" | "networth" | "accounts";
 
-const PAGES: Page[] = ["import", "imports", "networth"];
+const PAGES: Page[] = ["import", "imports", "networth", "accounts"];
 
 const NAV: Array<{ id: Page; label: string; icon: string }> = [
   { id: "import", label: "Import", icon: "↑" },
   { id: "imports", label: "Imports", icon: "≡" },
   { id: "networth", label: "Net Worth", icon: "◆" },
+  { id: "accounts", label: "Accounts", icon: "⊞" },
 ];
 
 function getPageFromHash(): Page {
@@ -53,6 +55,7 @@ function App() {
         {page === "import" && <ImportPage />}
         {page === "imports" && <ImportsPage />}
         {page === "networth" && <NetWorthPage />}
+        {page === "accounts" && <AccountsPage />}
       </main>
     </div>
   );

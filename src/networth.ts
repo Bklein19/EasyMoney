@@ -54,7 +54,11 @@ export function getNetWorthReport(): NetWorthReport {
   const balances = db
     .query<{ month: string; account_id: number; balance_cents: number }, []>(
       `SELECT strftime('%Y-%m', date) as month, account_id, balance_cents
-       FROM account_balances WHERE account_id IS NOT NULL
+       FROM (
+         SELECT date, account_id, balance_cents FROM account_balances WHERE account_id IS NOT NULL
+         UNION ALL
+         SELECT date, account_id, balance_cents FROM manual_balances
+       )
        GROUP BY month, account_id HAVING date = MAX(date)`
     )
     .all();

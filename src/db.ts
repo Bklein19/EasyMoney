@@ -15,7 +15,7 @@ export function getDb(): Database {
   return _db;
 }
 
-const MIGRATIONS: Array<(db: Database) => void> = [migration1Base, migration2Accounts, migration3CoveredRange, migration4TxDedup];
+const MIGRATIONS: Array<(db: Database) => void> = [migration1Base, migration2Accounts, migration3CoveredRange, migration4TxDedup, migration5ManualBalances];
 
 function migrate(db: Database) {
   const version = (db.query<{ user_version: number }, []>("PRAGMA user_version").get())!.user_version;
@@ -72,6 +72,20 @@ function migration1Base(db: Database) {
       institution TEXT NOT NULL,
       balance_cents INTEGER NOT NULL,
       UNIQUE(date, account, institution)
+    )
+  `);
+}
+
+function migration5ManualBalances(db: Database) {
+  db.run(`
+    CREATE TABLE manual_balances (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER NOT NULL REFERENCES accounts(id),
+      date TEXT NOT NULL,
+      balance_cents INTEGER NOT NULL,
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(account_id, date)
     )
   `);
 }

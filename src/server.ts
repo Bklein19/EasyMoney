@@ -1,6 +1,7 @@
 import { importFile } from "./importer";
 import { getNetWorthReport } from "./networth";
 import { getImportList } from "./imports";
+import { getDb } from "./db";
 import type { AgentEvent } from "./agent";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
@@ -23,6 +24,51 @@ export function startServer(port = Number(process.env["PORT"] ?? 3000)) {
       },
       "/api/imports": {
         GET: () => Response.json(getImportList()),
+      },
+      "/api/accounts": {
+        GET: () => {
+          const db = getDb();
+          const accounts = db.query(`
+            SELECT a.id, a.name, a.institution, a.type, a.classification, a.tax_treatment,
+              (SELECT balance_cents FROM (
+                SELECT date, balance_cents FROM account_balances WHERE account_id = a.id
+                UNION ALL
+                SELECT date, balance_cents FROM manual_balances WHERE account_id = a.id
+              ) ORDER BY date DESC LIMIT 1) as latest_balance_cents,
+              (SELECT date FROM (
+                SELECT date FROM account_balances WHERE account_id = a.id
+                UNION ALL
+                SELECT date FROM manual_balances WHERE account_id = a.id
+              ) ORDER BY date DESC LIMIT 1) as latest_balance_date
+            FROM accounts a
+            ORDER BY a.institution, a.name
+          `).all();
+          const manualBalances = db.query(
+            "SELECT id, account_id, date, balance_cents, note FROM manual_balances ORDER BY account_id, date DESC"
+          ).all();
+          return Response.json({ accounts, manualBalances });
+        },
+      },
+      "/api/accounts/manual-balance": {
+        POST: async (req) => {
+          const { account_id, date, balance_cents, note } = await req.json() as {
+            account_id: number; date: string; balance_cents: number; note?: string;
+          };
+          if (!account_id || !date || balance_cents === undefined) {
+            return Response.json({ error: "account_id, date, and balance_cents required" }, { status: 400 });
+          }
+          const db = getDb();
+          db.run(
+            "INSERT OR REPLACE INTO manual_balances (account_id, date, balance_cents, note) VALUES (?, ?, ?, ?)",
+            [account_id, date, balance_cents, note ?? null]
+          );
+          return Response.json({ ok: true });
+        },
+        DELETE: async (req) => {
+          const { id } = await req.json() as { id: number };
+          getDb().run("DELETE FROM manual_balances WHERE id = ?", [id]);
+          return Response.json({ ok: true });
+        },
       },
       "/api/import": {
         POST: async (req) => {
