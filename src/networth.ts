@@ -243,6 +243,17 @@ export function getNetWorthReport(): NetWorthReport {
 
     pa.contribAdjust.set(pa.firstMonth, basisCarried);
     if (gainsCarried !== 0) pa.gainsAdjust.set(pa.firstMonth, gainsCarried);
+
+    // Split the source's outflow the same way: basis comes out of contributions,
+    // the rest out of gains — so the two sides cancel when viewed together.
+    const spa = perAccount.get(source.id)!;
+    const outflow = flows.get(flowKey(source.outflowMonth, source.id))?.contributions ?? 0; // negative
+    const basisPart = -Math.min(-outflow, sourceBasis);
+    const gainsPart = outflow - basisPart; // negative remainder beyond basis
+    if (gainsPart !== 0) {
+      spa.contribAdjust.set(source.outflowMonth, (spa.contribAdjust.get(source.outflowMonth) ?? 0) - gainsPart);
+      spa.gainsAdjust.set(source.outflowMonth, (spa.gainsAdjust.get(source.outflowMonth) ?? 0) + gainsPart);
+    }
   }
 
   // --- Emit rows ---
