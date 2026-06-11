@@ -1,5 +1,6 @@
 import { importFile } from "./importer";
 import { getNetWorthReport } from "./networth";
+import { getImportList } from "./imports";
 import type { AgentEvent } from "./agent";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
@@ -19,6 +20,9 @@ export function startServer(port = Number(process.env["PORT"] ?? 3000)) {
       "/": index,
       "/api/networth": {
         GET: () => Response.json(getNetWorthReport()),
+      },
+      "/api/imports": {
+        GET: () => Response.json(getImportList()),
       },
       "/api/import": {
         POST: async (req) => {

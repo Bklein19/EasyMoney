@@ -1,13 +1,15 @@
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ImportPage } from "./ImportPage";
+import { ImportsPage } from "./ImportsPage";
 import { NetWorthPage } from "./NetWorthPage";
 import "./app.css";
 
-type Page = "import" | "networth";
+type Page = "import" | "imports" | "networth";
 
 const NAV: Array<{ id: Page; label: string; icon: string }> = [
   { id: "import", label: "Import", icon: "↑" },
+  { id: "imports", label: "Imports", icon: "≡" },
   { id: "networth", label: "Net Worth", icon: "◆" },
 ];
 
@@ -31,6 +33,7 @@ function App() {
       </nav>
       <main className="main">
         {page === "import" && <ImportPage />}
+        {page === "imports" && <ImportsPage />}
         {page === "networth" && <NetWorthPage />}
       </main>
     </div>
