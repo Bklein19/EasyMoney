@@ -86,6 +86,7 @@ export function NetWorthPage() {
     let cumulativeContribs = 0;
     let cumulativeGains = 0;
     let running = 0;
+    let started = false;
     const points: ChartPoint[] = [];
 
     for (const month of months) {
@@ -94,26 +95,35 @@ export function NetWorthPage() {
       cumulativeContribs += contribDelta;
       cumulativeGains += gainsDelta;
 
+      // Return of capital: outflows draw down contributions first; anything
+      // beyond that comes out of gains. Keeps a fully-emptied account at 0/0.
+      if (cumulativeContribs < 0) {
+        cumulativeGains += cumulativeContribs;
+        cumulativeContribs = 0;
+      }
+
       const snapped = balanceByMonth.get(month);
       let hasBalance = false;
       if (snapped !== undefined) {
         running = snapped;
         hasBalance = true;
-        // Reconcile: keep contributions as-is, let gains absorb any rounding
+        // Reconcile: keep contributions as-is, let gains absorb any residual
         cumulativeGains = running - cumulativeContribs;
       } else {
         running += contribDelta + gainsDelta;
       }
 
-      if (cumulativeContribs !== 0 || cumulativeGains !== 0 || running !== 0) {
-        points.push({
-          month,
-          cumulativeContributions: cumulativeContribs,
-          cumulativeGains: Math.max(0, cumulativeGains),
-          cumulative: running,
-          hasBalance,
-        });
-      }
+      // Skip leading empty months, but keep zeros once there's history —
+      // a closed-out account dropping to 0 is real data.
+      if (!started && cumulativeContribs === 0 && cumulativeGains === 0 && running === 0) continue;
+      started = true;
+      points.push({
+        month,
+        cumulativeContributions: cumulativeContribs,
+        cumulativeGains,
+        cumulative: running,
+        hasBalance,
+      });
     }
     return points;
   }, [report, selectedIds]);
@@ -179,7 +189,7 @@ export function NetWorthPage() {
 
       <div className="chart-container">
         <ResponsiveContainer width="100%" height={420}>
-          <ComposedChart data={data}>
+          <ComposedChart data={data} stackOffset="sign">
             <CartesianGrid strokeDasharray="3 3" stroke="#222" />
             <XAxis dataKey="month" stroke="#555" tick={{ fontSize: 11 }} />
             <YAxis stroke="#555" tick={{ fontSize: 11 }} tickFormatter={fmtUsdAxis} />
