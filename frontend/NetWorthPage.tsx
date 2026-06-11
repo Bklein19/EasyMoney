@@ -37,11 +37,9 @@ interface NetWorthReport {
 interface ChartPoint {
   month: string;
   contributions: number;
-  dividends: number;
-  interest: number;
-  gains: number;
+  gains: number; // market gains + dividends + interest
   cumulative: number;
-  hasBalance: boolean; // true when cumulative is anchored to a real balance snapshot
+  hasBalance: boolean;
 }
 
 const fmtUsd = (v: number) =>
@@ -72,17 +70,14 @@ export function NetWorthPage() {
     const byMonth = new Map<string, ChartPoint>();
     const months = [...new Set(report.rows.map((r) => r.month))].sort();
     for (const month of months) {
-      byMonth.set(month, { month, contributions: 0, dividends: 0, interest: 0, gains: 0, cumulative: 0, hasBalance: false });
+      byMonth.set(month, { month, contributions: 0, gains: 0, cumulative: 0, hasBalance: false });
     }
-    // Track the total balance snapshot per month across selected accounts
     const balanceByMonth = new Map<string, number>();
     for (const row of report.rows) {
       if (!selectedIds.has(row.account_id)) continue;
       const point = byMonth.get(row.month)!;
       point.contributions += row.contributions_cents / 100;
-      point.dividends += row.dividends_cents / 100;
-      point.interest += row.interest_cents / 100;
-      point.gains += (row.gains_cents ?? 0) / 100;
+      point.gains += (row.dividends_cents + row.interest_cents + (row.gains_cents ?? 0)) / 100;
       if (row.end_balance_cents !== null) {
         balanceByMonth.set(row.month, (balanceByMonth.get(row.month) ?? 0) + row.end_balance_cents / 100);
       }
@@ -92,11 +87,10 @@ export function NetWorthPage() {
     for (const p of points) {
       const snapped = balanceByMonth.get(p.month);
       if (snapped !== undefined) {
-        // Anchor to the real balance — ground truth beats running sum
         running = snapped;
         p.hasBalance = true;
       } else {
-        running += p.contributions + p.dividends + p.interest + p.gains;
+        running += p.contributions + p.gains;
       }
       p.cumulative = running;
     }
@@ -104,11 +98,9 @@ export function NetWorthPage() {
   }, [report, selectedIds]);
 
   const totals = useMemo(() => {
-    const t = { contributions: 0, dividends: 0, interest: 0, gains: 0 };
+    const t = { contributions: 0, gains: 0 };
     for (const p of data) {
       t.contributions += p.contributions;
-      t.dividends += p.dividends;
-      t.interest += p.interest;
       t.gains += p.gains;
     }
     return t;
@@ -150,23 +142,15 @@ export function NetWorthPage() {
       </div>
 
       <div className="networth-headline">
-        <span className="networth-label">Net worth</span>
-        <span className="networth-value">{fmtUsd(data[data.length - 1]?.cumulative ?? 0)}</span>
-        <span className="networth-asof">as of {data[data.length - 1]?.month ?? "—"}</span>
+        <div className="networth-label">Net worth</div>
+        <div className="networth-value">{fmtUsd(data[data.length - 1]?.cumulative ?? 0)}</div>
+        <div className="networth-asof">as of {data[data.length - 1]?.month ?? "—"}</div>
       </div>
 
       <div className="totals-row">
         <div className="total-card">
           <div className="total-label">Contributions</div>
           <div className="total-value">{fmtUsd(totals.contributions)}</div>
-        </div>
-        <div className="total-card">
-          <div className="total-label">Dividends</div>
-          <div className="total-value">{fmtUsd(totals.dividends)}</div>
-        </div>
-        <div className="total-card">
-          <div className="total-label">Interest</div>
-          <div className="total-value">{fmtUsd(totals.interest)}</div>
         </div>
         <div className="total-card">
           <div className="total-label">Market gains</div>
@@ -187,8 +171,6 @@ export function NetWorthPage() {
             />
             <Legend wrapperStyle={{ fontSize: 12 }} />
             <Bar dataKey="contributions" name="Contributions" stackId="flows" fill="#4a8fff" />
-            <Bar dataKey="dividends" name="Dividends" stackId="flows" fill="#2dca6e" />
-            <Bar dataKey="interest" name="Interest" stackId="flows" fill="#b78aff" />
             {hasGains && <Bar dataKey="gains" name="Market gains" stackId="flows" fill="#ffb74a" />}
             <Line
               type="monotone"
@@ -202,12 +184,6 @@ export function NetWorthPage() {
         </ResponsiveContainer>
       </div>
 
-      {!hasGains && (
-        <div className="hint-box">
-          Market gains require balance snapshots (e.g. monthly statements). Import statements with
-          balances and the gains breakdown will appear as the residual of value change minus flows.
-        </div>
-      )}
     </div>
   );
 }
