@@ -468,6 +468,20 @@ export function NetWorthPage({ view }: NetWorthPageProps) {
       </div>
     </div>
   );
+  const periodPicker = (
+    <div className="segmented-control" role="group" aria-label="Period">
+      {(["month", "quarter", "year"] as const).map((period) => (
+        <button
+          key={period}
+          type="button"
+          className={derivativePeriod === period ? "active" : ""}
+          onClick={() => setDerivativePeriod(period)}
+        >
+          {period}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <div className={`page page-networth ${view === "networth" ? "page-networth-dashboard" : "page-performance-dashboard"}`}>
@@ -520,18 +534,7 @@ export function NetWorthPage({ view }: NetWorthPageProps) {
                 <div className="chart-title">Change by period</div>
                 <div className="chart-subtitle">Contributions and market gains</div>
               </div>
-              <div className="segmented-control" role="group" aria-label="Derivative period">
-                {(["month", "quarter", "year"] as const).map((period) => (
-                  <button
-                    key={period}
-                    type="button"
-                    className={derivativePeriod === period ? "active" : ""}
-                    onClick={() => setDerivativePeriod(period)}
-                  >
-                    {period}
-                  </button>
-                ))}
-              </div>
+              {periodPicker}
             </div>
 
             <div className="chart-container derivative-chart">
@@ -617,7 +620,10 @@ export function NetWorthPage({ view }: NetWorthPageProps) {
             </ComposedChart>
           </ResponsiveContainer>
         </div>
-        <div className="return-subsection-title">Period Returns</div>
+        <div className="return-subsection-header">
+          <div className="return-subsection-title">Period Returns</div>
+          {periodPicker}
+        </div>
         <div className="chart-container returns-chart">
           <ResponsiveContainer width="100%" height={340}>
             <ComposedChart data={periodReturnData} margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>

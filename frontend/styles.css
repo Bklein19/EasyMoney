@@ -584,6 +584,19 @@ body {
   text-transform: uppercase;
 }
 
+.return-subsection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 18px 0 8px;
+}
+
+.return-subsection-header .return-subsection-title {
+  width: auto;
+  margin: 0;
+}
+
 .returns-investment-chart {
   margin-bottom: 2px;
   padding-top: 16px;
