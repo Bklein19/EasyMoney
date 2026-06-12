@@ -4,6 +4,7 @@ import { getImportList } from "./imports";
 import { getDb } from "./db";
 import { updateAccount, deleteAlias, createAlias } from "./accounts";
 import { saveManualFacts } from "./manualFacts";
+import { rebuild } from "./rebuild";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
 import index from "../index.html";
@@ -72,13 +73,15 @@ export function startServer(port = Number(process.env["PORT"] ?? 3000)) {
           }
           createAlias(institution, alias, account_id);
           await saveManualFacts();
-          return Response.json({ ok: true });
+          const report = await rebuild();
+          return Response.json({ ok: true, rebuild: report });
         },
         DELETE: async (req) => {
           const { institution, alias } = await req.json() as { institution: string; alias: string };
           deleteAlias(institution, alias);
           await saveManualFacts();
-          return Response.json({ ok: true });
+          const report = await rebuild();
+          return Response.json({ ok: true, rebuild: report });
         },
       },
       "/api/accounts/manual-balance": {

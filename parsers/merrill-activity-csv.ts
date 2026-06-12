@@ -92,7 +92,13 @@ export default async function parse(filePath: string): Promise<ParseResult> {
     const description1 = get(row, "Description 1");
     const description2 = get(row, "Description 2");
     const symbol = get(row, "Symbol/CUSIP #");
-    const description = [type, description1, description2, symbol].filter(Boolean).join(" | ");
+    const normalizedType =
+      type === "FundTransfers" && /withdrawal/i.test(description1)
+        ? "Transfer out"
+        : type === "DividendAndInterest" && /interest/i.test(description1)
+          ? ""
+          : type;
+    const description = [description1, description2, symbol, normalizedType].filter(Boolean).join(" | ");
 
     transactions.push(
       makeTx({
