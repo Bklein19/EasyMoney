@@ -15,7 +15,7 @@ export function getDb(): Database {
   return _db;
 }
 
-const MIGRATIONS: Array<(db: Database) => void> = [migration1Base, migration2Accounts, migration3CoveredRange, migration4TxDedup, migration5ManualBalances, migration6FlowTreatment];
+const MIGRATIONS: Array<(db: Database) => void> = [migration1Base, migration2Accounts, migration3CoveredRange, migration4TxDedup, migration5ManualBalances, migration6FlowTreatment, migration7CacheLedger];
 
 function migrate(db: Database) {
   const version = (db.query<{ user_version: number }, []>("PRAGMA user_version").get())!.user_version;
@@ -85,6 +85,57 @@ function migration6FlowTreatment(db: Database) {
     ALTER TABLE accounts ADD COLUMN flow_treatment TEXT NOT NULL DEFAULT 'normal'
       CHECK (flow_treatment IN ('normal', 'contributions'))
   `);
+}
+
+// Make the transaction/balance tables a pure rebuildable cache: drop import_file_id's
+// NOT NULL (rows now come from a set-union of many files, not one) and remove the
+// order-dependent logical-dedup index (dedup now happens deterministically in
+// buildLedger). Rebuilds both tables since SQLite can't relax NOT NULL via ALTER.
+function migration7CacheLedger(db: Database) {
+  db.run("DROP INDEX IF EXISTS idx_transactions_logical");
+
+  db.run(`
+    CREATE TABLE transactions_new (
+      id TEXT PRIMARY KEY,
+      import_file_id INTEGER REFERENCES import_files(id),
+      date TEXT NOT NULL,
+      amount_cents INTEGER NOT NULL,
+      description TEXT NOT NULL,
+      account TEXT NOT NULL,
+      institution TEXT NOT NULL,
+      account_id INTEGER REFERENCES accounts(id),
+      raw JSON NOT NULL
+    )
+  `);
+  db.run(`
+    INSERT INTO transactions_new
+      (id, import_file_id, date, amount_cents, description, account, institution, account_id, raw)
+    SELECT id, import_file_id, date, amount_cents, description, account, institution, account_id, raw
+    FROM transactions
+  `);
+  db.run("DROP TABLE transactions");
+  db.run("ALTER TABLE transactions_new RENAME TO transactions");
+
+  db.run(`
+    CREATE TABLE account_balances_new (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      import_file_id INTEGER REFERENCES import_files(id),
+      date TEXT NOT NULL,
+      account TEXT NOT NULL,
+      institution TEXT NOT NULL,
+      account_id INTEGER REFERENCES accounts(id),
+      balance_cents INTEGER NOT NULL,
+      UNIQUE(date, account, institution)
+    )
+  `);
+  db.run(`
+    INSERT INTO account_balances_new
+      (id, import_file_id, date, account, institution, account_id, balance_cents)
+    SELECT id, import_file_id, date, account, institution, account_id, balance_cents
+    FROM account_balances
+  `);
+  db.run("DROP TABLE account_balances");
+  db.run("ALTER TABLE account_balances_new RENAME TO account_balances");
 }
 
 function migration5ManualBalances(db: Database) {

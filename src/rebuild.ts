@@ -15,6 +15,7 @@ import { readdir } from "fs/promises";
 import { join } from "path";
 import { resolveParser } from "../parsers";
 import { lookupAlias } from "./accounts";
+import { getDb } from "./db";
 import type { ParsedTransaction, ParsedBalance, ParserMeta } from "./types";
 
 const RAW_DIR = join(import.meta.dir, "../imports/raw");
@@ -212,4 +213,57 @@ export function writeLedger(db: Database, ledger: BuiltLedger): { tx: number; ba
     }
   })();
   return { tx: ledger.transactions.length, bal: ledger.balances.length };
+}
+
+// Order-insensitive fingerprint of a ledger — sorts rows so two ledgers with the
+// same content but different row order hash identically.
+export function ledgerFingerprint(ledger: BuiltLedger): string {
+  const { createHash } = require("crypto") as typeof import("crypto");
+  const tx = ledger.transactions.map((t) => `${t.id}|${t.account_id}|${t.amount_cents}`).sort().join("\n");
+  const bal = ledger.balances
+    .map((b) => `${b.institution}\0${b.account}\0${b.date}|${b.balance_cents}|${b.account_id}`)
+    .sort()
+    .join("\n");
+  return createHash("sha256").update(`${tx}\n##\n${bal}`).digest("hex");
+}
+
+// Rebuild the live DB's ledger from raw files. Returns counts + any unmapped aliases.
+export async function rebuild(): Promise<{ tx: number; bal: number; unmappedAliases: BuiltLedger["unmappedAliases"] }> {
+  const files = await parseAllRawFiles();
+  const ledger = buildLedger(files);
+  const counts = writeLedger(getDb(), ledger);
+  return { ...counts, unmappedAliases: ledger.unmappedAliases };
+}
+
+// Prove order-independence: build the ledger from files in forward order and again
+// from the reverse, and assert identical fingerprints. Returns the fingerprint on
+// success; throws on mismatch. Pure — does not touch the live DB.
+export async function verify(): Promise<{ fingerprint: string; tx: number; bal: number }> {
+  const files = await parseAllRawFiles();
+  const forward = buildLedger(files);
+  const reverse = buildLedger([...files].reverse());
+  const fF = ledgerFingerprint(forward);
+  const fR = ledgerFingerprint(reverse);
+  if (fF !== fR) {
+    throw new Error(`Order-dependence detected: forward ${fF.slice(0, 16)} != reverse ${fR.slice(0, 16)}`);
+  }
+  return { fingerprint: fF, tx: forward.transactions.length, bal: forward.balances.length };
+}
+
+// CLI: `bun src/rebuild.ts` rebuilds the live DB; `--verify` only checks order-independence.
+if (import.meta.main) {
+  const verifyOnly = process.argv.includes("--verify");
+  if (verifyOnly) {
+    const r = await verify();
+    console.log(`✓ order-independent — ${r.tx} transactions, ${r.bal} balances, fingerprint ${r.fingerprint.slice(0, 16)}`);
+  } else {
+    // Verify first so we never write a ledger that isn't order-independent.
+    const v = await verify();
+    const r = await rebuild();
+    console.log(`rebuilt: ${r.tx} transactions, ${r.bal} balances (verified ${v.fingerprint.slice(0, 16)})`);
+    if (r.unmappedAliases.length) {
+      console.log(`⚠ ${r.unmappedAliases.length} unmapped alias(es):`);
+      for (const a of r.unmappedAliases) console.log(`   ${a.institution} / ${a.account}`);
+    }
+  }
 }
