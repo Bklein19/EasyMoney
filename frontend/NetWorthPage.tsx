@@ -332,8 +332,6 @@ export function NetWorthPage() {
               title="Option-click any account to invert the selection"
               onClick={(event) => handleAccountClick(event, a.id)}
             >
-              <span>{a.institution}</span>
-              <span className="account-chip-separator">·</span>
               <span className="account-chip-name">{a.name}</span>
             </button>
           ))}
