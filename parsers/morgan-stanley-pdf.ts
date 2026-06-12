@@ -94,6 +94,7 @@ export default async function parse(filePath: string): Promise<ParseResult> {
         makeTx({
           date, amount_cents, description,
           account: accountName, institution: "Morgan Stanley",
+          category: "in-kind-transfer",
           raw: { type: "security-transfer", date, description, amount_cents },
         })
       );

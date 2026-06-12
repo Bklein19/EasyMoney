@@ -1,3 +1,10 @@
+// Transaction category drives source-priority dedup. "in-kind-transfer" rows
+// (ACAT/security transfers) appear ONLY on statements and are never dropped.
+// "activity" rows (buys, sells, dividends, fees, cash transfers) appear on both
+// statements and activity-exports; when an activity-export covers the same
+// (account, month), the statement's "activity" rows are dropped as duplicates.
+export type TransactionCategory = "activity" | "in-kind-transfer";
+
 export interface ParsedTransaction {
   id: string;
   date: string; // ISO 8601: YYYY-MM-DD
@@ -5,6 +12,7 @@ export interface ParsedTransaction {
   description: string;
   account: string;
   institution: string;
+  category: TransactionCategory;
   raw: Record<string, unknown>;
 }
 
