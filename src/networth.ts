@@ -33,7 +33,7 @@ function classify(description: string): "contribution" | "dividend" | "interest"
   if (/dividend|cap gain rein|cg rein|income rein/.test(d)) return "dividend";
   if (d.includes("interest")) return "interest";
   if (
-    /funds received|funds transferred|transfer (in|out|from)|contribution|conversion|rollover|broker to broker|journaled|rsu vest|espp purchase|shares purchased|shares redeemed|fund purchase|\beft\b|\bach\b|direct deposit/.test(d)
+    /funds received|funds transferred|transfer (in|out|from)|contribution|conversion|rollover|broker to broker|journaled|rsu vest|espp purchase|shares purchased|shares redeemed|fund purchase|statement net cash flow|\beft\b|\bach\b|direct deposit/.test(d)
   ) {
     return "contribution";
   }
@@ -50,8 +50,8 @@ export function getNetWorthReport(): NetWorthReport {
     .all();
 
   const txs = db
-    .query<{ month: string; account_id: number; amount_cents: number; description: string }, []>(
-      `SELECT strftime('%Y-%m', date) as month, account_id, amount_cents, description
+    .query<{ date: string; month: string; account_id: number; amount_cents: number; description: string }, []>(
+      `SELECT date, strftime('%Y-%m', date) as month, account_id, amount_cents, description
        FROM transactions WHERE account_id IS NOT NULL ORDER BY date`
     )
     .all();
@@ -217,6 +217,16 @@ export function getNetWorthReport(): NetWorthReport {
     return cum;
   };
 
+  const balanceBefore = (accountId: number, beforeMonth: string): number => {
+    let latest = 0;
+    for (const m of sortedMonths) {
+      if (m >= beforeMonth) break;
+      const b = balanceMap.get(flowKey(m, accountId));
+      if (b !== undefined) latest = b;
+    }
+    return latest;
+  };
+
   for (const account of accounts) {
     const pa = perAccount.get(account.id)!;
     if (pa.firstMonth === null || pa.startingAmount < 100_000) continue; // ignore < $1k
@@ -253,6 +263,78 @@ export function getNetWorthReport(): NetWorthReport {
     if (gainsPart !== 0) {
       spa.contribAdjust.set(source.outflowMonth, (spa.contribAdjust.get(source.outflowMonth) ?? 0) - gainsPart);
       spa.gainsAdjust.set(source.outflowMonth, (spa.gainsAdjust.get(source.outflowMonth) ?? 0) + gainsPart);
+    }
+  }
+
+  // --- Cash transfer linking into existing accounts ---
+  // The starting-balance logic above handles whole-account moves. This handles
+  // later cash moves into an account that already has history, carrying the source
+  // account's basis/gain ratio across instead of treating the destination inflow as
+  // entirely new contribution.
+  const contributionTxs = txs.filter((t) => classify(t.description) === "contribution" && Math.abs(t.amount_cents) >= 1_000_000);
+  const outflows = contributionTxs.filter((t) => t.amount_cents < 0).sort((a, b) => a.date.localeCompare(b.date));
+  const inflows = contributionTxs.filter((t) => t.amount_cents > 0).sort((a, b) => a.date.localeCompare(b.date));
+  const usedInflows = new Set<number>();
+
+  const daysBetween = (from: string, to: string): number =>
+    Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
+
+  const candidateCombos = (items: Array<{ tx: typeof inflows[number]; index: number }>) => {
+    const combos: Array<{ indexes: number[]; amount: number; maxDays: number }> = [];
+    const walk = (start: number, picked: number[], amount: number, maxDays: number) => {
+      if (picked.length > 0) combos.push({ indexes: [...picked], amount, maxDays });
+      if (picked.length >= 3) return;
+      for (let i = start; i < items.length; i++) {
+        picked.push(items[i]!.index);
+        walk(i + 1, picked, amount + items[i]!.tx.amount_cents, Math.max(maxDays, daysBetween(items[0]!.tx.date, items[i]!.tx.date)));
+        picked.pop();
+      }
+    };
+    walk(0, [], 0, 0);
+    return combos;
+  };
+
+  for (const out of outflows) {
+    const target = -out.amount_cents;
+    const candidates = inflows
+      .map((tx, index) => ({ tx, index }))
+      .filter(({ tx, index }) => {
+        if (usedInflows.has(index) || tx.account_id === out.account_id) return false;
+        const days = daysBetween(out.date, tx.date);
+        return days >= 0 && days <= 7;
+      });
+    if (candidates.length === 0) continue;
+
+    const match = candidateCombos(candidates)
+      .filter((c) => c.amount >= target * 0.95 && c.amount <= target * 1.05)
+      .sort((a, b) => Math.abs(a.amount - target) - Math.abs(b.amount - target) || a.indexes.length - b.indexes.length || a.maxDays - b.maxDays)[0];
+    if (!match) continue;
+
+    const sourceBalance = balanceBefore(out.account_id, out.month);
+    if (sourceBalance <= 0) continue;
+    const sourceBasis = basisThrough(out.account_id, out.month);
+    const basisRatio = Math.max(0, Math.min(1, sourceBasis / sourceBalance));
+    const basisCarried = Math.round(match.amount * basisRatio);
+    const gainsCarried = match.amount - basisCarried;
+    if (gainsCarried === 0) continue;
+
+    const sourcePa = perAccount.get(out.account_id)!;
+    sourcePa.contribAdjust.set(out.month, (sourcePa.contribAdjust.get(out.month) ?? 0) + gainsCarried);
+    sourcePa.gainsAdjust.set(out.month, (sourcePa.gainsAdjust.get(out.month) ?? 0) - gainsCarried);
+
+    for (const index of match.indexes) {
+      usedInflows.add(index);
+      const tx = inflows[index]!;
+      const share = tx.amount_cents / match.amount;
+      const txGains = index === match.indexes.at(-1)
+        ? gainsCarried - match.indexes.slice(0, -1).reduce((sum, usedIndex) => {
+            const usedTx = inflows[usedIndex]!;
+            return sum + Math.round(gainsCarried * (usedTx.amount_cents / match.amount));
+          }, 0)
+        : Math.round(gainsCarried * share);
+      const destPa = perAccount.get(tx.account_id)!;
+      destPa.contribAdjust.set(tx.month, (destPa.contribAdjust.get(tx.month) ?? 0) - txGains);
+      destPa.gainsAdjust.set(tx.month, (destPa.gainsAdjust.get(tx.month) ?? 0) + txGains);
     }
   }
 

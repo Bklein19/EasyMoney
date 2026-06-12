@@ -1,6 +1,6 @@
 import { basename } from "path";
 import type { ParseResult, ParserMeta } from "../src/types";
-import { cents, pdfToText } from "./_helpers";
+import { cents, makeTx, pdfToText } from "./_helpers";
 
 export const meta: ParserMeta = {
   id: "merrill-cma-statement-pdf",
@@ -35,8 +35,43 @@ export default async function parse(filePath: string): Promise<ParseResult> {
     text.match(/Net Portfolio Value:\s+(\$?[\d,]+\.\d{2}|-)/);
   if (!balanceMatch) throw new Error("Could not find Merrill closing value");
 
+  const transactions: ParseResult["transactions"] = [];
+  const netCashFlowMatch = text.match(/Net Cash Flow\s+(\$?[\d,]+\.\d{2}|\(\$?[\d,]+\.\d{2}\)|-)/);
+  if (netCashFlowMatch && netCashFlowMatch[1] !== "-") {
+    const amount_cents = parseBalance(netCashFlowMatch[1]!);
+    if (amount_cents !== 0) {
+      transactions.push(
+        makeTx({
+          date,
+          account,
+          institution: "Merrill",
+          amount_cents,
+          description: "Statement net cash flow",
+          raw: { type: "statement-cash-flow-summary", metric: "netCashFlow" },
+        })
+      );
+    }
+  }
+
+  const incomeMatch = text.match(/Dividends\/Interest Income\s+(\$?[\d,]+\.\d{2}|-)/);
+  if (incomeMatch && incomeMatch[1] !== "-") {
+    const amount_cents = parseBalance(incomeMatch[1]!);
+    if (amount_cents !== 0) {
+      transactions.push(
+        makeTx({
+          date,
+          account,
+          institution: "Merrill",
+          amount_cents,
+          description: "Statement dividends/interest income",
+          raw: { type: "statement-cash-flow-summary", metric: "dividendsInterestIncome" },
+        })
+      );
+    }
+  }
+
   return {
-    transactions: [],
+    transactions,
     balances: [
       {
         date,
