@@ -1,5 +1,6 @@
 import { getDb } from "./db";
 import { classifyFlow } from "./flowClassification";
+import { summarizeReturns, type ReturnSummary } from "./returns";
 import { deriveTransferLinks, type TransferLink } from "./transferLinks";
 
 export interface AccountSummary {
@@ -25,6 +26,7 @@ export interface NetWorthReport {
   accounts: AccountSummary[];
   rows: MonthlyRow[];
   transfer_links: TransferLink[];
+  returns: ReturnSummary[];
 }
 
 export function getNetWorthReport(): NetWorthReport {
@@ -52,6 +54,18 @@ export function getNetWorthReport(): NetWorthReport {
          SELECT date, account_id, balance_cents FROM manual_balances
        )
        GROUP BY month, account_id HAVING date = MAX(date)`
+    )
+    .all();
+
+  const balanceSnapshots = db
+    .query<{ date: string; account_id: number; balance_cents: number }, []>(
+      `SELECT date, account_id, balance_cents
+       FROM (
+         SELECT date, account_id, balance_cents FROM account_balances WHERE account_id IS NOT NULL
+         UNION ALL
+         SELECT date, account_id, balance_cents FROM manual_balances
+       )
+       ORDER BY account_id, date`
     )
     .all();
 
@@ -207,6 +221,20 @@ export function getNetWorthReport(): NetWorthReport {
     pa.gainsAdjust.set(adj.month, (pa.gainsAdjust.get(adj.month) ?? 0) + adj.gains_cents);
   }
 
+  const returnSummaries: ReturnSummary[] = [];
+  for (const account of accounts) {
+    const summary = summarizeReturns({
+      account_id: account.id,
+      balances: balanceSnapshots
+        .filter((balance) => balance.account_id === account.id)
+        .map((balance) => ({ date: balance.date, balance_cents: balance.balance_cents })),
+      contribution_flows: txs
+        .filter((tx) => tx.account_id === account.id && classifyFlow(tx.description) === "contribution")
+        .map((tx) => ({ date: tx.date, amount_cents: tx.amount_cents })),
+    });
+    if (summary) returnSummaries.push(summary);
+  }
+
   // --- Emit rows ---
   for (const account of accounts) {
     const pa = perAccount.get(account.id)!;
@@ -240,5 +268,5 @@ export function getNetWorthReport(): NetWorthReport {
     }
   }
 
-  return { accounts, rows, transfer_links: transferFacts.links };
+  return { accounts, rows, transfer_links: transferFacts.links, returns: returnSummaries };
 }

@@ -328,6 +328,75 @@ body {
   padding-top: 16px;
 }
 
+.returns-section {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.returns-section .chart-section-header {
+  margin-top: 28px;
+}
+
+.returns-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid #1e1e1e;
+  border-radius: 8px;
+  background: #131313;
+}
+
+.returns-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.returns-table th,
+.returns-table td {
+  padding: 11px 14px;
+  border-bottom: 1px solid #202020;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.returns-table th {
+  color: #666;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.returns-table tr:last-child td {
+  border-bottom: none;
+}
+
+.returns-table .num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.return-account {
+  color: #e8e8e8;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.return-meta {
+  margin-top: 3px;
+  color: #666;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.return-rate {
+  color: #fff;
+  font-weight: 600;
+}
+
 .hint-box {
   width: 100%;
   margin-top: 16px;

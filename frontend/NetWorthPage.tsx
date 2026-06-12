@@ -32,6 +32,7 @@ interface MonthlyRow {
 interface NetWorthReport {
   accounts: AccountSummary[];
   rows: MonthlyRow[];
+  returns: ReturnSummary[];
 }
 
 type Period = "month" | "quarter" | "year";
@@ -51,8 +52,26 @@ interface DerivativePoint {
   marketGains: number;
 }
 
+interface ReturnSummary {
+  account_id: number;
+  start_date: string;
+  end_date: string;
+  years: number;
+  initial_balance_cents: number;
+  ending_balance_cents: number;
+  net_cash_flow_cents: number;
+  irr: number | null;
+  time_weighted_return: number | null;
+  annualized_time_weighted_return: number | null;
+}
+
 const fmtUsd = (v: number) =>
   v.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+
+const fmtPct = (v: number | null) =>
+  v === null
+    ? "—"
+    : v.toLocaleString("en-US", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 const fmtUsdAxis = (v: number) =>
   Math.abs(v) >= 999_500_000
@@ -180,6 +199,19 @@ export function NetWorthPage() {
     return [...byPeriod.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
   }, [report, selectedIds, derivativePeriod]);
 
+  const returnRows = useMemo(() => {
+    if (!report) return [];
+    const accountsById = new Map(report.accounts.map((account) => [account.id, account]));
+    return report.returns
+      .filter((row) => selectedIds.has(row.account_id))
+      .map((row) => ({ ...row, account: accountsById.get(row.account_id)! }))
+      .sort((a, b) => {
+        const aName = `${a.account.institution} ${a.account.name}`;
+        const bName = `${b.account.institution} ${b.account.name}`;
+        return aName.localeCompare(bName);
+      });
+  }, [report, selectedIds]);
+
   const toggleAccount = (id: number) => {
     const next = new Set(selectedIds);
     if (next.has(id)) next.delete(id);
@@ -293,6 +325,47 @@ export function NetWorthPage() {
           </ComposedChart>
         </ResponsiveContainer>
       </div>
+
+      <section className="returns-section">
+        <div className="chart-section-header">
+          <div>
+            <div className="chart-title">Returns</div>
+            <div className="chart-subtitle">Money-weighted IRR and time-weighted return by account</div>
+          </div>
+        </div>
+        <div className="returns-table-wrap">
+          <table className="returns-table">
+            <thead>
+              <tr>
+                <th>Account</th>
+                <th>Period</th>
+                <th className="num">Annual IRR</th>
+                <th className="num">Annual TWR</th>
+                <th className="num">Net flow</th>
+                <th className="num">Ending</th>
+              </tr>
+            </thead>
+            <tbody>
+              {returnRows.map((row) => (
+                <tr key={row.account_id}>
+                  <td>
+                    <div className="return-account">{row.account.institution} · {row.account.name}</div>
+                    <div className="return-meta">{row.account.type}</div>
+                  </td>
+                  <td>
+                    <div>{row.start_date} to {row.end_date}</div>
+                    <div className="return-meta">{row.years.toFixed(1)} years</div>
+                  </td>
+                  <td className="num return-rate">{fmtPct(row.irr)}</td>
+                  <td className="num return-rate">{fmtPct(row.annualized_time_weighted_return)}</td>
+                  <td className="num">{fmtUsd(row.net_cash_flow_cents / 100)}</td>
+                  <td className="num">{fmtUsd(row.ending_balance_cents / 100)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
     </div>
   );
