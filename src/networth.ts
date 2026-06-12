@@ -228,7 +228,7 @@ export function getNetWorthReport(): NetWorthReport {
       for (const m of [pa.firstMonth, monthBefore(pa.firstMonth)]) {
         if (!m) continue;
         const out = flows.get(flowKey(m, other.id))?.contributions ?? 0;
-        if (out < 0 && Math.abs(out) >= pa.startingAmount * 0.7 && Math.abs(out) <= pa.startingAmount * 1.3) {
+        if (out < 0 && Math.abs(out) >= pa.startingAmount * 0.95 && Math.abs(out) <= pa.startingAmount * 1.05) {
           candidates.push({ id: other.id, outflowMonth: m });
           break;
         }
