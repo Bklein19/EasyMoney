@@ -83,10 +83,11 @@ export function calculateTimeWeightedReturn(balances: BalanceSnapshot[], contrib
   if (snapshots.length < 2) return null;
 
   let linked = 1;
+  let linkedPeriods = 0;
   for (let i = 1; i < snapshots.length; i++) {
     const start = snapshots[i - 1]!;
     const end = snapshots[i]!;
-    if (start.balance_cents < 0 || end.balance_cents <= 0) return null;
+    if (start.balance_cents < 0 || end.balance_cents < 0) return null;
 
     const periodDays = daysBetween(start.date, end.date);
     if (periodDays <= 0) return null;
@@ -99,14 +100,21 @@ export function calculateTimeWeightedReturn(balances: BalanceSnapshot[], contrib
       weightedFlow += flow.amount_cents * (daysBetween(flow.date, end.date) / periodDays);
     }
 
+    const investmentReturn = end.balance_cents - start.balance_cents - netFlow;
     const denominator = start.balance_cents + weightedFlow;
-    if (Math.abs(denominator) < 1) return null;
-    const periodReturn = (end.balance_cents - start.balance_cents - netFlow) / denominator;
+    if (Math.abs(denominator) < 1) {
+      if (start.balance_cents === 0 && end.balance_cents > 0 && netFlow > 0) continue;
+      if (Math.abs(investmentReturn) < 1) continue;
+      return null;
+    }
+
+    const periodReturn = investmentReturn / denominator;
     if (!Number.isFinite(periodReturn) || periodReturn <= -1) return null;
     linked *= 1 + periodReturn;
+    linkedPeriods += 1;
   }
 
-  return linked - 1;
+  return linkedPeriods === 0 ? 0 : linked - 1;
 }
 
 export function summarizeReturns(input: IrrInput): ReturnSummary | null {

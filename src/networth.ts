@@ -227,6 +227,8 @@ export function getNetWorthReport(): NetWorthReport {
 
   const returnSummaries: ReturnSummary[] = [];
   for (const account of accounts) {
+    if (isCashLikeAccount(account)) continue;
+
     const summary = summarizeReturns({
       account_id: account.id,
       balances: balanceSnapshots
