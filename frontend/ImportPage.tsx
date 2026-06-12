@@ -7,6 +7,7 @@ interface ImportJob {
   parserId?: string;
   transactionsInserted?: number;
   balancesInserted?: number;
+  autoCreatedAccounts?: number;
   error?: string;
 }
 
@@ -54,6 +55,9 @@ export function ImportPage() {
             parserId: data["parserId"] as string,
             transactionsInserted: data["transactionsInserted"] as number,
             balancesInserted: data["balancesInserted"] as number,
+            autoCreatedAccounts: Array.isArray(data["autoCreatedAccounts"])
+              ? data["autoCreatedAccounts"].length
+              : 0,
           });
         } else if (eventLine === "error") {
           updateJob(id, { status: "error", error: data["error"] as string });
@@ -111,6 +115,12 @@ export function ImportPage() {
                 <div className="stats">
                   <strong>{job.transactionsInserted}</strong> transactions &nbsp;·&nbsp;{" "}
                   <strong>{job.balancesInserted}</strong> balances
+                  {job.autoCreatedAccounts ? (
+                    <>
+                      {" "}&nbsp;·&nbsp; <strong>{job.autoCreatedAccounts}</strong> new account
+                      {job.autoCreatedAccounts === 1 ? "" : "s"}
+                    </>
+                  ) : null}
                 </div>
               )}
               {job.error && (

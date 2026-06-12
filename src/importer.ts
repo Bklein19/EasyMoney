@@ -4,6 +4,8 @@ import { join, basename } from "path";
 import { getDb } from "./db";
 import { resolveParser } from "../parsers";
 import { rebuild } from "./rebuild";
+import { resolveAccountId } from "./accounts";
+import { saveManualFacts } from "./manualFacts";
 
 const RAW_DIR = join(import.meta.dir, "../imports/raw");
 
@@ -13,6 +15,7 @@ export interface ImportReport {
   transactionsInserted: number;
   balancesInserted: number;
   unmappedAliases: Array<{ institution: string; account: string }>;
+  autoCreatedAccounts: Array<{ institution: string; account: string; accountId: number }>;
 }
 
 // Ingest one uploaded file: content-address it into the raw store, record it in
@@ -59,13 +62,28 @@ export async function importFile(sourcePath: string): Promise<ImportReport> {
   );
 
   // Rebuild the ledger from all raw files — keeps the cache a pure projection.
-  const r = await rebuild();
+  // If newly imported data exposes account aliases we have never seen before,
+  // create visible placeholder accounts immediately and rebuild again so the
+  // import is one-step: the account appears in net worth without a separate
+  // manual mapping pass. The user can still refine metadata later in Accounts.
+  let r = await rebuild();
+  const autoCreatedAccounts = r.unmappedAliases.map(({ institution, account }) => ({
+    institution,
+    account,
+    accountId: resolveAccountId(institution, account),
+  }));
+  if (autoCreatedAccounts.length > 0) {
+    await saveManualFacts();
+    r = await rebuild();
+  }
+
   return {
     fileId,
     parserId,
     transactionsInserted: r.tx,
     balancesInserted: r.bal,
     unmappedAliases: r.unmappedAliases,
+    autoCreatedAccounts,
   };
 }
 
