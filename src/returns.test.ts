@@ -41,3 +41,21 @@ test("time weighted return neutralizes withdrawals", () => {
   expect(twr).not.toBeNull();
   expect(twr!).toBeGreaterThan(0);
 });
+
+test("zero starting balance can still produce account returns", () => {
+  const summary = summarizeReturns({
+    account_id: 1,
+    balances: [
+      { date: "2025-01-01", balance_cents: 0 },
+      { date: "2026-01-01", balance_cents: 11_000_00 },
+    ],
+    contribution_flows: [{ date: "2025-07-01", amount_cents: 10_000_00 }],
+  });
+
+  expect(summary).not.toBeNull();
+  expect(summary!.initial_balance_cents).toBe(0);
+  expect(summary!.irr).not.toBeNull();
+  expect(summary!.time_weighted_return).not.toBeNull();
+  expect(summary!.irr!).toBeGreaterThan(0);
+  expect(summary!.time_weighted_return!).toBeGreaterThan(0);
+});

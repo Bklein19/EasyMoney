@@ -86,7 +86,7 @@ export function calculateTimeWeightedReturn(balances: BalanceSnapshot[], contrib
   for (let i = 1; i < snapshots.length; i++) {
     const start = snapshots[i - 1]!;
     const end = snapshots[i]!;
-    if (start.balance_cents <= 0 || end.balance_cents <= 0) return null;
+    if (start.balance_cents < 0 || end.balance_cents <= 0) return null;
 
     const periodDays = daysBetween(start.date, end.date);
     if (periodDays <= 0) return null;
@@ -114,7 +114,7 @@ export function summarizeReturns(input: IrrInput): ReturnSummary | null {
   if (balances.length < 2) return null;
   const first = balances[0]!;
   const last = balances[balances.length - 1]!;
-  if (first.balance_cents <= 0 || last.balance_cents <= 0) return null;
+  if (first.balance_cents < 0 || last.balance_cents <= 0) return null;
   if (last.date <= first.date) return null;
 
   const investedFlows = input.contribution_flows
