@@ -470,17 +470,17 @@ export function NetWorthPage({ view }: NetWorthPageProps) {
   );
 
   return (
-    <div className="page page-networth">
+    <div className={`page page-networth ${view === "networth" ? "page-networth-dashboard" : "page-performance-dashboard"}`}>
       {view === "networth" ? (
         <div className="networth-dashboard">
           <aside className="networth-secondary-sidebar">
             <div className="secondary-sidebar-section">
-              <div className="secondary-sidebar-title">Accounts</div>
-              {accountControls}
-            </div>
-            <div className="secondary-sidebar-section">
               <div className="secondary-sidebar-title">Summary</div>
               {totalCards}
+            </div>
+            <div className="secondary-sidebar-section">
+              <div className="secondary-sidebar-title">Accounts</div>
+              {accountControls}
             </div>
           </aside>
 
