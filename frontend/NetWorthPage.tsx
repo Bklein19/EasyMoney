@@ -110,7 +110,11 @@ const formatMonthTick = (time: number) => {
 const accountColor = (index: number) =>
   ["#7aa7ff", "#c9a66b", "#9d8cff", "#68c7d8", "#e09f7d", "#8ccf91", "#d889c7", "#a8b86e"][index % 8]!;
 
-export function NetWorthPage() {
+interface NetWorthPageProps {
+  view: "networth" | "performance";
+}
+
+export function NetWorthPage({ view }: NetWorthPageProps) {
   const [report, setReport] = useState<NetWorthReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number> | null>(null); // null = all
@@ -182,10 +186,9 @@ export function NetWorthPage() {
       const snaps = balanceByMonthAccount.get(month);
       if (snaps) for (const [acct, bal] of snaps) lastBalance.set(acct, bal);
 
-      // Net worth = sum of every snapped account's most recent balance, carried forward.
-      const haveAllBalances = accountsEverSnapped.size > 0 && [...accountsEverSnapped].every((a) => lastBalance.has(a));
+      // Net worth = sum of every account's most recent available balance.
       let hasBalance = false;
-      if (snaps && haveAllBalances) {
+      if (snaps && accountsEverSnapped.size > 0) {
         running = [...lastBalance.values()].reduce((a, b) => a + b, 0);
         hasBalance = true;
         if (cashOnlySelection) {
@@ -413,120 +416,142 @@ export function NetWorthPage() {
   }
 
   const hasGains = report.rows.some((r) => r.gains_cents !== null);
+  const latest = data[data.length - 1];
+  const accountControls = (
+    <>
+      <div className="account-filter-actions">
+        <span>{selectedIds.size} of {report.accounts.length}</span>
+        <button type="button" onClick={setAllAccounts}>All</button>
+        <button type="button" onClick={setNoAccounts}>None</button>
+        <button type="button" onClick={invertAccounts}>Invert</button>
+      </div>
+      <div className="account-filter">
+        {report.accounts.map((a) => (
+          <button
+            key={a.id}
+            type="button"
+            className={`account-chip${selectedIds.has(a.id) ? " active" : ""}`}
+            aria-pressed={selectedIds.has(a.id)}
+            title="Option-click any account to invert the selection"
+            onClick={(event) => handleAccountClick(event, a.id)}
+          >
+            <span className="account-chip-name">{a.name}</span>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+  const totalCards = (
+    <div className="totals-row">
+      <div className="total-card total-card-highlight">
+        <div className="total-label">Net worth</div>
+        <div className="total-value">{fmtUsd(latest?.cumulative ?? 0)}</div>
+        <div className="total-asof">as of {latest?.month ?? "—"}</div>
+      </div>
+      <div className="total-card">
+        <div className="total-label">Contributions</div>
+        <div className="total-value">{fmtUsd(totals.contributions)}</div>
+      </div>
+      <div className="total-card">
+        <div className="total-label">Market gains</div>
+        <div className="total-value">{hasGains ? fmtUsd(totals.gains) : "—"}</div>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="page page-wide">
-      <div className="account-filter-panel">
-        <div className="account-filter-actions">
-          <span>{selectedIds.size} of {report.accounts.length}</span>
-          <button type="button" onClick={setAllAccounts}>All</button>
-          <button type="button" onClick={setNoAccounts}>None</button>
-          <button type="button" onClick={invertAccounts}>Invert</button>
-        </div>
-        <div className="account-filter">
-          {report.accounts.map((a) => (
-            <button
-              key={a.id}
-              type="button"
-              className={`account-chip${selectedIds.has(a.id) ? " active" : ""}`}
-              aria-pressed={selectedIds.has(a.id)}
-              title="Option-click any account to invert the selection"
-              onClick={(event) => handleAccountClick(event, a.id)}
-            >
-              <span className="account-chip-name">{a.name}</span>
-            </button>
-          ))}
-        </div>
-      </div>
+    <div className="page page-networth">
+      {view === "networth" ? (
+        <div className="networth-dashboard">
+          <aside className="networth-secondary-sidebar">
+            <div className="secondary-sidebar-section">
+              <div className="secondary-sidebar-title">Accounts</div>
+              {accountControls}
+            </div>
+            <div className="secondary-sidebar-section">
+              <div className="secondary-sidebar-title">Summary</div>
+              {totalCards}
+            </div>
+          </aside>
 
-      <div className="totals-row">
-        <div className="total-card total-card-highlight">
-          <div className="total-label">Net worth</div>
-          <div className="total-value">{fmtUsd(data[data.length - 1]?.cumulative ?? 0)}</div>
-          <div className="total-asof">as of {data[data.length - 1]?.month ?? "—"}</div>
-        </div>
-        <div className="total-card">
-          <div className="total-label">Contributions</div>
-          <div className="total-value">{fmtUsd(totals.contributions)}</div>
-        </div>
-        <div className="total-card">
-          <div className="total-label">Market gains</div>
-          <div className="total-value">{hasGains ? fmtUsd(totals.gains) : "—"}</div>
-        </div>
-      </div>
+          <div className="networth-dashboard-main">
+            <div className="chart-container networth-primary-chart">
+              <ResponsiveContainer width="100%" height={420}>
+                <ComposedChart data={data} stackOffset="sign">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#222" />
+                  <XAxis dataKey="month" stroke="#555" tick={{ fontSize: 11 }} />
+                  <YAxis
+                    stroke="#555"
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={fmtUsdAxis}
+                  />
+                  <Tooltip
+                    formatter={(value) => fmtUsd(Number(value))}
+                    contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
+                    labelStyle={{ color: "#888" }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="cumulativeContributions" name="Contributions" stackId="stack" fill="#4a8fff" />
+                  {hasGains && <Bar dataKey="cumulativeGains" name="Market gains" stackId="stack" fill="#ffb74a" />}
+                  <Line
+                    type="monotone"
+                    dataKey="cumulative"
+                    name="Net worth"
+                    stroke="#e8e8e8"
+                    strokeWidth={1.5}
+                    dot={false}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
 
-      <div className="chart-container">
-        <ResponsiveContainer width="100%" height={420}>
-          <ComposedChart data={data} stackOffset="sign">
-            <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-            <XAxis dataKey="month" stroke="#555" tick={{ fontSize: 11 }} />
-            <YAxis
-              stroke="#555"
-              tick={{ fontSize: 11 }}
-              tickFormatter={fmtUsdAxis}
-            />
-            <Tooltip
-              formatter={(value) => fmtUsd(Number(value))}
-              contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
-              labelStyle={{ color: "#888" }}
-            />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-            <Bar dataKey="cumulativeContributions" name="Contributions" stackId="stack" fill="#4a8fff" />
-            {hasGains && <Bar dataKey="cumulativeGains" name="Market gains" stackId="stack" fill="#ffb74a" />}
-            <Line
-              type="monotone"
-              dataKey="cumulative"
-              name="Net worth"
-              stroke="#e8e8e8"
-              strokeWidth={1.5}
-              dot={false}
-            />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
+            <div className="chart-section-header">
+              <div>
+                <div className="chart-title">Change by period</div>
+                <div className="chart-subtitle">Contributions and market gains</div>
+              </div>
+              <div className="segmented-control" role="group" aria-label="Derivative period">
+                {(["month", "quarter", "year"] as const).map((period) => (
+                  <button
+                    key={period}
+                    type="button"
+                    className={derivativePeriod === period ? "active" : ""}
+                    onClick={() => setDerivativePeriod(period)}
+                  >
+                    {period}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-      <div className="chart-section-header">
-        <div>
-          <div className="chart-title">Change by period</div>
-          <div className="chart-subtitle">Contributions and market gains</div>
+            <div className="chart-container derivative-chart">
+              <ResponsiveContainer width="100%" height={340}>
+                <ComposedChart data={derivativeData} stackOffset="sign">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#222" />
+                  <XAxis dataKey="period" stroke="#555" tick={{ fontSize: 11 }} />
+                  <YAxis
+                    stroke="#555"
+                    tick={{ fontSize: 11 }}
+                    tickFormatter={fmtUsdAxis}
+                  />
+                  <Tooltip
+                    formatter={(value) => fmtUsd(Number(value))}
+                    contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
+                    labelStyle={{ color: "#888" }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="contributions" name="Contributions" fill="#4a8fff" />
+                  <Bar dataKey="marketGains" name="Market gains" fill="#ffb74a" />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
         </div>
-        <div className="segmented-control" role="group" aria-label="Derivative period">
-          {(["month", "quarter", "year"] as const).map((period) => (
-            <button
-              key={period}
-              type="button"
-              className={derivativePeriod === period ? "active" : ""}
-              onClick={() => setDerivativePeriod(period)}
-            >
-              {period}
-            </button>
-          ))}
+      ) : (
+      <section className="returns-section performance-page">
+        <div className="performance-account-filter">
+          {accountControls}
         </div>
-      </div>
-
-      <div className="chart-container derivative-chart">
-        <ResponsiveContainer width="100%" height={340}>
-          <ComposedChart data={derivativeData} stackOffset="sign">
-            <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-            <XAxis dataKey="period" stroke="#555" tick={{ fontSize: 11 }} />
-            <YAxis
-              stroke="#555"
-              tick={{ fontSize: 11 }}
-              tickFormatter={fmtUsdAxis}
-            />
-            <Tooltip
-              formatter={(value) => fmtUsd(Number(value))}
-              contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
-              labelStyle={{ color: "#888" }}
-            />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-            <Bar dataKey="contributions" name="Contributions" fill="#4a8fff" />
-            <Bar dataKey="marketGains" name="Market gains" fill="#ffb74a" />
-          </ComposedChart>
-        </ResponsiveContainer>
-      </div>
-
-      <section className="returns-section">
         <div className="chart-section-header returns-header">
           <div>
             <div className="chart-title">Performance</div>
@@ -645,6 +670,7 @@ export function NetWorthPage() {
           </table>
         </div>
       </section>
+      )}
 
     </div>
   );

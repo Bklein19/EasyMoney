@@ -1,24 +1,24 @@
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { ImportPage } from "./ImportPage";
 import { ImportsPage } from "./ImportsPage";
 import { NetWorthPage } from "./NetWorthPage";
 import { AccountsPage } from "./Accounts";
 import "./styles.css";
 
-type Page = "import" | "imports" | "networth" | "accounts";
+type Page = "imports" | "networth" | "performance" | "accounts";
 
-const PAGES: Page[] = ["import", "imports", "networth", "accounts"];
+const PAGES: Page[] = ["imports", "networth", "performance", "accounts"];
 
 const NAV: Array<{ id: Page; label: string; icon: string }> = [
-  { id: "import", label: "Import", icon: "↑" },
   { id: "imports", label: "Imports", icon: "≡" },
   { id: "networth", label: "Net Worth", icon: "◆" },
+  { id: "performance", label: "Performance", icon: "↗" },
   { id: "accounts", label: "Accounts", icon: "⊞" },
 ];
 
 function getPageFromHash(): Page {
-  const hash = location.hash.slice(1) as Page;
+  const rawHash = location.hash.slice(1);
+  const hash = (rawHash === "import" ? "imports" : rawHash) as Page;
   return PAGES.includes(hash) ? hash : "networth";
 }
 
@@ -52,9 +52,9 @@ function App() {
         ))}
       </nav>
       <main className="main">
-        {page === "import" && <ImportPage />}
         {page === "imports" && <ImportsPage />}
-        {page === "networth" && <NetWorthPage />}
+        {page === "networth" && <NetWorthPage view="networth" />}
+        {page === "performance" && <NetWorthPage view="performance" />}
         {page === "accounts" && <AccountsPage />}
       </main>
     </div>
@@ -63,4 +63,3 @@ function App() {
 
 const root = createRoot(document.body);
 root.render(<App />);
-

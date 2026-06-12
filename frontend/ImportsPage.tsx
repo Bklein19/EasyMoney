@@ -1,4 +1,15 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+
+interface ImportJob {
+  id: string;
+  filename: string;
+  status: "pending" | "running" | "done" | "error";
+  parserId?: string;
+  transactionsInserted?: number;
+  balancesInserted?: number;
+  autoCreatedAccounts?: number;
+  error?: string;
+}
 
 interface ImportRecord {
   id: number;
@@ -16,76 +27,194 @@ interface ImportRecord {
 export function ImportsPage() {
   const [records, setRecords] = useState<ImportRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [jobs, setJobs] = useState<ImportJob[]>([]);
+  const [over, setOver] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    fetch("/api/imports")
+  const refreshRecords = useCallback(() => {
+    setLoading(true);
+    return fetch("/api/imports")
       .then((r) => r.json())
       .then((data) => { setRecords(data); setLoading(false); });
   }, []);
 
-  if (loading) return <div className="page"><p style={{ color: "#888" }}>Loading...</p></div>;
+  useEffect(() => {
+    refreshRecords();
+  }, [refreshRecords]);
+
+  const updateJob = useCallback((id: string, patch: Partial<ImportJob>) => {
+    setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)));
+  }, []);
+
+  const importFileJob = useCallback(async (file: File) => {
+    const id = `${Date.now()}-${Math.random()}`;
+    setJobs((prev) => [{ id, filename: file.name, status: "pending" }, ...prev]);
+    await new Promise((r) => setTimeout(r, 50));
+    updateJob(id, { status: "running" });
+
+    const body = new FormData();
+    body.append("file", file);
+
+    const res = await fetch("/api/import", { method: "POST", body });
+    if (!res.ok || !res.body) {
+      updateJob(id, { status: "error", error: await res.text() });
+      return;
+    }
+
+    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+    let buf = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      const messages = buf.split("\n\n");
+      buf = messages.pop() ?? "";
+      for (const msg of messages) {
+        const eventLine = msg.match(/^event: (.+)$/m)?.[1];
+        const dataLine = msg.match(/^data: (.+)$/m)?.[1];
+        if (!eventLine || !dataLine) continue;
+        const data = JSON.parse(dataLine) as Record<string, unknown>;
+        if (eventLine === "done") {
+          updateJob(id, {
+            status: "done",
+            parserId: data["parserId"] as string,
+            transactionsInserted: data["transactionsInserted"] as number,
+            balancesInserted: data["balancesInserted"] as number,
+            autoCreatedAccounts: Array.isArray(data["autoCreatedAccounts"])
+              ? data["autoCreatedAccounts"].length
+              : 0,
+          });
+          refreshRecords();
+        } else if (eventLine === "error") {
+          updateJob(id, { status: "error", error: data["error"] as string });
+        }
+      }
+    }
+  }, [refreshRecords, updateJob]);
+
+  const handleFiles = useCallback((files: FileList | null) => {
+    if (!files) return;
+    for (const file of Array.from(files)) importFileJob(file);
+  }, [importFileJob]);
+
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setOver(false);
+    handleFiles(e.dataTransfer.files);
+  }, [handleFiles]);
 
   return (
-    <div className="page">
-      <h2 style={{ marginTop: 0, marginBottom: 16, fontSize: 18, fontWeight: 600 }}>
-        Imported files <span style={{ color: "#888", fontWeight: 400, fontSize: 14 }}>({records.length})</span>
+    <div className="page page-imports">
+      <div
+        className={`drop-zone imports-drop-zone${over ? " over" : ""}`}
+        onClick={() => inputRef.current?.click()}
+        onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+        onDragLeave={() => setOver(false)}
+        onDrop={onDrop}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          accept=".csv,.pdf,.ofx,.qfx,.qbo"
+          onChange={(e) => handleFiles(e.target.files)}
+        />
+        <div className="drop-icon">↑</div>
+        <div className="drop-label">
+          Drop files here or <span>browse</span>
+        </div>
+        <div className="drop-hint">CSV, PDF, OFX, QFX supported</div>
+      </div>
+
+      {jobs.length > 0 && (
+        <div className="status imports-status">
+          {jobs.map((job) => (
+            <div key={job.id} className="status-item">
+              <div className="status-item-header">
+                <span className="filename">{job.filename}</span>
+                <span className={`badge ${job.status}`}>{job.status}</span>
+              </div>
+              {job.parserId && (
+                <div className="meta">parser: {job.parserId}</div>
+              )}
+              {job.status === "done" && (
+                <div className="stats">
+                  <strong>{job.transactionsInserted}</strong> transactions &nbsp;·&nbsp;{" "}
+                  <strong>{job.balancesInserted}</strong> balances
+                  {job.autoCreatedAccounts ? (
+                    <>
+                      {" "}&nbsp;·&nbsp; <strong>{job.autoCreatedAccounts}</strong> new account
+                      {job.autoCreatedAccounts === 1 ? "" : "s"}
+                    </>
+                  ) : null}
+                </div>
+              )}
+              {job.error && (
+                <div className="meta import-error">{job.error}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <h2 className="imports-heading">
+        Imported files <span>({records.length})</span>
       </h2>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      {loading ? (
+        <div className="meta">Loading...</div>
+      ) : (
+      <table className="imports-table">
         <thead>
-          <tr style={{ borderBottom: "1px solid #333", color: "#888", textAlign: "left" }}>
-            <th style={{ padding: "6px 12px 6px 0", fontWeight: 500 }}>File</th>
-            <th style={{ padding: "6px 12px", fontWeight: 500 }}>Coverage</th>
-            <th style={{ padding: "6px 12px", fontWeight: 500 }}>Accounts</th>
-            <th style={{ padding: "6px 12px", fontWeight: 500, textAlign: "right" }}>Txns</th>
-            <th style={{ padding: "6px 12px", fontWeight: 500, textAlign: "right" }}>Balances</th>
-            <th style={{ padding: "6px 12px", fontWeight: 500 }}>Parser</th>
+          <tr>
+            <th>File</th>
+            <th>Coverage</th>
+            <th>Accounts</th>
+            <th className="num">Txns</th>
+            <th className="num">Balances</th>
+            <th>Parser</th>
           </tr>
         </thead>
         <tbody>
           {records.map((r) => (
-            <tr key={r.id} style={{ borderBottom: "1px solid #222" }}>
-              <td style={{ padding: "8px 12px 8px 0", maxWidth: 260 }}>
+            <tr key={r.id}>
+              <td className="imports-file-cell">
                 <span
-                  style={{
-                    display: "block",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                    color: r.status === "ok" ? "#e8e8e8" : "#e05252",
-                  }}
+                  className={r.status === "ok" ? "imports-file-name" : "imports-file-name error"}
                   title={r.filename}
                 >
                   {r.filename}
                 </span>
-                <span style={{ color: "#555", fontSize: 11 }}>
+                <span className="imports-file-date">
                   {r.imported_at.slice(0, 10)}
                 </span>
               </td>
-              <td style={{ padding: "8px 12px", color: "#aaa", whiteSpace: "nowrap" }}>
+              <td className="imports-coverage">
                 {r.covered_from && r.covered_to
                   ? r.covered_from === r.covered_to
                     ? r.covered_from
-                    : `${r.covered_from} – ${r.covered_to}`
-                  : <span style={{ color: "#555" }}>—</span>}
+                    : `${r.covered_from} - ${r.covered_to}`
+                  : <span className="muted">—</span>}
               </td>
-              <td style={{ padding: "8px 12px", color: "#aaa", fontSize: 12 }}>
+              <td className="imports-accounts">
                 {r.accounts.length > 0
                   ? r.accounts.join(", ")
-                  : <span style={{ color: "#555" }}>—</span>}
+                  : <span className="muted">—</span>}
               </td>
-              <td style={{ padding: "8px 12px", textAlign: "right", color: r.transactions_count > 0 ? "#e8e8e8" : "#555" }}>
+              <td className={`num ${r.transactions_count > 0 ? "" : "muted"}`}>
                 {r.transactions_count || "—"}
               </td>
-              <td style={{ padding: "8px 12px", textAlign: "right", color: r.balances_count > 0 ? "#e8e8e8" : "#555" }}>
+              <td className={`num ${r.balances_count > 0 ? "" : "muted"}`}>
                 {r.balances_count || "—"}
               </td>
-              <td style={{ padding: "8px 12px", color: "#666", fontSize: 12, whiteSpace: "nowrap" }}>
-                {r.parser_id ?? <span style={{ color: "#444" }}>—</span>}
+              <td className="imports-parser">
+                {r.parser_id ?? <span className="muted">—</span>}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
+      )}
     </div>
   );
 }
