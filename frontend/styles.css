@@ -365,21 +365,17 @@ body {
 
 .networth-dashboard {
   display: grid;
-  grid-template-columns: 236px minmax(0, 1fr);
+  grid-template-columns: 180px minmax(0, 1fr);
   gap: 20px;
   width: 100%;
   align-items: start;
 }
 
 .networth-secondary-sidebar {
-  position: sticky;
-  top: 24px;
   display: flex;
   flex-direction: column;
   gap: 18px;
   min-width: 0;
-  max-height: calc(100vh - 72px);
-  overflow-y: auto;
   padding-right: 2px;
 }
 
@@ -394,6 +390,24 @@ body {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.secondary-sidebar-title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.secondary-sidebar-title-row span:last-child {
+  color: #555;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.networth-secondary-sidebar .account-filter-actions {
+  margin-bottom: 10px;
 }
 
 .networth-secondary-sidebar .account-filter-panel {
@@ -411,7 +425,7 @@ body {
   width: 100%;
   min-height: 34px;
   border-radius: 8px;
-  padding: 7px 10px;
+  padding: 7px 9px;
 }
 
 .networth-secondary-sidebar .account-chip-name {
@@ -428,11 +442,11 @@ body {
 }
 
 .networth-secondary-sidebar .total-card {
-  padding: 13px 14px;
+  padding: 12px;
 }
 
 .networth-secondary-sidebar .total-card-highlight .total-value {
-  font-size: 1.38rem;
+  font-size: 1.2rem;
 }
 
 .networth-dashboard-main {

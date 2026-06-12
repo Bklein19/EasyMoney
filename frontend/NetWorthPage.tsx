@@ -427,28 +427,36 @@ export function NetWorthPage({ view }: NetWorthPageProps) {
 
   const hasGains = report.rows.some((r) => r.gains_cents !== null);
   const latest = data[data.length - 1];
+  const accountActionButtonElements = (
+    <>
+      <button type="button" onClick={setAllAccounts}>All</button>
+      <button type="button" onClick={setNoAccounts}>None</button>
+      <button type="button" onClick={invertAccounts}>Invert</button>
+    </>
+  );
+  const accountChips = (
+    <div className="account-filter">
+      {report.accounts.map((a) => (
+        <button
+          key={a.id}
+          type="button"
+          className={`account-chip${selectedIds.has(a.id) ? " active" : ""}`}
+          aria-pressed={selectedIds.has(a.id)}
+          title="Option-click any account to invert the selection"
+          onClick={(event) => handleAccountClick(event, a.id)}
+        >
+          <span className="account-chip-name">{a.name}</span>
+        </button>
+      ))}
+    </div>
+  );
   const accountControls = (
     <>
       <div className="account-filter-actions">
         <span>{selectedIds.size} of {report.accounts.length}</span>
-        <button type="button" onClick={setAllAccounts}>All</button>
-        <button type="button" onClick={setNoAccounts}>None</button>
-        <button type="button" onClick={invertAccounts}>Invert</button>
+        {accountActionButtonElements}
       </div>
-      <div className="account-filter">
-        {report.accounts.map((a) => (
-          <button
-            key={a.id}
-            type="button"
-            className={`account-chip${selectedIds.has(a.id) ? " active" : ""}`}
-            aria-pressed={selectedIds.has(a.id)}
-            title="Option-click any account to invert the selection"
-            onClick={(event) => handleAccountClick(event, a.id)}
-          >
-            <span className="account-chip-name">{a.name}</span>
-          </button>
-        ))}
-      </div>
+      {accountChips}
     </>
   );
   const totalCards = (
@@ -493,8 +501,12 @@ export function NetWorthPage({ view }: NetWorthPageProps) {
               {totalCards}
             </div>
             <div className="secondary-sidebar-section">
-              <div className="secondary-sidebar-title">Accounts</div>
-              {accountControls}
+              <div className="secondary-sidebar-title secondary-sidebar-title-row">
+                <span>Accounts</span>
+                <span>{selectedIds.size} of {report.accounts.length}</span>
+              </div>
+              <div className="account-filter-actions">{accountActionButtonElements}</div>
+              {accountChips}
             </div>
           </aside>
 
