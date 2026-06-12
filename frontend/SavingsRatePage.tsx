@@ -138,7 +138,7 @@ export function SavingsRatePage() {
       <div className="chart-section-header returns-header">
         <div>
           <div className="chart-title">Savings Rate</div>
-          <div className="chart-subtitle">External income versus net investment and cash changes</div>
+          <div className="chart-subtitle">External income split into retained wealth and poof</div>
         </div>
         <div className="segmented-control" role="group" aria-label="Savings rate period">
           {(["month", "quarter", "year"] as const).map((p) => (
@@ -190,14 +190,12 @@ export function SavingsRatePage() {
               contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
               labelStyle={{ color: "#888" }}
             />
-            <Bar dataKey="investment" name="Investment change" stackId="allocation" fill="#7aa7ff" />
-            <Bar dataKey="cash" name="Cash change" stackId="allocation" fill="#68c7d8" />
+            <Bar dataKey="retained" name="Net retained" fill="#7aa7ff" />
             <Bar dataKey="poof" name="Poof" fill="#777" />
           </BarChart>
         </ResponsiveContainer>
         <div className="returns-account-legend">
-          <div className="returns-account-legend-item"><span style={{ background: "#7aa7ff" }} /> Investment change</div>
-          <div className="returns-account-legend-item"><span style={{ background: "#68c7d8" }} /> Cash change</div>
+          <div className="returns-account-legend-item"><span style={{ background: "#7aa7ff" }} /> Net retained</div>
           <div className="returns-account-legend-item"><span style={{ background: "#6f6f6f" }} /> Poof</div>
         </div>
       </div>
