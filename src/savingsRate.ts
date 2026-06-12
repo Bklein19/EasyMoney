@@ -13,8 +13,8 @@ export interface SavingsRateMonthlyRow {
   income_cents: number;
   market_income_cents: number;
   income_ex_market_gains_cents: number;
-  retained_investment_cents: number;
-  retained_cash_cents: number;
+  investment_change_cents: number;
+  cash_change_cents: number;
   poof_cents: number;
   net_retained_cents: number;
 }
@@ -48,7 +48,7 @@ const CASH_TYPES = new Set(["checking", "savings"]);
 
 type PeriodAllocation = Pick<
   SavingsRateMonthlyRow,
-  "retained_investment_cents" | "retained_cash_cents" | "net_retained_cents" | "poof_cents"
+  "investment_change_cents" | "cash_change_cents" | "net_retained_cents" | "poof_cents"
 >;
 
 export function periodAllocation(input: {
@@ -57,23 +57,10 @@ export function periodAllocation(input: {
   cash_delta_cents: number;
 }): PeriodAllocation {
   const net_retained_cents = input.investment_delta_cents + input.cash_delta_cents;
-  let retained_investment_cents = 0;
-  let retained_cash_cents = 0;
-
-  if (net_retained_cents > 0) {
-    if (input.investment_delta_cents > 0 && input.cash_delta_cents > 0) {
-      retained_investment_cents = input.investment_delta_cents;
-      retained_cash_cents = input.cash_delta_cents;
-    } else if (input.investment_delta_cents > 0) {
-      retained_investment_cents = net_retained_cents;
-    } else if (input.cash_delta_cents > 0) {
-      retained_cash_cents = net_retained_cents;
-    }
-  }
 
   return {
-    retained_investment_cents,
-    retained_cash_cents,
+    investment_change_cents: input.investment_delta_cents,
+    cash_change_cents: input.cash_delta_cents,
     net_retained_cents,
     poof_cents: Math.max(0, input.income_cents - net_retained_cents),
   };

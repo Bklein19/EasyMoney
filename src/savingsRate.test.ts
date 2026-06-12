@@ -28,16 +28,29 @@ test("savings rate can separate market income from external income", () => {
   expect(isMarketIncome("Example Payroll payroll")).toBe(false);
 });
 
-test("period allocation offsets cash drawdown against investment retention", () => {
+test("period allocation preserves cash-to-investment reallocations", () => {
   expect(periodAllocation({
     income_cents: 10_000_00,
     investment_delta_cents: 8_000_00,
     cash_delta_cents: -3_000_00,
   })).toEqual({
-    retained_investment_cents: 5_000_00,
-    retained_cash_cents: 0,
+    investment_change_cents: 8_000_00,
+    cash_change_cents: -3_000_00,
     net_retained_cents: 5_000_00,
     poof_cents: 5_000_00,
+  });
+});
+
+test("period allocation can show investing previously retained cash without new savings", () => {
+  expect(periodAllocation({
+    income_cents: 0,
+    investment_delta_cents: 10_000_00,
+    cash_delta_cents: -10_000_00,
+  })).toEqual({
+    investment_change_cents: 10_000_00,
+    cash_change_cents: -10_000_00,
+    net_retained_cents: 0,
+    poof_cents: 0,
   });
 });
 

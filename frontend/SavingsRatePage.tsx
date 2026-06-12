@@ -16,8 +16,8 @@ interface SavingsRateMonthlyRow {
   income_cents: number;
   market_income_cents: number;
   income_ex_market_gains_cents: number;
-  retained_investment_cents: number;
-  retained_cash_cents: number;
+  investment_change_cents: number;
+  cash_change_cents: number;
   poof_cents: number;
   net_retained_cents: number;
 }
@@ -100,8 +100,8 @@ export function SavingsRatePage() {
       point.income += row.income_cents / 100;
       point.incomeExGains += row.income_ex_market_gains_cents / 100;
       point.marketIncome += row.market_income_cents / 100;
-      point.investment += row.retained_investment_cents / 100;
-      point.cash += row.retained_cash_cents / 100;
+      point.investment += row.investment_change_cents / 100;
+      point.cash += row.cash_change_cents / 100;
       point.poof += row.poof_cents / 100;
       point.retained += row.net_retained_cents / 100;
       byPeriod.set(key, point);
@@ -138,7 +138,7 @@ export function SavingsRatePage() {
       <div className="chart-section-header returns-header">
         <div>
           <div className="chart-title">Savings Rate</div>
-          <div className="chart-subtitle">External income retained as investment or cash</div>
+          <div className="chart-subtitle">External income versus net investment and cash changes</div>
         </div>
         <div className="segmented-control" role="group" aria-label="Savings rate period">
           {(["month", "quarter", "year"] as const).map((p) => (
@@ -184,14 +184,14 @@ export function SavingsRatePage() {
               contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
               labelStyle={{ color: "#888" }}
             />
-            <Bar dataKey="investment" name="Invested" stackId="allocation" fill="#7aa7ff" />
-            <Bar dataKey="cash" name="Cash retained" stackId="allocation" fill="#68c7d8" />
+            <Bar dataKey="investment" name="Investment change" stackId="allocation" fill="#7aa7ff" />
+            <Bar dataKey="cash" name="Cash change" stackId="allocation" fill="#68c7d8" />
             <Bar dataKey="poof" name="Poof" stackId="allocation" fill="#6f6f6f" />
           </BarChart>
         </ResponsiveContainer>
         <div className="returns-account-legend">
-          <div className="returns-account-legend-item"><span style={{ background: "#7aa7ff" }} /> Invested</div>
-          <div className="returns-account-legend-item"><span style={{ background: "#68c7d8" }} /> Cash retained</div>
+          <div className="returns-account-legend-item"><span style={{ background: "#7aa7ff" }} /> Investment change</div>
+          <div className="returns-account-legend-item"><span style={{ background: "#68c7d8" }} /> Cash change</div>
           <div className="returns-account-legend-item"><span style={{ background: "#6f6f6f" }} /> Poof</div>
         </div>
       </div>
@@ -207,8 +207,8 @@ export function SavingsRatePage() {
                   <th className="num">Gross income</th>
                   <th className="num">Ex gains</th>
                   <th className="num">Market income</th>
-                  <th className="num">Invested</th>
-                  <th className="num">Cash</th>
+                  <th className="num">Investment change</th>
+                  <th className="num">Cash change</th>
                   <th className="num">Poof</th>
                   <th className="num">Rate</th>
                 </tr>
