@@ -337,6 +337,24 @@ body {
   margin-top: 28px;
 }
 
+.return-subsection-title {
+  width: 100%;
+  margin: 0 0 8px;
+  color: #e8e8e8;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.returns-investment-chart {
+  margin-bottom: 18px;
+  padding-top: 16px;
+}
+
+.returns-chart {
+  margin-bottom: 12px;
+  padding-top: 16px;
+}
+
 .returns-table-wrap {
   width: 100%;
   overflow-x: auto;

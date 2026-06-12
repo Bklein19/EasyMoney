@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   ComposedChart,
+  Area,
   Bar,
   Line,
+  ReferenceLine,
   XAxis,
   YAxis,
   Tooltip,
@@ -63,6 +65,19 @@ interface ReturnSummary {
   irr: number | null;
   time_weighted_return: number | null;
   annualized_time_weighted_return: number | null;
+}
+
+interface ReturnChartPoint {
+  accountLabel: string;
+  annualIrr: number | null;
+  annualTwr: number | null;
+}
+
+interface InvestmentReturnPoint {
+  month: string;
+  investmentReturns: number;
+  positiveReturns: number | null;
+  negativeReturns: number | null;
 }
 
 const fmtUsd = (v: number) =>
@@ -212,6 +227,23 @@ export function NetWorthPage() {
       });
   }, [report, selectedIds]);
 
+  const returnChartData: ReturnChartPoint[] = useMemo(() => {
+    return returnRows.map((row) => ({
+      accountLabel: `${row.account.institution} · ${row.account.name}`,
+      annualIrr: row.irr,
+      annualTwr: row.annualized_time_weighted_return,
+    }));
+  }, [returnRows]);
+
+  const investmentReturnData: InvestmentReturnPoint[] = useMemo(() => {
+    return data.map((point) => ({
+      month: point.month,
+      investmentReturns: point.cumulativeGains,
+      positiveReturns: point.cumulativeGains >= 0 ? point.cumulativeGains : null,
+      negativeReturns: point.cumulativeGains < 0 ? point.cumulativeGains : null,
+    }));
+  }, [data]);
+
   const toggleAccount = (id: number) => {
     const next = new Set(selectedIds);
     if (next.has(id)) next.delete(id);
@@ -332,6 +364,75 @@ export function NetWorthPage() {
             <div className="chart-title">Returns</div>
             <div className="chart-subtitle">Money-weighted IRR and time-weighted return by account</div>
           </div>
+        </div>
+        <div className="return-subsection-title">Investment returns</div>
+        <div className="chart-container returns-investment-chart">
+          <ResponsiveContainer width="100%" height={320}>
+            <ComposedChart data={investmentReturnData} margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#222" />
+              <XAxis dataKey="month" stroke="#555" tick={{ fontSize: 11 }} />
+              <YAxis
+                stroke="#555"
+                tick={{ fontSize: 11 }}
+                tickFormatter={fmtUsdAxis}
+              />
+              <Tooltip
+                formatter={(value) => fmtUsd(Number(value))}
+                contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
+                labelStyle={{ color: "#888" }}
+              />
+              <ReferenceLine y={0} stroke="#333" />
+              <Area
+                type="monotone"
+                dataKey="positiveReturns"
+                name="Investment returns"
+                stroke="#20a33a"
+                fill="#20a33a"
+                fillOpacity={0.16}
+                dot={false}
+                connectNulls={false}
+              />
+              <Area
+                type="monotone"
+                dataKey="negativeReturns"
+                name="Investment losses"
+                stroke="#dc3f9a"
+                fill="#dc3f9a"
+                fillOpacity={0.16}
+                dot={false}
+                connectNulls={false}
+              />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="return-subsection-title">Annualized rates</div>
+        <div className="chart-container returns-chart">
+          <ResponsiveContainer width="100%" height={Math.max(240, returnChartData.length * 72 + 72)}>
+            <ComposedChart data={returnChartData} layout="vertical" margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#222" />
+              <XAxis
+                type="number"
+                stroke="#555"
+                tick={{ fontSize: 11 }}
+                tickFormatter={(value) => fmtPct(Number(value))}
+              />
+              <YAxis
+                type="category"
+                dataKey="accountLabel"
+                width={190}
+                stroke="#555"
+                tick={{ fontSize: 11 }}
+              />
+              <Tooltip
+                formatter={(value) => fmtPct(Number(value))}
+                contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
+                labelStyle={{ color: "#888" }}
+              />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Bar dataKey="annualIrr" name="Annual IRR" fill="#60d394" />
+              <Bar dataKey="annualTwr" name="Annual TWR" fill="#ff7a90" />
+            </ComposedChart>
+          </ResponsiveContainer>
         </div>
         <div className="returns-table-wrap">
           <table className="returns-table">
