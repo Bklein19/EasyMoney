@@ -16,6 +16,7 @@ import { join } from "path";
 import { resolveParser } from "../parsers";
 import { lookupAlias } from "./accounts";
 import { getDb } from "./db";
+import { activityBucket } from "./flowClassification";
 import type { ParsedTransaction, ParsedBalance, ParserMeta } from "./types";
 
 const RAW_DIR = join(import.meta.dir, "../imports/raw");
@@ -59,23 +60,6 @@ export async function parseAllRawFiles(rawDir = RAW_DIR): Promise<ParsedFile[]> 
 }
 
 const monthOf = (date: string) => date.slice(0, 7); // YYYY-MM
-
-type ActivityBucket = "contribution" | "income" | "other";
-
-function activityBucket(t: Pick<ParsedTransaction, "description" | "raw">): ActivityBucket {
-  const metric = typeof t.raw.metric === "string" ? t.raw.metric : "";
-  if (metric === "netCashFlow") return "contribution";
-  if (metric === "dividendsInterestIncome") return "income";
-
-  const d = t.description.toLowerCase();
-  if (/dividend|cap gain rein|cg rein|income rein|interest/.test(d)) return "income";
-  if (
-    /funds received|funds transferred|transfer (in|out|from)|contribution|conversion|rollover|broker to broker|journaled|rsu vest|espp purchase|shares purchased|shares redeemed|fund purchase|\beft\b|\bach\b|direct deposit|statement net cash flow/.test(d)
-  ) {
-    return "contribution";
-  }
-  return "other";
-}
 
 function isStatementSummary(t: ParsedTransaction): boolean {
   return t.raw.type === "statement-cash-flow-summary";
