@@ -43,6 +43,7 @@ interface PeriodRow {
   investment: number;
   cash: number;
   poof: number;
+  poofOut: number;
   retained: number;
 }
 
@@ -94,6 +95,7 @@ export function SavingsRatePage() {
         investment: 0,
         cash: 0,
         poof: 0,
+        poofOut: 0,
         retained: 0,
       };
       if (row.month < point.sortKey) point.sortKey = row.month;
@@ -103,6 +105,7 @@ export function SavingsRatePage() {
       point.investment += row.investment_change_cents / 100;
       point.cash += row.cash_change_cents / 100;
       point.poof += row.poof_cents / 100;
+      point.poofOut -= row.poof_cents / 100;
       point.retained += row.net_retained_cents / 100;
       byPeriod.set(key, point);
     }
@@ -184,12 +187,12 @@ export function SavingsRatePage() {
             <XAxis dataKey="period" stroke="#555" tick={{ fontSize: 11 }} />
             <YAxis stroke="#555" tick={{ fontSize: 11 }} tickFormatter={fmtUsdAxis} />
             <Tooltip
-              formatter={(value) => fmtUsd(Number(value))}
+              formatter={(value, name) => fmtUsd(name === "Poof" ? Math.abs(Number(value)) : Number(value))}
               contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
               labelStyle={{ color: "#888" }}
             />
-            <Bar dataKey="retained" name="Net retained" fill="#7aa7ff" />
-            <Bar dataKey="poof" name="Poof" fill="#777" />
+            <Bar dataKey="retained" name="Net retained" stackId="flow" fill="#7aa7ff" />
+            <Bar dataKey="poofOut" name="Poof" stackId="flow" fill="#777" />
           </BarChart>
         </ResponsiveContainer>
         <div className="returns-account-legend">
