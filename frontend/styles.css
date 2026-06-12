@@ -403,6 +403,7 @@ body {
   color: #555;
   font-size: 0.62rem;
   letter-spacing: 0.04em;
+  text-transform: none;
   white-space: nowrap;
 }
 
