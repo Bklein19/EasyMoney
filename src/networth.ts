@@ -29,6 +29,10 @@ export interface NetWorthReport {
   returns: ReturnSummary[];
 }
 
+function isCashLikeAccount(account: { type: string }): boolean {
+  return ["checking", "savings", "credit-card", "loan"].includes(account.type);
+}
+
 export function getNetWorthReport(): NetWorthReport {
   const db = getDb();
 
@@ -186,8 +190,8 @@ export function getNetWorthReport(): NetWorthReport {
       if (startingAmount !== 0) contribAdjust.set(firstMonth, startingAmount);
     }
 
-    // --- Pass-through accounts: unexplained changes are contributions, never gains ---
-    if (account.flow_treatment === "contributions") {
+    // --- Cash/pass-through accounts: unexplained changes are contributions, never gains ---
+    if (account.flow_treatment === "contributions" || isCashLikeAccount(account)) {
       for (const [m, g] of gainsByMonth) {
         if (g !== 0) contribAdjust.set(m, (contribAdjust.get(m) ?? 0) + g);
         gainsByMonth.set(m, 0);

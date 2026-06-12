@@ -89,6 +89,9 @@ const fmtPct = (v: number | null) =>
     ? "—"
     : v.toLocaleString("en-US", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
+const isCashLikeAccount = (account: AccountSummary) =>
+  ["checking", "savings", "credit-card", "loan"].includes(account.type);
+
 const fmtUsdAxis = (v: number) =>
   Math.abs(v) >= 999_500_000
     ? `$${(v / 1_000_000_000).toFixed(Math.abs(v) >= 10_000_000_000 ? 0 : 1).replace(/\.0$/, "")}B`
@@ -146,6 +149,11 @@ export function NetWorthPage() {
     let running = 0;
     let started = false;
     const points: ChartPoint[] = [];
+    const accountById = new Map(report.accounts.map((account) => [account.id, account]));
+    const cashOnlySelection = [...selectedIds].every((id) => {
+      const account = accountById.get(id);
+      return account ? isCashLikeAccount(account) : false;
+    });
 
     for (const month of months) {
       const contribDelta = monthlyContribs.get(month) ?? 0;
@@ -155,7 +163,7 @@ export function NetWorthPage() {
 
       // Return of capital: outflows draw down contributions first; anything
       // beyond that comes out of gains. Keeps a fully-emptied account at 0/0.
-      if (cumulativeContribs < 0) {
+      if (!cashOnlySelection && cumulativeContribs < 0) {
         cumulativeGains += cumulativeContribs;
         cumulativeContribs = 0;
       }
@@ -165,8 +173,14 @@ export function NetWorthPage() {
       if (snapped !== undefined) {
         running = snapped;
         hasBalance = true;
-        // Reconcile: keep contributions as-is, let gains absorb any residual
-        cumulativeGains = running - cumulativeContribs;
+        if (cashOnlySelection) {
+          // Cash accounts have statement snapshots mid-month; transactions later
+          // in the same month are timing residuals, not market gains.
+          cumulativeContribs = running - cumulativeGains;
+        } else {
+          // Reconcile: keep contributions as-is, let gains absorb any residual.
+          cumulativeGains = running - cumulativeContribs;
+        }
       } else {
         running += contribDelta + gainsDelta;
       }

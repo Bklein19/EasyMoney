@@ -49,7 +49,7 @@ interface FlowTotals {
 }
 
 export function deriveTransferLinks(input: {
-  accounts: Array<{ id: number }>;
+  accounts: Array<{ id: number; type?: string }>;
   sortedMonths: string[];
   flows: Map<string, FlowTotals>;
   balances: Map<string, number>;
@@ -60,6 +60,9 @@ export function deriveTransferLinks(input: {
   const monthBefore = (m: string) => input.sortedMonths[input.sortedMonths.indexOf(m) - 1] ?? null;
   const links: TransferLink[] = [];
   const adjustments: TransferAdjustment[] = [];
+  const accountType = new Map(input.accounts.map((account) => [account.id, account.type ?? "unknown"]));
+  const canCarryMarketGains = (accountId: number): boolean =>
+    !["checking", "savings", "credit-card", "loan"].includes(accountType.get(accountId) ?? "unknown");
 
   const contributionAdjustments = new Map<number, Map<string, number>>();
   const gainsAdjustments = new Map<number, Map<string, number>>();
@@ -121,10 +124,10 @@ export function deriveTransferLinks(input: {
 
     const source = candidates[0]!;
     const sourceBasis = basisThrough(source.id, source.outflowMonth);
-    const basisCarried = Math.min(seed.startingAmount, sourceBasis);
+    const basisCarried = canCarryMarketGains(source.id) ? Math.min(seed.startingAmount, sourceBasis) : seed.startingAmount;
     const gainsCarried = seed.startingAmount - basisCarried;
     const sourceOutflow = input.flows.get(flowKey(source.outflowMonth, source.id))?.contributions ?? 0;
-    const sourceBasisPart = -Math.min(-sourceOutflow, sourceBasis);
+    const sourceBasisPart = canCarryMarketGains(source.id) ? -Math.min(-sourceOutflow, sourceBasis) : sourceOutflow;
     const sourceGainsPart = sourceOutflow - sourceBasisPart;
     const linkId = `starting:${source.id}:${source.outflowMonth}->${account.id}:${seed.firstMonth}`;
 
@@ -140,14 +143,16 @@ export function deriveTransferLinks(input: {
       gains_cents: gainsCarried,
     });
 
-    addAdjustment({
-      link_id: linkId,
-      reason: "starting-balance-transfer",
-      account_id: account.id,
-      month: seed.firstMonth,
-      contributions_cents: basisCarried - seed.startingAmount,
-      gains_cents: gainsCarried,
-    });
+    if (canCarryMarketGains(account.id)) {
+      addAdjustment({
+        link_id: linkId,
+        reason: "starting-balance-transfer",
+        account_id: account.id,
+        month: seed.firstMonth,
+        contributions_cents: basisCarried - seed.startingAmount,
+        gains_cents: gainsCarried,
+      });
+    }
     if (sourceGainsPart !== 0) {
       addAdjustment({
         link_id: linkId,
@@ -204,7 +209,7 @@ export function deriveTransferLinks(input: {
     const sourceBalance = balanceBefore(outflow.account_id, outflow.month);
     if (sourceBalance <= 0) continue;
     const sourceBasis = basisThrough(outflow.account_id, outflow.month);
-    const basisRatio = Math.max(0, Math.min(1, sourceBasis / sourceBalance));
+    const basisRatio = canCarryMarketGains(outflow.account_id) ? Math.max(0, Math.min(1, sourceBasis / sourceBalance)) : 1;
     const basisCarried = Math.round(match.amount * basisRatio);
     const gainsCarried = match.amount - basisCarried;
     if (gainsCarried === 0) continue;
@@ -241,14 +246,16 @@ export function deriveTransferLinks(input: {
         ? Math.round(gainsCarried * (tx.amount_cents / match.amount))
         : gainsCarried - distributedGains;
       distributedGains += txGains;
-      addAdjustment({
-        link_id: linkId,
-        reason: "cash-transfer",
-        account_id: tx.account_id,
-        month: tx.month,
-        contributions_cents: -txGains,
-        gains_cents: txGains,
-      });
+      if (canCarryMarketGains(tx.account_id)) {
+        addAdjustment({
+          link_id: linkId,
+          reason: "cash-transfer",
+          account_id: tx.account_id,
+          month: tx.month,
+          contributions_cents: -txGains,
+          gains_cents: txGains,
+        });
+      }
     }
   }
 
