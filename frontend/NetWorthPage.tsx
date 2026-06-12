@@ -359,13 +359,13 @@ export function NetWorthPage() {
       </div>
 
       <section className="returns-section">
-        <div className="chart-section-header">
+        <div className="chart-section-header returns-header">
           <div>
-            <div className="chart-title">Returns</div>
-            <div className="chart-subtitle">Money-weighted IRR and time-weighted return by account</div>
+            <div className="chart-title">Performance</div>
+            <div className="chart-subtitle">Investment returns and annualized account returns</div>
           </div>
         </div>
-        <div className="return-subsection-title">Investment returns</div>
+        <div className="return-subsection-title">Investment Returns</div>
         <div className="chart-container returns-investment-chart">
           <ResponsiveContainer width="100%" height={320}>
             <ComposedChart data={investmentReturnData} margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
@@ -405,7 +405,7 @@ export function NetWorthPage() {
             </ComposedChart>
           </ResponsiveContainer>
         </div>
-        <div className="return-subsection-title">Annualized rates</div>
+        <div className="return-subsection-title">Annualized Rates</div>
         <div className="chart-container returns-chart">
           <ResponsiveContainer width="100%" height={Math.max(240, returnChartData.length * 72 + 72)}>
             <ComposedChart data={returnChartData} layout="vertical" margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
@@ -434,8 +434,17 @@ export function NetWorthPage() {
             </ComposedChart>
           </ResponsiveContainer>
         </div>
+        <div className="return-subsection-title">Return Details</div>
         <div className="returns-table-wrap">
           <table className="returns-table">
+            <colgroup>
+              <col className="c-return-account" />
+              <col className="c-return-period" />
+              <col className="c-return-rate" />
+              <col className="c-return-rate" />
+              <col className="c-return-money" />
+              <col className="c-return-money" />
+            </colgroup>
             <thead>
               <tr>
                 <th>Account</th>
@@ -450,7 +459,8 @@ export function NetWorthPage() {
               {returnRows.map((row) => (
                 <tr key={row.account_id}>
                   <td>
-                    <div className="return-account">{row.account.institution} · {row.account.name}</div>
+                    <div className="return-account">{row.account.institution}</div>
+                    <div className="return-account-name">{row.account.name}</div>
                     <div className="return-meta">{row.account.type}</div>
                   </td>
                   <td>

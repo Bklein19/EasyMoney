@@ -330,28 +330,35 @@ body {
 
 .returns-section {
   width: 100%;
-  margin-top: 8px;
+  margin-top: 12px;
 }
 
 .returns-section .chart-section-header {
-  margin-top: 28px;
+  margin: 30px 0 14px;
+}
+
+.returns-header {
+  padding-bottom: 10px;
+  border-bottom: 1px solid #202020;
 }
 
 .return-subsection-title {
   width: 100%;
-  margin: 0 0 8px;
-  color: #e8e8e8;
-  font-size: 0.86rem;
-  font-weight: 600;
+  margin: 18px 0 8px;
+  color: #777;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .returns-investment-chart {
-  margin-bottom: 18px;
+  margin-bottom: 2px;
   padding-top: 16px;
 }
 
 .returns-chart {
-  margin-bottom: 12px;
+  margin-bottom: 2px;
   padding-top: 16px;
 }
 
@@ -361,30 +368,43 @@ body {
   border: 1px solid #1e1e1e;
   border-radius: 8px;
   background: #131313;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 
 .returns-table {
   width: 100%;
-  min-width: 760px;
+  min-width: 720px;
   border-collapse: collapse;
-  font-size: 0.82rem;
+  table-layout: fixed;
+  font-size: 0.78rem;
   font-variant-numeric: tabular-nums;
 }
 
+.returns-table col.c-return-account { width: 30%; }
+.returns-table col.c-return-period { width: 22%; }
+.returns-table col.c-return-rate { width: 11%; }
+.returns-table col.c-return-money { width: 13%; }
+
 .returns-table th,
 .returns-table td {
-  padding: 11px 14px;
+  padding: 10px 12px;
   border-bottom: 1px solid #202020;
   text-align: left;
-  vertical-align: middle;
+  vertical-align: top;
 }
 
 .returns-table th {
   color: #666;
-  font-size: 0.68rem;
+  font-size: 0.64rem;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
+  white-space: nowrap;
+  background: #151515;
+}
+
+.returns-table tbody tr:hover {
+  background: #171717;
 }
 
 .returns-table tr:last-child td {
@@ -398,14 +418,20 @@ body {
 
 .return-account {
   color: #e8e8e8;
-  font-weight: 500;
-  white-space: nowrap;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.return-account-name {
+  margin-top: 2px;
+  color: #aaa;
+  line-height: 1.25;
 }
 
 .return-meta {
-  margin-top: 3px;
+  margin-top: 5px;
   color: #666;
-  font-size: 0.72rem;
+  font-size: 0.62rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
