@@ -94,6 +94,11 @@ body {
   align-items: stretch;
 }
 
+.page-savings-rate {
+  max-width: 1180px;
+  align-items: stretch;
+}
+
 /* Import page */
 
 .drop-zone {
@@ -739,6 +744,34 @@ body {
 .return-rate {
   color: #fff;
   font-weight: 600;
+}
+
+.savings-summary-row {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.savings-rate-chart {
+  margin-bottom: 18px;
+}
+
+.savings-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.85fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.savings-table,
+.savings-source-table {
+  min-width: 0;
+}
+
+.savings-table {
+  table-layout: auto;
+}
+
+.savings-source-table {
+  table-layout: auto;
 }
 
 .hint-box {

@@ -2,17 +2,19 @@ import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ImportsPage } from "./ImportsPage";
 import { NetWorthPage } from "./NetWorthPage";
+import { SavingsRatePage } from "./SavingsRatePage";
 import { AccountsPage } from "./Accounts";
 import "./styles.css";
 
-type Page = "imports" | "networth" | "performance" | "accounts";
+type Page = "imports" | "networth" | "performance" | "savings" | "accounts";
 
-const PAGES: Page[] = ["imports", "networth", "performance", "accounts"];
+const PAGES: Page[] = ["imports", "networth", "performance", "savings", "accounts"];
 
 const NAV: Array<{ id: Page; label: string; icon: string }> = [
   { id: "imports", label: "Imports", icon: "≡" },
   { id: "networth", label: "Net Worth", icon: "◆" },
   { id: "performance", label: "Performance", icon: "↗" },
+  { id: "savings", label: "Savings Rate", icon: "◫" },
   { id: "accounts", label: "Accounts", icon: "⊞" },
 ];
 
@@ -55,6 +57,7 @@ function App() {
         {page === "imports" && <ImportsPage />}
         {page === "networth" && <NetWorthPage view="networth" />}
         {page === "performance" && <NetWorthPage view="performance" />}
+        {page === "savings" && <SavingsRatePage />}
         {page === "accounts" && <AccountsPage />}
       </main>
     </div>

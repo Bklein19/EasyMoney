@@ -1,5 +1,6 @@
 import { importFile } from "./importer";
 import { getNetWorthReport } from "./networth";
+import { getSavingsRateReport } from "./savingsRate";
 import { getImportList } from "./imports";
 import { getDb } from "./db";
 import { updateAccount, deleteAlias, createAlias } from "./accounts";
@@ -23,6 +24,9 @@ export function startServer(port = Number(process.env["PORT"] ?? 3000)) {
       "/": index,
       "/api/networth": {
         GET: () => Response.json(getNetWorthReport()),
+      },
+      "/api/savings-rate": {
+        GET: () => Response.json(getSavingsRateReport()),
       },
       "/api/imports": {
         GET: () => Response.json(getImportList()),
