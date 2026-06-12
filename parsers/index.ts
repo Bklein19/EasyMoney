@@ -11,6 +11,8 @@ import { meta as fid401kMeta, default as fid401kParse } from "./fidelity-401k-ht
 import { meta as seqMeta, default as seqParse } from "./sequoia-fund-pdf";
 import { meta as merrillActMeta, default as merrillActParse } from "./merrill-activity-csv";
 import { meta as merrillStmtMeta, default as merrillStmtParse } from "./merrill-cma-statement-pdf";
+import { meta as bofaActivityMeta, default as bofaActivityParse } from "./bofa-activity-csv";
+import { meta as bofaStatementMeta, default as bofaStatementParse } from "./bofa-statement-pdf";
 
 export const PARSERS: ParserModule[] = [
   { meta: msStmtMeta, parse: msStmtParse },
@@ -22,6 +24,8 @@ export const PARSERS: ParserModule[] = [
   { meta: seqMeta, parse: seqParse },
   { meta: merrillActMeta, parse: merrillActParse },
   { meta: merrillStmtMeta, parse: merrillStmtParse },
+  { meta: bofaActivityMeta, parse: bofaActivityParse },
+  { meta: bofaStatementMeta, parse: bofaStatementParse },
 ];
 
 export function getParserById(id: string): ParserModule | undefined {
