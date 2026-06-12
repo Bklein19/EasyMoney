@@ -438,16 +438,33 @@ body {
 
 .networth-secondary-sidebar .totals-row {
   grid-template-columns: 1fr;
-  gap: 10px;
+  gap: 8px;
   margin-bottom: 0;
 }
 
 .networth-secondary-sidebar .total-card {
-  padding: 12px;
+  border-radius: 8px;
+  padding: 9px 10px;
 }
 
 .networth-secondary-sidebar .total-card-highlight .total-value {
-  font-size: 1.2rem;
+  font-size: 1.1rem;
+}
+
+.networth-secondary-sidebar .total-label {
+  margin-bottom: 4px;
+  font-size: 0.62rem;
+  letter-spacing: 0.055em;
+}
+
+.networth-secondary-sidebar .total-value {
+  font-size: 1.08rem;
+  line-height: 1.15;
+}
+
+.networth-secondary-sidebar .total-asof {
+  margin-top: 3px;
+  font-size: 0.66rem;
 }
 
 .networth-dashboard-main {
