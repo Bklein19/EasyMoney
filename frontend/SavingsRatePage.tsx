@@ -37,8 +37,8 @@ interface SavingsRateReport {
 interface PeriodRow {
   period: string;
   sortKey: string;
+  grossIncome: number;
   income: number;
-  incomeExGains: number;
   marketIncome: number;
   investment: number;
   cash: number;
@@ -88,8 +88,8 @@ export function SavingsRatePage() {
       const point = byPeriod.get(key) ?? {
         period: key,
         sortKey: row.month,
+        grossIncome: 0,
         income: 0,
-        incomeExGains: 0,
         marketIncome: 0,
         investment: 0,
         cash: 0,
@@ -97,8 +97,8 @@ export function SavingsRatePage() {
         retained: 0,
       };
       if (row.month < point.sortKey) point.sortKey = row.month;
-      point.income += row.income_cents / 100;
-      point.incomeExGains += row.income_ex_market_gains_cents / 100;
+      point.grossIncome += row.income_cents / 100;
+      point.income += row.income_ex_market_gains_cents / 100;
       point.marketIncome += row.market_income_cents / 100;
       point.investment += row.investment_change_cents / 100;
       point.cash += row.cash_change_cents / 100;
@@ -111,7 +111,7 @@ export function SavingsRatePage() {
 
   const totals = useMemo(() => {
     const income = rows.reduce((sum, row) => sum + row.income, 0);
-    const incomeExGains = rows.reduce((sum, row) => sum + row.incomeExGains, 0);
+    const grossIncome = rows.reduce((sum, row) => sum + row.grossIncome, 0);
     const marketIncome = rows.reduce((sum, row) => sum + row.marketIncome, 0);
     const retained = rows.reduce((sum, row) => sum + row.retained, 0);
     const investment = rows.reduce((sum, row) => sum + row.investment, 0);
@@ -119,14 +119,13 @@ export function SavingsRatePage() {
     const poof = income - retained;
     return {
       income,
-      incomeExGains,
+      grossIncome,
       marketIncome,
       retained,
       investment,
       cash,
       poof,
       rate: income > 0 ? retained / income : null,
-      rateExGains: incomeExGains > 0 ? retained / incomeExGains : null,
     };
   }, [rows]);
 
@@ -138,7 +137,7 @@ export function SavingsRatePage() {
       <div className="chart-section-header returns-header">
         <div>
           <div className="chart-title">Savings Rate</div>
-          <div className="chart-subtitle">External income split into retained wealth and poof</div>
+          <div className="chart-subtitle">Income excluding dividends and interest, split into retained wealth and poof</div>
         </div>
         <div className="segmented-control" role="group" aria-label="Savings rate period">
           {(["month", "quarter", "year"] as const).map((p) => (
@@ -153,15 +152,14 @@ export function SavingsRatePage() {
         <div className="total-card total-card-highlight">
           <div className="total-label">Savings rate</div>
           <div className="total-value">{fmtPct(totals.rate)}</div>
-          <div className="total-meta">Ex gains {fmtPct(totals.rateExGains)}</div>
         </div>
         <div className="total-card">
-          <div className="total-label">Gross income</div>
+          <div className="total-label">Income</div>
           <div className="total-value">{fmtUsd(totals.income)}</div>
         </div>
         <div className="total-card">
-          <div className="total-label">Income ex gains</div>
-          <div className="total-value">{fmtUsd(totals.incomeExGains)}</div>
+          <div className="total-label">Investment income</div>
+          <div className="total-value">{fmtUsd(totals.marketIncome)}</div>
         </div>
         <div className="total-card">
           <div className="total-label">Retained</div>
@@ -208,9 +206,9 @@ export function SavingsRatePage() {
               <thead>
                 <tr>
                   <th>Period</th>
+                  <th className="num">Income</th>
+                  <th className="num">Investment income</th>
                   <th className="num">Gross income</th>
-                  <th className="num">Ex gains</th>
-                  <th className="num">Market income</th>
                   <th className="num">Investment change</th>
                   <th className="num">Cash change</th>
                   <th className="num">Poof</th>
@@ -222,8 +220,8 @@ export function SavingsRatePage() {
                   <tr key={row.period}>
                     <td>{row.period}</td>
                     <td className="num">{fmtUsd(row.income)}</td>
-                    <td className="num">{fmtUsd(row.incomeExGains)}</td>
                     <td className="num">{fmtUsd(row.marketIncome)}</td>
+                    <td className="num">{fmtUsd(row.grossIncome)}</td>
                     <td className="num">{fmtUsd(row.investment)}</td>
                     <td className="num">{fmtUsd(row.cash)}</td>
                     <td className="num">{fmtUsd(row.poof)}</td>
@@ -250,7 +248,7 @@ export function SavingsRatePage() {
                 {report.income_sources.slice(0, 12).map((source) => (
                   <tr key={source.label}>
                     <td>{source.label}</td>
-                    <td>{source.is_market_income ? "Market" : "Income"}</td>
+                    <td>{source.is_market_income ? "Investment" : "Income"}</td>
                     <td className="num">{source.count}</td>
                     <td className="num">{fmtUsd(source.amount_cents / 100)}</td>
                   </tr>

@@ -200,7 +200,7 @@ export function getSavingsRateReport(): SavingsRateReport {
         market_income_cents,
         income_ex_market_gains_cents: income_cents - market_income_cents,
         ...periodAllocation({
-          income_cents,
+          income_cents: income_cents - market_income_cents,
           investment_delta_cents: deltas.investment,
           cash_delta_cents: deltas.cash,
         }),

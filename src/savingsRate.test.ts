@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { isExternalIncome, isInternalMoneyMove, isMarketIncome, periodAllocation } from "./savingsRate";
+import { getSavingsRateReport, isExternalIncome, isInternalMoneyMove, isMarketIncome, periodAllocation } from "./savingsRate";
 
 test("savings rate treats payroll and retirement contributions as income", () => {
   expect(isExternalIncome({
@@ -26,6 +26,12 @@ test("savings rate can separate market income from external income", () => {
   expect(isExternalIncome({ amount_cents: 12_34, description: "Interest Paid" })).toBe(true);
   expect(isMarketIncome("Interest Paid")).toBe(true);
   expect(isMarketIncome("Example Payroll payroll")).toBe(false);
+});
+
+test("savings rate excludes investment income from the poof denominator", () => {
+  const row = getSavingsRateReport().rows.find((r) => r.market_income_cents > 0);
+  expect(row).toBeDefined();
+  expect(row!.poof_cents).toBe(Math.max(0, row!.income_ex_market_gains_cents - row!.net_retained_cents));
 });
 
 test("period allocation preserves cash-to-investment reallocations", () => {
