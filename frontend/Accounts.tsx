@@ -74,6 +74,46 @@ function Field({ label, value, options, onChange }: {
   );
 }
 
+function AccountNameField({ account, onSave }: { account: Account; onSave: (name: string) => Promise<void> }) {
+  const [name, setName] = useState(account.name);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setName(account.name);
+  }, [account.name]);
+
+  const save = async () => {
+    const next = name.trim();
+    if (!next || next === account.name) {
+      setName(account.name);
+      return;
+    }
+    setSaving(true);
+    await onSave(next);
+    setSaving(false);
+  };
+
+  return (
+    <div className="field account-name-field">
+      <label>Name</label>
+      <input
+        type="text"
+        value={name}
+        disabled={saving}
+        onChange={(e) => setName(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") e.currentTarget.blur();
+          if (e.key === "Escape") {
+            setName(account.name);
+            e.currentTarget.blur();
+          }
+        }}
+      />
+    </div>
+  );
+}
+
 function AccountMetaForm({ account, aliases, onSaved, onUndo }: {
   account: Account; aliases: Alias[]; onSaved: () => void; onUndo: (p: PendingUndo) => void;
 }) {
@@ -106,6 +146,7 @@ function AccountMetaForm({ account, aliases, onSaved, onUndo }: {
   };
   return (
     <div className="meta-form">
+      <AccountNameField account={account} onSave={(name) => patch({ name })} />
       <Field label="Type" value={account.type} options={TYPES} onChange={(v) => patch({ type: v })} />
       <Field label="Class" value={account.classification} options={CLASSIFICATIONS} onChange={(v) => patch({ classification: v })} />
       <Field label="Tax" value={account.tax_treatment} options={TAX_TREATMENTS} onChange={(v) => patch({ tax_treatment: v })} />

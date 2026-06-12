@@ -281,6 +281,26 @@ export function NetWorthPage() {
     setSelected(next);
   };
 
+  const invertAccounts = () => {
+    if (!report) return;
+    setSelected(new Set(report.accounts.filter((account) => !selectedIds.has(account.id)).map((account) => account.id)));
+  };
+
+  const setAllAccounts = () => {
+    if (!report) return;
+    setSelected(new Set(report.accounts.map((account) => account.id)));
+  };
+
+  const setNoAccounts = () => setSelected(new Set());
+
+  const handleAccountClick = (event: React.MouseEvent<HTMLButtonElement>, id: number) => {
+    if (event.altKey) {
+      invertAccounts();
+      return;
+    }
+    toggleAccount(id);
+  };
+
   if (error) return <div className="page"><div className="meta" style={{ color: "#e05252" }}>{error}</div></div>;
   if (!report) return <div className="page"><div className="meta">Loading…</div></div>;
   if (report.rows.length === 0) {
@@ -295,18 +315,29 @@ export function NetWorthPage() {
 
   return (
     <div className="page page-wide">
-      <div className="account-filter">
-        {report.accounts.map((a) => (
-          <label key={a.id} className={`account-chip${selectedIds.has(a.id) ? " active" : ""}`}>
-            <input
-              type="checkbox"
-              checked={selectedIds.has(a.id)}
-              onChange={() => toggleAccount(a.id)}
-            />
-            {a.institution} · {a.name}
-            <span className="account-type">{a.type}</span>
-          </label>
-        ))}
+      <div className="account-filter-panel">
+        <div className="account-filter-actions">
+          <span>{selectedIds.size} of {report.accounts.length}</span>
+          <button type="button" onClick={setAllAccounts}>All</button>
+          <button type="button" onClick={setNoAccounts}>None</button>
+          <button type="button" onClick={invertAccounts}>Invert</button>
+        </div>
+        <div className="account-filter">
+          {report.accounts.map((a) => (
+            <button
+              key={a.id}
+              type="button"
+              className={`account-chip${selectedIds.has(a.id) ? " active" : ""}`}
+              aria-pressed={selectedIds.has(a.id)}
+              title="Option-click any account to invert the selection"
+              onClick={(event) => handleAccountClick(event, a.id)}
+            >
+              <span>{a.institution}</span>
+              <span className="account-chip-separator">·</span>
+              <span className="account-chip-name">{a.name}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="totals-row">

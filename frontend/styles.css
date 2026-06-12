@@ -180,44 +180,74 @@ body {
 
 /* Net worth page */
 
+.account-filter-panel {
+  width: 100%;
+  margin-bottom: 24px;
+}
+
+.account-filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  color: #666;
+  font-size: 0.76rem;
+}
+
+.account-filter-actions span {
+  margin-right: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.account-filter-actions button {
+  background: #151515;
+  border: 1px solid #2a2a2a;
+  color: #8a8a8a;
+  border-radius: 6px;
+  padding: 4px 9px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.account-filter-actions button:hover {
+  border-color: #444;
+  color: #ddd;
+}
+
 .account-filter {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   width: 100%;
-  margin-bottom: 24px;
 }
 
 .account-chip {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding: 6px 12px;
   background: #161616;
   border: 1px solid #2a2a2a;
   border-radius: 999px;
   font-size: 0.8rem;
+  font-family: inherit;
   color: #777;
   cursor: pointer;
   user-select: none;
   transition: border-color 0.12s, color 0.12s;
 }
 
-.account-chip input { display: none; }
-
 .account-chip.active {
   border-color: #4a8fff;
   color: #ddd;
 }
 
-.account-type {
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: #555;
-  background: #1e1e1e;
-  padding: 1px 6px;
-  border-radius: 4px;
+.account-chip-separator {
+  color: #4f4f4f;
+}
+
+.account-chip-name {
+  color: #aaa;
 }
 
 
@@ -617,6 +647,11 @@ body {
   display: flex;
   flex-direction: column;
   gap: 5px;
+}
+
+.account-name-field {
+  min-width: min(360px, 100%);
+  flex: 1 1 280px;
 }
 
 .field label {
