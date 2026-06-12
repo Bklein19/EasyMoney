@@ -99,6 +99,11 @@ body {
   align-items: stretch;
 }
 
+.page-transfers {
+  max-width: 1280px;
+  align-items: stretch;
+}
+
 /* Import page */
 
 .drop-zone {
@@ -772,6 +777,116 @@ body {
 
 .savings-source-table {
   table-layout: auto;
+}
+
+.transfer-summary-row {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.transfer-table-wrap {
+  margin-bottom: 22px;
+}
+
+.transfer-table {
+  min-width: 1120px;
+  table-layout: fixed;
+}
+
+.transfer-table th:nth-child(1) { width: 16%; }
+.transfer-table th:nth-child(2) { width: 25%; }
+.transfer-table th:nth-child(3) { width: 25%; }
+.transfer-table th:nth-child(4),
+.transfer-table th:nth-child(5),
+.transfer-table th:nth-child(6) { width: 11%; }
+
+.transfer-candidate-table {
+  min-width: 980px;
+  table-layout: fixed;
+}
+
+.transfer-candidate-table th:nth-child(1) { width: 10%; }
+.transfer-candidate-table th:nth-child(2) { width: 18%; }
+.transfer-candidate-table th:nth-child(3) { width: 42%; }
+.transfer-candidate-table th:nth-child(4) { width: 14%; }
+.transfer-candidate-table th:nth-child(5) { width: 16%; }
+
+.transfer-account {
+  color: #e8e8e8;
+  font-weight: 600;
+  line-height: 1.25;
+  margin-bottom: 6px;
+}
+
+.transfer-tx-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.transfer-tx {
+  padding: 7px 8px;
+  border: 1px solid #252525;
+  border-radius: 6px;
+  background: #151515;
+}
+
+.transfer-tx-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #777;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.transfer-tx-top strong {
+  color: #ddd;
+}
+
+.transfer-tx-desc {
+  margin-top: 4px;
+  color: #aaa;
+  font-size: 0.7rem;
+  line-height: 1.3;
+}
+
+.transfer-empty {
+  color: #666;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.transfer-confidence,
+.transfer-direction {
+  display: inline-flex;
+  width: fit-content;
+  margin: 4px 0 6px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #999;
+  background: #1a1a1a;
+  border: 1px solid #282828;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.transfer-confidence.high {
+  color: #8fb5ff;
+  border-color: #25406b;
+}
+
+.transfer-confidence.medium {
+  color: #c9a66b;
+  border-color: #4a3920;
+}
+
+.transfer-direction.inflow {
+  color: #8ccf91;
+}
+
+.transfer-direction.outflow {
+  color: #d88989;
 }
 
 .hint-box {

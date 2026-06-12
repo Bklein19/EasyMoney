@@ -1,6 +1,7 @@
 import { importFile } from "./importer";
 import { getNetWorthReport } from "./networth";
 import { getSavingsRateReport } from "./savingsRate";
+import { getTransferAuditReport } from "./transfers";
 import { getImportList } from "./imports";
 import { getDb } from "./db";
 import { updateAccount, deleteAlias, createAlias } from "./accounts";
@@ -27,6 +28,9 @@ export function startServer(port = Number(process.env["PORT"] ?? 3000)) {
       },
       "/api/savings-rate": {
         GET: () => Response.json(getSavingsRateReport()),
+      },
+      "/api/transfers": {
+        GET: () => Response.json(getTransferAuditReport()),
       },
       "/api/imports": {
         GET: () => Response.json(getImportList()),
