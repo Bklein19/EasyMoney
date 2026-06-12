@@ -3,6 +3,7 @@ import { getNetWorthReport } from "./networth";
 import { getImportList } from "./imports";
 import { getDb } from "./db";
 import { updateAccount, deleteAlias, createAlias } from "./accounts";
+import { saveManualFacts } from "./manualFacts";
 import type { AgentEvent } from "./agent";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
@@ -58,6 +59,7 @@ export function startServer(port = Number(process.env["PORT"] ?? 3000)) {
           const id = Number(req.params.id);
           if (!id) return Response.json({ error: "invalid account id" }, { status: 400 });
           updateAccount(id, await req.json());
+          await saveManualFacts();
           return Response.json({ ok: true });
         },
       },
@@ -70,11 +72,13 @@ export function startServer(port = Number(process.env["PORT"] ?? 3000)) {
             return Response.json({ error: "institution, alias, account_id required" }, { status: 400 });
           }
           createAlias(institution, alias, account_id);
+          await saveManualFacts();
           return Response.json({ ok: true });
         },
         DELETE: async (req) => {
           const { institution, alias } = await req.json() as { institution: string; alias: string };
           deleteAlias(institution, alias);
+          await saveManualFacts();
           return Response.json({ ok: true });
         },
       },
@@ -91,11 +95,13 @@ export function startServer(port = Number(process.env["PORT"] ?? 3000)) {
             "INSERT OR REPLACE INTO manual_balances (account_id, date, balance_cents, note) VALUES (?, ?, ?, ?)",
             [account_id, date, balance_cents, note ?? null]
           );
+          await saveManualFacts();
           return Response.json({ ok: true });
         },
         DELETE: async (req) => {
           const { id } = await req.json() as { id: number };
           getDb().run("DELETE FROM manual_balances WHERE id = ?", [id]);
+          await saveManualFacts();
           return Response.json({ ok: true });
         },
       },
