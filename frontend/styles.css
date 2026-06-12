@@ -433,7 +433,7 @@ body {
 }
 
 .performance-page {
-  max-width: 980px;
+  max-width: 1180px;
   align-self: center;
 }
 
@@ -583,6 +583,29 @@ body {
   padding-top: 16px;
 }
 
+.returns-account-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 14px;
+  padding: 0 14px 10px;
+  color: #aaa;
+  font-size: 0.76rem;
+}
+
+.returns-account-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.returns-account-legend-item span {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+}
+
 .returns-table-wrap {
   width: 100%;
   overflow-x: auto;
@@ -594,17 +617,17 @@ body {
 
 .returns-table {
   width: 100%;
-  min-width: 720px;
+  min-width: 860px;
   border-collapse: collapse;
   table-layout: fixed;
   font-size: 0.78rem;
   font-variant-numeric: tabular-nums;
 }
 
-.returns-table col.c-return-account { width: 30%; }
-.returns-table col.c-return-period { width: 22%; }
-.returns-table col.c-return-rate { width: 11%; }
-.returns-table col.c-return-money { width: 13%; }
+.returns-table col.c-return-account { width: 28%; }
+.returns-table col.c-return-period { width: 24%; }
+.returns-table col.c-return-rate { width: 12%; }
+.returns-table col.c-return-money { width: 12%; }
 
 .returns-table th,
 .returns-table td {

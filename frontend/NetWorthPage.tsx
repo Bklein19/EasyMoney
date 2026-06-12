@@ -346,6 +346,16 @@ export function NetWorthPage({ view }: NetWorthPageProps) {
       })),
     [returnRows],
   );
+  const returnAccountLegend = (
+    <div className="returns-account-legend">
+      {returnAccountBars.map((account) => (
+        <div key={account.key} className="returns-account-legend-item">
+          <span style={{ background: account.color }} />
+          {account.label}
+        </div>
+      ))}
+    </div>
+  );
 
   const investmentReturnData: InvestmentReturnPoint[] = useMemo(() => {
     const points: InvestmentReturnPoint[] = [];
@@ -620,12 +630,12 @@ export function NetWorthPage({ view }: NetWorthPageProps) {
                 labelStyle={{ color: "#888" }}
               />
               <ReferenceLine y={0} stroke="#333" />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
               {returnAccountBars.map((account) => (
                 <Bar key={account.key} dataKey={account.key} name={account.label} fill={account.color} />
               ))}
             </ComposedChart>
           </ResponsiveContainer>
+          {returnAccountLegend}
         </div>
         <div className="return-subsection-title">Return Details</div>
         <div className="returns-table-wrap">
