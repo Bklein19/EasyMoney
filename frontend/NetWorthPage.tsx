@@ -54,7 +54,13 @@ const fmtUsd = (v: number) =>
   v.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 
 const fmtUsdAxis = (v: number) =>
-  Math.abs(v) >= 1000 ? `$${(v / 1000).toFixed(0)}k` : `$${v.toFixed(0)}`;
+  Math.abs(v) >= 999_500_000
+    ? `$${(v / 1_000_000_000).toFixed(Math.abs(v) >= 10_000_000_000 ? 0 : 1).replace(/\.0$/, "")}B`
+    : Math.abs(v) >= 999_500
+    ? `$${(v / 1_000_000).toFixed(Math.abs(v) >= 10_000_000 ? 0 : 1).replace(/\.0$/, "")}M`
+    : Math.abs(v) >= 1000
+      ? `$${(v / 1000).toFixed(0)}k`
+      : `$${v.toFixed(0)}`;
 
 export function NetWorthPage() {
   const [report, setReport] = useState<NetWorthReport | null>(null);
