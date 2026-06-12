@@ -490,7 +490,8 @@ body {
   color: #666;
 }
 
-.field input {
+.field input,
+.field select {
   background: #1a1a1a;
   border: 1px solid #2c2c2c;
   color: #e8e8e8;
@@ -501,12 +502,63 @@ body {
   color-scheme: dark;
 }
 
-.field input:focus {
+.field input:focus,
+.field select:focus {
   outline: none;
   border-color: #4a8fff;
 }
 
 .field input::placeholder { color: #4a4a4a; }
+
+/* Account metadata editor */
+.meta-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.override-divider {
+  height: 1px;
+  background: #1e1e1e;
+  margin: 16px 0;
+}
+
+.aliases-block {
+  flex-basis: 100%;
+  margin-top: 4px;
+}
+
+.alias-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.alias-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #1c1c1c;
+  border: 1px solid #262626;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 0.78rem;
+  color: #999;
+  font-family: "SF Mono", "Fira Code", monospace;
+}
+
+.alias-chip button {
+  background: none;
+  border: none;
+  color: #555;
+  cursor: pointer;
+  font-size: 0.72rem;
+  padding: 0 2px;
+}
+
+.alias-chip button:hover { color: #e05252; }
 
 .btn-primary {
   background: #2a5adf;

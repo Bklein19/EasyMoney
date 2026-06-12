@@ -2,6 +2,7 @@ import { importFile } from "./importer";
 import { getNetWorthReport } from "./networth";
 import { getImportList } from "./imports";
 import { getDb } from "./db";
+import { updateAccount, deleteAlias } from "./accounts";
 import type { AgentEvent } from "./agent";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
@@ -29,7 +30,7 @@ export function startServer(port = Number(process.env["PORT"] ?? 3000)) {
         GET: () => {
           const db = getDb();
           const accounts = db.query(`
-            SELECT a.id, a.name, a.institution, a.type, a.classification, a.tax_treatment,
+            SELECT a.id, a.name, a.institution, a.type, a.classification, a.tax_treatment, a.flow_treatment,
               (SELECT balance_cents FROM (
                 SELECT date, balance_cents FROM account_balances WHERE account_id = a.id
                 UNION ALL
@@ -46,7 +47,25 @@ export function startServer(port = Number(process.env["PORT"] ?? 3000)) {
           const manualBalances = db.query(
             "SELECT id, account_id, date, balance_cents, note FROM manual_balances ORDER BY account_id, date DESC"
           ).all();
-          return Response.json({ accounts, manualBalances });
+          const aliases = db.query(
+            "SELECT account_id, institution, alias FROM account_aliases ORDER BY account_id, alias"
+          ).all();
+          return Response.json({ accounts, manualBalances, aliases });
+        },
+      },
+      "/api/accounts/:id": {
+        PATCH: async (req) => {
+          const id = Number(req.params.id);
+          if (!id) return Response.json({ error: "invalid account id" }, { status: 400 });
+          updateAccount(id, await req.json());
+          return Response.json({ ok: true });
+        },
+      },
+      "/api/accounts/alias": {
+        DELETE: async (req) => {
+          const { institution, alias } = await req.json() as { institution: string; alias: string };
+          deleteAlias(institution, alias);
+          return Response.json({ ok: true });
         },
       },
       "/api/accounts/manual-balance": {

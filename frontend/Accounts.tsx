@@ -7,6 +7,7 @@ interface Account {
   type: string;
   classification: string;
   tax_treatment: string;
+  flow_treatment: string;
   latest_balance_cents: number | null;
   latest_balance_date: string | null;
 }
@@ -17,6 +18,79 @@ interface ManualBalance {
   date: string;
   balance_cents: number;
   note: string | null;
+}
+
+interface Alias {
+  account_id: number;
+  institution: string;
+  alias: string;
+}
+
+const TYPES = ["checking", "savings", "brokerage", "retirement", "credit-card", "loan", "unknown"];
+const CLASSIFICATIONS = ["asset", "liability"];
+const TAX_TREATMENTS = ["taxable", "traditional", "roth", "hsa", "none"];
+const FLOW_TREATMENTS = ["normal", "contributions"];
+
+function Field({ label, value, options, onChange }: {
+  label: string; value: string; options: string[]; onChange: (v: string) => void;
+}) {
+  return (
+    <div className="field">
+      <label>{label}</label>
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
+        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function AccountMetaForm({ account, aliases, onSaved }: {
+  account: Account; aliases: Alias[]; onSaved: () => void;
+}) {
+  const patch = async (edit: Record<string, string>) => {
+    await fetch(`/api/accounts/${account.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(edit),
+    });
+    onSaved();
+  };
+  const deleteAlias = async (institution: string, alias: string) => {
+    await fetch("/api/accounts/alias", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ institution, alias }),
+    });
+    onSaved();
+  };
+  return (
+    <div className="meta-form">
+      <Field label="Type" value={account.type} options={TYPES} onChange={(v) => patch({ type: v })} />
+      <Field label="Class" value={account.classification} options={CLASSIFICATIONS} onChange={(v) => patch({ classification: v })} />
+      <Field label="Tax" value={account.tax_treatment} options={TAX_TREATMENTS} onChange={(v) => patch({ tax_treatment: v })} />
+      <Field
+        label="Flow treatment"
+        value={account.flow_treatment}
+        options={FLOW_TREATMENTS}
+        onChange={(v) => patch({ flow_treatment: v })}
+      />
+      {aliases.length > 0 && (
+        <div className="aliases-block">
+          <div className="manual-entries-title">
+            Aliases <span style={{ color: "#444" }}>(parser-emitted strings mapped to this account)</span>
+          </div>
+          <div className="alias-chips">
+            {aliases.map((al) => (
+              <span key={al.alias} className="alias-chip">
+                {al.alias}
+                <button title="Remove alias" onClick={() => deleteAlias(al.institution, al.alias)}>✕</button>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 const fmtUsd = (v: number) =>
@@ -103,15 +177,17 @@ function AddBalanceForm({ account, onSaved }: { account: Account; onSaved: () =>
 export function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [manualBalances, setManualBalances] = useState<ManualBalance[]>([]);
+  const [aliases, setAliases] = useState<Alias[]>([]);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(() => {
     fetch("/api/accounts")
       .then((r) => r.json())
-      .then((data: { accounts: Account[]; manualBalances: ManualBalance[] }) => {
+      .then((data: { accounts: Account[]; manualBalances: ManualBalance[]; aliases: Alias[] }) => {
         setAccounts(data.accounts);
         setManualBalances(data.manualBalances);
+        setAliases(data.aliases ?? []);
         setLoading(false);
       });
   }, []);
@@ -189,6 +265,12 @@ export function AccountsPage() {
                   <tr className="expanded-row">
                     <td colSpan={6} style={{ padding: "4px 0 12px", borderBottom: "1px solid #1c1c1c" }}>
                       <div className="override-panel">
+                        <AccountMetaForm
+                          account={a}
+                          aliases={aliases.filter((al) => al.account_id === a.id)}
+                          onSaved={reload}
+                        />
+                        <div className="override-divider" />
                         <AddBalanceForm account={a} onSaved={reload} />
                         {accountManual.length > 0 && (
                           <div className="manual-entries">

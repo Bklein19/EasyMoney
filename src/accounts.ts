@@ -82,6 +82,32 @@ export function createAccount(opts: {
 // Resolve a parser-emitted (institution, account-string) pair to a canonical account id.
 // The agent should have mapped every alias during import; this auto-create path is a
 // safety net so a commit never fails on an unmapped account.
+// Editable account metadata (the manual facts about an account). Only the fields
+// the user controls — never the auto-derived balances. Unspecified fields are left
+// unchanged. Column names are allow-listed so this can't be used to write arbitrary SQL.
+export interface AccountEdit {
+  name?: string;
+  type?: AccountType;
+  classification?: "asset" | "liability";
+  tax_treatment?: "taxable" | "traditional" | "roth" | "hsa" | "none";
+  flow_treatment?: "normal" | "contributions";
+}
+
+const EDITABLE_COLUMNS = new Set(["name", "type", "classification", "tax_treatment", "flow_treatment"]);
+
+export function updateAccount(id: number, edit: AccountEdit): void {
+  const db = getDb();
+  const entries = Object.entries(edit).filter(([k, v]) => EDITABLE_COLUMNS.has(k) && v !== undefined);
+  if (entries.length === 0) return;
+  const setClause = entries.map(([k]) => `${k} = ?`).join(", ");
+  const values = entries.map(([, v]) => v as string);
+  db.run(`UPDATE accounts SET ${setClause} WHERE id = ?`, [...values, id]);
+}
+
+export function deleteAlias(institution: string, alias: string): void {
+  getDb().run("DELETE FROM account_aliases WHERE alias = ? AND institution = ?", [alias, institution]);
+}
+
 export function resolveAccountId(institution: string, alias: string): number {
   const existing = lookupAlias(institution, alias);
   if (existing !== null) return existing;
