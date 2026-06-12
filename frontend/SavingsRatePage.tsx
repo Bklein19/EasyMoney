@@ -45,6 +45,14 @@ interface PeriodRow {
   poof: number;
   poofOut: number;
   retained: number;
+  retainedPositive: number;
+  retainedNegative: number;
+}
+
+interface SavingsTooltipProps {
+  active?: boolean;
+  label?: string | number;
+  payload?: ReadonlyArray<{ payload?: PeriodRow }>;
 }
 
 const fmtUsd = (v: number) =>
@@ -97,6 +105,8 @@ export function SavingsRatePage() {
         poof: 0,
         poofOut: 0,
         retained: 0,
+        retainedPositive: 0,
+        retainedNegative: 0,
       };
       if (row.month < point.sortKey) point.sortKey = row.month;
       point.grossIncome += row.income_cents / 100;
@@ -107,6 +117,8 @@ export function SavingsRatePage() {
       point.poof += row.poof_cents / 100;
       point.poofOut -= row.poof_cents / 100;
       point.retained += row.net_retained_cents / 100;
+      point.retainedPositive = Math.max(point.retained, 0);
+      point.retainedNegative = Math.min(point.retained, 0);
       byPeriod.set(key, point);
     }
     return [...byPeriod.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
@@ -134,6 +146,19 @@ export function SavingsRatePage() {
 
   if (error) return <div className="page page-wide"><div className="meta import-error">{error}</div></div>;
   if (!report) return <div className="page page-wide"><div className="empty-state">Loading…</div></div>;
+
+  const renderTooltip = ({ active, label, payload }: SavingsTooltipProps) => {
+    const row = active ? payload?.[0]?.payload : null;
+    if (!row) return null;
+
+    return (
+      <div className="recharts-default-tooltip savings-tooltip">
+        <div className="recharts-tooltip-label">{label}</div>
+        <div className="savings-tooltip-row savings-tooltip-retained">Net retained : {fmtUsd(row.retained)}</div>
+        <div className="savings-tooltip-row savings-tooltip-poof">Poof : {fmtUsd(row.poofOut)}</div>
+      </div>
+    );
+  };
 
   return (
     <div className="page page-savings-rate">
@@ -187,12 +212,13 @@ export function SavingsRatePage() {
             <XAxis dataKey="period" stroke="#555" tick={{ fontSize: 11 }} />
             <YAxis stroke="#555" tick={{ fontSize: 11 }} tickFormatter={fmtUsdAxis} />
             <Tooltip
-              formatter={(value, name) => fmtUsd(name === "Poof" ? Math.abs(Number(value)) : Number(value))}
+              content={renderTooltip}
               contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
               labelStyle={{ color: "#888" }}
             />
-            <Bar dataKey="retained" name="Net retained" stackId="flow" fill="#7aa7ff" />
+            <Bar dataKey="retainedPositive" name="Net retained" stackId="flow" fill="#7aa7ff" />
             <Bar dataKey="poofOut" name="Poof" stackId="flow" fill="#777" />
+            <Bar dataKey="retainedNegative" name="Net retained" stackId="flow" fill="#7aa7ff" />
           </BarChart>
         </ResponsiveContainer>
         <div className="returns-account-legend">
