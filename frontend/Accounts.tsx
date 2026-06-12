@@ -76,40 +76,52 @@ function Field({ label, value, options, onChange }: {
 
 function AccountNameField({ account, onSave }: { account: Account; onSave: (name: string) => Promise<void> }) {
   const [name, setName] = useState(account.name);
-  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<"idle" | "dirty" | "saving" | "saved">("idle");
 
   useEffect(() => {
     setName(account.name);
+    setStatus("idle");
   }, [account.name]);
 
   const save = async () => {
     const next = name.trim();
     if (!next || next === account.name) {
       setName(account.name);
+      setStatus("idle");
       return;
     }
-    setSaving(true);
+    setStatus("saving");
     await onSave(next);
-    setSaving(false);
+    setStatus("saved");
   };
+  const isDirty = name.trim() !== account.name;
 
   return (
-    <div className="field account-name-field">
-      <label>Name</label>
-      <input
-        type="text"
-        value={name}
-        disabled={saving}
-        onChange={(e) => setName(e.target.value)}
-        onBlur={save}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") e.currentTarget.blur();
-          if (e.key === "Escape") {
-            setName(account.name);
-            e.currentTarget.blur();
-          }
-        }}
-      />
+    <div className="account-name-row">
+      <div className="field account-name-field">
+        <label>Name</label>
+        <input
+          type="text"
+          value={name}
+          disabled={status === "saving"}
+          onChange={(e) => {
+            setName(e.target.value);
+            setStatus("dirty");
+          }}
+          onBlur={save}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+            if (e.key === "Escape") {
+              setName(account.name);
+              setStatus("idle");
+              e.currentTarget.blur();
+            }
+          }}
+        />
+      </div>
+      <div className={`account-name-status ${status}`}>
+        {status === "saving" ? "Saving" : isDirty ? "Unsaved" : status === "saved" ? "Saved" : "Autosaves"}
+      </div>
     </div>
   );
 }
@@ -145,17 +157,20 @@ function AccountMetaForm({ account, aliases, onSaved, onUndo }: {
     });
   };
   return (
-    <div className="meta-form">
-      <AccountNameField account={account} onSave={(name) => patch({ name })} />
-      <Field label="Type" value={account.type} options={TYPES} onChange={(v) => patch({ type: v })} />
-      <Field label="Class" value={account.classification} options={CLASSIFICATIONS} onChange={(v) => patch({ classification: v })} />
-      <Field label="Tax" value={account.tax_treatment} options={TAX_TREATMENTS} onChange={(v) => patch({ tax_treatment: v })} />
-      <Field
-        label="Flow treatment"
-        value={account.flow_treatment}
-        options={FLOW_TREATMENTS}
-        onChange={(v) => patch({ flow_treatment: v })}
-      />
+    <div className="account-details-block">
+      <div className="manual-entries-title">Account details</div>
+      <div className="meta-form">
+        <AccountNameField account={account} onSave={(name) => patch({ name })} />
+        <Field label="Type" value={account.type} options={TYPES} onChange={(v) => patch({ type: v })} />
+        <Field label="Class" value={account.classification} options={CLASSIFICATIONS} onChange={(v) => patch({ classification: v })} />
+        <Field label="Tax" value={account.tax_treatment} options={TAX_TREATMENTS} onChange={(v) => patch({ tax_treatment: v })} />
+        <Field
+          label="Flow treatment"
+          value={account.flow_treatment}
+          options={FLOW_TREATMENTS}
+          onChange={(v) => patch({ flow_treatment: v })}
+        />
+      </div>
       {aliases.length > 0 && (
         <div className="aliases-block">
           <div className="manual-entries-title">
@@ -332,7 +347,10 @@ export function AccountsPage() {
             const isClosed = a.latest_balance_cents === 0;
             return (
               <React.Fragment key={a.id}>
-                <tr className={isClosed && !isExpanded ? "closed" : ""}>
+                <tr
+                  className={`${isClosed && !isExpanded ? "closed " : ""}account-row${isExpanded ? " expanded" : ""}`}
+                  onClick={() => setExpanded(isExpanded ? null : a.id)}
+                >
                   <td>
                     <div className="acct-name" title={a.name}>
                       <span className="name-text">{a.name}</span>
@@ -346,13 +364,8 @@ export function AccountsPage() {
                     {a.latest_balance_cents !== null ? fmtUsd(a.latest_balance_cents / 100) : "—"}
                   </td>
                   <td className="acct-asof">{a.latest_balance_date ?? "—"}</td>
-                  <td style={{ textAlign: "right" }}>
-                    <button
-                      className={`btn-ghost${isExpanded ? " active" : ""}`}
-                      onClick={() => setExpanded(isExpanded ? null : a.id)}
-                    >
-                      {isExpanded ? "Close" : "Edit"}
-                    </button>
+                  <td className="acct-disclosure">
+                    <span>{isExpanded ? "Close" : "Edit"}</span>
                   </td>
                 </tr>
                 {isExpanded && (
@@ -366,6 +379,7 @@ export function AccountsPage() {
                           onUndo={setPendingUndo}
                         />
                         <div className="override-divider" />
+                        <div className="manual-entries-title">Manual balance adjustment</div>
                         <AddBalanceForm account={a} onSaved={reload} />
                         {accountManual.length > 0 && (
                           <div className="manual-entries">

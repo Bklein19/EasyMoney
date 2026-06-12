@@ -540,6 +540,18 @@ body {
   vertical-align: middle;
 }
 
+.accounts-table tr.account-row {
+  cursor: pointer;
+}
+
+.accounts-table tr.account-row:hover td {
+  background: #151515;
+}
+
+.accounts-table tr.account-row.expanded td {
+  background: #171717;
+}
+
 .accounts-table tr.closed td { opacity: 0.45; }
 .accounts-table tr.expanded-row td { opacity: 1; }
 
@@ -596,6 +608,24 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.acct-disclosure {
+  text-align: right;
+  color: #777;
+  font-size: 0.76rem;
+}
+
+.acct-disclosure span::after {
+  content: "›";
+  display: inline-block;
+  margin-left: 6px;
+  color: #555;
+  transition: transform 0.12s;
+}
+
+.account-row.expanded .acct-disclosure span::after {
+  transform: rotate(90deg);
+}
+
 .closed-badge {
   display: inline-block;
   font-size: 0.66rem;
@@ -643,6 +673,12 @@ body {
   flex-wrap: wrap;
 }
 
+.account-details-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .field {
   display: flex;
   flex-direction: column;
@@ -653,6 +689,25 @@ body {
   min-width: min(360px, 100%);
   flex: 1 1 280px;
 }
+
+.account-name-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex: 1 1 460px;
+  min-width: min(460px, 100%);
+}
+
+.account-name-status {
+  min-width: 64px;
+  padding-bottom: 8px;
+  color: #666;
+  font-size: 0.74rem;
+}
+
+.account-name-status.dirty { color: #c9a66b; }
+.account-name-status.saving { color: #7aa7ff; }
+.account-name-status.saved { color: #777; }
 
 .field label {
   font-size: 0.68rem;
