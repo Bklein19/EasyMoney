@@ -9,6 +9,7 @@ import { meta as vgActMeta, default as vgActParse } from "./vanguard-activity-pd
 import { meta as fidInvMeta, default as fidInvParse } from "./fidelity-investment-report-pdf";
 import { meta as fid401kMeta, default as fid401kParse } from "./fidelity-401k-html";
 import { meta as seqMeta, default as seqParse } from "./sequoia-fund-pdf";
+import { meta as merrillActMeta, default as merrillActParse } from "./merrill-activity-csv";
 
 export const PARSERS: ParserModule[] = [
   { meta: msStmtMeta, parse: msStmtParse },
@@ -18,6 +19,7 @@ export const PARSERS: ParserModule[] = [
   { meta: fidInvMeta, parse: fidInvParse },
   { meta: fid401kMeta, parse: fid401kParse },
   { meta: seqMeta, parse: seqParse },
+  { meta: merrillActMeta, parse: merrillActParse },
 ];
 
 export function getParserById(id: string): ParserModule | undefined {
