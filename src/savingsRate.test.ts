@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { isExternalIncome, isInternalMoneyMove, periodAllocation } from "./savingsRate";
+import { isExternalIncome, isInternalMoneyMove, isMarketIncome, periodAllocation } from "./savingsRate";
 
 test("savings rate treats payroll and retirement contributions as income", () => {
   expect(isExternalIncome({
@@ -20,6 +20,12 @@ test("savings rate excludes internal money moves from income", () => {
     amount_cents: 500_00,
     description: "OVERDRAFT PROTECTION FROM 00004667342644",
   })).toBe(false);
+});
+
+test("savings rate can separate market income from external income", () => {
+  expect(isExternalIncome({ amount_cents: 12_34, description: "Interest Paid" })).toBe(true);
+  expect(isMarketIncome("Interest Paid")).toBe(true);
+  expect(isMarketIncome("Example Payroll payroll")).toBe(false);
 });
 
 test("period allocation offsets cash drawdown against investment retention", () => {

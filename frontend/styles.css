@@ -540,6 +540,13 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.total-meta {
+  margin-top: 5px;
+  color: #666;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .chart-container {
   width: 100%;
   background: #131313;
@@ -752,7 +759,7 @@ body {
 }
 
 .savings-summary-row {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .savings-rate-chart {

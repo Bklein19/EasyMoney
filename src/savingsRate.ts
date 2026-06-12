@@ -11,6 +11,8 @@ export interface SavingsRateAccount {
 export interface SavingsRateMonthlyRow {
   month: string;
   income_cents: number;
+  market_income_cents: number;
+  income_ex_market_gains_cents: number;
   retained_investment_cents: number;
   retained_cash_cents: number;
   poof_cents: number;
@@ -21,6 +23,7 @@ export interface SavingsRateIncomeSource {
   label: string;
   amount_cents: number;
   count: number;
+  is_market_income: boolean;
 }
 
 export interface SavingsRateReport {
@@ -43,11 +46,16 @@ interface TransactionRow {
 const INVESTMENT_TYPES = new Set(["brokerage", "retirement"]);
 const CASH_TYPES = new Set(["checking", "savings"]);
 
+type PeriodAllocation = Pick<
+  SavingsRateMonthlyRow,
+  "retained_investment_cents" | "retained_cash_cents" | "net_retained_cents" | "poof_cents"
+>;
+
 export function periodAllocation(input: {
   income_cents: number;
   investment_delta_cents: number;
   cash_delta_cents: number;
-}): Omit<SavingsRateMonthlyRow, "month" | "income_cents"> {
+}): PeriodAllocation {
   const net_retained_cents = input.investment_delta_cents + input.cash_delta_cents;
   let retained_investment_cents = 0;
   let retained_cash_cents = 0;
@@ -111,6 +119,10 @@ export function isExternalIncome(transaction: {
   return false;
 }
 
+export function isMarketIncome(description: string): boolean {
+  return /interest|dividend|cap gain/.test(description.toLowerCase());
+}
+
 function incomeSourceLabel(description: string): string {
   const d = description.toLowerCase();
   if (/401\(k\) contributions/.test(d)) return "401(k) contributions";
@@ -146,6 +158,7 @@ export function getSavingsRateReport(): SavingsRateReport {
     .all();
 
   const incomeByMonth = new Map<string, number>();
+  const marketIncomeByMonth = new Map<string, number>();
   const sourceByLabel = new Map<string, SavingsRateIncomeSource>();
   const months = new Set<string>();
 
@@ -155,10 +168,19 @@ export function getSavingsRateReport(): SavingsRateReport {
     if (!isExternalIncome(tx)) continue;
 
     incomeByMonth.set(tx.month, (incomeByMonth.get(tx.month) ?? 0) + tx.amount_cents);
+    if (isMarketIncome(tx.description)) {
+      marketIncomeByMonth.set(tx.month, (marketIncomeByMonth.get(tx.month) ?? 0) + tx.amount_cents);
+    }
     const label = incomeSourceLabel(tx.description);
-    const source = sourceByLabel.get(label) ?? { label, amount_cents: 0, count: 0 };
+    const source = sourceByLabel.get(label) ?? {
+      label,
+      amount_cents: 0,
+      count: 0,
+      is_market_income: isMarketIncome(tx.description),
+    };
     source.amount_cents += tx.amount_cents;
     source.count += 1;
+    source.is_market_income = source.is_market_income || isMarketIncome(tx.description);
     sourceByLabel.set(label, source);
   }
 
@@ -183,10 +205,13 @@ export function getSavingsRateReport(): SavingsRateReport {
     .sort()
     .map((month): SavingsRateMonthlyRow => {
       const income_cents = incomeByMonth.get(month) ?? 0;
+      const market_income_cents = marketIncomeByMonth.get(month) ?? 0;
       const deltas = deltasByMonth.get(month) ?? { investment: 0, cash: 0 };
       return {
         month,
         income_cents,
+        market_income_cents,
+        income_ex_market_gains_cents: income_cents - market_income_cents,
         ...periodAllocation({
           income_cents,
           investment_delta_cents: deltas.investment,
