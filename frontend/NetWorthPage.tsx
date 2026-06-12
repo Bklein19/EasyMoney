@@ -74,6 +74,7 @@ interface ReturnChartPoint {
 }
 
 interface InvestmentReturnPoint {
+  time: number;
   month: string;
   investmentReturns: number;
   positiveReturns: number | null;
@@ -96,6 +97,13 @@ const fmtUsdAxis = (v: number) =>
     : Math.abs(v) >= 1000
       ? `$${(v / 1000).toFixed(0)}k`
       : `$${v.toFixed(0)}`;
+
+const monthToTime = (month: string) => Date.parse(`${month}-01T00:00:00Z`);
+
+const formatMonthTick = (time: number) => {
+  const date = new Date(time);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+};
 
 export function NetWorthPage() {
   const [report, setReport] = useState<NetWorthReport | null>(null);
@@ -236,12 +244,34 @@ export function NetWorthPage() {
   }, [returnRows]);
 
   const investmentReturnData: InvestmentReturnPoint[] = useMemo(() => {
-    return data.map((point) => ({
-      month: point.month,
-      investmentReturns: point.cumulativeGains,
-      positiveReturns: point.cumulativeGains >= 0 ? point.cumulativeGains : null,
-      negativeReturns: point.cumulativeGains < 0 ? point.cumulativeGains : null,
-    }));
+    const points: InvestmentReturnPoint[] = [];
+    const makePoint = (month: string, time: number, investmentReturns: number): InvestmentReturnPoint => ({
+      time,
+      month,
+      investmentReturns,
+      positiveReturns: investmentReturns >= 0 ? investmentReturns : null,
+      negativeReturns: investmentReturns <= 0 ? investmentReturns : null,
+    });
+
+    for (const point of data) {
+      const current = makePoint(point.month, monthToTime(point.month), point.cumulativeGains);
+      const previous = points.at(-1);
+      if (
+        previous &&
+        previous.investmentReturns !== 0 &&
+        current.investmentReturns !== 0 &&
+        Math.sign(previous.investmentReturns) !== Math.sign(current.investmentReturns)
+      ) {
+        const ratio =
+          Math.abs(previous.investmentReturns) /
+          (Math.abs(previous.investmentReturns) + Math.abs(current.investmentReturns));
+        const crossingTime = previous.time + (current.time - previous.time) * ratio;
+        points.push(makePoint(formatMonthTick(crossingTime), crossingTime, 0));
+      }
+      points.push(current);
+    }
+
+    return points;
   }, [data]);
 
   const toggleAccount = (id: number) => {
@@ -370,7 +400,15 @@ export function NetWorthPage() {
           <ResponsiveContainer width="100%" height={320}>
             <ComposedChart data={investmentReturnData} margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-              <XAxis dataKey="month" stroke="#555" tick={{ fontSize: 11 }} />
+              <XAxis
+                dataKey="time"
+                type="number"
+                scale="time"
+                domain={["dataMin", "dataMax"]}
+                stroke="#555"
+                tick={{ fontSize: 11 }}
+                tickFormatter={(value) => formatMonthTick(Number(value))}
+              />
               <YAxis
                 stroke="#555"
                 tick={{ fontSize: 11 }}
@@ -378,6 +416,7 @@ export function NetWorthPage() {
               />
               <Tooltip
                 formatter={(value) => fmtUsd(Number(value))}
+                labelFormatter={(value) => formatMonthTick(Number(value))}
                 contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
                 labelStyle={{ color: "#888" }}
               />
