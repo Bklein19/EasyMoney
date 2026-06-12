@@ -1,4 +1,34 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
+
+// A pending undo: a message to show and the action that reverses the last mutation.
+interface PendingUndo {
+  message: string;
+  undo: () => Promise<void>;
+}
+
+// Toast with an Undo button. Auto-dismisses after `timeoutMs`; clicking Undo runs
+// the reverse action. Used for destructive manual-fact edits (alias/balance deletes).
+function UndoToast({ pending, onClose }: { pending: PendingUndo; onClose: () => void }) {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    timer.current = setTimeout(onClose, 8000);
+    return () => { if (timer.current) clearTimeout(timer.current); };
+  }, [pending, onClose]);
+  return (
+    <div className="undo-toast">
+      <span>{pending.message}</span>
+      <button
+        onClick={async () => {
+          if (timer.current) clearTimeout(timer.current);
+          await pending.undo();
+          onClose();
+        }}
+      >
+        Undo
+      </button>
+    </div>
+  );
+}
 
 interface Account {
   id: number;
@@ -44,8 +74,8 @@ function Field({ label, value, options, onChange }: {
   );
 }
 
-function AccountMetaForm({ account, aliases, onSaved }: {
-  account: Account; aliases: Alias[]; onSaved: () => void;
+function AccountMetaForm({ account, aliases, onSaved, onUndo }: {
+  account: Account; aliases: Alias[]; onSaved: () => void; onUndo: (p: PendingUndo) => void;
 }) {
   const patch = async (edit: Record<string, string>) => {
     await fetch(`/api/accounts/${account.id}`, {
@@ -62,6 +92,17 @@ function AccountMetaForm({ account, aliases, onSaved }: {
       body: JSON.stringify({ institution, alias }),
     });
     onSaved();
+    onUndo({
+      message: `Removed alias "${alias}"`,
+      undo: async () => {
+        await fetch("/api/accounts/alias", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ institution, alias, account_id: account.id }),
+        });
+        onSaved();
+      },
+    });
   };
   return (
     <div className="meta-form">
@@ -180,6 +221,7 @@ export function AccountsPage() {
   const [aliases, setAliases] = useState<Alias[]>([]);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [pendingUndo, setPendingUndo] = useState<PendingUndo | null>(null);
 
   const reload = useCallback(() => {
     fetch("/api/accounts")
@@ -194,13 +236,24 @@ export function AccountsPage() {
 
   useEffect(() => { reload(); }, [reload]);
 
-  const deleteManual = async (id: number) => {
+  const deleteManual = async (m: ManualBalance) => {
     await fetch("/api/accounts/manual-balance", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
+      body: JSON.stringify({ id: m.id }),
     });
     reload();
+    setPendingUndo({
+      message: `Removed manual balance ${fmtUsd(m.balance_cents / 100)} on ${m.date}`,
+      undo: async () => {
+        await fetch("/api/accounts/manual-balance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ account_id: m.account_id, date: m.date, balance_cents: m.balance_cents, note: m.note }),
+        });
+        reload();
+      },
+    });
   };
 
   if (loading) return <div className="page page-accounts"><div className="empty-state">Loading…</div></div>;
@@ -269,6 +322,7 @@ export function AccountsPage() {
                           account={a}
                           aliases={aliases.filter((al) => al.account_id === a.id)}
                           onSaved={reload}
+                          onUndo={setPendingUndo}
                         />
                         <div className="override-divider" />
                         <AddBalanceForm account={a} onSaved={reload} />
@@ -280,7 +334,7 @@ export function AccountsPage() {
                                 <span className="amount">{fmtUsd(m.balance_cents / 100)}</span>
                                 <span>{m.date}</span>
                                 {m.note && <span className="note">{m.note}</span>}
-                                <button className="delete" onClick={() => deleteManual(m.id)} title="Delete entry">
+                                <button className="delete" onClick={() => deleteManual(m)} title="Delete entry">
                                   ✕
                                 </button>
                               </div>
@@ -296,6 +350,7 @@ export function AccountsPage() {
           })}
         </tbody>
       </table>
+      {pendingUndo && <UndoToast pending={pendingUndo} onClose={() => setPendingUndo(null)} />}
     </div>
   );
 }

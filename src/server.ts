@@ -2,7 +2,7 @@ import { importFile } from "./importer";
 import { getNetWorthReport } from "./networth";
 import { getImportList } from "./imports";
 import { getDb } from "./db";
-import { updateAccount, deleteAlias } from "./accounts";
+import { updateAccount, deleteAlias, createAlias } from "./accounts";
 import type { AgentEvent } from "./agent";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
@@ -62,6 +62,16 @@ export function startServer(port = Number(process.env["PORT"] ?? 3000)) {
         },
       },
       "/api/accounts/alias": {
+        POST: async (req) => {
+          const { institution, alias, account_id } = await req.json() as {
+            institution: string; alias: string; account_id: number;
+          };
+          if (!institution || !alias || !account_id) {
+            return Response.json({ error: "institution, alias, account_id required" }, { status: 400 });
+          }
+          createAlias(institution, alias, account_id);
+          return Response.json({ ok: true });
+        },
         DELETE: async (req) => {
           const { institution, alias } = await req.json() as { institution: string; alias: string };
           deleteAlias(institution, alias);
