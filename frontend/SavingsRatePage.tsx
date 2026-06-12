@@ -175,7 +175,13 @@ export function SavingsRatePage() {
 
       <div className="chart-container savings-rate-chart">
         <ResponsiveContainer width="100%" height={380}>
-          <BarChart data={rows} stackOffset="sign" margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
+          <BarChart
+            data={rows}
+            stackOffset="sign"
+            barCategoryGap={period === "month" ? "18%" : "32%"}
+            barGap={3}
+            margin={{ top: 8, right: 24, bottom: 8, left: 8 }}
+          >
             <CartesianGrid strokeDasharray="3 3" stroke="#222" />
             <XAxis dataKey="period" stroke="#555" tick={{ fontSize: 11 }} />
             <YAxis stroke="#555" tick={{ fontSize: 11 }} tickFormatter={fmtUsdAxis} />
@@ -186,7 +192,7 @@ export function SavingsRatePage() {
             />
             <Bar dataKey="investment" name="Investment change" stackId="allocation" fill="#7aa7ff" />
             <Bar dataKey="cash" name="Cash change" stackId="allocation" fill="#68c7d8" />
-            <Bar dataKey="poof" name="Poof" stackId="allocation" fill="#6f6f6f" />
+            <Bar dataKey="poof" name="Poof" fill="#777" />
           </BarChart>
         </ResponsiveContainer>
         <div className="returns-account-legend">
