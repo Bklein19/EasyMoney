@@ -80,8 +80,7 @@ export function createAccount(opts: {
 }
 
 // Resolve a parser-emitted (institution, account-string) pair to a canonical account id.
-// The agent should have mapped every alias during import; this auto-create path is a
-// safety net so a commit never fails on an unmapped account.
+// This auto-create path is a safety net so rebuilds do not fail on an unmapped account.
 // Editable account metadata (the manual facts about an account). Only the fields
 // the user controls — never the auto-derived balances. Unspecified fields are left
 // unchanged. Column names are allow-listed so this can't be used to write arbitrary SQL.

@@ -15,7 +15,16 @@ export function getDb(): Database {
   return _db;
 }
 
-const MIGRATIONS: Array<(db: Database) => void> = [migration1Base, migration2Accounts, migration3CoveredRange, migration4TxDedup, migration5ManualBalances, migration6FlowTreatment, migration7CacheLedger];
+const MIGRATIONS: Array<(db: Database) => void> = [
+  migration1Base,
+  migration2Accounts,
+  migration3CoveredRange,
+  migration4TxDedup,
+  migration5ManualBalances,
+  migration6FlowTreatment,
+  migration7CacheLedger,
+  migration8DropParserStore,
+];
 
 function migrate(db: Database) {
   const version = (db.query<{ user_version: number }, []>("PRAGMA user_version").get())!.user_version;
@@ -36,17 +45,6 @@ function migration1Base(db: Database) {
       imported_at TEXT NOT NULL DEFAULT (datetime('now')),
       parser_id TEXT,
       status TEXT NOT NULL DEFAULT 'pending'
-    )
-  `);
-
-  db.run(`
-    CREATE TABLE IF NOT EXISTS parsers (
-      id TEXT PRIMARY KEY,
-      institution TEXT NOT NULL,
-      file_type TEXT NOT NULL,
-      code TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   `);
 
@@ -136,6 +134,10 @@ function migration7CacheLedger(db: Database) {
   `);
   db.run("DROP TABLE account_balances");
   db.run("ALTER TABLE account_balances_new RENAME TO account_balances");
+}
+
+function migration8DropParserStore(db: Database) {
+  db.run("DROP TABLE IF EXISTS parsers");
 }
 
 function migration5ManualBalances(db: Database) {

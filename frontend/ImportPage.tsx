@@ -1,79 +1,13 @@
 import React, { useState, useCallback, useRef } from "react";
 
-interface AgentEvent {
-  type: "tool_call" | "tool_result" | "message";
-  tool?: string;
-  args?: Record<string, unknown>;
-  result?: unknown;
-  text?: string;
-}
-
 interface ImportJob {
   id: string;
   filename: string;
   status: "pending" | "running" | "done" | "error";
-  events: AgentEvent[];
   parserId?: string;
   transactionsInserted?: number;
   balancesInserted?: number;
   error?: string;
-}
-
-function argsSummary(args: Record<string, unknown>): string {
-  const entries = Object.entries(args).filter(([k]) => k !== "code");
-  if (entries.length === 0) return "";
-  return entries.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(" ");
-}
-
-function EventLog({ events }: { events: AgentEvent[] }) {
-  if (events.length === 0) return null;
-  return (
-    <div className="event-log">
-      {events.map((e, i) => {
-        if (e.type === "message") {
-          return (
-            <div key={i} className="event event-message">
-              <span className="event-icon">✦</span>
-              <span className="event-args" style={{ color: "#aaa", whiteSpace: "pre-wrap" }}>{e.text}</span>
-            </div>
-          );
-        }
-        if (e.type === "tool_call") {
-          const summary = e.args ? argsSummary(e.args) : "";
-          return (
-            <div key={i} className="event event-call">
-              <span className="event-icon">→</span>
-              <span className="event-tool">{e.tool}</span>
-              {summary && <span className="event-args">{summary}</span>}
-            </div>
-          );
-        }
-        if (e.type === "tool_result") {
-          const res = e.result as Record<string, unknown> | null;
-          const ok = res?.["ok"];
-          const errMsg = res?.["error"] as string | undefined;
-          const txCount = res?.["transaction_count"] as number | undefined;
-          const errors = res?.["errors"] as string[] | undefined;
-          return (
-            <div key={i} className={`event event-result ${ok === false ? "event-fail" : ""}`}>
-              <span className="event-icon">←</span>
-              <span className="event-tool">{e.tool}</span>
-              {ok === true && txCount != null && (
-                <span className="event-args">{txCount} transactions</span>
-              )}
-              {ok === false && errMsg && (
-                <span className="event-args event-error-text">{errMsg}</span>
-              )}
-              {ok === false && errors && errors.length > 0 && (
-                <span className="event-args event-error-text">{errors.slice(0, 3).join(", ")}</span>
-              )}
-            </div>
-          );
-        }
-        return null;
-      })}
-    </div>
-  );
 }
 
 export function ImportPage() {
@@ -85,15 +19,9 @@ export function ImportPage() {
     setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)));
   }, []);
 
-  const appendEvent = useCallback((id: string, event: AgentEvent) => {
-    setJobs((prev) =>
-      prev.map((j) => (j.id === id ? { ...j, events: [...j.events, event] } : j))
-    );
-  }, []);
-
   const importFileJob = useCallback(async (file: File) => {
     const id = `${Date.now()}-${Math.random()}`;
-    setJobs((prev) => [{ id, filename: file.name, status: "pending", events: [] }, ...prev]);
+    setJobs((prev) => [{ id, filename: file.name, status: "pending" }, ...prev]);
     await new Promise((r) => setTimeout(r, 50));
     updateJob(id, { status: "running" });
 
@@ -120,9 +48,7 @@ export function ImportPage() {
         const dataLine = msg.match(/^data: (.+)$/m)?.[1];
         if (!eventLine || !dataLine) continue;
         const data = JSON.parse(dataLine) as Record<string, unknown>;
-        if (eventLine === "agent_event") {
-          appendEvent(id, data as unknown as AgentEvent);
-        } else if (eventLine === "done") {
+        if (eventLine === "done") {
           updateJob(id, {
             status: "done",
             parserId: data["parserId"] as string,
@@ -134,7 +60,7 @@ export function ImportPage() {
         }
       }
     }
-  }, [updateJob, appendEvent]);
+  }, [updateJob]);
 
   const handleFiles = useCallback((files: FileList | null) => {
     if (!files) return;
@@ -178,7 +104,6 @@ export function ImportPage() {
                 <span className="filename">{job.filename}</span>
                 <span className={`badge ${job.status}`}>{job.status}</span>
               </div>
-              <EventLog events={job.events} />
               {job.parserId && (
                 <div className="meta">parser: {job.parserId}</div>
               )}

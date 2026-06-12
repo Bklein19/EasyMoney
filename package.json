@@ -13,8 +13,6 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@openai/agents": "^0.11.6",
-    "openai": "^6.42.0",
     "playwright": "^1.60.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

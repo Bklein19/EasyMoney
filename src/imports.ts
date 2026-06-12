@@ -52,7 +52,7 @@ export function getImportList(): ImportRecord[] {
     ).c;
 
     const accounts = db
-      .query<{ name: string; institution: string }, [number]>(
+      .query<{ name: string; institution: string }, [number, number]>(
         `SELECT DISTINCT a.name, a.institution
          FROM accounts a
          WHERE a.id IN (

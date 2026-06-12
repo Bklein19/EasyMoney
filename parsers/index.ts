@@ -1,6 +1,5 @@
-// Parser registry — the single source of truth for which parser handles which file.
-// Replaces the old mutable `parsers` DB table. Parsers are committed code; the agent
-// authors new ones interactively but NEVER runs during rebuild().
+// Parser registry: the single source of truth for which committed parser handles
+// which file. This replaces the old mutable `parsers` DB table.
 import type { ParserModule, ParseResult } from "../src/types";
 
 import { meta as msStmtMeta, default as msStmtParse } from "./morgan-stanley-pdf";

@@ -4,7 +4,6 @@ import { getImportList } from "./imports";
 import { getDb } from "./db";
 import { updateAccount, deleteAlias, createAlias } from "./accounts";
 import { saveManualFacts } from "./manualFacts";
-import type { AgentEvent } from "./agent";
 import { mkdir, writeFile } from "fs/promises";
 import { join } from "path";
 import index from "../index.html";
@@ -117,36 +116,16 @@ export function startServer(port = Number(process.env["PORT"] ?? 3000)) {
           const tmpPath = join(UPLOAD_TMP, file.name);
           await writeFile(tmpPath, Buffer.from(await file.arrayBuffer()));
 
-          let controller: ReadableStreamDefaultController<string>;
-          let closed = false;
-
-          const stream = new ReadableStream<string>({
-            start(c) { controller = c; },
-          });
-
-          const safeEnqueue = (msg: string) => {
-            if (!closed) controller!.enqueue(msg);
-          };
-
-          const safeClose = () => {
-            if (!closed) { closed = true; controller!.close(); }
-          };
-
-          const onEvent = (event: AgentEvent) => {
-            safeEnqueue(sseMessage("agent_event", event));
-          };
-
-          importFile(tmpPath, onEvent)
-            .then((report) => {
-              safeEnqueue(sseMessage("done", report));
-              safeClose();
-            })
-            .catch((err) => {
-              safeEnqueue(sseMessage("error", { error: String(err) }));
-              safeClose();
-            });
-
-          return new Response(stream, {
+          // Import is now fast (resolve committed parser + rebuild).
+          // Still emit SSE done/error so the existing Import-page reader works unchanged.
+          let body: string;
+          try {
+            const report = await importFile(tmpPath);
+            body = sseMessage("done", report);
+          } catch (err) {
+            body = sseMessage("error", { error: String(err) });
+          }
+          return new Response(body, {
             headers: {
               "Content-Type": "text/event-stream",
               "Cache-Control": "no-cache",

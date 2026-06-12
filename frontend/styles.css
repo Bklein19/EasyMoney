@@ -171,37 +171,6 @@ body {
 .badge.done     { background: #001a0e; color: #2dca6e; }
 .badge.error    { background: #1e0000; color: #e05252; }
 
-.event-log {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 6px 0 4px;
-  font-family: "SF Mono", "Fira Code", monospace;
-  font-size: 0.75rem;
-}
-
-.event {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  color: #555;
-  line-height: 1.5;
-}
-
-.event-call { color: #4a8fff; }
-.event-result { color: #3d9e6a; }
-.event-fail { color: #7a3a3a; }
-
-.event-icon { opacity: 0.5; flex-shrink: 0; }
-.event-tool { font-weight: 600; flex-shrink: 0; }
-.event-args {
-  color: #555;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.event-error-text { color: #9e4a4a; }
-
 .stats {
   font-size: 0.8rem;
   color: #555;

@@ -1,13 +1,9 @@
 import { createHash } from "crypto";
 import { copyFile, readFile, mkdir } from "fs/promises";
 import { join, basename } from "path";
-import type { Database } from "bun:sqlite";
 import { getDb } from "./db";
-import { resolveAccountId, lookupAlias } from "./accounts";
-import { runIngestionAgent } from "./agent";
-import { listParserIds, executeParser } from "./parserStore";
-import type { AgentEvent } from "./agent";
-import type { ParseResult } from "./types";
+import { resolveParser } from "../parsers";
+import { rebuild } from "./rebuild";
 
 const RAW_DIR = join(import.meta.dir, "../imports/raw");
 
@@ -16,13 +12,14 @@ export interface ImportReport {
   parserId: string;
   transactionsInserted: number;
   balancesInserted: number;
+  unmappedAliases: Array<{ institution: string; account: string }>;
 }
 
-// Import without the AI agent — requires parserId to already exist and all accounts to be mapped.
-export async function importFileDirect(
-  sourcePath: string,
-  parserId: string,
-): Promise<ImportReport> {
+// Ingest one uploaded file: content-address it into the raw store, record it in
+// import_files, confirm a committed parser handles it, then rebuild the ledger from
+// the whole raw store (the canonical, order-independent set-union). Raw files are
+// the source of truth, and rebuild() is the single path into the ledger cache.
+export async function importFile(sourcePath: string): Promise<ImportReport> {
   await mkdir(RAW_DIR, { recursive: true });
 
   const contents = await readFile(sourcePath);
@@ -30,287 +27,50 @@ export async function importFileDirect(
   const filename = basename(sourcePath);
   const destPath = join(RAW_DIR, `${sha256}-${filename}`);
 
-  await copyFile(sourcePath, destPath);
-
   const db = getDb();
-
   const existing = db
     .query<{ id: number; status: string }, [string]>(
       "SELECT id, status FROM import_files WHERE sha256 = ?"
     )
     .get(sha256);
-
   if (existing?.status === "ok") {
     throw new Error(`File already imported (id=${existing.id})`);
   }
 
-  const fileId = existing?.id ?? insertImportFile(sha256, filename);
-  db.run("UPDATE import_files SET parser_id = ? WHERE id = ?", [parserId, fileId]);
-
-  let parseResult: ParseResult;
+  // Resolve the parser BEFORE persisting anything, so an unrecognized file is
+  // rejected cleanly rather than left half-imported.
+  let parserId: string;
   try {
-    parseResult = await executeParser(parserId, destPath);
+    const parser = await resolveParser(sourcePath);
+    parserId = parser.meta.id;
+    // Validate it actually parses (throws on malformed input).
+    await parser.parse(sourcePath);
   } catch (err) {
-    db.run("UPDATE import_files SET status = 'failed' WHERE id = ?", [fileId]);
-    throw err;
-  }
-
-  // Verify all accounts are already mapped — refuse rather than silently drop data
-  const unmapped = collectUnmappedAccounts(parseResult);
-  if (unmapped.length > 0) {
-    db.run("UPDATE import_files SET status = 'failed' WHERE id = ?", [fileId]);
     throw new Error(
-      `Cannot import directly: ${unmapped.length} account(s) not mapped: ` +
-      unmapped.map((p) => `${p.institution} / ${p.account}`).join(", ")
+      `No committed parser handles "${filename}". Author one in parsers/ and commit it. (${String(err)})`
     );
   }
 
-  const allDates = [
-    ...parseResult.transactions.map((t) => t.date),
-    ...parseResult.balances.map((b) => b.date),
-  ].sort();
-  const covered_from = parseResult.covered_from ?? allDates[0] ?? null;
-  const covered_to = parseResult.covered_to ?? allDates[allDates.length - 1] ?? null;
-
-  if (covered_from && covered_to && parseResult.transactions.length > 0) {
-    if (hasOverlap(db, fileId, parseResult, covered_from, covered_to)) {
-      parseResult = { ...parseResult, transactions: [] };
-    }
-  }
-
-  const { transactionsInserted, balancesInserted } = commitToDb(fileId, parseResult);
-  db.run(
-    "UPDATE import_files SET status = 'ok', covered_from = ?, covered_to = ? WHERE id = ?",
-    [covered_from, covered_to, fileId]
-  );
-
-  return { fileId, parserId, transactionsInserted, balancesInserted };
-}
-
-function collectUnmappedAccounts(result: ParseResult): Array<{ institution: string; account: string }> {
-  const pairs = new Map<string, { institution: string; account: string }>();
-  for (const t of result.transactions) pairs.set(`${t.institution}\0${t.account}`, t);
-  for (const b of result.balances) pairs.set(`${b.institution}\0${b.account}`, b);
-  return [...pairs.values()].filter((p) => lookupAlias(p.institution, p.account) === null);
-}
-
-export async function importFile(
-  sourcePath: string,
-  onEvent?: (event: AgentEvent) => void
-): Promise<ImportReport> {
-  await mkdir(RAW_DIR, { recursive: true });
-
-  const contents = await readFile(sourcePath);
-  const sha256 = createHash("sha256").update(contents).digest("hex");
-  const filename = basename(sourcePath);
-  const destPath = join(RAW_DIR, `${sha256}-${filename}`);
-
   await copyFile(sourcePath, destPath);
-
-  const db = getDb();
-
-  const existing = db
-    .query<{ id: number; parser_id: string | null; status: string }, [string]>(
-      "SELECT id, parser_id, status FROM import_files WHERE sha256 = ?"
-    )
-    .get(sha256);
-
-  if (existing?.status === "ok") {
-    throw new Error(`File already imported (id=${existing.id})`);
-  }
-
   const fileId = existing?.id ?? insertImportFile(sha256, filename);
-
-  // Fast path: if there's a single parser that handles this file type and all accounts
-  // are already mapped, skip the agent entirely.
-  const fastPathResult = await tryFastPath(destPath, fileId);
-  if (fastPathResult) return fastPathResult;
-
-  let parserId: string;
-  let parseResult: ParseResult;
-
-  try {
-    ({ parserId, parseResult } = await runIngestionAgent(destPath, onEvent));
-  } catch (err) {
-    db.run("UPDATE import_files SET status = 'failed' WHERE id = ?", [fileId]);
-    throw err;
-  }
-
-  db.run("UPDATE import_files SET parser_id = ? WHERE id = ?", [parserId, fileId]);
-
-  // Infer covered range from data if parser didn't set it explicitly
-  const allDates = [
-    ...parseResult.transactions.map((t) => t.date),
-    ...parseResult.balances.map((b) => b.date),
-  ].sort();
-  const covered_from = parseResult.covered_from ?? allDates[0] ?? null;
-  const covered_to = parseResult.covered_to ?? allDates[allDates.length - 1] ?? null;
-
-  // If transactions overlap with an already-imported file for the same account(s),
-  // drop the transactions but keep balance snapshots — the activity report already has the txns.
-  if (covered_from && covered_to && parseResult.transactions.length > 0) {
-    if (hasOverlap(db, fileId, parseResult, covered_from, covered_to)) {
-      parseResult = { ...parseResult, transactions: [] };
-    }
-  }
-
-  const { transactionsInserted, balancesInserted } = commitToDb(fileId, parseResult);
   db.run(
-    "UPDATE import_files SET status = 'ok', covered_from = ?, covered_to = ? WHERE id = ?",
-    [covered_from, covered_to, fileId]
+    "UPDATE import_files SET parser_id = ?, status = 'ok' WHERE id = ?",
+    [parserId, fileId]
   );
 
-  return { fileId, parserId, transactionsInserted, balancesInserted };
-}
-
-// Try all known parsers. If exactly one succeeds and has all accounts mapped, use it directly.
-async function tryFastPath(destPath: string, fileId: number): Promise<ImportReport | null> {
-  const db = getDb();
-  const parserIds = listParserIds();
-  const candidates: Array<{ parserId: string; parseResult: ParseResult }> = [];
-
-  for (const pid of parserIds) {
-    try {
-      const result = await executeParser(pid, destPath);
-      // Skip parsers that produced nothing useful
-      if (result.transactions.length === 0 && result.balances.length === 0) continue;
-      if (collectUnmappedAccounts(result).length > 0) continue;
-      candidates.push({ parserId: pid, parseResult: result });
-    } catch {
-      // Parser failed or errored — not a match
-    }
-  }
-
-  if (candidates.length !== 1) return null; // ambiguous or no match — let agent decide
-
-  const { parserId, parseResult } = candidates[0]!;
-  db.run("UPDATE import_files SET parser_id = ? WHERE id = ?", [parserId, fileId]);
-
-  const allDates = [
-    ...parseResult.transactions.map((t) => t.date),
-    ...parseResult.balances.map((b) => b.date),
-  ].sort();
-  const covered_from = parseResult.covered_from ?? allDates[0] ?? null;
-  const covered_to = parseResult.covered_to ?? allDates[allDates.length - 1] ?? null;
-
-  let finalResult = parseResult;
-  if (covered_from && covered_to && finalResult.transactions.length > 0) {
-    if (hasOverlap(db, fileId, finalResult, covered_from, covered_to)) {
-      finalResult = { ...finalResult, transactions: [] };
-    }
-  }
-
-  const { transactionsInserted, balancesInserted } = commitToDb(fileId, finalResult);
-  db.run(
-    "UPDATE import_files SET status = 'ok', covered_from = ?, covered_to = ? WHERE id = ?",
-    [covered_from, covered_to, fileId]
-  );
-
-  return { fileId, parserId, transactionsInserted, balancesInserted };
+  // Rebuild the ledger from all raw files — keeps the cache a pure projection.
+  const r = await rebuild();
+  return {
+    fileId,
+    parserId,
+    transactionsInserted: r.tx,
+    balancesInserted: r.bal,
+    unmappedAliases: r.unmappedAliases,
+  };
 }
 
 function insertImportFile(sha256: string, filename: string): number {
   const db = getDb();
   db.run("INSERT INTO import_files (sha256, filename) VALUES (?, ?)", [sha256, filename]);
   return db.query<{ id: number }, []>("SELECT last_insert_rowid() as id").get()!.id;
-}
-
-// Returns true if any existing completed import covers the same account(s) and overlaps
-// the date range of the incoming file's transactions.
-function hasOverlap(
-  db: Database,
-  incomingFileId: number,
-  result: ParseResult,
-  covered_from: string,
-  covered_to: string
-): boolean {
-  const accountIds = new Set<number>();
-  for (const t of result.transactions) {
-    const id = lookupAlias(t.institution, t.account);
-    if (id !== null) accountIds.add(id);
-  }
-  for (const b of result.balances) {
-    const id = lookupAlias(b.institution, b.account);
-    if (id !== null) accountIds.add(id);
-  }
-  if (accountIds.size === 0) return false;
-
-  const placeholders = [...accountIds].map(() => "?").join(", ");
-  const conflicts = db
-    .query<
-      { id: number },
-      (string | number)[]
-    >(
-      `SELECT DISTINCT f.id
-       FROM import_files f
-       JOIN transactions t ON t.import_file_id = f.id
-       WHERE f.status = 'ok'
-         AND f.id != ?
-         AND f.covered_from IS NOT NULL
-         AND f.covered_to IS NOT NULL
-         AND f.covered_from <= ?
-         AND f.covered_to >= ?
-         AND t.account_id IN (${placeholders})`
-    )
-    .all(incomingFileId, covered_to, covered_from, ...[...accountIds]);
-
-  if (conflicts.length > 0) {
-    return true;
-  }
-  return false;
-}
-
-function commitToDb(
-  fileId: number,
-  result: ParseResult
-): { transactionsInserted: number; balancesInserted: number } {
-  const db = getDb();
-
-  const insertTx = db.prepare(`
-    INSERT OR IGNORE INTO transactions
-      (id, import_file_id, date, amount_cents, description, account, institution, account_id, raw)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  const insertBal = db.prepare(`
-    INSERT OR REPLACE INTO account_balances
-      (import_file_id, date, account, institution, account_id, balance_cents)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `);
-
-  let transactionsInserted = 0;
-  let balancesInserted = 0;
-  const accountIdCache = new Map<string, number>();
-
-  const accountIdFor = (institution: string, account: string): number => {
-    const key = `${institution} ${account}`;
-    let id = accountIdCache.get(key);
-    if (id === undefined) {
-      id = resolveAccountId(institution, account);
-      accountIdCache.set(key, id);
-    }
-    return id;
-  };
-
-  db.transaction(() => {
-    for (const t of result.transactions) {
-      const info = insertTx.run(
-        t.id, fileId, t.date, t.amount_cents,
-        t.description, t.account, t.institution,
-        accountIdFor(t.institution, t.account),
-        JSON.stringify(t.raw)
-      );
-      transactionsInserted += info.changes;
-    }
-    for (const b of result.balances) {
-      const info = insertBal.run(
-        fileId, b.date, b.account, b.institution,
-        accountIdFor(b.institution, b.account),
-        b.balance_cents
-      );
-      balancesInserted += info.changes;
-    }
-  })();
-
-  return { transactionsInserted, balancesInserted };
 }
