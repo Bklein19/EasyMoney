@@ -46,6 +46,7 @@ interface ChartPoint {
 
 interface DerivativePoint {
   period: string;
+  sortKey: string;
   contributions: number;
   marketGains: number;
 }
@@ -168,14 +169,15 @@ export function NetWorthPage() {
       const period = periodKey(row.month);
       let point = byPeriod.get(period);
       if (!point) {
-        point = { period, contributions: 0, marketGains: 0 };
+        point = { period, sortKey: row.month, contributions: 0, marketGains: 0 };
         byPeriod.set(period, point);
       }
+      if (row.month < point.sortKey) point.sortKey = row.month;
       point.contributions += row.contributions_cents / 100;
       point.marketGains += (row.dividends_cents + row.interest_cents + (row.gains_cents ?? 0)) / 100;
     }
 
-    return [...byPeriod.values()];
+    return [...byPeriod.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
   }, [report, selectedIds, derivativePeriod]);
 
   const toggleAccount = (id: number) => {
