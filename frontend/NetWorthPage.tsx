@@ -34,12 +34,20 @@ interface NetWorthReport {
   rows: MonthlyRow[];
 }
 
+type Period = "month" | "quarter" | "year";
+
 interface ChartPoint {
   month: string;
   cumulativeContributions: number;
   cumulativeGains: number;
   cumulative: number;
   hasBalance: boolean;
+}
+
+interface DerivativePoint {
+  period: string;
+  contributions: number;
+  marketGains: number;
 }
 
 const fmtUsd = (v: number) =>
@@ -52,6 +60,7 @@ export function NetWorthPage() {
   const [report, setReport] = useState<NetWorthReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number> | null>(null); // null = all
+  const [derivativePeriod, setDerivativePeriod] = useState<Period>("month");
 
   useEffect(() => {
     fetch("/api/networth")
@@ -136,6 +145,33 @@ export function NetWorthPage() {
     };
   }, [data]);
 
+  const derivativeData: DerivativePoint[] = useMemo(() => {
+    if (!report) return [];
+
+    const periodKey = (month: string): string => {
+      if (derivativePeriod === "month") return month;
+      const year = month.slice(0, 4);
+      if (derivativePeriod === "year") return year;
+      const monthIndex = Number(month.slice(5, 7));
+      return `${year} Q${Math.ceil(monthIndex / 3)}`;
+    };
+
+    const byPeriod = new Map<string, DerivativePoint>();
+    for (const row of report.rows) {
+      if (!selectedIds.has(row.account_id)) continue;
+      const period = periodKey(row.month);
+      let point = byPeriod.get(period);
+      if (!point) {
+        point = { period, contributions: 0, marketGains: 0 };
+        byPeriod.set(period, point);
+      }
+      point.contributions += row.contributions_cents / 100;
+      point.marketGains += (row.dividends_cents + row.interest_cents + (row.gains_cents ?? 0)) / 100;
+    }
+
+    return [...byPeriod.values()];
+  }, [report, selectedIds, derivativePeriod]);
+
   const toggleAccount = (id: number) => {
     const next = new Set(selectedIds);
     if (next.has(id)) next.delete(id);
@@ -209,6 +245,43 @@ export function NetWorthPage() {
               strokeWidth={1.5}
               dot={false}
             />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div className="chart-section-header">
+        <div>
+          <div className="chart-title">Change by period</div>
+          <div className="chart-subtitle">Contributions and market gains</div>
+        </div>
+        <div className="segmented-control" role="group" aria-label="Derivative period">
+          {(["month", "quarter", "year"] as const).map((period) => (
+            <button
+              key={period}
+              type="button"
+              className={derivativePeriod === period ? "active" : ""}
+              onClick={() => setDerivativePeriod(period)}
+            >
+              {period}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="chart-container derivative-chart">
+        <ResponsiveContainer width="100%" height={340}>
+          <ComposedChart data={derivativeData} stackOffset="sign">
+            <CartesianGrid strokeDasharray="3 3" stroke="#222" />
+            <XAxis dataKey="period" stroke="#555" tick={{ fontSize: 11 }} />
+            <YAxis stroke="#555" tick={{ fontSize: 11 }} tickFormatter={fmtUsdAxis} />
+            <Tooltip
+              formatter={(value) => fmtUsd(Number(value))}
+              contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
+              labelStyle={{ color: "#888" }}
+            />
+            <Legend wrapperStyle={{ fontSize: 12 }} />
+            <Bar dataKey="contributions" name="Contributions" fill="#4a8fff" />
+            <Bar dataKey="marketGains" name="Market gains" fill="#ffb74a" />
           </ComposedChart>
         </ResponsiveContainer>
       </div>

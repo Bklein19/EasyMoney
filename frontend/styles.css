@@ -274,6 +274,60 @@ body {
   padding: 20px 12px 8px;
 }
 
+.chart-section-header {
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 28px 0 12px;
+}
+
+.chart-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #e8e8e8;
+}
+
+.chart-subtitle {
+  margin-top: 3px;
+  font-size: 0.78rem;
+  color: #666;
+}
+
+.segmented-control {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px;
+  border: 1px solid #292929;
+  border-radius: 8px;
+  background: #151515;
+}
+
+.segmented-control button {
+  min-width: 68px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #777;
+  font: inherit;
+  font-size: 0.78rem;
+  text-transform: capitalize;
+  cursor: pointer;
+}
+
+.segmented-control button:hover { color: #bbb; }
+
+.segmented-control button.active {
+  background: #242424;
+  color: #fff;
+}
+
+.derivative-chart {
+  padding-top: 16px;
+}
+
 .hint-box {
   width: 100%;
   margin-top: 16px;
