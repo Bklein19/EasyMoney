@@ -499,8 +499,8 @@ export function NetWorthPage() {
                 labelStyle={{ color: "#888" }}
               />
               <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="annualIrr" name="Annual IRR" fill="#60d394" />
-              <Bar dataKey="annualTwr" name="Annual TWR" fill="#ff7a90" />
+              <Bar dataKey="annualIrr" name="Annual IRR" fill="#7aa7ff" />
+              <Bar dataKey="annualTwr" name="Annual TWR" fill="#c9a66b" />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
