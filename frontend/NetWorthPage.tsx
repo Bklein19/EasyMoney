@@ -67,11 +67,10 @@ interface ReturnSummary {
   annualized_time_weighted_return: number | null;
 }
 
-interface ReturnChartPoint {
-  accountLabel: string;
-  annualIrr: number | null;
-  annualTwr: number | null;
-}
+type PeriodReturnChartPoint = {
+  period: string;
+  sortKey: string;
+} & Record<string, string | number | null>;
 
 interface InvestmentReturnPoint {
   time: number;
@@ -108,6 +107,9 @@ const formatMonthTick = (time: number) => {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 };
 
+const accountColor = (index: number) =>
+  ["#7aa7ff", "#c9a66b", "#9d8cff", "#68c7d8", "#e09f7d", "#8ccf91", "#d889c7", "#a8b86e"][index % 8]!;
+
 export function NetWorthPage() {
   const [report, setReport] = useState<NetWorthReport | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -130,17 +132,24 @@ export function NetWorthPage() {
     if (!report) return [];
     const months = [...new Set(report.rows.map((r) => r.month))].sort();
 
-    // Monthly deltas per (month, account)
+    // Monthly deltas (summed across selected accounts) + per-account balance
+    // snapshots. Accounts report on different cadences (Sequoia is quarterly),
+    // so each account's last-known balance must carry forward into months where
+    // it has no new snapshot — otherwise the combined total saws up and down.
     const monthlyContribs = new Map<string, number>();
     const monthlyGains = new Map<string, number>();
-    const balanceByMonth = new Map<string, number>();
+    const balanceByMonthAccount = new Map<string, Map<number, number>>(); // month → (account → balance)
+    const accountsEverSnapped = new Set<number>();
 
     for (const row of report.rows) {
       if (!selectedIds.has(row.account_id)) continue;
       monthlyContribs.set(row.month, (monthlyContribs.get(row.month) ?? 0) + row.contributions_cents / 100);
       monthlyGains.set(row.month, (monthlyGains.get(row.month) ?? 0) + (row.dividends_cents + row.interest_cents + (row.gains_cents ?? 0)) / 100);
       if (row.end_balance_cents !== null) {
-        balanceByMonth.set(row.month, (balanceByMonth.get(row.month) ?? 0) + row.end_balance_cents / 100);
+        let m = balanceByMonthAccount.get(row.month);
+        if (!m) { m = new Map(); balanceByMonthAccount.set(row.month, m); }
+        m.set(row.account_id, row.end_balance_cents / 100);
+        accountsEverSnapped.add(row.account_id);
       }
     }
 
@@ -148,6 +157,7 @@ export function NetWorthPage() {
     let cumulativeGains = 0;
     let running = 0;
     let started = false;
+    const lastBalance = new Map<number, number>(); // account → most recent balance
     const points: ChartPoint[] = [];
     const accountById = new Map(report.accounts.map((account) => [account.id, account]));
     const cashOnlySelection = [...selectedIds].every((id) => {
@@ -168,10 +178,15 @@ export function NetWorthPage() {
         cumulativeContribs = 0;
       }
 
-      const snapped = balanceByMonth.get(month);
+      // Update any account that has a fresh snapshot this month.
+      const snaps = balanceByMonthAccount.get(month);
+      if (snaps) for (const [acct, bal] of snaps) lastBalance.set(acct, bal);
+
+      // Net worth = sum of every snapped account's most recent balance, carried forward.
+      const haveAllBalances = accountsEverSnapped.size > 0 && [...accountsEverSnapped].every((a) => lastBalance.has(a));
       let hasBalance = false;
-      if (snapped !== undefined) {
-        running = snapped;
+      if (snaps && haveAllBalances) {
+        running = [...lastBalance.values()].reduce((a, b) => a + b, 0);
         hasBalance = true;
         if (cashOnlySelection) {
           // Cash accounts have statement snapshots mid-month; transactions later
@@ -249,13 +264,85 @@ export function NetWorthPage() {
       });
   }, [report, selectedIds]);
 
-  const returnChartData: ReturnChartPoint[] = useMemo(() => {
-    return returnRows.map((row) => ({
-      accountLabel: `${row.account.institution} · ${row.account.name}`,
-      annualIrr: row.irr,
-      annualTwr: row.annualized_time_weighted_return,
-    }));
-  }, [returnRows]);
+  const periodReturnData: PeriodReturnChartPoint[] = useMemo(() => {
+    if (!report) return [];
+
+    const periodKey = (month: string): string => {
+      if (derivativePeriod === "month") return month;
+      const year = month.slice(0, 4);
+      if (derivativePeriod === "year") return year;
+      const monthIndex = Number(month.slice(5, 7));
+      return `${year} Q${Math.ceil(monthIndex / 3)}`;
+    };
+
+    const returnAccountIds = new Set(returnRows.map((row) => row.account_id));
+    const rowsByAccount = new Map<number, MonthlyRow[]>();
+    for (const row of report.rows) {
+      if (!returnAccountIds.has(row.account_id)) continue;
+      if (!selectedIds.has(row.account_id)) continue;
+      const rows = rowsByAccount.get(row.account_id) ?? [];
+      rows.push(row);
+      rowsByAccount.set(row.account_id, rows);
+    }
+
+    const byPeriod = new Map<string, PeriodReturnChartPoint>();
+    for (const [accountId, rows] of rowsByAccount) {
+      rows.sort((a, b) => a.month.localeCompare(b.month));
+
+      let estimatedStartBalance: number | null = null;
+      const linkedByPeriod = new Map<string, { sortKey: string; linked: number; periods: number }>();
+
+      for (const row of rows) {
+        const period = periodKey(row.month);
+        const periodState = linkedByPeriod.get(period) ?? { sortKey: row.month, linked: 1, periods: 0 };
+        if (row.month < periodState.sortKey) periodState.sortKey = row.month;
+
+        const externalFlow = row.contributions_cents / 100;
+        const investmentReturn = (row.dividends_cents + row.interest_cents + (row.gains_cents ?? 0)) / 100;
+        const capitalBase =
+          estimatedStartBalance === null
+            ? Math.max(0, externalFlow)
+            : estimatedStartBalance + Math.max(0, externalFlow);
+
+        if (capitalBase > 0) {
+          const monthlyReturn = investmentReturn / capitalBase;
+          if (Number.isFinite(monthlyReturn) && monthlyReturn > -1) {
+            periodState.linked *= 1 + monthlyReturn;
+            periodState.periods += 1;
+          }
+        }
+
+        if (row.end_balance_cents !== null) {
+          estimatedStartBalance = row.end_balance_cents / 100;
+        } else if (estimatedStartBalance !== null) {
+          estimatedStartBalance += externalFlow + investmentReturn;
+        }
+
+        linkedByPeriod.set(period, periodState);
+      }
+
+      const accountKey = `account_${accountId}`;
+      for (const [period, state] of linkedByPeriod) {
+        if (state.periods === 0) continue;
+        const point = byPeriod.get(period) ?? { period, sortKey: state.sortKey };
+        if (state.sortKey < String(point.sortKey)) point.sortKey = state.sortKey;
+        point[accountKey] = state.linked - 1;
+        byPeriod.set(period, point);
+      }
+    }
+
+    return [...byPeriod.values()].sort((a, b) => String(a.sortKey).localeCompare(String(b.sortKey)));
+  }, [report, returnRows, selectedIds, derivativePeriod]);
+
+  const returnAccountBars = useMemo(
+    () =>
+      returnRows.map((row, index) => ({
+        key: `account_${row.account_id}`,
+        label: `${row.account.institution} · ${row.account.name}`,
+        color: accountColor(index),
+      })),
+    [returnRows],
+  );
 
   const investmentReturnData: InvestmentReturnPoint[] = useMemo(() => {
     const points: InvestmentReturnPoint[] = [];
@@ -373,7 +460,11 @@ export function NetWorthPage() {
           <ComposedChart data={data} stackOffset="sign">
             <CartesianGrid strokeDasharray="3 3" stroke="#222" />
             <XAxis dataKey="month" stroke="#555" tick={{ fontSize: 11 }} />
-            <YAxis stroke="#555" tick={{ fontSize: 11 }} tickFormatter={fmtUsdAxis} />
+            <YAxis
+              stroke="#555"
+              tick={{ fontSize: 11 }}
+              tickFormatter={fmtUsdAxis}
+            />
             <Tooltip
               formatter={(value) => fmtUsd(Number(value))}
               contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
@@ -418,7 +509,11 @@ export function NetWorthPage() {
           <ComposedChart data={derivativeData} stackOffset="sign">
             <CartesianGrid strokeDasharray="3 3" stroke="#222" />
             <XAxis dataKey="period" stroke="#555" tick={{ fontSize: 11 }} />
-            <YAxis stroke="#555" tick={{ fontSize: 11 }} tickFormatter={fmtUsdAxis} />
+            <YAxis
+              stroke="#555"
+              tick={{ fontSize: 11 }}
+              tickFormatter={fmtUsdAxis}
+            />
             <Tooltip
               formatter={(value) => fmtUsd(Number(value))}
               contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
@@ -435,7 +530,7 @@ export function NetWorthPage() {
         <div className="chart-section-header returns-header">
           <div>
             <div className="chart-title">Performance</div>
-            <div className="chart-subtitle">Investment returns and annualized account returns</div>
+            <div className="chart-subtitle">Investment returns and period account returns</div>
           </div>
         </div>
         <div className="return-subsection-title">Investment Returns</div>
@@ -487,32 +582,23 @@ export function NetWorthPage() {
             </ComposedChart>
           </ResponsiveContainer>
         </div>
-        <div className="return-subsection-title">Annualized Rates</div>
+        <div className="return-subsection-title">Period Returns</div>
         <div className="chart-container returns-chart">
-          <ResponsiveContainer width="100%" height={Math.max(240, returnChartData.length * 72 + 72)}>
-            <ComposedChart data={returnChartData} layout="vertical" margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
+          <ResponsiveContainer width="100%" height={340}>
+            <ComposedChart data={periodReturnData} margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-              <XAxis
-                type="number"
-                stroke="#555"
-                tick={{ fontSize: 11 }}
-                tickFormatter={(value) => fmtPct(Number(value))}
-              />
-              <YAxis
-                type="category"
-                dataKey="accountLabel"
-                width={190}
-                stroke="#555"
-                tick={{ fontSize: 11 }}
-              />
+              <XAxis dataKey="period" stroke="#555" tick={{ fontSize: 11 }} />
+              <YAxis stroke="#555" tick={{ fontSize: 11 }} tickFormatter={(value) => fmtPct(Number(value))} />
               <Tooltip
-                formatter={(value) => fmtPct(Number(value))}
+                formatter={(value, name) => [fmtPct(Number(value)), name]}
                 contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
                 labelStyle={{ color: "#888" }}
               />
+              <ReferenceLine y={0} stroke="#333" />
               <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="annualIrr" name="Annual IRR" fill="#7aa7ff" />
-              <Bar dataKey="annualTwr" name="Annual TWR" fill="#c9a66b" />
+              {returnAccountBars.map((account) => (
+                <Bar key={account.key} dataKey={account.key} name={account.label} fill={account.color} />
+              ))}
             </ComposedChart>
           </ResponsiveContainer>
         </div>
