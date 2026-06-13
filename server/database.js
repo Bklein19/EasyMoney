@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -7,9 +7,36 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = path.resolve(__dirname, '..', 'data', 'easymoney.sqlite');
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
-const db = new Database(dbPath);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+const sqlite = new Database(dbPath, { create: true });
+sqlite.run('PRAGMA journal_mode = WAL');
+sqlite.run('PRAGMA foreign_keys = ON');
+
+function normalizeSql(sql) {
+  return sql.replace(/@([A-Za-z_][A-Za-z0-9_]*)/g, '$$$1');
+}
+
+function normalizeParams(params) {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return params;
+  return Object.fromEntries(
+    Object.entries(params).flatMap(([key, value]) => (
+      key.startsWith('$') ? [[key, value]] : [[key, value], [`$${key}`, value]]
+    ))
+  );
+}
+
+function wrapStatement(statement) {
+  return {
+    all: (...params) => statement.all(...params.map(normalizeParams)),
+    get: (...params) => statement.get(...params.map(normalizeParams)),
+    run: (...params) => statement.run(...params.map(normalizeParams)),
+  };
+}
+
+const db = {
+  exec: (sql) => sqlite.exec(sql),
+  prepare: (sql) => wrapStatement(sqlite.prepare(normalizeSql(sql))),
+  transaction: (fn) => sqlite.transaction(fn),
+};
 
 const TABLES = {
   accounts: ['id', 'name', 'institution', 'type', 'currentBalance', 'currency', 'createdAt', 'updatedAt'],

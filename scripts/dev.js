@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 
 const processes = [
-  spawn('node', ['server/index.js'], { stdio: 'inherit', shell: true }),
-  spawn('npx', ['vite'], { stdio: 'inherit', shell: true })
+  spawn('bun', ['run', 'build:client', '--', '--watch'], { stdio: 'inherit' }),
+  spawn('bun', ['server/index.js'], { stdio: 'inherit' })
 ];
 
 function shutdown(code = 0) {
