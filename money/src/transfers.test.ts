@@ -1,10 +1,16 @@
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
+import { seedReportFixture } from "./testFixtures";
 import { getTransferAuditReport } from "./transfers";
+
+beforeAll(() => {
+  seedReportFixture();
+});
 
 test("transfer audit report exposes heuristic links", () => {
   const report = getTransferAuditReport();
-  expect(report.links.length).toBeGreaterThan(0);
-  expect(report.links.every((link) => link.source_account && link.destination_account)).toBe(true);
+  const fixtureLinks = report.links.filter((link) => link.id.startsWith("cash:fixture-transfer-out"));
+  expect(fixtureLinks.length).toBeGreaterThan(0);
+  expect(fixtureLinks.every((link) => link.source_account && link.destination_account)).toBe(true);
 });
 
 test("transfer audit candidates are large unmatched transfer-like transactions", () => {

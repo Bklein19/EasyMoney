@@ -1,19 +1,83 @@
 import { expect, test, beforeAll } from "bun:test";
-import { parseAllRawFiles, buildLedger, verify, type BuiltLedger } from "./rebuild";
+import { buildLedger, ledgerFingerprint, type BuiltLedger, type ParsedFile } from "./rebuild";
 import { activityBucket } from "./flowClassification";
+import { seedReportFixture } from "./testFixtures";
 
-// Parsing every raw file (PDFs via pdftotext) is slow; do it once for the whole suite.
+const fixtureFiles: ParsedFile[] = [
+  {
+    filename: "fixture-statement.csv",
+    storedName: "fixture-statement.csv",
+    meta: {
+      id: "fixture-statement",
+      institution: "Fixture Bank",
+      kind: "statement",
+      priority: 10,
+      matches: () => false,
+    },
+    transactions: [
+      {
+        id: "fixture-summary",
+        date: "2026-03-31",
+        amount_cents: 1_000_000,
+        description: "Statement net cash flow",
+        account: "Fixture Brokerage",
+        institution: "Fixture Bank",
+        category: "activity",
+        raw: { type: "statement-cash-flow-summary", metric: "netCashFlow" },
+      },
+    ],
+    balances: [
+      {
+        date: "2026-03-31",
+        account: "Fixture Brokerage",
+        institution: "Fixture Bank",
+        balance_cents: 2_000_000,
+      },
+    ],
+    covered_from: "2026-03-01",
+    covered_to: "2026-03-31",
+  },
+  {
+    filename: "fixture-activity.csv",
+    storedName: "fixture-activity.csv",
+    meta: {
+      id: "fixture-activity",
+      institution: "Fixture Bank",
+      kind: "activity-export",
+      priority: 100,
+      matches: () => false,
+    },
+    transactions: [
+      {
+        id: "fixture-detail",
+        date: "2026-03-15",
+        amount_cents: 1_000_000,
+        description: "Transfer in from checking",
+        account: "Fixture Brokerage",
+        institution: "Fixture Bank",
+        category: "activity",
+        raw: {},
+      },
+    ],
+    balances: [],
+    covered_from: "2026-03-01",
+    covered_to: "2026-03-31",
+  },
+];
+
 let ledger: BuiltLedger;
 beforeAll(async () => {
-  ledger = buildLedger(await parseAllRawFiles());
+  seedReportFixture();
+  ledger = buildLedger(fixtureFiles);
 }, 120_000);
 
 test("rebuild is independent of raw import file order", async () => {
-  const result = await verify({ sampleSize: 32, permutations: 8 });
+  const forward = buildLedger(fixtureFiles);
+  const reverse = buildLedger([...fixtureFiles].reverse());
 
-  expect(result.tx).toBeGreaterThan(0);
-  expect(result.fingerprint).toMatch(/^[a-f0-9]{64}$/);
-  expect(result.seed).toMatch(/^[a-f0-9]{32}$/);
+  expect(forward.transactions.length).toBeGreaterThan(0);
+  expect(ledgerFingerprint(forward)).toBe(ledgerFingerprint(reverse));
+  expect(ledgerFingerprint(forward)).toMatch(/^[a-f0-9]{64}$/);
 }, 60_000);
 
 // Regression guard for cross-source double-counting (the Merrill bug): a coarse

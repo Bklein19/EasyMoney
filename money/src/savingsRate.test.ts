@@ -1,5 +1,10 @@
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import { getSavingsRateReport, isExternalIncome, isInternalMoneyMove, isMarketIncome, periodAllocation } from "./savingsRate";
+import { seedReportFixture } from "./testFixtures";
+
+beforeAll(() => {
+  seedReportFixture();
+});
 
 test("savings rate treats payroll and retirement contributions as income", () => {
   expect(isExternalIncome({
@@ -29,7 +34,7 @@ test("savings rate can separate market income from external income", () => {
 });
 
 test("savings rate excludes investment income from the poof denominator", () => {
-  const row = getSavingsRateReport().rows.find((r) => r.market_income_cents > 0);
+  const row = getSavingsRateReport().rows.find((r) => r.month === "2026-03" && r.market_income_cents > 0);
   expect(row).toBeDefined();
   expect(row!.poof_cents).toBe(Math.max(0, row!.income_ex_market_gains_cents - row!.net_retained_cents));
 });

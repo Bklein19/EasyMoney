@@ -1,6 +1,9 @@
 {
   "name": "easymoney",
   "private": true,
+  "workspaces": [
+    "money"
+  ],
   "version": "0.0.0",
   "type": "module",
   "scripts": {
