@@ -34,9 +34,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .DS_Store
 
 # local data
-data/*.db
-data/*.db-wal
-data/*.db-shm
+data/
 imports/raw/
 imports/downloads/
 imports/documents/
