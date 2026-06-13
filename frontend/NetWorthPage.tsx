@@ -432,14 +432,11 @@ export function NetWorthPage({ view, selectedIds }: NetWorthPageProps) {
     <div className={`page page-networth ${view === "networth" ? "page-networth-dashboard" : "page-performance-dashboard"}`}>
       {view === "networth" ? (
         <div className="networth-dashboard">
-          <aside className="networth-secondary-sidebar">
-            <div className="secondary-sidebar-section">
-              <div className="secondary-sidebar-title">Summary</div>
+          <div className="networth-dashboard-main">
+            <div className="networth-summary">
               {totalCards}
             </div>
-          </aside>
 
-          <div className="networth-dashboard-main">
             <div className="chart-container networth-primary-chart">
               <ResponsiveContainer width="100%" height={420}>
                 <ComposedChart data={data} stackOffset="sign">
