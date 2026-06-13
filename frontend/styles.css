@@ -15,17 +15,36 @@ body {
 /* Sidebar */
 
 .sidebar {
-  width: 240px;
+  width: var(--sidebar-width, 240px);
   min-width: 180px;
-  max-width: 480px;
+  max-width: 520px;
   flex-shrink: 0;
   background: #131313;
   border-right: 1px solid #222;
   height: 100vh;
-  /* Drag the bottom-right browser handle to resize. Keep scrolling on an inner
-     child so the native resize affordance stays pinned to the viewport corner. */
   overflow: hidden;
-  resize: horizontal;
+  position: relative;
+}
+
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 5;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.sidebar-resize-handle:hover,
+body.sidebar-resizing .sidebar-resize-handle {
+  background: rgba(80, 145, 255, 0.16);
+}
+
+body.sidebar-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .sidebar-scroll {

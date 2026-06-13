@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 export interface PickerAccount {
   id: number;
@@ -19,6 +19,8 @@ export function AccountPicker({
   selectedIds: Set<number>;
   onChange: (next: Set<number>) => void;
 }) {
+  const pickerRef = useRef<HTMLDivElement | null>(null);
+  const pickerActive = useRef(false);
   const [lastClickedId, setLastClickedId] = useState<number | null>(null);
   const holders = useMemo(() => {
     const holderMap = new Map<string, number[]>();
@@ -32,7 +34,7 @@ export function AccountPicker({
     return [...holderMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [accounts]);
 
-  const allIds = accounts.map((a) => a.id);
+  const allIds = useMemo(() => accounts.map((a) => a.id), [accounts]);
   const setExactly = (ids: number[]) => {
     setLastClickedId(null);
     onChange(new Set(ids));
@@ -52,27 +54,60 @@ export function AccountPicker({
   const selectAccount = (id: number, e: React.MouseEvent<HTMLButtonElement>) => {
     setLastClickedId(id);
     if (e.altKey) {
-      onChange(new Set(allIds.filter((x) => !selectedIds.has(x))));
+      invertSelection();
       return;
     }
     if (e.shiftKey && lastClickedId !== null) {
-      onChange(new Set([...selectedIds, ...rangeBetween(lastClickedId, id)]));
+      const range = rangeBetween(lastClickedId, id);
+      onChange(e.metaKey || e.ctrlKey ? new Set([...selectedIds, ...range]) : new Set(range));
       return;
     }
-    const next = new Set(selectedIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    onChange(next);
+    if (e.metaKey || e.ctrlKey) {
+      const next = new Set(selectedIds);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      onChange(next);
+      return;
+    }
+    onChange(new Set([id]));
   };
 
   // A shortcut is "active" when the current selection is exactly its account set.
   const isExactly = (ids: number[]) =>
     ids.length === selectedIds.size && ids.every((id) => selectedIds.has(id));
 
+  useEffect(() => {
+    const isInPicker = (target: EventTarget | null) =>
+      target instanceof Node && pickerRef.current?.contains(target);
+    const handlePointerDown = (e: PointerEvent) => {
+      pickerActive.current = Boolean(isInPicker(e.target));
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!pickerActive.current || e.defaultPrevented) return;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        setLastClickedId(null);
+        onChange(new Set(allIds));
+      }
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown, true);
+    };
+  }, [allIds, onChange]);
+
   return (
     <div
+      ref={pickerRef}
       className="account-picker"
+      tabIndex={-1}
+      onFocusCapture={() => {
+        pickerActive.current = true;
+      }}
       onKeyDown={(e) => {
+        if (e.defaultPrevented) return;
         if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a") {
           e.preventDefault();
           setExactly(allIds);
