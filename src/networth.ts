@@ -10,6 +10,7 @@ export interface AccountSummary {
   type: string;
   classification: string;
   flow_treatment: string;
+  account_holder: string | null;
 }
 
 export interface MonthlyRow {
@@ -38,7 +39,7 @@ export function getNetWorthReport(): NetWorthReport {
 
   const accounts = db
     .query<AccountSummary, []>(
-      "SELECT id, name, institution, type, classification, flow_treatment FROM accounts ORDER BY institution, name"
+      "SELECT id, name, institution, type, classification, flow_treatment, account_holder FROM accounts ORDER BY institution, name"
     )
     .all();
 

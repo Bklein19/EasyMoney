@@ -112,12 +112,13 @@ const accountColor = (index: number) =>
 
 interface NetWorthPageProps {
   view: "networth" | "performance";
+  // Shared account selection from the app-level picker.
+  selectedIds: Set<number>;
 }
 
-export function NetWorthPage({ view }: NetWorthPageProps) {
+export function NetWorthPage({ view, selectedIds }: NetWorthPageProps) {
   const [report, setReport] = useState<NetWorthReport | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<Set<number> | null>(null); // null = all
   const [derivativePeriod, setDerivativePeriod] = useState<Period>("month");
 
   useEffect(() => {
@@ -126,11 +127,6 @@ export function NetWorthPage({ view }: NetWorthPageProps) {
       .then((data) => setReport(data as NetWorthReport))
       .catch((e) => setError(String(e)));
   }, []);
-
-  const selectedIds = useMemo(() => {
-    if (!report) return new Set<number>();
-    return selected ?? new Set(report.accounts.map((a) => a.id));
-  }, [report, selected]);
 
   const data: ChartPoint[] = useMemo(() => {
     if (!report) return [];
@@ -388,33 +384,6 @@ export function NetWorthPage({ view }: NetWorthPageProps) {
     return points;
   }, [data]);
 
-  const toggleAccount = (id: number) => {
-    const next = new Set(selectedIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setSelected(next);
-  };
-
-  const invertAccounts = () => {
-    if (!report) return;
-    setSelected(new Set(report.accounts.filter((account) => !selectedIds.has(account.id)).map((account) => account.id)));
-  };
-
-  const setAllAccounts = () => {
-    if (!report) return;
-    setSelected(new Set(report.accounts.map((account) => account.id)));
-  };
-
-  const setNoAccounts = () => setSelected(new Set());
-
-  const handleAccountClick = (event: React.MouseEvent<HTMLButtonElement>, id: number) => {
-    if (event.altKey) {
-      invertAccounts();
-      return;
-    }
-    toggleAccount(id);
-  };
-
   if (error) return <div className="page"><div className="meta" style={{ color: "#e05252" }}>{error}</div></div>;
   if (!report) return <div className="page"><div className="meta">Loading…</div></div>;
   if (report.rows.length === 0) {
@@ -427,38 +396,6 @@ export function NetWorthPage({ view }: NetWorthPageProps) {
 
   const hasGains = report.rows.some((r) => r.gains_cents !== null);
   const latest = data[data.length - 1];
-  const accountActionButtonElements = (
-    <>
-      <button type="button" onClick={setAllAccounts}>All</button>
-      <button type="button" onClick={setNoAccounts}>None</button>
-      <button type="button" onClick={invertAccounts}>Invert</button>
-    </>
-  );
-  const accountChips = (
-    <div className="account-filter">
-      {report.accounts.map((a) => (
-        <button
-          key={a.id}
-          type="button"
-          className={`account-chip${selectedIds.has(a.id) ? " active" : ""}`}
-          aria-pressed={selectedIds.has(a.id)}
-          title="Option-click any account to invert the selection"
-          onClick={(event) => handleAccountClick(event, a.id)}
-        >
-          <span className="account-chip-name">{a.name}</span>
-        </button>
-      ))}
-    </div>
-  );
-  const accountControls = (
-    <>
-      <div className="account-filter-actions">
-        <span>{selectedIds.size} of {report.accounts.length}</span>
-        {accountActionButtonElements}
-      </div>
-      {accountChips}
-    </>
-  );
   const totalCards = (
     <div className="totals-row">
       <div className="total-card total-card-highlight">
@@ -499,14 +436,6 @@ export function NetWorthPage({ view }: NetWorthPageProps) {
             <div className="secondary-sidebar-section">
               <div className="secondary-sidebar-title">Summary</div>
               {totalCards}
-            </div>
-            <div className="secondary-sidebar-section">
-              <div className="secondary-sidebar-title secondary-sidebar-title-row">
-                <span>Accounts</span>
-                <span>{selectedIds.size} of {report.accounts.length}</span>
-              </div>
-              <div className="account-filter-actions">{accountActionButtonElements}</div>
-              {accountChips}
             </div>
           </aside>
 
@@ -574,9 +503,6 @@ export function NetWorthPage({ view }: NetWorthPageProps) {
         </div>
       ) : (
       <section className="returns-section performance-page">
-        <div className="performance-account-filter">
-          {accountControls}
-        </div>
         <div className="chart-section-header returns-header">
           <div>
             <div className="chart-title">Performance</div>
