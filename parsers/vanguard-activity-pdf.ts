@@ -7,7 +7,10 @@ export const meta: ParserMeta = {
   institution: "Vanguard",
   kind: "activity-export",
   priority: 100,
-  matches: ({ filename }) => filename === "customActivityReport.pdf",
+  matches: ({ filename, sample }) =>
+    filename === "customActivityReport.pdf" ||
+    /^vanguard-\d{4}-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}-transaction-history\.pdf$/.test(filename) ||
+    (/transaction-history\.pdf$/.test(filename) && /Custom report created on:/.test(sample) && /Vanguard/i.test(sample)),
 };
 
 function parseAmountToCents(value: string): number {
@@ -22,14 +25,36 @@ function toIsoDate(value: string): string {
   return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
+function accountFromReportText(text: string): string {
+  const legacyBrokerageMatch = text.match(/(?:^|\n)Brokerage\s+-\s+(\d{4,})\*/);
+  if (legacyBrokerageMatch) return `Brokerage - ${legacyBrokerageMatch[1]}`;
+
+  const match = text.match(
+    /(?:^|\n)(?:.+?\s+—\s+)?(Individual brokerage account|Roth IRA Brokerage Account|Roth IRA brokerage account|Traditional IRA brokerage account)\s+—\s+(\d{4,}|X{4}\d{4})/i
+  );
+  if (!match) return "Brokerage";
+
+  const accountType = match[1]!
+    .replace(/\s+/g, " ")
+    .replace(/\bBrokerage\b/, "brokerage")
+    .replace(/\bAccount\b/, "account");
+  return `${accountType}-XXXX${match[2]!.slice(-4)}`;
+}
+
+function signedAmountCents(description: string, amount: string): number {
+  const absolute = Math.abs(parseAmountToCents(amount));
+  if (/\b(Contribution|Dividend|Sweep in|Sell)\b/i.test(description)) return absolute;
+  if (/\b(Buy|Reinvestment|Sweep out)\b/i.test(description)) return -absolute;
+  return amount.trim().startsWith("-") ? -absolute : absolute;
+}
+
 export default async function parse(filePath: string): Promise<ParseResult> {
   const pdf = await getDocumentProxy(new Uint8Array(await Bun.file(filePath).arrayBuffer()));
   const { text: pageTexts } = await extractText(pdf);
   const allText = pageTexts.join("\n");
   const institution = "Vanguard";
 
-  const accountMatch = allText.match(/Brokerage\s+-\s+(\d+)/);
-  const account = accountMatch ? `Brokerage - ${accountMatch[1]}` : "Brokerage";
+  const account = accountFromReportText(allText);
 
   const coverageMatch = allText.match(
     /This report only includes transactions that were settled from:\s*(\d{1,2}\/\d{1,2}\/\d{4})\s+to\s+(\d{1,2}\/\d{1,2}\/\d{4})\./
@@ -39,7 +64,7 @@ export default async function parse(filePath: string): Promise<ParseResult> {
 
   const transactions: ParseResult["transactions"] = [];
   const dateLineRegex = /^(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}\/\d{1,2}\/\d{4})\s+(.*)$/;
-  const amountRegex = /(-?\$[\d,]+\.\d{4})$/;
+  const amountRegex = /(-?\s*\$[\d,]+\.\d{4})$/;
 
   for (const page of pageTexts) {
     const lines = page.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -64,13 +89,13 @@ export default async function parse(filePath: string): Promise<ParseResult> {
 
       const description = row
         .replace(/^\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}\/\d{1,2}\/\d{4}\s+/, "")
-        .replace(/\s+-?\$[\d,]+\.\d{4}$/, "")
+        .replace(/\s+-?\s*\$[\d,]+\.\d{4}$/, "")
         .trim();
 
       transactions.push(
         makeTx({
           date: toIsoDate(start[1]!),
-          amount_cents: parseAmountToCents(amountMatch[1]!),
+          amount_cents: signedAmountCents(description, amountMatch[1]!),
           description,
           account,
           institution,
