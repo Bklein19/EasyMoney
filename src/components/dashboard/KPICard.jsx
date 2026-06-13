@@ -1,6 +1,6 @@
 import { formatCurrency, formatPercent } from '../../utils/formatters';
 
-export default function KPICard({ title, amount, trend, icon: Icon, trendLabel }) {
+export default function KPICard({ title, amount, trend, icon: Icon, trendLabel, detail }) {
   const isPositive = trend >= 0;
   
   return (
@@ -20,6 +20,9 @@ export default function KPICard({ title, amount, trend, icon: Icon, trendLabel }
             <span className="trend-value">{formatPercent(trend)}</span>
             <span className="trend-label">{trendLabel || 'vs last month'}</span>
           </div>
+        )}
+        {detail && (
+          <div className="kpi-card__detail">{detail}</div>
         )}
       </div>
     </div>

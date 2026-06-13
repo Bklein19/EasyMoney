@@ -21,7 +21,26 @@ const TABLES = {
   budgets: ['id', 'categoryId', 'month', 'amount'],
   balanceSnapshots: ['id', 'accountId', 'month', 'balance', 'capturedAt'],
   categorizationRules: ['id', 'categoryId', 'pattern', 'matchType', 'priority'],
-  importProfiles: ['id', 'headerSignature', 'profileName', 'profileJson', 'mappingJson', 'lastAccountId', 'createdAt', 'updatedAt']
+  importProfiles: ['id', 'headerSignature', 'profileName', 'profileJson', 'mappingJson', 'lastAccountId', 'createdAt', 'updatedAt'],
+  robinhoodAccounts: [
+    'id', 'accountKey', 'label', 'accountNumberMasked', 'type', 'brokerageAccountType',
+    'isDefault', 'agenticAllowed', 'createdAt', 'updatedAt'
+  ],
+  robinhoodSnapshots: ['id', 'fetchedAt', 'source', 'totalValue', 'createdAt'],
+  robinhoodAccountSnapshots: [
+    'id', 'snapshotId', 'accountKey', 'totalValue', 'equityValue', 'optionsValue', 'cash',
+    'buyingPower', 'cryptoValue', 'futuresValue', 'mutualFundsValue', 'fixedIncomeValue'
+  ],
+  robinhoodEquityPositions: [
+    'id', 'snapshotId', 'accountKey', 'symbol', 'quantity', 'averageBuyPrice', 'lastPrice',
+    'lastPriceAsOf', 'previousClose', 'marketValue', 'unrealizedGain', 'unrealizedGainPercent', 'type'
+  ],
+  robinhoodOptionPositions: [
+    'id', 'snapshotId', 'accountKey', 'underlyingSymbol', 'symbol', 'contractSymbol',
+    'instrumentId', 'expirationDate', 'strikePrice', 'optionType', 'positionType',
+    'quantity', 'averageCost', 'markPrice', 'marketValue', 'unrealizedGain',
+    'unrealizedGainPercent'
+  ]
 };
 
 const ORDER_BY = {
@@ -31,7 +50,12 @@ const ORDER_BY = {
   budgets: 'month DESC, id DESC',
   balanceSnapshots: 'month ASC, id ASC',
   categorizationRules: 'priority DESC, id ASC',
-  importProfiles: 'updatedAt DESC, id DESC'
+  importProfiles: 'updatedAt DESC, id DESC',
+  robinhoodAccounts: 'isDefault DESC, id ASC',
+  robinhoodSnapshots: 'fetchedAt DESC, id DESC',
+  robinhoodAccountSnapshots: 'id ASC',
+  robinhoodEquityPositions: 'accountKey ASC, symbol ASC',
+  robinhoodOptionPositions: 'accountKey ASC, expirationDate ASC, underlyingSymbol ASC, strikePrice ASC'
 };
 
 export function initDatabase() {
@@ -109,6 +133,82 @@ export function initDatabase() {
       lastAccountId INTEGER,
       createdAt TEXT,
       updatedAt TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS robinhoodAccounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      accountKey TEXT NOT NULL UNIQUE,
+      label TEXT NOT NULL,
+      accountNumberMasked TEXT,
+      type TEXT,
+      brokerageAccountType TEXT,
+      isDefault INTEGER DEFAULT 0,
+      agenticAllowed INTEGER DEFAULT 0,
+      createdAt TEXT,
+      updatedAt TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS robinhoodSnapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      fetchedAt TEXT NOT NULL UNIQUE,
+      source TEXT,
+      totalValue REAL DEFAULT 0,
+      createdAt TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS robinhoodAccountSnapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      snapshotId INTEGER NOT NULL,
+      accountKey TEXT NOT NULL,
+      totalValue REAL DEFAULT 0,
+      equityValue REAL DEFAULT 0,
+      optionsValue REAL DEFAULT 0,
+      cash REAL DEFAULT 0,
+      buyingPower REAL DEFAULT 0,
+      cryptoValue REAL DEFAULT 0,
+      futuresValue REAL DEFAULT 0,
+      mutualFundsValue REAL DEFAULT 0,
+      fixedIncomeValue REAL DEFAULT 0,
+      UNIQUE(snapshotId, accountKey),
+      FOREIGN KEY(snapshotId) REFERENCES robinhoodSnapshots(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS robinhoodEquityPositions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      snapshotId INTEGER NOT NULL,
+      accountKey TEXT NOT NULL,
+      symbol TEXT NOT NULL,
+      quantity REAL DEFAULT 0,
+      averageBuyPrice REAL DEFAULT 0,
+      lastPrice REAL DEFAULT 0,
+      lastPriceAsOf TEXT,
+      previousClose REAL DEFAULT 0,
+      marketValue REAL DEFAULT 0,
+      unrealizedGain REAL DEFAULT 0,
+      unrealizedGainPercent REAL DEFAULT 0,
+      type TEXT,
+      FOREIGN KEY(snapshotId) REFERENCES robinhoodSnapshots(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS robinhoodOptionPositions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      snapshotId INTEGER NOT NULL,
+      accountKey TEXT NOT NULL,
+      underlyingSymbol TEXT,
+      symbol TEXT,
+      contractSymbol TEXT,
+      instrumentId TEXT,
+      expirationDate TEXT,
+      strikePrice REAL DEFAULT 0,
+      optionType TEXT,
+      positionType TEXT,
+      quantity REAL DEFAULT 0,
+      averageCost REAL DEFAULT 0,
+      markPrice REAL DEFAULT 0,
+      marketValue REAL DEFAULT 0,
+      unrealizedGain REAL DEFAULT 0,
+      unrealizedGainPercent REAL DEFAULT 0,
+      FOREIGN KEY(snapshotId) REFERENCES robinhoodSnapshots(id) ON DELETE CASCADE
     );
   `);
 

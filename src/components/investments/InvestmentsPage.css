@@ -1,0 +1,405 @@
+.robinhood-page {
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.robinhood-page__header {
+  margin-bottom: 0;
+}
+
+.robinhood-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+}
+
+.robinhood-banner--error {
+  border-color: rgba(239, 68, 68, 0.28);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.robinhood-empty {
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.robinhood-empty h2 {
+  color: var(--text-primary);
+  font-size: var(--text-xl);
+}
+
+.robinhood-empty p {
+  max-width: 420px;
+  font-size: var(--text-sm);
+}
+
+.robinhood-account-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+
+.robinhood-account-strip h2 {
+  margin-top: var(--space-2);
+  font-size: var(--text-xl);
+}
+
+.robinhood-account-strip p {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.robinhood-account-strip__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid rgba(16, 185, 129, 0.24);
+  border-radius: var(--radius-full);
+  background: rgba(16, 185, 129, 0.08);
+  color: var(--color-success);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.robinhood-account-tabs {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.robinhood-account-tabs button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  min-height: 70px;
+  padding: var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: rgba(15, 23, 42, 0.38);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  text-align: left;
+  transition: all var(--transition-fast);
+}
+
+.robinhood-account-tabs button:hover,
+.robinhood-account-tabs button:focus-visible,
+.robinhood-account-tabs button.active {
+  border-color: rgba(6, 182, 212, 0.35);
+  background: rgba(6, 182, 212, 0.08);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.robinhood-account-tabs button span {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.robinhood-account-tabs button.active span {
+  color: var(--accent-cyan);
+}
+
+.robinhood-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.robinhood-metric {
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.robinhood-metric__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.robinhood-metric__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md);
+  background: rgba(6, 182, 212, 0.12);
+  color: var(--accent-cyan);
+}
+
+.robinhood-metric strong {
+  color: var(--text-primary);
+  font-size: var(--text-2xl);
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.robinhood-metric small {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.robinhood-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(360px, 0.75fr);
+  gap: var(--space-6);
+}
+
+.robinhood-panel--history {
+  grid-column: 1 / -1;
+}
+
+.robinhood-history-chart {
+  height: 280px;
+}
+
+.robinhood-panel {
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.robinhood-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.robinhood-panel__header h3 {
+  color: var(--text-primary);
+  font-size: var(--text-lg);
+  font-weight: 700;
+}
+
+.robinhood-panel__header p {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.robinhood-allocation {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(240px, 1fr);
+  gap: var(--space-6);
+  align-items: center;
+}
+
+.robinhood-chart {
+  position: relative;
+  height: 320px;
+  min-width: 0;
+}
+
+.robinhood-chart__center {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+}
+
+.robinhood-chart__center span {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.robinhood-chart__center strong {
+  color: var(--text-primary);
+  font-size: var(--text-xl);
+}
+
+.robinhood-legend {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.robinhood-legend__row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: rgba(15, 23, 42, 0.28);
+}
+
+.robinhood-legend__row span:nth-child(2) {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.robinhood-legend__row strong {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.robinhood-legend__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.robinhood-bar-chart {
+  height: 250px;
+}
+
+.robinhood-liquidity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: rgba(15, 23, 42, 0.28);
+}
+
+.robinhood-liquidity__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.robinhood-liquidity__row strong {
+  color: var(--text-primary);
+}
+
+.robinhood-liquidity__track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.robinhood-liquidity__track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--color-success), var(--accent-cyan));
+}
+
+.robinhood-panel--table {
+  min-height: 0;
+}
+
+.robinhood-options-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  border: 1px dashed rgba(245, 158, 11, 0.32);
+  border-radius: var(--radius-md);
+  background: rgba(245, 158, 11, 0.08);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.robinhood-options-empty strong {
+  color: var(--text-primary);
+}
+
+.robinhood-options-table th,
+.robinhood-options-table td {
+  white-space: nowrap;
+}
+
+.robinhood-options-table th:nth-child(2),
+.robinhood-options-table td:nth-child(2) {
+  min-width: 230px;
+  white-space: normal;
+}
+
+.robinhood-table td strong,
+.robinhood-table td span {
+  display: block;
+}
+
+.robinhood-table td span {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
+
+.robinhood-table td {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1180px) {
+  .robinhood-account-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .robinhood-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .robinhood-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .robinhood-account-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .robinhood-account-strip,
+  .robinhood-allocation {
+    grid-template-columns: 1fr;
+  }
+
+  .robinhood-account-strip {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .robinhood-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .robinhood-chart {
+    height: 260px;
+  }
+}

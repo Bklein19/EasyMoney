@@ -9,6 +9,7 @@ import KPICard from './KPICard';
 import SpendingDonut from './SpendingDonut';
 import MonthlyTrendChart from './MonthlyTrendChart';
 import RecentTransactions from './RecentTransactions';
+import InvestmentSnapshotCard from './InvestmentSnapshotCard';
 import './DashboardPage.css';
 
 export default function DashboardPage() {
@@ -112,6 +113,7 @@ export default function DashboardPage() {
         </div>
 
         <MonthlyTrendChart />
+        <InvestmentSnapshotCard />
         <SpendingDonut />
         <RecentTransactions />
       </div>

@@ -7,8 +7,10 @@ import {
   FileSpreadsheet,
   FolderInput,
   Layers3,
+  PiggyBank,
   Plus,
   Tags,
+  Wand2,
   WalletCards
 } from 'lucide-react';
 import './HowToUsePage.css';
@@ -37,6 +39,12 @@ const setupSteps = [
     description: 'Internal Transfer and Investment categories are excluded from spending and net flow. Credit card charges still count as spending, while card payments do not.',
     icon: BarChart3,
     action: { to: '/analytics', label: 'Open Analytics' }
+  },
+  {
+    title: 'Save budget templates',
+    description: 'Design a monthly budget or save one from a real period, then apply it to months, years, or custom ranges for normalized comparisons.',
+    icon: PiggyBank,
+    action: { to: '/budgeting', label: 'Open Budgeting' }
   }
 ];
 
@@ -145,6 +153,43 @@ function MiniAnalyticsScreenshot() {
   );
 }
 
+function MiniBudgetingScreenshot() {
+  return (
+    <div className="howto-shot howto-shot--budgeting" aria-label="Example budgeting workflow">
+      <div className="howto-budget-tabs">
+        <span className="active">Month</span>
+        <span>Year</span>
+        <span>Custom</span>
+      </div>
+      <div className="howto-budget-kpis">
+        <div>
+          <span>Period Budget</span>
+          <strong>$6,000</strong>
+        </div>
+        <div>
+          <span>Actual Spending</span>
+          <strong>$3,500</strong>
+        </div>
+        <div>
+          <span>Unspent</span>
+          <strong>$1,500</strong>
+        </div>
+      </div>
+      <div className="howto-budget-card">
+        <div className="howto-budget-ring">
+          <i />
+          <strong>Income</strong>
+          <span>$5,000</span>
+        </div>
+        <div className="howto-budget-actions">
+          <span><Wand2 size={14} /> Save Budget from This Period</span>
+          <span><PiggyBank size={14} /> Saved budgets apply to any period</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function HowToUsePage() {
   return (
     <div className="page howto-page">
@@ -160,7 +205,7 @@ export default function HowToUsePage() {
           <span className="howto-kicker">Recommended first run</span>
           <h2>Accounts, then imports, then cleanup.</h2>
           <p>
-            EasyMoney works best when each CSV lands in the correct account. After import, use filters and bulk category tools to clean up anything automatic categorization missed.
+            EasyMoney works best when each CSV lands in the correct account. After import, use filters and bulk category tools to clean up anything automatic categorization missed, then save budget templates for comparison.
           </p>
         </div>
         <MiniAccountsScreenshot />
@@ -224,6 +269,17 @@ export default function HowToUsePage() {
           </div>
           <MiniAnalyticsScreenshot />
         </article>
+
+        <article className="howto-workflow__item">
+          <div>
+            <span className="howto-kicker">5. Build a budget template</span>
+            <h2>Save a monthly budget and compare every period against it</h2>
+            <p>
+              Use Design Budget to create a named monthly template, or Save Budget from This Period to turn the displayed month, year, or custom range into a normalized monthly plan. Applying a saved budget scales it automatically for year and custom views.
+            </p>
+          </div>
+          <MiniBudgetingScreenshot />
+        </article>
       </section>
 
       <section className="howto-cleanup glass-card">
@@ -259,6 +315,11 @@ export default function HowToUsePage() {
           <BarChart3 size={20} />
           <h2>Investments</h2>
           <p>Use Investment for brokerage transfers. Investments get their own analytics tile and do not reduce net flow.</p>
+        </div>
+        <div className="howto-reference__card glass-card">
+          <PiggyBank size={20} />
+          <h2>Budget templates</h2>
+          <p>Saved budgets are monthly plans. EasyMoney scales them to the selected month, year, or custom period.</p>
         </div>
       </section>
     </div>

@@ -13,6 +13,7 @@ import {
   updateRow
 } from './database.js';
 import { seedDatabase } from './seed.js';
+import { getLatestRobinhoodSnapshot, saveRobinhoodSnapshot } from './robinhoodSnapshots.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 fs.mkdirSync(path.resolve(__dirname, '..', 'data'), { recursive: true });
@@ -21,12 +22,45 @@ initDatabase();
 seedDatabase();
 
 const app = express();
-const port = Number(process.env.VAULTVIEW_API_PORT || 4177);
+const port = Number(process.env.PORT || process.env.VAULTVIEW_API_PORT || 4177);
+const distPath = path.resolve(__dirname, '..', 'dist');
 
 app.use(express.json({ limit: '25mb' }));
 
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
+});
+
+app.get('/api/robinhood/snapshot', (_req, res, next) => {
+  try {
+    const snapshot = getLatestRobinhoodSnapshot();
+    if (!snapshot) {
+      res.json({
+        connected: false,
+        accounts: [],
+        history: [],
+        message: 'No Robinhood snapshot has been persisted yet.'
+      });
+      return;
+    }
+
+    res.json({ connected: true, ...snapshot });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post('/api/robinhood/snapshot', (req, res, next) => {
+  try {
+    const snapshotId = saveRobinhoodSnapshot(req.body || {});
+    res.status(201).json({ id: snapshotId });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get('/api/:table', (req, res, next) => {
@@ -209,7 +243,18 @@ app.post('/api/migrate', (req, res, next) => {
   }
 });
 
-app.use((error, _req, res) => {
+if (fs.existsSync(distPath)) {
+  app.use((req, res, next) => {
+    if (req.method !== 'GET' || req.path.startsWith('/api')) {
+      next();
+      return;
+    }
+    res.sendFile(path.join(distPath, 'index.html'));
+  });
+}
+
+app.use((error, _req, res, next) => {
+  void next;
   console.error(error);
   res.status(500).json({ error: error.message });
 });
