@@ -13,6 +13,8 @@ import { meta as merrillActMeta, default as merrillActParse } from "./merrill-ac
 import { meta as merrillStmtMeta, default as merrillStmtParse } from "./merrill-cma-statement-pdf";
 import { meta as bofaActivityMeta, default as bofaActivityParse } from "./bofa-activity-csv";
 import { meta as bofaStatementMeta, default as bofaStatementParse } from "./bofa-statement-pdf";
+import { meta as tiaaActivityMeta, default as tiaaActivityParse } from "./tiaa-activity-csv";
+import { meta as tiaaStatementMeta, default as tiaaStatementParse } from "./tiaa-statement-pdf";
 
 export const PARSERS: ParserModule[] = [
   { meta: msStmtMeta, parse: msStmtParse },
@@ -26,6 +28,8 @@ export const PARSERS: ParserModule[] = [
   { meta: merrillStmtMeta, parse: merrillStmtParse },
   { meta: bofaActivityMeta, parse: bofaActivityParse },
   { meta: bofaStatementMeta, parse: bofaStatementParse },
+  { meta: tiaaActivityMeta, parse: tiaaActivityParse },
+  { meta: tiaaStatementMeta, parse: tiaaStatementParse },
 ];
 
 export function getParserById(id: string): ParserModule | undefined {
