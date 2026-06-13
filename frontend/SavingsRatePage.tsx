@@ -29,9 +29,31 @@ interface SavingsRateIncomeSource {
   is_market_income: boolean;
 }
 
+interface SavingsRateAccountMonth {
+  account_id: number;
+  month: string;
+  income_cents: number;
+  market_income_cents: number;
+  investment_delta_cents: number;
+  cash_delta_cents: number;
+}
+
 interface SavingsRateReport {
   rows: SavingsRateMonthlyRow[];
+  account_months: SavingsRateAccountMonth[];
   income_sources: SavingsRateIncomeSource[];
+}
+
+// Mirror of the server's periodAllocation: poof/net_retained are non-additive across
+// accounts, so we recompute them after summing the selected accounts' components.
+function periodAllocation(income_cents: number, investment_delta_cents: number, cash_delta_cents: number) {
+  const net_retained_cents = investment_delta_cents + cash_delta_cents;
+  return {
+    investment_change_cents: investment_delta_cents,
+    cash_change_cents: cash_delta_cents,
+    net_retained_cents,
+    poof_cents: Math.max(0, income_cents - net_retained_cents),
+  };
 }
 
 interface PeriodRow {
@@ -74,7 +96,7 @@ const periodKey = (month: string, period: Period) => {
   return `${year} Q${Math.ceil(Number(month.slice(5, 7)) / 3)}`;
 };
 
-export function SavingsRatePage() {
+export function SavingsRatePage({ selectedIds }: { selectedIds: Set<number> }) {
   const [report, setReport] = useState<SavingsRateReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [period, setPeriod] = useState<Period>("year");
@@ -86,10 +108,35 @@ export function SavingsRatePage() {
       .catch((e) => setError(String(e)));
   }, []);
 
+  // Rebuild monthly rows from per-account components, summing only the selected
+  // accounts, then run the (non-additive) savings-rate allocation per month.
+  const monthlyRows = useMemo<SavingsRateMonthlyRow[]>(() => {
+    if (!report) return [];
+    const byMonth = new Map<string, { income: number; market: number; inv: number; cash: number }>();
+    for (const am of report.account_months) {
+      if (!selectedIds.has(am.account_id)) continue;
+      const m = byMonth.get(am.month) ?? { income: 0, market: 0, inv: 0, cash: 0 };
+      m.income += am.income_cents;
+      m.market += am.market_income_cents;
+      m.inv += am.investment_delta_cents;
+      m.cash += am.cash_delta_cents;
+      byMonth.set(am.month, m);
+    }
+    return [...byMonth.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([month, m]) => ({
+        month,
+        income_cents: m.income,
+        market_income_cents: m.market,
+        income_ex_market_gains_cents: m.income - m.market,
+        ...periodAllocation(m.income - m.market, m.inv, m.cash),
+      }));
+  }, [report, selectedIds]);
+
   const rows = useMemo(() => {
     if (!report) return [];
     const byPeriod = new Map<string, PeriodRow>();
-    for (const row of report.rows) {
+    for (const row of monthlyRows) {
       const key = periodKey(row.month, period);
       const point = byPeriod.get(key) ?? {
         period: key,
@@ -119,7 +166,7 @@ export function SavingsRatePage() {
       byPeriod.set(key, point);
     }
     return [...byPeriod.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
-  }, [report, period]);
+  }, [monthlyRows, period]);
 
   const totals = useMemo(() => {
     const income = rows.reduce((sum, row) => sum + row.income, 0);

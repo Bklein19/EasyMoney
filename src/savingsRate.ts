@@ -19,6 +19,20 @@ export interface SavingsRateMonthlyRow {
   net_retained_cents: number;
 }
 
+// Per-(account, month) raw components. The savings-rate allocation (poof / net
+// retained) is non-additive across accounts because of a Math.max(0, …), so the
+// client must sum the selected accounts' components per month and THEN run
+// periodAllocation — it cannot sum pre-computed monthly rows. This carries the
+// additive pieces so the page can filter by the shared account picker.
+export interface SavingsRateAccountMonth {
+  account_id: number;
+  month: string;
+  income_cents: number;
+  market_income_cents: number;
+  investment_delta_cents: number;
+  cash_delta_cents: number;
+}
+
 export interface SavingsRateIncomeSource {
   label: string;
   amount_cents: number;
@@ -29,6 +43,7 @@ export interface SavingsRateIncomeSource {
 export interface SavingsRateReport {
   accounts: SavingsRateAccount[];
   rows: SavingsRateMonthlyRow[];
+  account_months: SavingsRateAccountMonth[];
   income_sources: SavingsRateIncomeSource[];
 }
 
@@ -149,14 +164,30 @@ export function getSavingsRateReport(): SavingsRateReport {
   const sourceByLabel = new Map<string, SavingsRateIncomeSource>();
   const months = new Set<string>();
 
+  // Per-(account, month) raw components for client-side account filtering.
+  const amKey = (accountId: number, month: string) => `${accountId}\0${month}`;
+  const accountMonths = new Map<string, SavingsRateAccountMonth>();
+  const amFor = (accountId: number, month: string): SavingsRateAccountMonth => {
+    const k = amKey(accountId, month);
+    let am = accountMonths.get(k);
+    if (!am) {
+      am = { account_id: accountId, month, income_cents: 0, market_income_cents: 0, investment_delta_cents: 0, cash_delta_cents: 0 };
+      accountMonths.set(k, am);
+    }
+    return am;
+  };
+
   for (const tx of txs) {
     months.add(tx.month);
     if (transferTransactionIds.has(tx.id)) continue;
     if (!isExternalIncome(tx)) continue;
 
     incomeByMonth.set(tx.month, (incomeByMonth.get(tx.month) ?? 0) + tx.amount_cents);
+    const am = amFor(tx.account_id, tx.month);
+    am.income_cents += tx.amount_cents;
     if (isMarketIncome(tx.description)) {
       marketIncomeByMonth.set(tx.month, (marketIncomeByMonth.get(tx.month) ?? 0) + tx.amount_cents);
+      am.market_income_cents += tx.amount_cents;
     }
     const label = incomeSourceLabel(tx.description);
     const source = sourceByLabel.get(label) ?? {
@@ -180,8 +211,10 @@ export function getSavingsRateReport(): SavingsRateReport {
     const deltas = deltasByMonth.get(row.month) ?? { investment: 0, cash: 0 };
     if (INVESTMENT_TYPES.has(account.type)) {
       deltas.investment += row.contributions_cents;
+      amFor(row.account_id, row.month).investment_delta_cents += row.contributions_cents;
     } else if (CASH_TYPES.has(account.type)) {
       deltas.cash += row.contributions_cents;
+      amFor(row.account_id, row.month).cash_delta_cents += row.contributions_cents;
     }
     deltasByMonth.set(row.month, deltas);
   }
@@ -210,6 +243,9 @@ export function getSavingsRateReport(): SavingsRateReport {
   return {
     accounts: netWorth.accounts.map(({ id, name, institution, type }) => ({ id, name, institution, type })),
     rows,
+    account_months: [...accountMonths.values()].filter(
+      (am) => firstIncomeMonth === null || am.month >= firstIncomeMonth
+    ),
     income_sources: [...sourceByLabel.values()].sort((a, b) => b.amount_cents - a.amount_cents),
   };
 }

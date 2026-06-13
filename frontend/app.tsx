@@ -22,7 +22,7 @@ const NAV: Array<{ id: Page; label: string; icon: string }> = [
 ];
 
 // Pages that filter by account and therefore show the shared picker.
-const PICKER_PAGES = new Set<Page>(["networth", "performance"]);
+const PICKER_PAGES = new Set<Page>(["networth", "performance", "savings"]);
 
 function getPageFromHash(): Page {
   const rawHash = location.hash.slice(1);
@@ -86,7 +86,7 @@ function App() {
         {page === "imports" && <ImportsPage />}
         {page === "networth" && <NetWorthPage view="networth" selectedIds={selectedIds} />}
         {page === "performance" && <NetWorthPage view="performance" selectedIds={selectedIds} />}
-        {page === "savings" && <SavingsRatePage />}
+        {page === "savings" && <SavingsRatePage selectedIds={selectedIds} />}
         {page === "transfers" && <TransfersPage />}
         {page === "accounts" && <AccountsPage />}
       </main>
