@@ -1314,3 +1314,13 @@ body {
 }
 
 .undo-toast button:hover { background: #1a2a4a; border-color: #4a8fff; }
+
+.acct-holder {
+  margin-left: 8px;
+  font-size: 0.7rem;
+  color: #8a7bbf;
+  background: #1a1726;
+  border: 1px solid #2a2440;
+  border-radius: 4px;
+  padding: 1px 6px;
+}

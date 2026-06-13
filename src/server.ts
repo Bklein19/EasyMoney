@@ -39,7 +39,7 @@ export function startServer(port = Number(process.env["PORT"] ?? 3000)) {
         GET: () => {
           const db = getDb();
           const accounts = db.query(`
-            SELECT a.id, a.name, a.institution, a.type, a.classification, a.tax_treatment, a.flow_treatment,
+            SELECT a.id, a.name, a.institution, a.type, a.classification, a.tax_treatment, a.flow_treatment, a.account_holder,
               (SELECT balance_cents FROM (
                 SELECT date, balance_cents FROM account_balances WHERE account_id = a.id
                 UNION ALL

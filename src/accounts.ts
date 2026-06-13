@@ -90,16 +90,17 @@ export interface AccountEdit {
   classification?: "asset" | "liability";
   tax_treatment?: "taxable" | "traditional" | "roth" | "hsa" | "none";
   flow_treatment?: "normal" | "contributions";
+  account_holder?: string | null;
 }
 
-const EDITABLE_COLUMNS = new Set(["name", "type", "classification", "tax_treatment", "flow_treatment"]);
+const EDITABLE_COLUMNS = new Set(["name", "type", "classification", "tax_treatment", "flow_treatment", "account_holder"]);
 
 export function updateAccount(id: number, edit: AccountEdit): void {
   const db = getDb();
   const entries = Object.entries(edit).filter(([k, v]) => EDITABLE_COLUMNS.has(k) && v !== undefined);
   if (entries.length === 0) return;
   const setClause = entries.map(([k]) => `${k} = ?`).join(", ");
-  const values = entries.map(([, v]) => v as string);
+  const values = entries.map(([, v]) => v as string | null);
   db.run(`UPDATE accounts SET ${setClause} WHERE id = ?`, [...values, id]);
 }
 

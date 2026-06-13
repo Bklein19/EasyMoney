@@ -24,6 +24,7 @@ const MIGRATIONS: Array<(db: Database) => void> = [
   migration6FlowTreatment,
   migration7CacheLedger,
   migration8DropParserStore,
+  migration9AccountHolder,
 ];
 
 function migrate(db: Database) {
@@ -83,6 +84,12 @@ function migration6FlowTreatment(db: Database) {
     ALTER TABLE accounts ADD COLUMN flow_treatment TEXT NOT NULL DEFAULT 'normal'
       CHECK (flow_treatment IN ('normal', 'contributions'))
   `);
+}
+
+// Account holder — a manual fact for joint household tracking (e.g. some accounts
+// belong to a spouse). Nullable free text; null means unattributed.
+function migration9AccountHolder(db: Database) {
+  db.run("ALTER TABLE accounts ADD COLUMN account_holder TEXT");
 }
 
 // Make the transaction/balance tables a pure rebuildable cache: drop import_file_id's

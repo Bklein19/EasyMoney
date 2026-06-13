@@ -38,6 +38,7 @@ interface Account {
   classification: string;
   tax_treatment: string;
   flow_treatment: string;
+  account_holder: string | null;
   latest_balance_cents: number | null;
   latest_balance_date: string | null;
 }
@@ -70,6 +71,32 @@ function Field({ label, value, options, onChange }: {
       <select value={value} onChange={(e) => onChange(e.target.value)}>
         {options.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
+    </div>
+  );
+}
+
+// Free-text field that saves on blur or Enter; empty string clears the value (null).
+function TextField({ label, value, placeholder, onSave }: {
+  label: string; value: string | null; placeholder?: string; onSave: (v: string | null) => void;
+}) {
+  const [draft, setDraft] = useState(value ?? "");
+  useEffect(() => { setDraft(value ?? ""); }, [value]);
+  const commit = () => {
+    const trimmed = draft.trim();
+    const next = trimmed === "" ? null : trimmed;
+    if (next !== (value ?? null)) onSave(next);
+  };
+  return (
+    <div className="field">
+      <label>{label}</label>
+      <input
+        type="text"
+        value={draft}
+        placeholder={placeholder}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+      />
     </div>
   );
 }
@@ -129,7 +156,7 @@ function AccountNameField({ account, onSave }: { account: Account; onSave: (name
 function AccountMetaForm({ account, aliases, onSaved, onUndo }: {
   account: Account; aliases: Alias[]; onSaved: () => void; onUndo: (p: PendingUndo) => void;
 }) {
-  const patch = async (edit: Record<string, string>) => {
+  const patch = async (edit: Record<string, string | null>) => {
     await fetch(`/api/accounts/${account.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -169,6 +196,12 @@ function AccountMetaForm({ account, aliases, onSaved, onUndo }: {
           value={account.flow_treatment}
           options={FLOW_TREATMENTS}
           onChange={(v) => patch({ flow_treatment: v })}
+        />
+        <TextField
+          label="Holder"
+          value={account.account_holder}
+          placeholder="e.g. Annie"
+          onSave={(v) => patch({ account_holder: v })}
         />
       </div>
       {aliases.length > 0 && (
@@ -356,7 +389,10 @@ export function AccountsPage() {
                       <span className="name-text">{a.name}</span>
                       {isClosed && <span className="closed-badge">closed</span>}
                     </div>
-                    <div className="acct-institution">{a.institution}</div>
+                    <div className="acct-institution">
+                      {a.institution}
+                      {a.account_holder && <span className="acct-holder">{a.account_holder}</span>}
+                    </div>
                   </td>
                   <td><span className="acct-chip">{a.type}</span></td>
                   <td><span className="acct-chip">{a.tax_treatment}</span></td>

@@ -22,6 +22,7 @@ interface ManualFacts {
     classification: string;
     tax_treatment: string;
     flow_treatment: string;
+    account_holder: string | null;
   }>;
   aliases: Array<{ institution: string; alias: string; account: string }>; // account = "institution::name"
   manual_balances: Array<{ account: string; date: string; balance_cents: number; note: string | null }>;
@@ -32,15 +33,15 @@ const acctRef = (institution: string, name: string) => `${institution}::${name}`
 export function exportManualFacts(): ManualFacts {
   const db = getDb();
   const accountsRaw = db
-    .query<{ id: number; name: string; institution: string; type: string; classification: string; tax_treatment: string; flow_treatment: string }, []>(
-      "SELECT id, name, institution, type, classification, tax_treatment, flow_treatment FROM accounts"
+    .query<{ id: number; name: string; institution: string; type: string; classification: string; tax_treatment: string; flow_treatment: string; account_holder: string | null }, []>(
+      "SELECT id, name, institution, type, classification, tax_treatment, flow_treatment, account_holder FROM accounts"
     )
     .all();
   const idToRef = new Map(accountsRaw.map((a) => [a.id, acctRef(a.institution, a.name)]));
 
   const accounts = accountsRaw
-    .map(({ name, institution, type, classification, tax_treatment, flow_treatment }) => ({
-      name, institution, type, classification, tax_treatment, flow_treatment,
+    .map(({ name, institution, type, classification, tax_treatment, flow_treatment, account_holder }) => ({
+      name, institution, type, classification, tax_treatment, flow_treatment, account_holder: account_holder ?? null,
     }))
     .sort((a, b) => acctRef(a.institution, a.name).localeCompare(acctRef(b.institution, b.name)));
 
@@ -86,12 +87,13 @@ export async function restoreManualFacts(path = MANUAL_FACTS_PATH): Promise<{ ac
   db.transaction(() => {
     for (const a of facts.accounts) {
       db.run(
-        `INSERT INTO accounts (name, institution, type, classification, tax_treatment, flow_treatment)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO accounts (name, institution, type, classification, tax_treatment, flow_treatment, account_holder)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(name, institution) DO UPDATE SET
            type = excluded.type, classification = excluded.classification,
-           tax_treatment = excluded.tax_treatment, flow_treatment = excluded.flow_treatment`,
-        [a.name, a.institution, a.type, a.classification, a.tax_treatment, a.flow_treatment]
+           tax_treatment = excluded.tax_treatment, flow_treatment = excluded.flow_treatment,
+           account_holder = excluded.account_holder`,
+        [a.name, a.institution, a.type, a.classification, a.tax_treatment, a.flow_treatment, a.account_holder ?? null]
       );
     }
     for (const a of db.query<{ id: number; name: string; institution: string }, []>("SELECT id, name, institution FROM accounts").all()) {
