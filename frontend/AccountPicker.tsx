@@ -8,10 +8,8 @@ export interface PickerAccount {
   account_holder: string | null;
 }
 
-// Shared account picker: a wrap-row of per-account chips plus quick-select shortcut
-// chips (by holder, by type). Shortcuts are bulk-toggles over the same per-account
-// selection — clicking "Annie" selects exactly Annie's accounts and deselects the
-// rest. Selection state is owned by the app so it persists across page/tab switches.
+// Shared account picker: a wrap-row of per-account chips plus quick-select holder
+// shortcuts. Shortcuts are bulk-toggles over the same per-account selection.
 export function AccountPicker({
   accounts,
   selectedIds,
@@ -21,24 +19,16 @@ export function AccountPicker({
   selectedIds: Set<number>;
   onChange: (next: Set<number>) => void;
 }) {
-  // Build the shortcut facets present in the data: holders, then types.
-  const { holders, types } = useMemo(() => {
+  const holders = useMemo(() => {
     const holderMap = new Map<string, number[]>();
-    const typeMap = new Map<string, number[]>();
     for (const a of accounts) {
       if (a.account_holder) {
         const arr = holderMap.get(a.account_holder) ?? [];
         arr.push(a.id);
         holderMap.set(a.account_holder, arr);
       }
-      const t = typeMap.get(a.type) ?? [];
-      t.push(a.id);
-      typeMap.set(a.type, t);
     }
-    return {
-      holders: [...holderMap.entries()].sort((a, b) => a[0].localeCompare(b[0])),
-      types: [...typeMap.entries()].sort((a, b) => a[0].localeCompare(b[0])),
-    };
+    return [...holderMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [accounts]);
 
   const allIds = accounts.map((a) => a.id);
@@ -66,7 +56,6 @@ export function AccountPicker({
         <button type="button" onClick={() => onChange(new Set(allIds.filter((x) => !selectedIds.has(x))))}>
           Invert
         </button>
-        {holders.length > 0 && <span className="account-picker-divider" />}
         {holders.map(([holder, ids]) => (
           <button
             key={`holder-${holder}`}
@@ -78,19 +67,6 @@ export function AccountPicker({
             {holder}
           </button>
         ))}
-        {types.length > 1 && <span className="account-picker-divider" />}
-        {types.length > 1 &&
-          types.map(([type, ids]) => (
-            <button
-              key={`type-${type}`}
-              type="button"
-              className={`shortcut-chip${isExactly(ids) ? " active" : ""}`}
-              onClick={() => setExactly(ids)}
-              title={`Select only ${type} accounts`}
-            >
-              {type}
-            </button>
-          ))}
       </div>
       <div className="account-filter">
         {accounts.map((a) => (

@@ -466,11 +466,6 @@ body {
   background: #19162a;
 }
 
-.account-picker-divider {
-  width: 100%;
-  height: 0;
-}
-
 /* Sidebar picker: tighter chips, wrap to multiple lines. */
 .account-picker .account-filter {
   gap: 5px;
