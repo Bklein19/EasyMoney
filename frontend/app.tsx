@@ -13,12 +13,12 @@ type Page = "imports" | "networth" | "performance" | "savings" | "transfers" | "
 const PAGES: Page[] = ["imports", "networth", "performance", "savings", "transfers", "accounts"];
 
 const NAV: Array<{ id: Page; label: string; icon: string }> = [
-  { id: "imports", label: "Imports", icon: "≡" },
   { id: "networth", label: "Net Worth", icon: "◆" },
   { id: "performance", label: "Performance", icon: "↗" },
   { id: "savings", label: "Savings Rate", icon: "◫" },
-  { id: "transfers", label: "Transfers", icon: "⇄" },
   { id: "accounts", label: "Accounts", icon: "⊞" },
+  { id: "imports", label: "Imports", icon: "≡" },
+  { id: "transfers", label: "Transfers", icon: "⇄" },
 ];
 
 const SIDEBAR_WIDTH_KEY = "money.sidebarWidth";
