@@ -19,7 +19,7 @@ body {
   flex-shrink: 0;
   background: #131313;
   border-right: 1px solid #222;
-  padding: 24px 12px;
+  padding: 14px 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -33,7 +33,7 @@ body {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: #666;
-  padding: 0 12px 16px;
+  padding: 0 12px 10px;
 }
 
 .sidebar-nav {
@@ -44,8 +44,8 @@ body {
 
 /* Accounts picker lives below the nav, ChatGPT-history style. */
 .sidebar-accounts {
-  margin-top: 22px;
-  padding-top: 16px;
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: 1px solid #222;
   min-height: 0;
 }
@@ -64,7 +64,7 @@ body {
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 10px 12px;
+  padding: 6px 12px;
   background: none;
   border: none;
   border-radius: 8px;
