@@ -1,5 +1,5 @@
 import type { ParseResult, ParserMeta } from "../src/types";
-import { cents, pdfToText } from "./_helpers";
+import { cents, pdfToText, makeTx } from "./_helpers";
 
 export const meta: ParserMeta = {
   id: "tiaa-statement-pdf",
@@ -48,11 +48,44 @@ export default async function parse(filePath: string): Promise<ParseResult> {
   const periodMatch = text.match(
     /For\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})\s+to\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})/
   );
+  const covered_from = periodMatch ? isoLongDate(periodMatch[1]!) : statementDate;
+  const covered_to = periodMatch ? isoLongDate(periodMatch[2]!) : statementDate;
+
+  // Quarterly contribution totals come from the activity-summary block, which only
+  // keeps label and value on one line in layout mode. The CSV activity export records
+  // only fund-level Buy/Sell/ReinvDiv with no contribution marker, so the statement is
+  // the authoritative source for TIAA contributions. Take the FIRST match of each
+  // label — later "Your contributions" lines are per-fund breakdowns, not the summary.
+  // Older statements (pre-2024-Q3) omit the "$" on summary values; newer ones include
+  // it. Match either. First occurrence is the summary block; later same-label lines are
+  // per-fund breakdowns.
+  const layout = await pdfToText(filePath, true);
+  const employee = layout.match(/^\s*Your contributions\s+\$?([\d,]+\.\d{2})/m);
+  const employer = layout.match(/^\s*Employer contributions\s+\$?([\d,]+\.\d{2})/m);
+
+  const transactions: ParseResult["transactions"] = [];
+  const pushContribution = (amount: string | undefined, kind: string) => {
+    if (!amount) return;
+    const amount_cents = cents(amount);
+    if (amount_cents === 0) return;
+    transactions.push(
+      makeTx({
+        date: covered_to,
+        amount_cents,
+        description: `TIAA ${kind} contribution`,
+        account: ACCOUNT,
+        institution: "TIAA",
+        raw: { source: "tiaa-statement-summary", period: `${covered_from}/${covered_to}`, kind, amount },
+      })
+    );
+  };
+  pushContribution(employee?.[1], "employee");
+  pushContribution(employer?.[1], "employer");
 
   return {
-    transactions: [],
+    transactions,
     balances: [{ date: statementDate, account: ACCOUNT, institution: "TIAA", balance_cents }],
-    covered_from: periodMatch ? isoLongDate(periodMatch[1]!) : statementDate,
-    covered_to: periodMatch ? isoLongDate(periodMatch[2]!) : statementDate,
+    covered_from,
+    covered_to,
   };
 }

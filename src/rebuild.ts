@@ -17,7 +17,6 @@ import { join } from "path";
 import { resolveParser } from "../parsers";
 import { lookupAlias } from "./accounts";
 import { getDb } from "./db";
-import { activityBucket } from "./flowClassification";
 import type { ParsedTransaction, ParsedBalance, ParserMeta } from "./types";
 
 const RAW_DIR = join(import.meta.dir, "../imports/raw");
@@ -79,12 +78,6 @@ function deterministicShuffle<T>(values: T[], seed: string, key: (value: T) => s
   });
 }
 
-const monthOf = (date: string) => date.slice(0, 7); // YYYY-MM
-
-function isStatementSummary(t: ParsedTransaction): boolean {
-  return t.raw.type === "statement-cash-flow-summary";
-}
-
 export interface LedgerRow {
   id: string;
   date: string;
@@ -137,61 +130,36 @@ export function buildLedger(files: ParsedFile[]): BuiltLedger {
     const id = resolve(institution, account);
     return id !== null ? `id:${id}` : `str:${institution}\0${account}`;
   };
-  const coverKey = (acctKey: string, month: string) => `${acctKey}\0${month}`;
 
-  // Highest "activity"-row source priority covering each (canonical account, month).
-  const bestActivityPriority = new Map<string, number>();
+  // Exact-match source-priority dedup. A higher-priority source should only shadow
+  // rows it actually carries — not every row in a month it happens to cover. So we
+  // index the highest priority at which each EXACT (account, date, amount) appears,
+  // and drop a lower-priority "activity" row only when a strictly-higher-priority
+  // source has a row with the same (account, date, amount). This collapses genuine
+  // cross-source duplicates (e.g. a Vanguard buy in both the statement and the
+  // activity export) while preserving rows a higher source simply lacks (e.g. TIAA
+  // statement contributions, which the CSV activity export never records).
+  // "in-kind-transfer" rows are never dropped — they exist only on statements.
+  const exactKey = (ak: string, date: string, amount: number) => `${ak}\0${date}\0${amount}`;
+  const bestExactPriority = new Map<string, number>();
   for (const f of files) {
-    if (!f.covered_from || !f.covered_to) continue;
-    const acctKeys = new Set(
-      f.transactions.filter((t) => t.category === "activity").map((t) => acctKeyOf(t.institution, t.account))
-    );
-    if (acctKeys.size === 0) continue;
-    const fromM = monthOf(f.covered_from);
-    const toM = monthOf(f.covered_to);
-    for (const ak of acctKeys) {
-      for (let m = fromM; m <= toM; m = nextMonth(m)) {
-        const k = coverKey(ak, m);
-        if (f.meta.priority > (bestActivityPriority.get(k) ?? -Infinity)) {
-          bestActivityPriority.set(k, f.meta.priority);
-        }
+    for (const t of f.transactions) {
+      if (t.category !== "activity") continue;
+      const k = exactKey(acctKeyOf(t.institution, t.account), t.date, t.amount_cents);
+      if (f.meta.priority > (bestExactPriority.get(k) ?? -Infinity)) {
+        bestExactPriority.set(k, f.meta.priority);
       }
     }
   }
 
-  // For monthly statement summary rows, coverage alone is not enough to prove a
-  // duplicate. A detailed activity export can cover a month yet omit an earlier
-  // net cash-flow item from the statement period. Keep the summary unless the
-  // winning higher-priority source has the same monthly bucket total.
-  const bestActivitySums = new Map<string, number>();
-  for (const f of files) {
-    for (const t of f.transactions) {
-      if (t.category !== "activity") continue;
-      const ak = acctKeyOf(t.institution, t.account);
-      const month = monthOf(t.date);
-      const best = bestActivityPriority.get(coverKey(ak, month));
-      if (best === undefined || f.meta.priority !== best) continue;
-      const bucket = activityBucket(t);
-      if (bucket === "other") continue;
-      const k = `${coverKey(ak, month)}\0${bucket}`;
-      bestActivitySums.set(k, (bestActivitySums.get(k) ?? 0) + t.amount_cents);
-    }
-  }
-
-  // Union by deterministic id, applying the category-aware drop on canonical accounts.
+  // Union by deterministic id, applying the exact-match drop on canonical accounts.
   const txById = new Map<string, ParsedTransaction>();
   for (const f of files) {
     for (const t of f.transactions) {
       if (t.category === "activity") {
-        const ak = acctKeyOf(t.institution, t.account);
-        const month = monthOf(t.date);
-        const best = bestActivityPriority.get(coverKey(ak, month));
-        if (best !== undefined && f.meta.priority < best) {
-          if (!isStatementSummary(t)) continue; // a higher source owns this month
-          const bucket = activityBucket(t);
-          const higherSum = bestActivitySums.get(`${coverKey(ak, month)}\0${bucket}`) ?? 0;
-          if (bucket === "other" || higherSum === t.amount_cents) continue;
-        }
+        const k = exactKey(acctKeyOf(t.institution, t.account), t.date, t.amount_cents);
+        const best = bestExactPriority.get(k);
+        if (best !== undefined && f.meta.priority < best) continue; // a higher source carries this exact row
       }
       txById.set(t.id, t); // same id from two sources → identical row, idempotent
     }
@@ -232,13 +200,6 @@ export function buildLedger(files: ParsedFile[]): BuiltLedger {
     );
 
   return { transactions, balances, unmappedAliases: [...unmapped.values()] };
-}
-
-function nextMonth(ym: string): string {
-  let [y, m] = ym.split("-").map(Number) as [number, number];
-  m += 1;
-  if (m > 12) { m = 1; y += 1; }
-  return `${y}-${String(m).padStart(2, "0")}`;
 }
 
 // Write a built ledger into a database's transactions + account_balances tables,
