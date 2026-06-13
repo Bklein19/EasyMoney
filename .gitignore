@@ -38,3 +38,10 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 imports/raw/
+imports/downloads/
+imports/documents/
+imports/statements/
+imports/tmp/
+.playwright-cli/
+*.pdf
+*.PDF
