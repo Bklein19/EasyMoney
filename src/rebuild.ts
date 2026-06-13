@@ -11,7 +11,7 @@
 // only dropped when a higher-priority source covers the same (account, month).
 
 import { Database } from "bun:sqlite";
-import { createHash } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import { readdir } from "fs/promises";
 import { join } from "path";
 import { resolveParser } from "../parsers";
@@ -285,25 +285,33 @@ export async function rebuild(): Promise<{ tx: number; bal: number; unmappedAlia
   return { ...counts, unmappedAliases: ledger.unmappedAliases };
 }
 
-// Prove order-independence: build the ledger from two deterministic shuffles and
+// Prove order-independence: build the ledger from multiple seeded shuffles and
 // assert identical fingerprints. Returns the fingerprint on success; throws on
-// mismatch. Pure — does not touch the live DB.
-export async function verify(options: { sampleSize?: number; seed?: string } = {}): Promise<{ fingerprint: string; tx: number; bal: number }> {
-  const seed = options.seed ?? "rebuild-verify";
+// mismatch with the seed needed to reproduce the failure. Pure — does not touch
+// the live DB.
+export async function verify(options: { sampleSize?: number; seed?: string; permutations?: number } = {}): Promise<{ fingerprint: string; tx: number; bal: number; seed: string }> {
+  const seed = options.seed ?? randomBytes(16).toString("hex");
+  const permutations = options.permutations ?? 8;
+  if (permutations < 2) throw new Error("verify requires at least two permutations");
+
   let storedNames: string[] | undefined;
   if (options.sampleSize !== undefined) {
     const names = (await readdir(RAW_DIR)).filter((n) => !n.startsWith(".")).sort();
     storedNames = deterministicSample(names, options.sampleSize, seed);
   }
   const files = await parseAllRawFiles(RAW_DIR, storedNames);
-  const left = buildLedger(deterministicShuffle(files, `${seed}:left`, (file) => file.storedName));
-  const right = buildLedger(deterministicShuffle(files, `${seed}:right`, (file) => file.storedName));
-  const fL = ledgerFingerprint(left);
-  const fR = ledgerFingerprint(right);
-  if (fL !== fR) {
-    throw new Error(`Order-dependence detected: shuffle ${fL.slice(0, 16)} != shuffle ${fR.slice(0, 16)}`);
+  const first = buildLedger(deterministicShuffle(files, `${seed}:0`, (file) => file.storedName));
+  const firstFingerprint = ledgerFingerprint(first);
+  for (let i = 1; i < permutations; i++) {
+    const next = buildLedger(deterministicShuffle(files, `${seed}:${i}`, (file) => file.storedName));
+    const nextFingerprint = ledgerFingerprint(next);
+    if (firstFingerprint !== nextFingerprint) {
+      throw new Error(
+        `Order-dependence detected with seed ${seed}: permutation 0 ${firstFingerprint.slice(0, 16)} != permutation ${i} ${nextFingerprint.slice(0, 16)}`
+      );
+    }
   }
-  return { fingerprint: fL, tx: left.transactions.length, bal: left.balances.length };
+  return { fingerprint: firstFingerprint, tx: first.transactions.length, bal: first.balances.length, seed };
 }
 
 // CLI: `bun src/rebuild.ts` rebuilds the live DB; `--verify` only checks order-independence.
