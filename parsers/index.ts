@@ -17,6 +17,7 @@ import { meta as wellsFargoActivityMeta, default as wellsFargoActivityParse } fr
 import { meta as wellsFargoStatementMeta, default as wellsFargoStatementParse } from "./wells-fargo-statement-pdf";
 import { meta as tiaaActivityMeta, default as tiaaActivityParse } from "./tiaa-activity-csv";
 import { meta as tiaaStatementMeta, default as tiaaStatementParse } from "./tiaa-statement-pdf";
+import { meta as marcusStatementMeta, default as marcusStatementParse } from "./marcus-statement-pdf";
 
 export const PARSERS: ParserModule[] = [
   { meta: msStmtMeta, parse: msStmtParse },
@@ -34,6 +35,7 @@ export const PARSERS: ParserModule[] = [
   { meta: wellsFargoStatementMeta, parse: wellsFargoStatementParse },
   { meta: tiaaActivityMeta, parse: tiaaActivityParse },
   { meta: tiaaStatementMeta, parse: tiaaStatementParse },
+  { meta: marcusStatementMeta, parse: marcusStatementParse },
 ];
 
 export function getParserById(id: string): ParserModule | undefined {

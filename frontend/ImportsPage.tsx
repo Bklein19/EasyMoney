@@ -46,18 +46,25 @@ export function ImportsPage() {
     setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)));
   }, []);
 
-  const importFileJob = useCallback(async (file: File) => {
-    const id = `${Date.now()}-${Math.random()}`;
-    setJobs((prev) => [{ id, filename: file.name, status: "pending" }, ...prev]);
+  const importFileJobs = useCallback(async (files: File[]) => {
+    const batch = files.map((file) => ({
+      id: `${Date.now()}-${Math.random()}`,
+      file,
+    }));
+    setJobs((prev) => [
+      ...batch.map(({ id, file }) => ({ id, filename: file.name, status: "pending" as const })),
+      ...prev,
+    ]);
     await new Promise((r) => setTimeout(r, 50));
-    updateJob(id, { status: "running" });
+    for (const { id } of batch) updateJob(id, { status: "running" });
 
     const body = new FormData();
-    body.append("file", file);
+    for (const { file } of batch) body.append("file", file);
 
     const res = await fetch("/api/import", { method: "POST", body });
     if (!res.ok || !res.body) {
-      updateJob(id, { status: "error", error: await res.text() });
+      const error = await res.text();
+      for (const { id } of batch) updateJob(id, { status: "error", error });
       return;
     }
 
@@ -76,7 +83,9 @@ export function ImportsPage() {
         if (!eventLine || !dataLine) continue;
         const data = JSON.parse(dataLine) as Record<string, unknown>;
         if (eventLine === "done") {
-          updateJob(id, {
+          const next = batch.shift();
+          if (!next) continue;
+          updateJob(next.id, {
             status: "done",
             parserId: data["parserId"] as string,
             transactionsInserted: data["transactionsInserted"] as number,
@@ -85,18 +94,18 @@ export function ImportsPage() {
               ? data["autoCreatedAccounts"].length
               : 0,
           });
-          refreshRecords();
         } else if (eventLine === "error") {
-          updateJob(id, { status: "error", error: data["error"] as string });
+          for (const { id } of batch) updateJob(id, { status: "error", error: data["error"] as string });
         }
       }
     }
+    refreshRecords();
   }, [refreshRecords, updateJob]);
 
   const handleFiles = useCallback((files: FileList | null) => {
     if (!files) return;
-    for (const file of Array.from(files)) importFileJob(file);
-  }, [importFileJob]);
+    importFileJobs(Array.from(files));
+  }, [importFileJobs]);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();

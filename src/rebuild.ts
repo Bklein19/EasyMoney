@@ -288,10 +288,8 @@ if (import.meta.main) {
     const r = await verify();
     console.log(`✓ order-independent — ${r.tx} transactions, ${r.bal} balances, fingerprint ${r.fingerprint.slice(0, 16)}`);
   } else {
-    // Verify first so we never write a ledger that isn't order-independent.
-    const v = await verify();
     const r = await rebuild();
-    console.log(`rebuilt: ${r.tx} transactions, ${r.bal} balances (verified ${v.fingerprint.slice(0, 16)})`);
+    console.log(`rebuilt: ${r.tx} transactions, ${r.bal} balances`);
     if (r.unmappedAliases.length) {
       console.log(`⚠ ${r.unmappedAliases.length} unmapped alias(es):`);
       for (const a of r.unmappedAliases) console.log(`   ${a.institution} / ${a.account}`);

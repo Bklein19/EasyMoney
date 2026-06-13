@@ -1,4 +1,4 @@
-import { importFile } from "./importer";
+import { importFile, importFiles } from "./importer";
 import { getNetWorthReport } from "./networth";
 import { getSavingsRateReport } from "./savingsRate";
 import { getTransferAuditReport } from "./transfers";
@@ -118,21 +118,27 @@ export function startServer(port = Number(process.env["PORT"] ?? 3000)) {
       "/api/import": {
         POST: async (req) => {
           const form = await req.formData();
-          const file = form.get("file");
-          if (!(file instanceof File)) {
+          const files = form.getAll("file").filter((file): file is File => file instanceof File);
+          if (files.length === 0) {
             return Response.json({ error: "No file provided" }, { status: 400 });
           }
 
-          await mkdir(UPLOAD_TMP, { recursive: true });
-          const tmpPath = join(UPLOAD_TMP, file.name);
-          await writeFile(tmpPath, Buffer.from(await file.arrayBuffer()));
+          const uploadDir = join(UPLOAD_TMP, `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+          await mkdir(uploadDir, { recursive: true });
+          const tmpPaths: string[] = [];
+          for (const [i, file] of files.entries()) {
+            const fileDir = join(uploadDir, String(i));
+            await mkdir(fileDir, { recursive: true });
+            const tmpPath = join(fileDir, file.name);
+            await writeFile(tmpPath, Buffer.from(await file.arrayBuffer()));
+            tmpPaths.push(tmpPath);
+          }
 
-          // Import is now fast (resolve committed parser + rebuild).
-          // Still emit SSE done/error so the existing Import-page reader works unchanged.
+          // Emit SSE done/error so the Import-page reader can update per-file rows.
           let body: string;
           try {
-            const report = await importFile(tmpPath);
-            body = sseMessage("done", report);
+            const reports = tmpPaths.length === 1 ? [await importFile(tmpPaths[0]!)] : await importFiles(tmpPaths);
+            body = reports.map((report) => sseMessage("done", report)).join("");
           } catch (err) {
             body = sseMessage("error", { error: String(err) });
           }

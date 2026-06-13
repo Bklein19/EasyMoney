@@ -29,10 +29,11 @@ Use this skill when adding a new bank, brokerage, retirement, or credit account 
 
 ## Download Workflow
 
-Use headed Playwright when the task requires an authenticated website flow.
+Use headed Playwright when the task requires an authenticated website flow. Always include
+`--headed` in the actual command so the user can see and complete login/MFA.
 
 - Start a provider-specific headed persistent session, then let the user log in:
-  - `bunx @playwright/cli -s=<institution> open <url> --headed --persistent --profile=.playwright-cli/<institution>-profile`
+  - `bunx @playwright/cli -s=<institution> open --headed --browser=chrome --profile=.playwright-cli/<institution>-profile <url>`
   - Do not collect, request, or store credentials. Wait for the user to say they are in.
 - Once authorized, inventory all visible account/document areas before downloading:
   - account summary and account detail pages
