@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 
 export interface PickerAccount {
   id: number;
@@ -19,6 +19,7 @@ export function AccountPicker({
   selectedIds: Set<number>;
   onChange: (next: Set<number>) => void;
 }) {
+  const [lastClickedId, setLastClickedId] = useState<number | null>(null);
   const holders = useMemo(() => {
     const holderMap = new Map<string, number[]>();
     for (const a of accounts) {
@@ -32,10 +33,30 @@ export function AccountPicker({
   }, [accounts]);
 
   const allIds = accounts.map((a) => a.id);
-  const setExactly = (ids: number[]) => onChange(new Set(ids));
-  const toggle = (id: number, invert: boolean) => {
-    if (invert) {
+  const setExactly = (ids: number[]) => {
+    setLastClickedId(null);
+    onChange(new Set(ids));
+  };
+  const invertSelection = () => {
+    setLastClickedId(null);
+    onChange(new Set(allIds.filter((x) => !selectedIds.has(x))));
+  };
+  const rangeBetween = (fromId: number, toId: number) => {
+    const from = allIds.indexOf(fromId);
+    const to = allIds.indexOf(toId);
+    if (from === -1 || to === -1) return [toId];
+    const start = Math.min(from, to);
+    const end = Math.max(from, to);
+    return allIds.slice(start, end + 1);
+  };
+  const selectAccount = (id: number, e: React.MouseEvent<HTMLButtonElement>) => {
+    setLastClickedId(id);
+    if (e.altKey) {
       onChange(new Set(allIds.filter((x) => !selectedIds.has(x))));
+      return;
+    }
+    if (e.shiftKey && lastClickedId !== null) {
+      onChange(new Set([...selectedIds, ...rangeBetween(lastClickedId, id)]));
       return;
     }
     const next = new Set(selectedIds);
@@ -49,11 +70,19 @@ export function AccountPicker({
     ids.length === selectedIds.size && ids.every((id) => selectedIds.has(id));
 
   return (
-    <div className="account-picker">
+    <div
+      className="account-picker"
+      onKeyDown={(e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a") {
+          e.preventDefault();
+          setExactly(allIds);
+        }
+      }}
+    >
       <div className="account-picker-shortcuts">
         <button type="button" onClick={() => setExactly(allIds)}>All</button>
         <button type="button" onClick={() => setExactly([])}>None</button>
-        <button type="button" onClick={() => onChange(new Set(allIds.filter((x) => !selectedIds.has(x))))}>
+        <button type="button" onClick={invertSelection}>
           Invert
         </button>
         {holders.map(([holder, ids]) => (
@@ -75,8 +104,8 @@ export function AccountPicker({
             type="button"
             className={`account-chip${selectedIds.has(a.id) ? " active" : ""}`}
             aria-pressed={selectedIds.has(a.id)}
-            title="Option-click any account to invert the selection"
-            onClick={(e) => toggle(a.id, e.altKey)}
+            title="Command-click to toggle, Shift-click to select a range, Option-click to invert"
+            onClick={(e) => selectAccount(a.id, e)}
           >
             <span className="account-chip-name">{a.name}</span>
             {a.account_holder && <span className="account-chip-holder">{a.account_holder}</span>}
