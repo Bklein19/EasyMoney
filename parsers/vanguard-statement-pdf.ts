@@ -9,6 +9,7 @@ export const meta: ParserMeta = {
   priority: 50,
   matches: ({ filename, sample }) =>
     /^\d{4}-\d{2}-\d{2}-(Brokerage|Roth-IRA|Trad-IRA)---.+\.pdf$/.test(filename) ||
+    /^vanguard-\d{4}-\d{4}-\d{2}-\d{2}-statement\.pdf$/.test(filename) ||
     // Generically-named statements (statement-4.pdf etc.) — disambiguate by content.
     (/^statement-\d+\.pdf$/.test(filename) && /Vanguard Brokerage Services/.test(sample)),
 };
@@ -44,19 +45,27 @@ export default async function parse(filePath: string): Promise<ParseResult> {
   const statementDate = parseStatementDate(allText);
   const year = Number(statementDate.slice(0, 4));
 
-  const accountTypeMatch = allText.match(
-    /(Individual brokerage account|Roth IRA brokerage account|Traditional IRA brokerage account)[—-](X{4}\d{4})/
-  );
+  const accountTypeMatch =
+    allText.match(
+      /(Individual brokerage account|Roth IRA brokerage account|Traditional IRA brokerage account)[—-](X{4}\d{4}|\d{4,})/
+    ) ??
+    allText.match(
+      /(Individual brokerage account|Roth IRA brokerage account|Traditional IRA brokerage account)[\s\S]{0,120}?Vanguard Brokerage Account[—-](X{4}\d{4}|\d{4,})/
+    );
   const accountType = accountTypeMatch ? accountTypeMatch[1]! : "Individual brokerage account";
-  const accountSuffix = accountTypeMatch ? accountTypeMatch[2]! : null;
+  const accountSuffix = accountTypeMatch
+    ? `XXXX${accountTypeMatch[2]!.slice(-4)}`
+    : null;
   const account = accountSuffix ? `${accountType}-${accountSuffix}` : accountType;
   const institution = "Vanguard";
 
   const balances: ParseResult["balances"] = [];
   const escapedType = accountType.replace(/[.*+?^()|[\]{}]/g, "\\$&");
-  const balanceMatch = allText.match(
-    new RegExp(escapedType + "\\s+\\$[\\d,]+\\.\\d{2}\\s+\\$(\\d[\\d,]*\\.\\d{2})")
-  );
+  const balanceMatch =
+    allText.match(
+      new RegExp(escapedType + "\\s+\\$[\\d,]+\\.\\d{2}\\s+\\$(\\d[\\d,]*\\.\\d{2})")
+    ) ??
+    allText.match(/\$(\d[\d,]*\.\d{2})\s+Total account value as of [A-Z][a-z]+ \d{1,2}, \d{4}/);
   if (balanceMatch) {
     balances.push({ date: statementDate, account, institution, balance_cents: parseAmountToCents(`$${balanceMatch[1]}`) });
   }
