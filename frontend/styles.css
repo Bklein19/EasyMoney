@@ -42,6 +42,10 @@
   --series-negative: #c93586;
   --series-retained: #4f84e6;
   --series-poof: #d04545;
+  --status-info-bg: #eaf2ff;
+  --status-info-text: #24559f;
+  --status-warn-bg: #fff3da;
+  --status-warn-text: #8a5a00;
   --account-series-0: #336fd6;
   --account-series-1: #9a650e;
   --account-series-2: #735bc6;
@@ -50,9 +54,9 @@
   --account-series-5: #418a55;
   --account-series-6: #aa4d90;
   --account-series-7: #758228;
-  --chart-grid: #e2e5e9;
+  --chart-grid: #edf0f3;
   --chart-axis: #7b8490;
-  --chart-zero: #c2c8d0;
+  --chart-zero: #d7dde4;
   --tooltip-bg: #ffffff;
   --tooltip-border: #cdd3db;
 }
@@ -99,6 +103,10 @@
     --series-negative: #dc3f9a;
     --series-retained: #7aa7ff;
     --series-poof: #e05252;
+    --status-info-bg: #172338;
+    --status-info-text: #9fbdff;
+    --status-warn-bg: #2a2114;
+    --status-warn-text: #e0a84a;
     --account-series-0: #7aa7ff;
     --account-series-1: #c9a66b;
     --account-series-2: #9d8cff;
@@ -1053,7 +1061,19 @@ body.sidebar-resizing {
   line-height: 1.35;
 }
 
-.transfer-confidence,
+.transfer-confidence {
+  display: inline-flex;
+  width: fit-content;
+  margin: 4px 0 6px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 0;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
 .transfer-direction {
   display: inline-flex;
   width: fit-content;
@@ -1069,13 +1089,13 @@ body.sidebar-resizing {
 }
 
 .transfer-confidence.high {
-  color: #8fb5ff;
-  border-color: #25406b;
+  color: var(--status-info-text);
+  background: var(--status-info-bg);
 }
 
 .transfer-confidence.medium {
-  color: var(--series-gains);
-  border-color: #4a3920;
+  color: var(--status-warn-text);
+  background: var(--status-warn-bg);
 }
 
 .transfer-direction.inflow {
