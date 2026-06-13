@@ -107,8 +107,23 @@ const formatMonthTick = (time: number) => {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
 };
 
-const accountColor = (index: number) =>
-  ["#7aa7ff", "#c9a66b", "#9d8cff", "#68c7d8", "#e09f7d", "#8ccf91", "#d889c7", "#a8b86e"][index % 8]!;
+const accountColor = (index: number) => `var(--account-series-${index % 8})`;
+
+const chartTheme = {
+  axis: "var(--chart-axis)",
+  grid: "var(--chart-grid)",
+  zero: "var(--chart-zero)",
+  tooltipContent: { background: "var(--tooltip-bg)", border: "1px solid var(--tooltip-border)", borderRadius: 8 },
+  tooltipLabel: { color: "var(--text-muted)" },
+};
+
+const series = {
+  contributions: "var(--series-contributions)",
+  gains: "var(--series-gains)",
+  netWorth: "var(--series-net-worth)",
+  positive: "var(--series-positive)",
+  negative: "var(--series-negative)",
+};
 
 interface NetWorthPageProps {
   view: "networth" | "performance";
@@ -384,7 +399,7 @@ export function NetWorthPage({ view, selectedIds }: NetWorthPageProps) {
     return points;
   }, [data]);
 
-  if (error) return <div className="page"><div className="meta" style={{ color: "#e05252" }}>{error}</div></div>;
+  if (error) return <div className="page"><div className="meta import-error">{error}</div></div>;
   if (!report) return <div className="page"><div className="meta">Loading…</div></div>;
   if (report.rows.length === 0) {
     return (
@@ -440,26 +455,26 @@ export function NetWorthPage({ view, selectedIds }: NetWorthPageProps) {
             <div className="chart-container networth-primary-chart">
               <ResponsiveContainer width="100%" height={420}>
                 <ComposedChart data={data} stackOffset="sign">
-                  <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-                  <XAxis dataKey="month" stroke="#555" tick={{ fontSize: 11 }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
+                  <XAxis dataKey="month" stroke={chartTheme.axis} tick={{ fontSize: 11 }} />
                   <YAxis
-                    stroke="#555"
+                    stroke={chartTheme.axis}
                     tick={{ fontSize: 11 }}
                     tickFormatter={fmtUsdAxis}
                   />
                   <Tooltip
                     formatter={(value) => fmtUsd(Number(value))}
-                    contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
-                    labelStyle={{ color: "#888" }}
+                    contentStyle={chartTheme.tooltipContent}
+                    labelStyle={chartTheme.tooltipLabel}
                   />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="cumulativeContributions" name="Contributions" stackId="stack" fill="#4a8fff" />
-                  {hasGains && <Bar dataKey="cumulativeGains" name="Market gains" stackId="stack" fill="#ffb74a" />}
+                  <Bar dataKey="cumulativeContributions" name="Contributions" stackId="stack" fill={series.contributions} />
+                  {hasGains && <Bar dataKey="cumulativeGains" name="Market gains" stackId="stack" fill={series.gains} />}
                   <Line
                     type="monotone"
                     dataKey="cumulative"
                     name="Net worth"
-                    stroke="#e8e8e8"
+                    stroke={series.netWorth}
                     strokeWidth={1.5}
                     dot={false}
                   />
@@ -478,21 +493,21 @@ export function NetWorthPage({ view, selectedIds }: NetWorthPageProps) {
             <div className="chart-container derivative-chart">
               <ResponsiveContainer width="100%" height={340}>
                 <ComposedChart data={derivativeData} stackOffset="sign">
-                  <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-                  <XAxis dataKey="period" stroke="#555" tick={{ fontSize: 11 }} />
+                  <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
+                  <XAxis dataKey="period" stroke={chartTheme.axis} tick={{ fontSize: 11 }} />
                   <YAxis
-                    stroke="#555"
+                    stroke={chartTheme.axis}
                     tick={{ fontSize: 11 }}
                     tickFormatter={fmtUsdAxis}
                   />
                   <Tooltip
                     formatter={(value) => fmtUsd(Number(value))}
-                    contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
-                    labelStyle={{ color: "#888" }}
+                    contentStyle={chartTheme.tooltipContent}
+                    labelStyle={chartTheme.tooltipLabel}
                   />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="contributions" name="Contributions" fill="#4a8fff" />
-                  <Bar dataKey="marketGains" name="Market gains" fill="#ffb74a" />
+                  <Bar dataKey="contributions" name="Contributions" fill={series.contributions} />
+                  <Bar dataKey="marketGains" name="Market gains" fill={series.gains} />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -510,34 +525,34 @@ export function NetWorthPage({ view, selectedIds }: NetWorthPageProps) {
         <div className="chart-container returns-investment-chart">
           <ResponsiveContainer width="100%" height={320}>
             <ComposedChart data={investmentReturnData} margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#222" />
+              <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
               <XAxis
                 dataKey="time"
                 type="number"
                 scale="time"
                 domain={["dataMin", "dataMax"]}
-                stroke="#555"
+                stroke={chartTheme.axis}
                 tick={{ fontSize: 11 }}
                 tickFormatter={(value) => formatMonthTick(Number(value))}
               />
               <YAxis
-                stroke="#555"
+                stroke={chartTheme.axis}
                 tick={{ fontSize: 11 }}
                 tickFormatter={fmtUsdAxis}
               />
               <Tooltip
                 formatter={(value) => fmtUsd(Number(value))}
                 labelFormatter={(value) => formatMonthTick(Number(value))}
-                contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
-                labelStyle={{ color: "#888" }}
+                contentStyle={chartTheme.tooltipContent}
+                labelStyle={chartTheme.tooltipLabel}
               />
-              <ReferenceLine y={0} stroke="#333" />
+              <ReferenceLine y={0} stroke={chartTheme.zero} />
               <Area
                 type="monotone"
                 dataKey="positiveReturns"
                 name="Investment returns"
-                stroke="#20a33a"
-                fill="#20a33a"
+                stroke={series.positive}
+                fill={series.positive}
                 fillOpacity={0.16}
                 dot={false}
                 connectNulls={false}
@@ -546,8 +561,8 @@ export function NetWorthPage({ view, selectedIds }: NetWorthPageProps) {
                 type="monotone"
                 dataKey="negativeReturns"
                 name="Investment losses"
-                stroke="#dc3f9a"
-                fill="#dc3f9a"
+                stroke={series.negative}
+                fill={series.negative}
                 fillOpacity={0.16}
                 dot={false}
                 connectNulls={false}
@@ -562,15 +577,15 @@ export function NetWorthPage({ view, selectedIds }: NetWorthPageProps) {
         <div className="chart-container returns-chart">
           <ResponsiveContainer width="100%" height={340}>
             <ComposedChart data={periodReturnData} margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-              <XAxis dataKey="period" stroke="#555" tick={{ fontSize: 11 }} />
-              <YAxis stroke="#555" tick={{ fontSize: 11 }} tickFormatter={(value) => fmtPct(Number(value))} />
+              <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
+              <XAxis dataKey="period" stroke={chartTheme.axis} tick={{ fontSize: 11 }} />
+              <YAxis stroke={chartTheme.axis} tick={{ fontSize: 11 }} tickFormatter={(value) => fmtPct(Number(value))} />
               <Tooltip
                 formatter={(value, name) => [fmtPct(Number(value)), name]}
-                contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
-                labelStyle={{ color: "#888" }}
+                contentStyle={chartTheme.tooltipContent}
+                labelStyle={chartTheme.tooltipLabel}
               />
-              <ReferenceLine y={0} stroke="#333" />
+              <ReferenceLine y={0} stroke={chartTheme.zero} />
               {returnAccountBars.map((account) => (
                 <Bar key={account.key} dataKey={account.key} name={account.label} fill={account.color} />
               ))}

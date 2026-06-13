@@ -95,8 +95,14 @@ const fmtUsdAxis = (v: number) =>
       ? `$${(v / 1000).toFixed(0)}k`
       : `$${v.toFixed(0)}`;
 
-const retainedColor = "#7aa7ff";
-const poofColor = "#e05252";
+const retainedColor = "var(--series-retained)";
+const poofColor = "var(--series-poof)";
+const chartTheme = {
+  axis: "var(--chart-axis)",
+  grid: "var(--chart-grid)",
+  tooltipContent: { background: "var(--tooltip-bg)", border: "1px solid var(--tooltip-border)", borderRadius: 8 },
+  tooltipLabel: { color: "var(--text-muted)" },
+};
 
 const periodKey = (month: string, period: Period) => {
   if (period === "month") return month;
@@ -263,13 +269,13 @@ export function SavingsRatePage({ selectedIds }: { selectedIds: Set<number> }) {
             barGap={3}
             margin={{ top: 8, right: 24, bottom: 8, left: 8 }}
           >
-            <CartesianGrid strokeDasharray="3 3" stroke="#222" />
-            <XAxis dataKey="period" stroke="#555" tick={{ fontSize: 11 }} />
-            <YAxis stroke="#555" tick={{ fontSize: 11 }} tickFormatter={fmtUsdAxis} />
+            <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
+            <XAxis dataKey="period" stroke={chartTheme.axis} tick={{ fontSize: 11 }} />
+            <YAxis stroke={chartTheme.axis} tick={{ fontSize: 11 }} tickFormatter={fmtUsdAxis} />
             <Tooltip
               formatter={(value) => fmtUsd(Number(value))}
-              contentStyle={{ background: "#1a1a1a", border: "1px solid #333", borderRadius: 8 }}
-              labelStyle={{ color: "#888" }}
+              contentStyle={chartTheme.tooltipContent}
+              labelStyle={chartTheme.tooltipLabel}
             />
             <Bar dataKey="retainedPositive" name="Net retained" stackId="flow" fill={retainedColor} />
             <Bar dataKey="poofOut" name="Poof" stackId="flow" fill={poofColor} />

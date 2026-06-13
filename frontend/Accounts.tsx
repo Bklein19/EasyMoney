@@ -207,7 +207,7 @@ function AccountMetaForm({ account, aliases, onSaved, onUndo }: {
       {aliases.length > 0 && (
         <div className="aliases-block">
           <div className="manual-entries-title">
-            Aliases <span style={{ color: "#444" }}>(parser-emitted strings mapped to this account)</span>
+            Aliases <span style={{ color: "var(--text-faint)" }}>(parser-emitted strings mapped to this account)</span>
           </div>
           <div className="alias-chips">
             {aliases.map((al) => (
@@ -406,7 +406,7 @@ export function AccountsPage() {
                 </tr>
                 {isExpanded && (
                   <tr className="expanded-row">
-                    <td colSpan={6} style={{ padding: "4px 0 12px", borderBottom: "1px solid #1c1c1c" }}>
+                    <td colSpan={6} style={{ padding: "4px 0 12px", borderBottom: "1px solid var(--border-subtle)" }}>
                       <div className="override-panel">
                         <AccountMetaForm
                           account={a}
