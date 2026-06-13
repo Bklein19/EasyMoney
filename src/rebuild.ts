@@ -11,6 +11,7 @@
 // only dropped when a higher-priority source covers the same (account, month).
 
 import { Database } from "bun:sqlite";
+import { createHash } from "crypto";
 import { readdir } from "fs/promises";
 import { join } from "path";
 import { resolveParser } from "../parsers";
@@ -34,8 +35,8 @@ export interface ParsedFile {
 // Parse every raw file through its registry-resolved parser. Pure: depends only on
 // file bytes + committed parser code. Returns results sorted by storedName for a
 // canonical (but irrelevant — the union is order-independent) processing order.
-export async function parseAllRawFiles(rawDir = RAW_DIR): Promise<ParsedFile[]> {
-  const names = (await readdir(rawDir)).filter((n) => !n.startsWith(".")).sort();
+export async function parseAllRawFiles(rawDir = RAW_DIR, storedNames?: string[]): Promise<ParsedFile[]> {
+  const names = (storedNames ?? (await readdir(rawDir)).filter((n) => !n.startsWith("."))).sort();
   const out: ParsedFile[] = [];
   for (const storedName of names) {
     const path = join(rawDir, storedName);
@@ -57,6 +58,25 @@ export async function parseAllRawFiles(rawDir = RAW_DIR): Promise<ParsedFile[]> 
     });
   }
   return out;
+}
+
+function deterministicSample(names: string[], size: number, seed: string): string[] {
+  if (size >= names.length) return names;
+  return [...names]
+    .sort((a, b) => {
+      const aHash = createHash("sha256").update(`${seed}\0${a}`).digest("hex");
+      const bHash = createHash("sha256").update(`${seed}\0${b}`).digest("hex");
+      return aHash.localeCompare(bHash);
+    })
+    .slice(0, size);
+}
+
+function deterministicShuffle<T>(values: T[], seed: string, key: (value: T) => string): T[] {
+  return [...values].sort((a, b) => {
+    const aHash = createHash("sha256").update(`${seed}\0${key(a)}`).digest("hex");
+    const bHash = createHash("sha256").update(`${seed}\0${key(b)}`).digest("hex");
+    return aHash.localeCompare(bHash);
+  });
 }
 
 const monthOf = (date: string) => date.slice(0, 7); // YYYY-MM
@@ -249,7 +269,6 @@ export function writeLedger(db: Database, ledger: BuiltLedger): { tx: number; ba
 // Order-insensitive fingerprint of a ledger — sorts rows so two ledgers with the
 // same content but different row order hash identically.
 export function ledgerFingerprint(ledger: BuiltLedger): string {
-  const { createHash } = require("crypto") as typeof import("crypto");
   const tx = ledger.transactions.map((t) => `${t.id}|${t.account_id}|${t.amount_cents}`).sort().join("\n");
   const bal = ledger.balances
     .map((b) => `${b.institution}\0${b.account}\0${b.date}|${b.balance_cents}|${b.account_id}`)
@@ -266,19 +285,25 @@ export async function rebuild(): Promise<{ tx: number; bal: number; unmappedAlia
   return { ...counts, unmappedAliases: ledger.unmappedAliases };
 }
 
-// Prove order-independence: build the ledger from files in forward order and again
-// from the reverse, and assert identical fingerprints. Returns the fingerprint on
-// success; throws on mismatch. Pure — does not touch the live DB.
-export async function verify(): Promise<{ fingerprint: string; tx: number; bal: number }> {
-  const files = await parseAllRawFiles();
-  const forward = buildLedger(files);
-  const reverse = buildLedger([...files].reverse());
-  const fF = ledgerFingerprint(forward);
-  const fR = ledgerFingerprint(reverse);
-  if (fF !== fR) {
-    throw new Error(`Order-dependence detected: forward ${fF.slice(0, 16)} != reverse ${fR.slice(0, 16)}`);
+// Prove order-independence: build the ledger from two deterministic shuffles and
+// assert identical fingerprints. Returns the fingerprint on success; throws on
+// mismatch. Pure — does not touch the live DB.
+export async function verify(options: { sampleSize?: number; seed?: string } = {}): Promise<{ fingerprint: string; tx: number; bal: number }> {
+  const seed = options.seed ?? "rebuild-verify";
+  let storedNames: string[] | undefined;
+  if (options.sampleSize !== undefined) {
+    const names = (await readdir(RAW_DIR)).filter((n) => !n.startsWith(".")).sort();
+    storedNames = deterministicSample(names, options.sampleSize, seed);
   }
-  return { fingerprint: fF, tx: forward.transactions.length, bal: forward.balances.length };
+  const files = await parseAllRawFiles(RAW_DIR, storedNames);
+  const left = buildLedger(deterministicShuffle(files, `${seed}:left`, (file) => file.storedName));
+  const right = buildLedger(deterministicShuffle(files, `${seed}:right`, (file) => file.storedName));
+  const fL = ledgerFingerprint(left);
+  const fR = ledgerFingerprint(right);
+  if (fL !== fR) {
+    throw new Error(`Order-dependence detected: shuffle ${fL.slice(0, 16)} != shuffle ${fR.slice(0, 16)}`);
+  }
+  return { fingerprint: fL, tx: left.transactions.length, bal: left.balances.length };
 }
 
 // CLI: `bun src/rebuild.ts` rebuilds the live DB; `--verify` only checks order-independence.
