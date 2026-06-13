@@ -17,6 +17,7 @@ import { join } from "path";
 import { resolveParser } from "../parsers";
 import { lookupAlias } from "./accounts";
 import { getDb } from "./db";
+import { activityBucket } from "./flowClassification";
 import type { ParsedTransaction, ParsedBalance, ParserMeta } from "./types";
 
 const RAW_DIR = join(import.meta.dir, "../imports/raw");
@@ -103,16 +104,24 @@ export interface BuiltLedger {
   unmappedAliases: Array<{ institution: string; account: string }>;
 }
 
+// A coarse monthly aggregate (e.g. a Merrill statement's single "Net Cash Flow" row)
+// rather than an itemized transaction. These yield to any higher-priority source that
+// itemizes the same month, but survive where no detailed source covers the month.
+function isStatementSummary(t: ParsedTransaction): boolean {
+  return (t.raw as { type?: string }).type === "statement-cash-flow-summary";
+}
+
 // Pure function: parsed files → canonical ledger. This is the order-independence
 // guarantee, expressed without touching the database.
 //
-// Dedup rule (category-aware source priority):
-//   - "in-kind-transfer" transactions are ALWAYS kept (they live only on statements;
-//     activity-exports structurally never contain them).
-//   - "activity" transactions: for each (account, month), the highest-priority source
-//     KIND that covers that month wins. A statement's activity rows are dropped when an
-//     activity-export (higher priority) covers the same (account, month). Coverage is
-//     the file's [covered_from, covered_to] range — robust to gaps in a given month.
+// Dedup rules (all keyed on canonical account id, so differing alias strings collapse):
+//   - "in-kind-transfer" rows are ALWAYS kept (statement-only; exports never have them).
+//   - statement-cash-flow-summary rows (coarse monthly aggregates) are dropped when a
+//     higher-priority source itemizes that (account, month) — even if dates/amounts
+//     differ — but kept where no detailed source covers the month.
+//   - other "activity" rows are dropped only when a strictly-higher-priority source has
+//     a row at the same exact (account, date, amount), collapsing genuine duplicates
+//     while preserving rows a higher source simply lacks.
 export function buildLedger(files: ParsedFile[]): BuiltLedger {
   // Resolve account ids FIRST so coverage/dedup work on canonical accounts, not on
   // the differing alias strings each source uses ("Brokerage - 34702059" from the
@@ -142,24 +151,44 @@ export function buildLedger(files: ParsedFile[]): BuiltLedger {
   // "in-kind-transfer" rows are never dropped — they exist only on statements.
   const exactKey = (ak: string, date: string, amount: number) => `${ak}\0${date}\0${amount}`;
   const bestExactPriority = new Map<string, number>();
+  // For coarse statement summaries: track the highest priority at which DETAILED
+  // activity of the SAME BUCKET (contribution vs income) exists per (account, month).
+  // A monthly net-cash-flow summary must yield only to a higher-priority source that
+  // actually itemizes cash flow that month — not merely one that itemizes interest.
+  // This keeps an early-month deposit summary the CSV doesn't cover, while dropping
+  // the summary once the CSV starts itemizing that bucket.
+  const monthBucketKey = (ak: string, date: string, bucket: string) => `${ak}\0${date.slice(0, 7)}\0${bucket}`;
+  const bestMonthBucketDetailPriority = new Map<string, number>();
   for (const f of files) {
     for (const t of f.transactions) {
       if (t.category !== "activity") continue;
-      const k = exactKey(acctKeyOf(t.institution, t.account), t.date, t.amount_cents);
-      if (f.meta.priority > (bestExactPriority.get(k) ?? -Infinity)) {
-        bestExactPriority.set(k, f.meta.priority);
+      const ak = acctKeyOf(t.institution, t.account);
+      const ek = exactKey(ak, t.date, t.amount_cents);
+      if (f.meta.priority > (bestExactPriority.get(ek) ?? -Infinity)) bestExactPriority.set(ek, f.meta.priority);
+      if (!isStatementSummary(t)) {
+        const mk = monthBucketKey(ak, t.date, activityBucket(t));
+        if (f.meta.priority > (bestMonthBucketDetailPriority.get(mk) ?? -Infinity)) {
+          bestMonthBucketDetailPriority.set(mk, f.meta.priority);
+        }
       }
     }
   }
 
-  // Union by deterministic id, applying the exact-match drop on canonical accounts.
+  // Union by deterministic id, applying the drop rules on canonical accounts.
   const txById = new Map<string, ParsedTransaction>();
   for (const f of files) {
     for (const t of f.transactions) {
       if (t.category === "activity") {
-        const k = exactKey(acctKeyOf(t.institution, t.account), t.date, t.amount_cents);
-        const best = bestExactPriority.get(k);
-        if (best !== undefined && f.meta.priority < best) continue; // a higher source carries this exact row
+        const ak = acctKeyOf(t.institution, t.account);
+        if (isStatementSummary(t)) {
+          // Drop a monthly summary when a higher-priority source itemizes the SAME
+          // bucket (contribution/income) that month.
+          const best = bestMonthBucketDetailPriority.get(monthBucketKey(ak, t.date, activityBucket(t)));
+          if (best !== undefined && f.meta.priority < best) continue;
+        } else {
+          const best = bestExactPriority.get(exactKey(ak, t.date, t.amount_cents));
+          if (best !== undefined && f.meta.priority < best) continue; // a higher source carries this exact row
+        }
       }
       txById.set(t.id, t); // same id from two sources → identical row, idempotent
     }
