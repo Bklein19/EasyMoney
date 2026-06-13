@@ -62,25 +62,30 @@ function App() {
   return (
     <div className="layout">
       <nav className="sidebar">
-        <div className="sidebar-title">Observatory</div>
-        <div className="sidebar-nav">
-          {NAV.map((item) => (
-            <button
-              key={item.id}
-              className={`nav-item${page === item.id ? " active" : ""}`}
-              onClick={() => navigate(item.id)}
-            >
-              <span className="nav-icon">{item.icon}</span>
-              {item.label}
-            </button>
-          ))}
-        </div>
-        {showPicker && (
-          <div className="sidebar-accounts">
-            <div className="sidebar-section-title">Accounts</div>
-            <AccountPicker accounts={accounts} selectedIds={selectedIds} onChange={setSelected} />
+        <div className="sidebar-scroll">
+          <div className="sidebar-title">Observatory</div>
+          <div className="sidebar-nav">
+            {NAV.map((item) => (
+              <button
+                key={item.id}
+                className={`nav-item${page === item.id ? " active" : ""}`}
+                onClick={() => navigate(item.id)}
+              >
+                <span className="nav-icon">{item.icon}</span>
+                {item.label}
+              </button>
+            ))}
           </div>
-        )}
+          {showPicker && (
+            <div className="sidebar-accounts">
+              <div className="sidebar-section-title sidebar-section-title-row">
+                <span>Accounts</span>
+                <span>{selectedIds.size} of {accounts.length}</span>
+              </div>
+              <AccountPicker accounts={accounts} selectedIds={selectedIds} onChange={setSelected} />
+            </div>
+          )}
+        </div>
       </nav>
       <main className="main">
         {page === "imports" && <ImportsPage />}

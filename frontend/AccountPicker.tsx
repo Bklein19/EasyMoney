@@ -61,9 +61,6 @@ export function AccountPicker({
   return (
     <div className="account-picker">
       <div className="account-picker-shortcuts">
-        <span className="account-picker-count">
-          {selectedIds.size} of {accounts.length}
-        </span>
         <button type="button" onClick={() => setExactly(allIds)}>All</button>
         <button type="button" onClick={() => setExactly([])}>None</button>
         <button type="button" onClick={() => onChange(new Set(allIds.filter((x) => !selectedIds.has(x))))}>
