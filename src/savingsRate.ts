@@ -40,11 +40,22 @@ export interface SavingsRateIncomeSource {
   is_market_income: boolean;
 }
 
+// Per-(account, label) income contribution, so the income-sources panel can be
+// filtered by the shared account picker the same way the monthly rows are.
+export interface SavingsRateAccountSource {
+  account_id: number;
+  label: string;
+  amount_cents: number;
+  count: number;
+  is_market_income: boolean;
+}
+
 export interface SavingsRateReport {
   accounts: SavingsRateAccount[];
   rows: SavingsRateMonthlyRow[];
   account_months: SavingsRateAccountMonth[];
   income_sources: SavingsRateIncomeSource[];
+  account_sources: SavingsRateAccountSource[];
 }
 
 interface TransactionRow {
@@ -162,6 +173,7 @@ export function getSavingsRateReport(): SavingsRateReport {
   const incomeByMonth = new Map<string, number>();
   const marketIncomeByMonth = new Map<string, number>();
   const sourceByLabel = new Map<string, SavingsRateIncomeSource>();
+  const sourceByAccountLabel = new Map<string, SavingsRateAccountSource>();
   const months = new Set<string>();
 
   // Per-(account, month) raw components for client-side account filtering.
@@ -200,6 +212,19 @@ export function getSavingsRateReport(): SavingsRateReport {
     source.count += 1;
     source.is_market_income = source.is_market_income || isMarketIncome(tx.description);
     sourceByLabel.set(label, source);
+
+    const alKey = `${tx.account_id}\0${label}`;
+    const accountSource = sourceByAccountLabel.get(alKey) ?? {
+      account_id: tx.account_id,
+      label,
+      amount_cents: 0,
+      count: 0,
+      is_market_income: isMarketIncome(tx.description),
+    };
+    accountSource.amount_cents += tx.amount_cents;
+    accountSource.count += 1;
+    accountSource.is_market_income = accountSource.is_market_income || isMarketIncome(tx.description);
+    sourceByAccountLabel.set(alKey, accountSource);
   }
 
   const deltasByMonth = new Map<string, { investment: number; cash: number }>();
@@ -247,5 +272,6 @@ export function getSavingsRateReport(): SavingsRateReport {
       (am) => firstIncomeMonth === null || am.month >= firstIncomeMonth
     ),
     income_sources: [...sourceByLabel.values()].sort((a, b) => b.amount_cents - a.amount_cents),
+    account_sources: [...sourceByAccountLabel.values()],
   };
 }

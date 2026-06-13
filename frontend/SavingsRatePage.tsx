@@ -38,10 +38,19 @@ interface SavingsRateAccountMonth {
   cash_delta_cents: number;
 }
 
+interface SavingsRateAccountSource {
+  account_id: number;
+  label: string;
+  amount_cents: number;
+  count: number;
+  is_market_income: boolean;
+}
+
 interface SavingsRateReport {
   rows: SavingsRateMonthlyRow[];
   account_months: SavingsRateAccountMonth[];
   income_sources: SavingsRateIncomeSource[];
+  account_sources: SavingsRateAccountSource[];
 }
 
 // Mirror of the server's periodAllocation: poof/net_retained are non-additive across
@@ -167,6 +176,21 @@ export function SavingsRatePage({ selectedIds }: { selectedIds: Set<number> }) {
     }
     return [...byPeriod.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
   }, [monthlyRows, period]);
+
+  // Income sources, summed across only the selected accounts.
+  const incomeSources = useMemo<SavingsRateIncomeSource[]>(() => {
+    if (!report) return [];
+    const byLabel = new Map<string, SavingsRateIncomeSource>();
+    for (const s of report.account_sources) {
+      if (!selectedIds.has(s.account_id)) continue;
+      const existing = byLabel.get(s.label) ?? { label: s.label, amount_cents: 0, count: 0, is_market_income: s.is_market_income };
+      existing.amount_cents += s.amount_cents;
+      existing.count += s.count;
+      existing.is_market_income = existing.is_market_income || s.is_market_income;
+      byLabel.set(s.label, existing);
+    }
+    return [...byLabel.values()].sort((a, b) => b.amount_cents - a.amount_cents);
+  }, [report, selectedIds]);
 
   const totals = useMemo(() => {
     const income = rows.reduce((sum, row) => sum + row.income, 0);
@@ -305,7 +329,7 @@ export function SavingsRatePage({ selectedIds }: { selectedIds: Set<number> }) {
                 </tr>
               </thead>
               <tbody>
-                {report.income_sources.slice(0, 12).map((source) => (
+                {incomeSources.slice(0, 12).map((source) => (
                   <tr key={source.label}>
                     <td>{source.label}</td>
                     <td>{source.is_market_income ? "Investment" : "Income"}</td>

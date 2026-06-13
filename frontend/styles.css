@@ -16,6 +16,8 @@ body {
 
 .sidebar {
   width: 240px;
+  min-width: 180px;
+  max-width: 480px;
   flex-shrink: 0;
   background: #131313;
   border-right: 1px solid #222;
@@ -24,7 +26,9 @@ body {
   flex-direction: column;
   gap: 4px;
   height: 100vh;
-  overflow-y: auto;
+  /* Drag the right edge to resize. `resize` requires a non-visible overflow. */
+  overflow: auto;
+  resize: horizontal;
 }
 
 .sidebar-title {
