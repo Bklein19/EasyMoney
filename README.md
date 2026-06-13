@@ -11,6 +11,24 @@ EasyMoney is a local-first personal finance dashboard for importing bank, credit
 - Saved import profiles for repeated uploads with the same file format
 - Local SQLite persistence through a small Express API
 
+## Screenshots
+
+### Budgeting
+
+Track month, year, and custom-range budgets against actual spending.
+
+![Monthly budgeting view](budgeting-month.png)
+
+![Year budgeting view](budgeting-year.png)
+
+![Custom budgeting view](budgeting-custom.png)
+
+### Mobile Budgeting
+
+The budgeting workflow also adapts to smaller screens.
+
+![Mobile budgeting view](budgeting-mobile.png)
+
 ## Local Data
 
 EasyMoney stores local app data in `data/easymoney.sqlite`. The `data/` folder is ignored by Git so personal transaction data is not committed.
