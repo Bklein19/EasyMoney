@@ -1,5 +1,9 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+html {
+  height: 100%;
+}
+
 :root {
   color-scheme: light dark;
   --app-bg: #f6f7f8;
@@ -127,12 +131,14 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: var(--app-bg);
   color: var(--text);
-  min-height: 100vh;
+  height: 100%;
+  overflow: hidden;
 }
 
 .layout {
   display: flex;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 /* Sidebar */
@@ -262,11 +268,14 @@ body.sidebar-resizing {
 
 .main {
   flex: 1;
+  min-width: 0;
+  height: 100vh;
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 24px 32px 48px;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .page {
