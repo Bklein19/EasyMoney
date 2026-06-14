@@ -9,26 +9,27 @@ export interface ImportProfile {
   amountConfig?: Record<string, unknown>;
 }
 
-export interface ParsedImportRecord {
+export type ImportParserSourceType = 'activity-export' | 'statement';
+export type ParsedImportSourceRole = 'activity' | 'statement-only';
+
+export interface ParsedImportTransaction {
   sourceRowIndex: number;
   date: string;
-  amount: number;
+  amountCents: number;
   description: string;
-  merchant: string;
-  originalDescription: string;
-  originalCategory: string | null;
-  type: string;
-  transactionKind?: string | null;
-  status: string;
-  notes: string;
+  institution?: string | null;
+  account?: string | null;
+  sourceRole: ParsedImportSourceRole;
+  raw?: Record<string, unknown>;
 }
 
 export interface ParsedImportBalance {
   sourceRowIndex: number | null;
   date: string;
-  balance: number;
-  accountName?: string | null;
+  balanceCents: number;
+  account?: string | null;
   institution?: string | null;
+  raw?: Record<string, unknown>;
 }
 
 export interface AppImportParseInput {
@@ -39,7 +40,7 @@ export interface AppImportParseInput {
 }
 
 export interface AppImportParseResult {
-  records: Array<ParsedImportRecord | null>;
+  transactions: Array<ParsedImportTransaction | null>;
   balances: ParsedImportBalance[];
 }
 
@@ -47,13 +48,31 @@ export interface AppImportParser {
   id: string;
   name: string;
   institution: string;
+  sourceType: ImportParserSourceType;
+  priority: number;
   matches(file: { fileName: string; headers: string[]; sample: string }): boolean;
   parse(input: AppImportParseInput): AppImportParseResult;
 }
 
-export interface ImportPreviewTransaction extends ParsedImportRecord {
+export interface ImportPreviewTransaction {
   importFileId: number;
   importRowId: number;
+  sourceRowIndex: number;
+  date: string;
+  amountCents: number;
+  amount: number;
+  description: string;
+  merchant: string;
+  originalDescription: string;
+  originalCategory: string | null;
+  type: string;
+  transactionKind?: string | null;
+  status: string;
+  notes: string;
+  institution?: string | null;
+  account?: string | null;
+  sourceRole: ParsedImportSourceRole;
+  raw?: Record<string, unknown>;
   categoryId: null;
   fingerprint?: string | null;
 }

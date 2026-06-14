@@ -1,9 +1,11 @@
-import type { AppImportParseInput, AppImportParseResult, AppImportParser, ParsedImportRecord } from '../importTypes.ts';
+import type { AppImportParseInput, AppImportParseResult, AppImportParser, ParsedImportTransaction } from '../importTypes.ts';
 
 export const chaseCreditCardParser: AppImportParser = {
   id: 'chase-credit-card-csv',
   name: 'Chase Credit Card',
   institution: 'Chase',
+  sourceType: 'activity-export',
+  priority: 100,
   matches: ({ headers }) => hasHeaders(headers, [
     'Transaction Date',
     'Post Date',
@@ -35,32 +37,38 @@ function parseAmount(value: string) {
   return Math.round(amount * 100) / 100;
 }
 
-function parseRow(row: Record<string, string>, sourceRowIndex: number): ParsedImportRecord | null {
+function parseAmountCents(value: string) {
+  return Math.round(parseAmount(value) * 100);
+}
+
+function parseRow(row: Record<string, string>, sourceRowIndex: number): ParsedImportTransaction | null {
   const date = row['Transaction Date']?.trim();
   const description = row.Description?.trim();
   const amount = row.Amount?.trim();
   if (!date || !description || !amount) return null;
 
-  const parsedAmount = parseAmount(amount);
-
   return {
     sourceRowIndex,
     date: parseDate(date),
-    amount: parsedAmount,
+    amountCents: parseAmountCents(amount),
     description,
-    merchant: description,
-    originalDescription: description,
-    originalCategory: row.Category?.trim() || null,
-    type: parsedAmount >= 0 ? 'credit' : 'debit',
-    transactionKind: parsedAmount > 0 ? 'card_payment' : null,
-    status: 'cleared',
-    notes: '',
+    institution: 'Chase',
+    account: null,
+    sourceRole: 'activity',
+    raw: {
+      transactionDate: row['Transaction Date'] || '',
+      postDate: row['Post Date'] || '',
+      description,
+      category: row.Category || '',
+      type: row.Type || '',
+      amount,
+    },
   };
 }
 
 function parse(input: AppImportParseInput): AppImportParseResult {
   return {
-    records: input.rows.map((row, index) => parseRow(row, index)),
+    transactions: input.rows.map((row, index) => parseRow(row, index)),
     balances: [],
   };
 }

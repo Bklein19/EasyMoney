@@ -6,7 +6,7 @@ import {
   mappingFromProfile,
   normalizeTransaction,
 } from '../../src/utils/bankProfiles.js';
-import type { CommitImportTransaction, ImportPreviewTransaction, ImportProfile, ParsedImportRecord } from './importTypes.ts';
+import type { CommitImportTransaction, ImportPreviewTransaction, ImportProfile, ParsedImportTransaction } from './importTypes.ts';
 import { resolveImportParser } from './importParsers/index.ts';
 
 interface PreviewImportOptions {
@@ -64,6 +64,10 @@ function normalizeAmount(value: unknown) {
   return Number(value || 0).toFixed(2);
 }
 
+function dollarsFromCents(value: number) {
+  return Math.round(value) / 100;
+}
+
 function getHeaderSignature(headers: string[] = []) {
   return headers.map(header => normalizeText(header)).join('|');
 }
@@ -98,29 +102,54 @@ function parseCsv(text: string) {
   return result;
 }
 
-function toParsedImportRecord(transaction: LegacyNormalizedTransaction | null, sourceRowIndex: number): ParsedImportRecord | null {
+function toParsedImportTransaction(transaction: LegacyNormalizedTransaction | null, sourceRowIndex: number): ParsedImportTransaction | null {
   if (!transaction) return null;
 
   return {
     sourceRowIndex,
     date: transaction.date,
-    amount: transaction.amount,
+    amountCents: Math.round(transaction.amount * 100),
     description: transaction.description || '',
-    merchant: transaction.merchant || transaction.description || '',
-    originalDescription: transaction.originalDescription || transaction.description || '',
-    originalCategory: transaction.originalCategory || null,
-    type: transaction.type || (transaction.amount >= 0 ? 'credit' : 'debit'),
-    transactionKind: transaction.transactionKind || null,
-    status: transaction.status || 'cleared',
-    notes: transaction.notes || '',
+    institution: null,
+    account: null,
+    sourceRole: 'activity',
+    raw: {
+      merchant: transaction.merchant || transaction.description || '',
+      originalDescription: transaction.originalDescription || transaction.description || '',
+      originalCategory: transaction.originalCategory || null,
+      status: transaction.status || 'cleared',
+      transactionKind: transaction.transactionKind || null,
+    },
   };
 }
 
-function toPreviewTransaction(record: ParsedImportRecord, importFileId: number, importRowId: number): ImportPreviewTransaction {
+function toPreviewTransaction(transaction: ParsedImportTransaction, importFileId: number, importRowId: number): ImportPreviewTransaction {
+  const amount = dollarsFromCents(transaction.amountCents);
+  const raw = transaction.raw || {};
+  const merchant = typeof raw.merchant === 'string' ? raw.merchant : transaction.description;
+  const originalDescription = typeof raw.originalDescription === 'string' ? raw.originalDescription : transaction.description;
+  const originalCategory = typeof raw.originalCategory === 'string' && raw.originalCategory.trim()
+    ? raw.originalCategory
+    : typeof raw.category === 'string' && raw.category.trim()
+      ? raw.category
+      : null;
+  const status = typeof raw.status === 'string' ? raw.status : 'cleared';
+  const transactionKind = typeof raw.transactionKind === 'string'
+    ? raw.transactionKind
+    : amount > 0 ? 'card_payment' : null;
+
   return {
-    ...record,
+    ...transaction,
     importFileId,
     importRowId,
+    amount,
+    merchant,
+    originalDescription,
+    originalCategory,
+    type: amount >= 0 ? 'credit' : 'debit',
+    transactionKind,
+    status,
+    notes: '',
     categoryId: null,
   };
 }
@@ -131,14 +160,14 @@ function saveImportPreview({
   headers,
   parserName,
   rawRows,
-  parsedRecords,
+  parsedTransactions,
 }: {
   fileName: string;
   text: string;
   headers: string[];
   parserName: string | null;
   rawRows: Array<Record<string, string>>;
-  parsedRecords: Array<ParsedImportRecord | null>;
+  parsedTransactions: Array<ParsedImportTransaction | null>;
 }) {
   const now = new Date().toISOString();
   const headerSignature = getHeaderSignature(headers);
@@ -158,7 +187,7 @@ function saveImportPreview({
       importFileId,
       rowIndex: index,
       rawJson: JSON.stringify(row),
-      normalizedJson: parsedRecords[index] ? JSON.stringify(parsedRecords[index]) : null,
+      normalizedJson: parsedTransactions[index] ? JSON.stringify(parsedTransactions[index]) : null,
       createdAt: now,
     });
     rowIds[index] = Number(importRowId);
@@ -183,8 +212,8 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
       rows: parsed.data,
       text,
     });
-    const records = parsedResult.records.filter((record): record is ParsedImportRecord => record !== null);
-    if (!records.length) {
+    const transactions = parsedResult.transactions.filter((transaction): transaction is ParsedImportTransaction => transaction !== null);
+    if (!transactions.length) {
       throw new Error('Could not parse any valid transactions from this file.');
     }
 
@@ -194,10 +223,10 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
       headers,
       parserName: appParser.id,
       rawRows: parsed.data,
-      parsedRecords: parsedResult.records,
+      parsedTransactions: parsedResult.transactions,
     });
-    const transactions = records.map(record =>
-      toPreviewTransaction(record, preview.importFileId, preview.rowIds[record.sourceRowIndex])
+    const previewTransactions = transactions.map(transaction =>
+      toPreviewTransaction(transaction, preview.importFileId, preview.rowIds[transaction.sourceRowIndex])
     );
 
     return {
@@ -208,7 +237,7 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
       previewData: parsed.data.slice(0, 5),
       mapping: mappingFromProfile(null, headers),
       balances: parsedResult.balances,
-      transactions,
+      transactions: previewTransactions,
     };
   }
 
@@ -222,7 +251,7 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
       headers,
       parserName: null,
       rawRows: parsed.data,
-      parsedRecords: parsed.data.map(() => null),
+      parsedTransactions: parsed.data.map(() => null),
     });
 
     return {
@@ -234,12 +263,12 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
     };
   }
 
-  const parsedRecords = parsed.data.map((row, sourceRowIndex) =>
-    toParsedImportRecord(normalizeTransaction(row, profile) as LegacyNormalizedTransaction | null, sourceRowIndex)
+  const parsedTransactions = parsed.data.map((row, sourceRowIndex) =>
+    toParsedImportTransaction(normalizeTransaction(row, profile) as LegacyNormalizedTransaction | null, sourceRowIndex)
   );
-  const records = parsedRecords.filter((record): record is ParsedImportRecord => record !== null);
+  const transactions = parsedTransactions.filter((transaction): transaction is ParsedImportTransaction => transaction !== null);
 
-  if (!records.length) {
+  if (!transactions.length) {
     throw new Error('Could not parse any valid transactions from this file.');
   }
 
@@ -249,10 +278,10 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
     headers,
     parserName: profile.name,
     rawRows: parsed.data,
-    parsedRecords,
+    parsedTransactions,
   });
-  const transactions = records.map(record =>
-    toPreviewTransaction(record, preview.importFileId, preview.rowIds[record.sourceRowIndex])
+  const previewTransactions = transactions.map(transaction =>
+    toPreviewTransaction(transaction, preview.importFileId, preview.rowIds[transaction.sourceRowIndex])
   );
 
   return {
@@ -264,7 +293,7 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
     previewData: parsed.data.slice(0, 5),
     mapping: mappingFromProfile(profile, headers),
     balances: [],
-    transactions,
+    transactions: previewTransactions,
   };
 }
 
@@ -300,6 +329,8 @@ export function commitImport({ accountId, transactions, importMeta = null }: Com
       importFileId: transaction.importFileId || importMeta?.importFileId || 0,
       importRowId: transaction.importRowId || 0,
       sourceRowIndex: transaction.sourceRowIndex || 0,
+      amountCents: transaction.amountCents ?? Math.round(transaction.amount * 100),
+      sourceRole: transaction.sourceRole || 'activity',
       description: transaction.description || '',
       merchant: transaction.merchant || transaction.description || '',
       originalDescription: transaction.originalDescription || transaction.description || transaction.merchant || '',

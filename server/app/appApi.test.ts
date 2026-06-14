@@ -321,7 +321,14 @@ test('app imports commit inserts unique transactions and updates account balance
   expect(sourceRow.transactionId).toBe(imported[0].id);
   expect(sourceRow.fingerprint).toBe(firstCommit.insertedFingerprints[0]);
   expect(JSON.parse(sourceRow.rawJson).Description).toBe('ACME PAYROLL');
-  expect(JSON.parse(sourceRow.normalizedJson).amount).toBe(1250);
+  expect(JSON.parse(sourceRow.normalizedJson)).toMatchObject({
+    amountCents: 125000,
+    institution: 'Chase',
+    sourceRole: 'activity',
+    raw: {
+      category: 'Payment',
+    },
+  });
 
   const savedProfile = getDb().prepare('SELECT * FROM importProfiles').get();
   expect(savedProfile).toBeNull();
