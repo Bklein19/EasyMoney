@@ -47,6 +47,14 @@ interface CommitImportOptions {
   } | null;
 }
 
+interface MaterializeImportTransactionsOptions {
+  accountId: number;
+  importFileId?: number | null;
+  importRowIds?: number[] | null;
+  transactions?: ImportTransactionInput[];
+  fallbackImportFileId?: number | null;
+}
+
 function normalizeText(value = '') {
   return String(value)
     .toLowerCase()
@@ -345,13 +353,13 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
   };
 }
 
-export function commitImport({
+export function materializeImportTransactions({
   accountId,
   importFileId: stagedImportFileId = null,
   importRowIds = null,
   transactions = [],
-  importMeta = null,
-}: CommitImportOptions) {
+  fallbackImportFileId = null,
+}: MaterializeImportTransactionsOptions) {
   if (!accountId) throw new Error('accountId is required');
   if (!Array.isArray(transactions)) throw new Error('transactions must be an array');
   if (importRowIds !== null && !Array.isArray(importRowIds)) throw new Error('importRowIds must be an array');
@@ -386,7 +394,7 @@ export function commitImport({
     seen.add(fingerprint);
     unique.push({
       ...withFingerprint,
-      importFileId: transaction.importFileId || importMeta?.importFileId || 0,
+      importFileId: transaction.importFileId || fallbackImportFileId || 0,
       importRowId: transaction.importRowId || 0,
       sourceRowIndex: transaction.sourceRowIndex || 0,
       amountCents: transaction.amountCents ?? Math.round(transaction.amount * 100),
@@ -416,7 +424,7 @@ export function commitImport({
   ].join('-');
   const now = new Date().toISOString();
   const totalAmount = unique.reduce((sum, transaction) => sum + transaction.amount, 0);
-  const importFileId = stagedImportFileId || importMeta?.importFileId || transactionsToCommit.find(transaction => transaction.importFileId)?.importFileId || null;
+  const importFileId = stagedImportFileId || fallbackImportFileId || transactionsToCommit.find(transaction => transaction.importFileId)?.importFileId || null;
 
   db.transaction(() => {
     for (const transaction of unique) {
@@ -448,30 +456,6 @@ export function commitImport({
       });
     }
 
-    if (importMeta?.headers?.length && importMeta.profile) {
-      const headerSignature = getHeaderSignature(importMeta.headers);
-      const existingProfile = db.prepare('SELECT id FROM importProfiles WHERE headerSignature = ?').get(headerSignature) as
-        | { id: number }
-        | undefined;
-      const row = {
-        headerSignature,
-        profileName: importMeta.profileName || importMeta.profile.name,
-        profileJson: JSON.stringify(importMeta.profile),
-        mappingJson: JSON.stringify(importMeta.mapping || mappingFromProfile(importMeta.profile, importMeta.headers)),
-        lastAccountId: accountId,
-        updatedAt: now,
-      };
-
-      if (existingProfile) {
-        updateRow('importProfiles', existingProfile.id, row);
-      } else {
-        insertRow('importProfiles', {
-          ...row,
-          createdAt: now,
-        });
-      }
-    }
-
     if (importFileId) {
       updateRow('importFiles', importFileId, {
         status: 'committed',
@@ -487,4 +471,48 @@ export function commitImport({
     importBatchId,
     insertedFingerprints: unique.map(transaction => transaction.fingerprint),
   };
+}
+
+export function commitImport({
+  accountId,
+  importFileId = null,
+  importRowIds = null,
+  transactions = [],
+  importMeta = null,
+}: CommitImportOptions) {
+  const result = materializeImportTransactions({
+    accountId,
+    importFileId,
+    importRowIds,
+    transactions,
+    fallbackImportFileId: importMeta?.importFileId || null,
+  });
+
+  if (importMeta?.headers?.length && importMeta.profile) {
+    const db = getDb();
+    const now = new Date().toISOString();
+    const headerSignature = getHeaderSignature(importMeta.headers);
+    const existingProfile = db.prepare('SELECT id FROM importProfiles WHERE headerSignature = ?').get(headerSignature) as
+      | { id: number }
+      | undefined;
+    const row = {
+      headerSignature,
+      profileName: importMeta.profileName || importMeta.profile.name,
+      profileJson: JSON.stringify(importMeta.profile),
+      mappingJson: JSON.stringify(importMeta.mapping || mappingFromProfile(importMeta.profile, importMeta.headers)),
+      lastAccountId: accountId,
+      updatedAt: now,
+    };
+
+    if (existingProfile) {
+      updateRow('importProfiles', existingProfile.id, row);
+    } else {
+      insertRow('importProfiles', {
+        ...row,
+        createdAt: now,
+      });
+    }
+  }
+
+  return result;
 }
