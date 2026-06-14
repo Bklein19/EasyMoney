@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, expect, test } from 'bun:test';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -34,6 +35,29 @@ function resetAppTables() {
 
 async function getJson(path: string) {
   const response = await fetch(`${TEST_URL}${path}`);
+  expect(response.status).toBe(200);
+  return response.json();
+}
+
+async function postJson(path: string, payload: unknown, expectedStatus = 200) {
+  const response = await fetch(`${TEST_URL}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  expect(response.status).toBe(expectedStatus);
+  return response.json();
+}
+
+async function postImportPreview(fileName: string, text: string, inferCategories = false) {
+  const form = new FormData();
+  form.append('file', new File([text], fileName, { type: 'text/csv' }));
+  form.append('inferCategories', String(inferCategories));
+
+  const response = await fetch(`${TEST_URL}/api/app/imports/preview`, {
+    method: 'POST',
+    body: form,
+  });
   expect(response.status).toBe(200);
   return response.json();
 }
@@ -213,4 +237,78 @@ test('app transactions search includes notes', async () => {
   const body = await getJson('/api/app/transactions?search=reimbursable');
 
   expect(body.transactions.map((transaction: { notes: string }) => transaction.notes)).toEqual(['reimbursable team lunch']);
+});
+
+test('app imports preview parses a Chase CSV on the backend', async () => {
+  const csv = fs.readFileSync(path.resolve(import.meta.dir, '..', '..', 'sample-imports', 'chase-credit-card-demo.csv'), 'utf8');
+
+  const body = await postImportPreview('chase-credit-card-demo.csv', csv);
+
+  expect(body.requiresMapping).toBe(false);
+  expect(body.profileUsed).toBe('Chase Credit Card');
+  expect(body.headers).toEqual(['Transaction Date', 'Post Date', 'Description', 'Category', 'Type', 'Amount']);
+  expect(body.transactions).toHaveLength(10);
+  expect(body.transactions[0]).toMatchObject({
+    date: '2026-06-14T00:00:00.000Z',
+    description: 'ACME PAYROLL',
+    amount: 1250,
+    originalCategory: 'Payment',
+  });
+});
+
+test('app imports commit inserts unique transactions and updates account balance', async () => {
+  const csv = fs.readFileSync(path.resolve(import.meta.dir, '..', '..', 'sample-imports', 'chase-credit-card-demo.csv'), 'utf8');
+  const accountId = insertRow('accounts', {
+    name: 'Chase Sapphire',
+    institution: 'Chase',
+    type: 'credit',
+    currentBalance: 100,
+  });
+  const preview = await postImportPreview('chase-credit-card-demo.csv', csv);
+
+  const firstCommit = await postJson('/api/app/imports/commit', {
+    accountId,
+    transactions: preview.transactions,
+    importMeta: {
+      headers: preview.headers,
+      profile: preview.profile,
+      mapping: preview.mapping,
+      profileName: preview.profileUsed,
+    },
+  }, 201);
+
+  expect(firstCommit.importedCount).toBe(10);
+  expect(firstCommit.skippedDuplicateCount).toBe(0);
+  expect(firstCommit.insertedFingerprints).toHaveLength(10);
+
+  const account = getDb().prepare('SELECT currentBalance FROM accounts WHERE id = ?').get(accountId) as { currentBalance: number };
+  expect(account.currentBalance).toBeCloseTo(1350.22);
+
+  const imported = getDb().prepare('SELECT * FROM transactions WHERE accountId = ? ORDER BY date DESC').all(accountId);
+  expect(imported).toHaveLength(10);
+  expect(imported[0]).toMatchObject({
+    description: 'ACME PAYROLL',
+    transactionKind: 'card_payment',
+    fingerprint: firstCommit.insertedFingerprints[0],
+  });
+
+  const savedProfile = getDb().prepare('SELECT * FROM importProfiles').get() as { profileName: string; lastAccountId: number };
+  expect(savedProfile).toMatchObject({
+    profileName: 'Chase Credit Card',
+    lastAccountId: accountId,
+  });
+
+  const secondCommit = await postJson('/api/app/imports/commit', {
+    accountId,
+    transactions: preview.transactions,
+    importMeta: {
+      headers: preview.headers,
+      profile: preview.profile,
+      mapping: preview.mapping,
+      profileName: preview.profileUsed,
+    },
+  }, 201);
+
+  expect(secondCommit.importedCount).toBe(0);
+  expect(secondCommit.skippedDuplicateCount).toBe(10);
 });

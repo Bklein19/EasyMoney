@@ -14,6 +14,7 @@ import { seedDatabase } from './seed.js';
 import { getLatestRobinhoodSnapshot, saveRobinhoodSnapshot } from './robinhoodSnapshots.js';
 import { listAccounts } from './app/accounts.ts';
 import { listCategories } from './app/categories.ts';
+import { commitImport, previewImport } from './app/imports.ts';
 import { listTransactions } from './app/transactions.ts';
 import index from '../index.html';
 
@@ -112,6 +113,33 @@ export const routes = wrapRoutes({
 
   '/api/app/transactions': {
     GET: (request) => json(listTransactions(queryObject(request))),
+  },
+
+  '/api/app/imports/preview': {
+    POST: async (request) => {
+      const form = await request.formData();
+      const file = form.get('file');
+      if (!file || typeof file === 'string') {
+        return json({ error: 'CSV file is required' }, 400);
+      }
+
+      const customProfileJson = form.get('profileJson');
+      const customProfile = typeof customProfileJson === 'string' && customProfileJson
+        ? JSON.parse(customProfileJson)
+        : null;
+      const inferCategories = form.get('inferCategories') !== 'false';
+
+      return json(previewImport({
+        fileName: file.name || 'import.csv',
+        text: await file.text(),
+        customProfile,
+        inferCategories,
+      }));
+    },
+  },
+
+  '/api/app/imports/commit': {
+    POST: async (request) => json(commitImport(await bodyJson(request)), 201),
   },
 
   '/api/accounts/:id/deep': {

@@ -3,22 +3,21 @@ import { format } from 'date-fns';
 import { Check, AlertTriangle } from 'lucide-react';
 import { useAccounts } from '../../hooks/useAccounts';
 import { useTransactions } from '../../hooks/useTransactions';
-import { useImportProfiles } from '../../hooks/useImportProfiles';
+import { apiAction } from '../../db/api';
 import { isCreditAccount } from '../../utils/transactionSemantics';
 import { getAccountTypeLabel } from '../../utils/formatters';
-import { getHeaderSignature, getTransactionFingerprint, splitDuplicateTransactions } from '../../utils/importIdentity';
+import { getTransactionFingerprint, splitDuplicateTransactions } from '../../utils/importIdentity';
 import './ImportPreview.css';
 
 export default function ImportPreview({ transactions, importMeta, onComplete, onCancel }) {
-  const { accounts, updateBalance } = useAccounts();
+  const { accounts } = useAccounts();
   const initialAccountId = importMeta?.savedImportProfile?.lastAccountId
     ? String(importMeta.savedImportProfile.lastAccountId)
     : '';
   const [selectedAccountId, setSelectedAccountId] = useState(initialAccountId);
-  const { transactions: existingTransactions, addTransactionsBatch } = useTransactions(
+  const { transactions: existingTransactions } = useTransactions(
     selectedAccountId ? { accountId: selectedAccountId } : {}
   );
-  const { saveImportProfile } = useImportProfiles();
   const [isImporting, setIsImporting] = useState(false);
   const selectedAccount = accounts.find(a => a.id === Number(selectedAccountId));
   const importingToCreditCard = isCreditAccount(selectedAccount);
@@ -32,6 +31,7 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
   const { unique, duplicates } = accountId
     ? splitDuplicateTransactions(validTransactions, existingTransactions, accountId)
     : { unique: validTransactions, duplicates: [] };
+  const duplicateFingerprints = new Set(duplicates.map(duplicate => duplicate.fingerprint));
   const uniqueTotalAmount = unique.reduce((sum, t) => sum + t.amount, 0);
 
   const handleImport = async () => {
@@ -43,44 +43,15 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
     setIsImporting(true);
     try {
       const accountId = Number(selectedAccountId);
-      const account = accounts.find(a => a.id === accountId);
-      const isCardImport = isCreditAccount(account);
-      const importBatchId = [
-        'import',
-        accountId,
-        validTransactions[0]?.date || 'unknown-start',
-        validTransactions.at(-1)?.date || 'unknown-end',
-        validTransactions.length
-      ].join('-');
-      
-      const transactionsToImport = unique.map(t => ({
-          ...t,
+      const result = await apiAction('/app/imports/commit', {
+        method: 'POST',
+        body: JSON.stringify({
           accountId,
-          importBatchId,
-          transactionKind: isCardImport && t.amount > 0 ? 'card_payment' : t.transactionKind,
-        }));
-
-      if (transactionsToImport.length > 0) {
-        await addTransactionsBatch(transactionsToImport);
-      }
-
-      // Update account balance
-      if (account && transactionsToImport.length > 0) {
-        const newBalance = (account.currentBalance || 0) + uniqueTotalAmount;
-        await updateBalance(accountId, newBalance);
-      }
-
-      if (importMeta?.headers?.length && importMeta?.profile) {
-        await saveImportProfile({
-          headerSignature: getHeaderSignature(importMeta.headers),
-          profileName: importMeta.profileName,
-          profile: importMeta.profile,
-          mapping: importMeta.mapping,
-          lastAccountId: accountId
-        });
-      }
-
-      onComplete(transactionsToImport.length, duplicates.length);
+          transactions: validTransactions,
+          importMeta,
+        })
+      });
+      onComplete(result.importedCount, result.skippedDuplicateCount);
     } catch (error) {
       console.error("Import error:", error);
       alert("An error occurred during import. Check console for details.");
@@ -177,7 +148,7 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
           <tbody>
             {validTransactions.slice(0, 50).map((t, i) => {
               const isDuplicate = accountId
-                ? duplicates.some(duplicate => duplicate.fingerprint === getTransactionFingerprint(t, accountId))
+                ? duplicateFingerprints.has(getTransactionFingerprint(t, accountId))
                 : false;
 
               return (

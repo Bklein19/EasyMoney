@@ -1,5 +1,5 @@
 export function isCreditAccount(account) {
-  return account?.type === 'credit' || account?.type === 'credit_card';
+  return account?.type === 'credit' || account?.type === 'credit_card' || account?.type === 'credit-card';
 }
 
 export function isInvestmentAccount(account) {
