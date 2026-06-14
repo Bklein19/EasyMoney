@@ -1,4 +1,3 @@
-import express from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,123 +20,76 @@ fs.mkdirSync(path.resolve(__dirname, '..', 'data'), { recursive: true });
 initDatabase();
 seedDatabase();
 
-const app = express();
 const port = Number(process.env.PORT || process.env.VAULTVIEW_API_PORT || 4177);
 const distPath = path.resolve(__dirname, '..', 'dist');
 
-app.use(express.json({ limit: '25mb' }));
-
-if (fs.existsSync(distPath)) {
-  app.use(express.static(distPath));
+function json(data, status = 200) {
+  return Response.json(data, { status });
 }
 
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true });
-});
-
-app.get('/api/robinhood/snapshot', (_req, res, next) => {
+async function bodyJson(request) {
+  if (request.headers.get('content-length') === '0') return {};
   try {
-    const snapshot = getLatestRobinhoodSnapshot();
-    if (!snapshot) {
-      res.json({
-        connected: false,
-        accounts: [],
-        history: [],
-        message: 'No Robinhood snapshot has been persisted yet.'
-      });
-      return;
+    return await request.json();
+  } catch {
+    return {};
+  }
+}
+
+function queryObject(url) {
+  return Object.fromEntries(url.searchParams.entries());
+}
+
+function pathParts(url) {
+  return url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+}
+
+async function handleApi(request, url) {
+  const parts = pathParts(url);
+  const method = request.method;
+
+  if (method === 'GET' && url.pathname === '/api/health') {
+    return json({ ok: true });
+  }
+
+  if (url.pathname === '/api/robinhood/snapshot') {
+    if (method === 'GET') {
+      const snapshot = getLatestRobinhoodSnapshot();
+      if (!snapshot) {
+        return json({
+          connected: false,
+          accounts: [],
+          history: [],
+          message: 'No Robinhood snapshot has been persisted yet.'
+        });
+      }
+
+      return json({ connected: true, ...snapshot });
     }
 
-    res.json({ connected: true, ...snapshot });
-  } catch (error) {
-    next(error);
+    if (method === 'POST') {
+      const snapshotId = saveRobinhoodSnapshot(await bodyJson(request));
+      return json({ id: snapshotId }, 201);
+    }
   }
-});
 
-app.post('/api/robinhood/snapshot', (req, res, next) => {
-  try {
-    const snapshotId = saveRobinhoodSnapshot(req.body || {});
-    res.status(201).json({ id: snapshotId });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.get('/api/:table', (req, res, next) => {
-  try {
-    assertTable(req.params.table);
-    res.json(listRows(req.params.table, req.query));
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post('/api/:table', (req, res, next) => {
-  try {
-    assertTable(req.params.table);
-    const id = insertRow(req.params.table, req.body);
-    res.status(201).json({ id });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.post('/api/:table/bulk', (req, res, next) => {
-  try {
-    assertTable(req.params.table);
-    insertRows(req.params.table, req.body.rows || []);
-    res.status(201).json({ count: req.body.rows?.length || 0 });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.put('/api/:table/:id', (req, res, next) => {
-  try {
-    assertTable(req.params.table);
-    updateRow(req.params.table, req.params.id, req.body);
-    res.json({ ok: true });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.delete('/api/:table/:id', (req, res, next) => {
-  try {
-    assertTable(req.params.table);
-    deleteRow(req.params.table, req.params.id);
-    res.json({ ok: true });
-  } catch (error) {
-    next(error);
-  }
-});
-
-app.delete('/api/accounts/:id/deep', (req, res, next) => {
-  try {
+  if (method === 'DELETE' && parts[0] === 'api' && parts[1] === 'accounts' && parts[3] === 'deep') {
     const db = getDb();
     const remove = db.transaction((id) => {
       db.prepare('DELETE FROM transactions WHERE accountId = ?').run(id);
       db.prepare('DELETE FROM balanceSnapshots WHERE accountId = ?').run(id);
       db.prepare('DELETE FROM accounts WHERE id = ?').run(id);
     });
-    remove(req.params.id);
-    res.json({ ok: true });
-  } catch (error) {
-    next(error);
+    remove(parts[2]);
+    return json({ ok: true });
   }
-});
 
-app.delete('/api/transactions/import-batch/:batchId', (req, res, next) => {
-  try {
-    const result = getDb().prepare('DELETE FROM transactions WHERE importBatchId = ?').run(req.params.batchId);
-    res.json({ count: result.changes });
-  } catch (error) {
-    next(error);
+  if (method === 'DELETE' && parts[0] === 'api' && parts[1] === 'transactions' && parts[2] === 'import-batch') {
+    const result = getDb().prepare('DELETE FROM transactions WHERE importBatchId = ?').run(parts[3]);
+    return json({ count: result.changes });
   }
-});
 
-app.post('/api/categories/:id/delete', (req, res, next) => {
-  try {
+  if (method === 'POST' && parts[0] === 'api' && parts[1] === 'categories' && parts[3] === 'delete') {
     const db = getDb();
     const uncategorized = db.prepare("SELECT id FROM categories WHERE name = 'Uncategorized'").get();
     const remove = db.transaction((id) => {
@@ -147,43 +99,32 @@ app.post('/api/categories/:id/delete', (req, res, next) => {
       db.prepare('DELETE FROM categorizationRules WHERE categoryId = ?').run(id);
       db.prepare('DELETE FROM categories WHERE id = ?').run(id);
     });
-    remove(req.params.id);
-    res.json({ ok: true });
-  } catch (error) {
-    next(error);
+    remove(parts[2]);
+    return json({ ok: true });
   }
-});
 
-app.post('/api/budgets/set', (req, res, next) => {
-  try {
-    const { categoryId, month, amount } = req.body;
+  if (method === 'POST' && url.pathname === '/api/budgets/set') {
+    const { categoryId, month, amount } = await bodyJson(request);
     const db = getDb();
     const existing = db.prepare('SELECT id FROM budgets WHERE categoryId = ? AND month = ?').get(categoryId, month);
     if (existing && amount <= 0) {
       deleteRow('budgets', existing.id);
-      res.json({ ok: true });
-      return;
+      return json({ ok: true });
     }
     if (existing) {
       updateRow('budgets', existing.id, { amount });
-      res.json({ id: existing.id });
-      return;
+      return json({ id: existing.id });
     }
     if (amount <= 0) {
-      res.json({ ok: true });
-      return;
+      return json({ ok: true });
     }
     const id = insertRow('budgets', { categoryId, month, amount });
-    res.status(201).json({ id });
-  } catch (error) {
-    next(error);
+    return json({ id }, 201);
   }
-});
 
-app.post('/api/importProfiles/upsert', (req, res, next) => {
-  try {
+  if (method === 'POST' && url.pathname === '/api/importProfiles/upsert') {
     const now = new Date().toISOString();
-    const { headerSignature, profileName, profileJson, mappingJson, lastAccountId } = req.body;
+    const { headerSignature, profileName, profileJson, mappingJson, lastAccountId } = await bodyJson(request);
     const db = getDb();
     const existing = db.prepare('SELECT id FROM importProfiles WHERE headerSignature = ?').get(headerSignature);
 
@@ -195,8 +136,7 @@ app.post('/api/importProfiles/upsert', (req, res, next) => {
         lastAccountId,
         updatedAt: now
       });
-      res.json({ id: existing.id });
-      return;
+      return json({ id: existing.id });
     }
 
     const id = insertRow('importProfiles', {
@@ -208,23 +148,18 @@ app.post('/api/importProfiles/upsert', (req, res, next) => {
       createdAt: now,
       updatedAt: now
     });
-    res.status(201).json({ id });
-  } catch (error) {
-    next(error);
+    return json({ id }, 201);
   }
-});
 
-app.post('/api/migrate', (req, res, next) => {
-  try {
+  if (method === 'POST' && url.pathname === '/api/migrate') {
     const db = getDb();
     const hasTransactions = db.prepare('SELECT COUNT(*) AS count FROM transactions').get().count > 0;
     const hasAccounts = db.prepare('SELECT COUNT(*) AS count FROM accounts').get().count > 0;
     if (hasTransactions || hasAccounts) {
-      res.json({ skipped: true });
-      return;
+      return json({ skipped: true });
     }
 
-    const payload = req.body || {};
+    const payload = await bodyJson(request);
     const migrate = db.transaction(() => {
       for (const table of ['transactions', 'accounts', 'categories', 'budgets', 'balanceSnapshots', 'categorizationRules', 'importProfiles']) {
         db.prepare(`DELETE FROM ${table}`).run();
@@ -237,28 +172,88 @@ app.post('/api/migrate', (req, res, next) => {
     });
     migrate();
     seedDatabase();
-    res.json({ ok: true });
-  } catch (error) {
-    next(error);
+    return json({ ok: true });
+  }
+
+  if (parts[0] === 'api' && parts.length === 2 && method === 'GET') {
+    const table = parts[1];
+    assertTable(table);
+    return json(listRows(table, queryObject(url)));
+  }
+
+  if (parts[0] === 'api' && parts.length === 2 && method === 'POST') {
+    const table = parts[1];
+    assertTable(table);
+    const id = insertRow(table, await bodyJson(request));
+    return json({ id }, 201);
+  }
+
+  if (parts[0] === 'api' && parts.length === 3 && parts[2] === 'bulk' && method === 'POST') {
+    const table = parts[1];
+    assertTable(table);
+    const body = await bodyJson(request);
+    insertRows(table, body.rows || []);
+    return json({ count: body.rows?.length || 0 }, 201);
+  }
+
+  if (parts[0] === 'api' && parts.length === 3 && method === 'PUT') {
+    const table = parts[1];
+    assertTable(table);
+    updateRow(table, parts[2], await bodyJson(request));
+    return json({ ok: true });
+  }
+
+  if (parts[0] === 'api' && parts.length === 3 && method === 'DELETE') {
+    const table = parts[1];
+    assertTable(table);
+    deleteRow(table, parts[2]);
+    return json({ ok: true });
+  }
+
+  return json({ error: 'Not found' }, 404);
+}
+
+function staticResponse(url) {
+  if (!fs.existsSync(distPath)) return null;
+
+  const pathname = url.pathname === '/' ? '/index.html' : url.pathname;
+  const requestedPath = path.resolve(distPath, `.${pathname}`);
+  if (!requestedPath.startsWith(`${distPath}${path.sep}`) && requestedPath !== distPath) {
+    return json({ error: 'Not found' }, 404);
+  }
+
+  if (fs.existsSync(requestedPath) && fs.statSync(requestedPath).isFile()) {
+    return new Response(Bun.file(requestedPath));
+  }
+
+  if (url.pathname.startsWith('/api')) return null;
+
+  const indexPath = path.join(distPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    return new Response(Bun.file(indexPath), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8' }
+    });
+  }
+
+  return null;
+}
+
+Bun.serve({
+  port,
+  async fetch(request) {
+    const url = new URL(request.url);
+
+    try {
+      if (url.pathname.startsWith('/api')) {
+        return await handleApi(request, url);
+      }
+
+      return staticResponse(url) ?? json({ error: 'Not found' }, 404);
+    } catch (error) {
+      console.error(error);
+      return json({ error: error.message }, 500);
+    }
   }
 });
 
-if (fs.existsSync(distPath)) {
-  app.use((req, res, next) => {
-    if (req.method !== 'GET' || req.path.startsWith('/api')) {
-      next();
-      return;
-    }
-    res.sendFile(path.join(distPath, 'index.html'));
-  });
-}
-
-app.use((error, _req, res, next) => {
-  void next;
-  console.error(error);
-  res.status(500).json({ error: error.message });
-});
-
-app.listen(port, () => {
-  console.log(`EasyMoney local SQLite API listening on http://localhost:${port}`);
-});
+console.log(`EasyMoney Bun server listening on http://localhost:${port}`);

@@ -20,7 +20,6 @@
     "date-fns": "^4.3.0",
     "dexie": "^4.4.2",
     "dexie-react-hooks": "^4.4.0",
-    "express": "^5.2.1",
     "lucide-react": "^1.16.0",
     "papaparse": "^5.5.3",
     "react": "^19.2.6",
