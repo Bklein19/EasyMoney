@@ -4,7 +4,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = path.resolve(__dirname, '..', 'data', 'easymoney.sqlite');
+const dbPath = process.env.EASYMONEY_DB_PATH
+  ? path.resolve(process.env.EASYMONEY_DB_PATH)
+  : path.resolve(__dirname, '..', 'data', 'easymoney.sqlite');
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
 const sqlite = new Database(dbPath, { create: true });

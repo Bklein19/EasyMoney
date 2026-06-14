@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   assertTable,
   deleteRow,
@@ -13,15 +12,17 @@ import {
 } from './database.js';
 import { seedDatabase } from './seed.js';
 import { getLatestRobinhoodSnapshot, saveRobinhoodSnapshot } from './robinhoodSnapshots.js';
+import { listAccounts } from './app/accounts.ts';
+import { listCategories } from './app/categories.ts';
+import { listTransactions } from './app/transactions.ts';
+import index from '../index.html';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-fs.mkdirSync(path.resolve(__dirname, '..', 'data'), { recursive: true });
+fs.mkdirSync(path.resolve(import.meta.dir, '..', 'data'), { recursive: true });
 
 initDatabase();
 seedDatabase();
 
-const port = Number(process.env.PORT || process.env.VAULTVIEW_API_PORT || 4177);
-const distPath = path.resolve(__dirname, '..', 'dist');
+const defaultPort = Number(process.env.PORT || process.env.VAULTVIEW_API_PORT || 4177);
 
 function json(data, status = 200) {
   return Response.json(data, { status });
@@ -36,24 +37,53 @@ async function bodyJson(request) {
   }
 }
 
-function queryObject(url) {
-  return Object.fromEntries(url.searchParams.entries());
+function queryObject(request) {
+  return Object.fromEntries(new URL(request.url).searchParams.entries());
 }
 
-function pathParts(url) {
-  return url.pathname.split('/').filter(Boolean).map(decodeURIComponent);
+function safe(handler) {
+  return async (request) => {
+    try {
+      return await handler(request);
+    } catch (error) {
+      console.error(error);
+      return json({ error: error.message }, 500);
+    }
+  };
 }
 
-async function handleApi(request, url) {
-  const parts = pathParts(url);
-  const method = request.method;
+const HTTP_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD']);
 
-  if (method === 'GET' && url.pathname === '/api/health') {
-    return json({ ok: true });
-  }
+function wrapRouteValue(value) {
+  if (typeof value === 'function') return safe(value);
+  if (!value || typeof value !== 'object') return value;
 
-  if (url.pathname === '/api/robinhood/snapshot') {
-    if (method === 'GET') {
+  const entries = Object.entries(value);
+  if (!entries.some(([key]) => HTTP_METHODS.has(key))) return value;
+
+  return Object.fromEntries(
+    entries.map(([key, handler]) => [
+      key,
+      typeof handler === 'function' ? safe(handler) : handler,
+    ])
+  );
+}
+
+function wrapRoutes(routeMap) {
+  return Object.fromEntries(
+    Object.entries(routeMap).map(([route, value]) => [route, wrapRouteValue(value)])
+  );
+}
+
+export const routes = wrapRoutes({
+  '/': index,
+
+  '/api/health': {
+    GET: () => json({ ok: true }),
+  },
+
+  '/api/robinhood/snapshot': {
+    GET: () => {
       const snapshot = getLatestRobinhoodSnapshot();
       if (!snapshot) {
         return json({
@@ -65,195 +95,192 @@ async function handleApi(request, url) {
       }
 
       return json({ connected: true, ...snapshot });
-    }
-
-    if (method === 'POST') {
+    },
+    POST: async (request) => {
       const snapshotId = saveRobinhoodSnapshot(await bodyJson(request));
       return json({ id: snapshotId }, 201);
-    }
-  }
+    },
+  },
 
-  if (method === 'DELETE' && parts[0] === 'api' && parts[1] === 'accounts' && parts[3] === 'deep') {
-    const db = getDb();
-    const remove = db.transaction((id) => {
-      db.prepare('DELETE FROM transactions WHERE accountId = ?').run(id);
-      db.prepare('DELETE FROM balanceSnapshots WHERE accountId = ?').run(id);
-      db.prepare('DELETE FROM accounts WHERE id = ?').run(id);
-    });
-    remove(parts[2]);
-    return json({ ok: true });
-  }
+  '/api/app/accounts': {
+    GET: () => json(listAccounts()),
+  },
 
-  if (method === 'DELETE' && parts[0] === 'api' && parts[1] === 'transactions' && parts[2] === 'import-batch') {
-    const result = getDb().prepare('DELETE FROM transactions WHERE importBatchId = ?').run(parts[3]);
-    return json({ count: result.changes });
-  }
+  '/api/app/categories': {
+    GET: () => json(listCategories()),
+  },
 
-  if (method === 'POST' && parts[0] === 'api' && parts[1] === 'categories' && parts[3] === 'delete') {
-    const db = getDb();
-    const uncategorized = db.prepare("SELECT id FROM categories WHERE name = 'Uncategorized'").get();
-    const remove = db.transaction((id) => {
-      if (uncategorized) {
-        db.prepare('UPDATE transactions SET categoryId = ? WHERE categoryId = ?').run(uncategorized.id, id);
+  '/api/app/transactions': {
+    GET: (request) => json(listTransactions(queryObject(request))),
+  },
+
+  '/api/accounts/:id/deep': {
+    DELETE: (request) => {
+      const db = getDb();
+      const remove = db.transaction((id) => {
+        db.prepare('DELETE FROM transactions WHERE accountId = ?').run(id);
+        db.prepare('DELETE FROM balanceSnapshots WHERE accountId = ?').run(id);
+        db.prepare('DELETE FROM accounts WHERE id = ?').run(id);
+      });
+      remove(request.params.id);
+      return json({ ok: true });
+    },
+  },
+
+  '/api/transactions/import-batch/:batchId': {
+    DELETE: (request) => {
+      const result = getDb().prepare('DELETE FROM transactions WHERE importBatchId = ?').run(request.params.batchId);
+      return json({ count: result.changes });
+    },
+  },
+
+  '/api/categories/:id/delete': {
+    POST: (request) => {
+      const db = getDb();
+      const uncategorized = db.prepare("SELECT id FROM categories WHERE name = 'Uncategorized'").get();
+      const remove = db.transaction((id) => {
+        if (uncategorized) {
+          db.prepare('UPDATE transactions SET categoryId = ? WHERE categoryId = ?').run(uncategorized.id, id);
+        }
+        db.prepare('DELETE FROM categorizationRules WHERE categoryId = ?').run(id);
+        db.prepare('DELETE FROM categories WHERE id = ?').run(id);
+      });
+      remove(request.params.id);
+      return json({ ok: true });
+    },
+  },
+
+  '/api/budgets/set': {
+    POST: async (request) => {
+      const { categoryId, month, amount } = await bodyJson(request);
+      const db = getDb();
+      const existing = db.prepare('SELECT id FROM budgets WHERE categoryId = ? AND month = ?').get(categoryId, month);
+      if (existing && amount <= 0) {
+        deleteRow('budgets', existing.id);
+        return json({ ok: true });
       }
-      db.prepare('DELETE FROM categorizationRules WHERE categoryId = ?').run(id);
-      db.prepare('DELETE FROM categories WHERE id = ?').run(id);
-    });
-    remove(parts[2]);
-    return json({ ok: true });
-  }
+      if (existing) {
+        updateRow('budgets', existing.id, { amount });
+        return json({ id: existing.id });
+      }
+      if (amount <= 0) {
+        return json({ ok: true });
+      }
+      const id = insertRow('budgets', { categoryId, month, amount });
+      return json({ id }, 201);
+    },
+  },
 
-  if (method === 'POST' && url.pathname === '/api/budgets/set') {
-    const { categoryId, month, amount } = await bodyJson(request);
-    const db = getDb();
-    const existing = db.prepare('SELECT id FROM budgets WHERE categoryId = ? AND month = ?').get(categoryId, month);
-    if (existing && amount <= 0) {
-      deleteRow('budgets', existing.id);
-      return json({ ok: true });
-    }
-    if (existing) {
-      updateRow('budgets', existing.id, { amount });
-      return json({ id: existing.id });
-    }
-    if (amount <= 0) {
-      return json({ ok: true });
-    }
-    const id = insertRow('budgets', { categoryId, month, amount });
-    return json({ id }, 201);
-  }
+  '/api/importProfiles/upsert': {
+    POST: async (request) => {
+      const now = new Date().toISOString();
+      const { headerSignature, profileName, profileJson, mappingJson, lastAccountId } = await bodyJson(request);
+      const db = getDb();
+      const existing = db.prepare('SELECT id FROM importProfiles WHERE headerSignature = ?').get(headerSignature);
 
-  if (method === 'POST' && url.pathname === '/api/importProfiles/upsert') {
-    const now = new Date().toISOString();
-    const { headerSignature, profileName, profileJson, mappingJson, lastAccountId } = await bodyJson(request);
-    const db = getDb();
-    const existing = db.prepare('SELECT id FROM importProfiles WHERE headerSignature = ?').get(headerSignature);
+      if (existing) {
+        updateRow('importProfiles', existing.id, {
+          profileName,
+          profileJson,
+          mappingJson,
+          lastAccountId,
+          updatedAt: now
+        });
+        return json({ id: existing.id });
+      }
 
-    if (existing) {
-      updateRow('importProfiles', existing.id, {
+      const id = insertRow('importProfiles', {
+        headerSignature,
         profileName,
         profileJson,
         mappingJson,
         lastAccountId,
+        createdAt: now,
         updatedAt: now
       });
-      return json({ id: existing.id });
-    }
+      return json({ id }, 201);
+    },
+  },
 
-    const id = insertRow('importProfiles', {
-      headerSignature,
-      profileName,
-      profileJson,
-      mappingJson,
-      lastAccountId,
-      createdAt: now,
-      updatedAt: now
-    });
-    return json({ id }, 201);
-  }
-
-  if (method === 'POST' && url.pathname === '/api/migrate') {
-    const db = getDb();
-    const hasTransactions = db.prepare('SELECT COUNT(*) AS count FROM transactions').get().count > 0;
-    const hasAccounts = db.prepare('SELECT COUNT(*) AS count FROM accounts').get().count > 0;
-    if (hasTransactions || hasAccounts) {
-      return json({ skipped: true });
-    }
-
-    const payload = await bodyJson(request);
-    const migrate = db.transaction(() => {
-      for (const table of ['transactions', 'accounts', 'categories', 'budgets', 'balanceSnapshots', 'categorizationRules', 'importProfiles']) {
-        db.prepare(`DELETE FROM ${table}`).run();
+  '/api/migrate': {
+    POST: async (request) => {
+      const db = getDb();
+      const hasTransactions = db.prepare('SELECT COUNT(*) AS count FROM transactions').get().count > 0;
+      const hasAccounts = db.prepare('SELECT COUNT(*) AS count FROM accounts').get().count > 0;
+      if (hasTransactions || hasAccounts) {
+        return json({ skipped: true });
       }
-      for (const table of ['accounts', 'categories', 'budgets', 'balanceSnapshots', 'categorizationRules', 'importProfiles', 'transactions']) {
-        if (Array.isArray(payload[table]) && payload[table].length) {
-          insertRows(table, payload[table], true);
+
+      const payload = await bodyJson(request);
+      const migrate = db.transaction(() => {
+        for (const table of ['transactions', 'accounts', 'categories', 'budgets', 'balanceSnapshots', 'categorizationRules', 'importProfiles']) {
+          db.prepare(`DELETE FROM ${table}`).run();
         }
-      }
-    });
-    migrate();
-    seedDatabase();
-    return json({ ok: true });
-  }
+        for (const table of ['accounts', 'categories', 'budgets', 'balanceSnapshots', 'categorizationRules', 'importProfiles', 'transactions']) {
+          if (Array.isArray(payload[table]) && payload[table].length) {
+            insertRows(table, payload[table], true);
+          }
+        }
+      });
+      migrate();
+      seedDatabase();
+      return json({ ok: true });
+    },
+  },
 
-  if (parts[0] === 'api' && parts.length === 2 && method === 'GET') {
-    const table = parts[1];
-    assertTable(table);
-    return json(listRows(table, queryObject(url)));
-  }
+  '/api/:table': {
+    GET: (request) => {
+      const table = request.params.table;
+      assertTable(table);
+      return json(listRows(table, queryObject(request)));
+    },
+    POST: async (request) => {
+      const table = request.params.table;
+      assertTable(table);
+      const id = insertRow(table, await bodyJson(request));
+      return json({ id }, 201);
+    },
+  },
 
-  if (parts[0] === 'api' && parts.length === 2 && method === 'POST') {
-    const table = parts[1];
-    assertTable(table);
-    const id = insertRow(table, await bodyJson(request));
-    return json({ id }, 201);
-  }
+  '/api/:table/bulk': {
+    POST: async (request) => {
+      const table = request.params.table;
+      assertTable(table);
+      const body = await bodyJson(request);
+      insertRows(table, body.rows || []);
+      return json({ count: body.rows?.length || 0 }, 201);
+    },
+  },
 
-  if (parts[0] === 'api' && parts.length === 3 && parts[2] === 'bulk' && method === 'POST') {
-    const table = parts[1];
-    assertTable(table);
-    const body = await bodyJson(request);
-    insertRows(table, body.rows || []);
-    return json({ count: body.rows?.length || 0 }, 201);
-  }
+  '/api/:table/:id': {
+    PUT: async (request) => {
+      const table = request.params.table;
+      assertTable(table);
+      updateRow(table, request.params.id, await bodyJson(request));
+      return json({ ok: true });
+    },
+    DELETE: (request) => {
+      const table = request.params.table;
+      assertTable(table);
+      deleteRow(table, request.params.id);
+      return json({ ok: true });
+    },
+  },
 
-  if (parts[0] === 'api' && parts.length === 3 && method === 'PUT') {
-    const table = parts[1];
-    assertTable(table);
-    updateRow(table, parts[2], await bodyJson(request));
-    return json({ ok: true });
-  }
+  '/api/*': () => json({ error: 'Not found' }, 404),
 
-  if (parts[0] === 'api' && parts.length === 3 && method === 'DELETE') {
-    const table = parts[1];
-    assertTable(table);
-    deleteRow(table, parts[2]);
-    return json({ ok: true });
-  }
-
-  return json({ error: 'Not found' }, 404);
-}
-
-function staticResponse(url) {
-  if (!fs.existsSync(distPath)) return null;
-
-  const pathname = url.pathname === '/' ? '/index.html' : url.pathname;
-  const requestedPath = path.resolve(distPath, `.${pathname}`);
-  if (!requestedPath.startsWith(`${distPath}${path.sep}`) && requestedPath !== distPath) {
-    return json({ error: 'Not found' }, 404);
-  }
-
-  if (fs.existsSync(requestedPath) && fs.statSync(requestedPath).isFile()) {
-    return new Response(Bun.file(requestedPath));
-  }
-
-  if (url.pathname.startsWith('/api')) return null;
-
-  const indexPath = path.join(distPath, 'index.html');
-  if (fs.existsSync(indexPath)) {
-    return new Response(Bun.file(indexPath), {
-      headers: { 'Content-Type': 'text/html; charset=utf-8' }
-    });
-  }
-
-  return null;
-}
-
-Bun.serve({
-  port,
-  async fetch(request) {
-    const url = new URL(request.url);
-
-    try {
-      if (url.pathname.startsWith('/api')) {
-        return await handleApi(request, url);
-      }
-
-      return staticResponse(url) ?? json({ error: 'Not found' }, 404);
-    } catch (error) {
-      console.error(error);
-      return json({ error: error.message }, 500);
-    }
-  }
+  '/*': index,
 });
 
-console.log(`EasyMoney Bun server listening on http://localhost:${port}`);
+export function createServer(options = {}) {
+  return Bun.serve({
+    port: options.port ?? defaultPort,
+    routes,
+    development: { hmr: true, console: true },
+  });
+}
+
+if (import.meta.main) {
+  const server = createServer();
+  console.log(`EasyMoney Bun server listening on http://localhost:${server.port}`);
+}
