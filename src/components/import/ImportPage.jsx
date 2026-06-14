@@ -10,24 +10,6 @@ import ImportPreview from './ImportPreview';
 import BankDetector from './BankDetector';
 import './ImportPage.css';
 
-function ImportOptions({ inferCategories, onInferCategoriesChange }) {
-  return (
-    <div className="import-options glass-card">
-      <label className="import-options__toggle">
-        <input
-          type="checkbox"
-          checked={inferCategories}
-          onChange={(event) => onInferCategoriesChange(event.target.checked)}
-        />
-        <span>
-          <strong>Infer transaction categories</strong>
-          <small>Turn this off to import everything without automatic category guesses.</small>
-        </span>
-      </label>
-    </div>
-  );
-}
-
 export default function ImportPage() {
   const { processImport, isParsing, error } = useCSVImport();
   const { importProfiles } = useImportProfiles();
@@ -37,20 +19,17 @@ export default function ImportPage() {
   const [importResult, setImportResult] = useState(null);
   const [importedCount, setImportedCount] = useState(0);
   const [skippedDuplicateCount, setSkippedDuplicateCount] = useState(0);
-  const [inferCategories, setInferCategories] = useState(true);
-
-  const importOptions = { inferCategories };
 
   const handleFileSelected = async (file) => {
     setCurrentFile(file);
-    let result = await processImport(file, null, importOptions);
+    let result = await processImport(file);
     
     if (result) {
       const headerSignature = getHeaderSignature(result.headers);
       const savedProfile = importProfiles.find(profile => profile.headerSignature === headerSignature);
       if (savedProfile?.profileJson) {
         const profile = JSON.parse(savedProfile.profileJson);
-        const remapped = await processImport(file, profile, importOptions);
+        const remapped = await processImport(file, profile);
         if (remapped && !remapped.requiresMapping) {
           result = { ...remapped, savedImportProfile: savedProfile };
         }
@@ -67,7 +46,7 @@ export default function ImportPage() {
 
   const handleMappingComplete = async (mapping) => {
     const customProfile = buildCustomProfile(mapping);
-    const result = await processImport(currentFile, customProfile, importOptions);
+    const result = await processImport(currentFile, customProfile);
     
     if (result && !result.requiresMapping) {
       setImportResult({ ...result, mapping });
@@ -114,10 +93,6 @@ export default function ImportPage() {
             onFileSelected={handleFileSelected} 
             isParsing={isParsing} 
           />
-          <ImportOptions
-            inferCategories={inferCategories}
-            onInferCategoriesChange={setInferCategories}
-          />
           
           <div className="supported-formats glass-card">
             <h3>Supported Banks</h3>
@@ -129,10 +104,6 @@ export default function ImportPage() {
       {stage === 'mapping' && importResult && (
         <div className="mapping-container">
           <BankDetector requiresMapping={true} profileUsed={importResult.profileUsed} />
-          <ImportOptions
-            inferCategories={inferCategories}
-            onInferCategoriesChange={setInferCategories}
-          />
           <ColumnMapper 
             headers={importResult.headers} 
             initialMapping={mappingFromProfile(importResult.profile, importResult.headers)}
@@ -159,7 +130,6 @@ export default function ImportPage() {
               profile: importResult.profile,
               mapping: importResult.mapping || mappingFromProfile(importResult.profile, importResult.headers),
               profileName: importResult.profileUsed || importResult.profile?.name || 'Custom',
-              inferCategories: importResult.inferCategories,
               savedImportProfile: importResult.savedImportProfile
             }}
             onComplete={handleImportComplete}

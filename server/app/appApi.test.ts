@@ -51,10 +51,9 @@ async function postJson(path: string, payload: unknown, expectedStatus = 200) {
   return response.json();
 }
 
-async function postImportPreview(fileName: string, text: string, inferCategories = false) {
+async function postImportPreview(fileName: string, text: string) {
   const form = new FormData();
   form.append('file', new File([text], fileName, { type: 'text/csv' }));
-  form.append('inferCategories', String(inferCategories));
 
   const response = await fetch(`${TEST_URL}/api/app/imports/preview`, {
     method: 'POST',

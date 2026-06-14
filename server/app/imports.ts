@@ -1,6 +1,5 @@
 import Papa from 'papaparse';
-import { getDb, hashContent, insertRow, listRows, updateRow } from '../database.js';
-import { categorizeTransactions } from '../../src/utils/categorizer.js';
+import { getDb, hashContent, insertRow, updateRow } from '../database.js';
 import {
   detectBank,
   enhanceProfileWithHeaders,
@@ -23,7 +22,6 @@ interface PreviewImportOptions {
   fileName: string;
   text: string;
   customProfile?: ImportProfile | null;
-  inferCategories?: boolean;
 }
 
 interface PreviewTransaction {
@@ -151,7 +149,7 @@ function saveImportPreview({
   return { importFileId: Number(importFileId), rowIds };
 }
 
-export function previewImport({ fileName, text, customProfile = null, inferCategories = true }: PreviewImportOptions) {
+export function previewImport({ fileName, text, customProfile = null }: PreviewImportOptions) {
   const parsed = parseCsv(text);
   if (!parsed.data.length) throw new Error('No data found in CSV');
 
@@ -178,24 +176,12 @@ export function previewImport({ fileName, text, customProfile = null, inferCateg
   }
 
   const normalizedRows = parsed.data.map(row => normalizeTransaction(row, profile));
-  let indexedTransactions = normalizedRows
+  const indexedTransactions = normalizedRows
     .map((transaction, sourceRowIndex) => transaction ? { sourceRowIndex, transaction } : null)
     .filter((item): item is { sourceRowIndex: number; transaction: PreviewTransaction } => item !== null);
 
   if (!indexedTransactions.length) {
     throw new Error('Could not parse any valid transactions from this file.');
-  }
-
-  if (inferCategories) {
-    const categorized = categorizeTransactions(
-      indexedTransactions.map(item => item.transaction),
-      listRows('categorizationRules'),
-      listRows('categories')
-    );
-    indexedTransactions = indexedTransactions.map((item, index) => ({
-      ...item,
-      transaction: categorized[index],
-    }));
   }
 
   const preview = saveImportPreview({
@@ -222,7 +208,6 @@ export function previewImport({ fileName, text, customProfile = null, inferCateg
     profile,
     headers,
     previewData: parsed.data.slice(0, 5),
-    inferCategories,
     mapping: mappingFromProfile(profile, headers),
     transactions,
   };

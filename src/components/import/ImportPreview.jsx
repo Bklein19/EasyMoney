@@ -104,11 +104,6 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
               {importingToCreditCard ? 'Credit card mode' : `${getAccountTypeLabel(selectedAccount.type)} mode`}
             </span>
           )}
-          {importMeta?.inferCategories === false && (
-            <span className="account-kind-badge manual">
-              Category inference off
-            </span>
-          )}
         </div>
       </div>
 
@@ -141,7 +136,7 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
             <tr>
               <th>Date</th>
               <th>Description</th>
-              <th>{importingToCreditCard ? 'Type' : 'Category (Auto)'}</th>
+              <th>Import Status</th>
               <th className="text-right">Amount</th>
             </tr>
           </thead>
@@ -160,10 +155,8 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
                     <span className="badge duplicate">Duplicate</span>
                   ) : importingToCreditCard && t.amount > 0 ? (
                     <span className="badge categorized">Card payment</span>
-                  ) : t.categoryId ? (
-                    <span className="badge categorized">Categorized</span>
                   ) : (
-                    <span className="badge uncategorized">Uncategorized</span>
+                    <span className="badge uncategorized">Ready</span>
                   )}
                 </td>
                 <td className={`text-right font-medium ${t.amount >= 0 ? 'positive' : ''}`}>

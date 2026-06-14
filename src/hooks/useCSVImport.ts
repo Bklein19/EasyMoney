@@ -11,10 +11,6 @@ interface ImportProfile {
   amountConfig?: Record<string, unknown>;
 }
 
-interface ImportOptions {
-  inferCategories?: boolean;
-}
-
 interface ImportPreviewResult {
   importFileId?: number;
   requiresMapping: boolean;
@@ -22,7 +18,6 @@ interface ImportPreviewResult {
   profile?: ImportProfile;
   headers: string[];
   previewData?: Array<Record<string, string>>;
-  inferCategories?: boolean;
   mapping?: Record<string, unknown>;
   transactions?: unknown[];
 }
@@ -33,17 +28,14 @@ export function useCSVImport() {
 
   const processImport = useCallback(async (
     file: File,
-    customProfile: ImportProfile | null = null,
-    options: ImportOptions = {}
+    customProfile: ImportProfile | null = null
   ): Promise<ImportPreviewResult | null> => {
-    const { inferCategories = true } = options;
     setIsParsing(true);
     setError(null);
 
     try {
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('inferCategories', String(inferCategories));
       if (customProfile) {
         formData.append('profileJson', JSON.stringify(customProfile));
       }
