@@ -54,7 +54,7 @@ const TABLES = {
   importProfiles: ['id', 'headerSignature', 'profileName', 'profileJson', 'mappingJson', 'lastAccountId', 'createdAt', 'updatedAt'],
   importFiles: [
     'id', 'fileName', 'contentHash', 'parserName', 'headerSignature', 'rowCount',
-    'status', 'importBatchId', 'createdAt', 'committedAt'
+    'sourceType', 'parserPriority', 'institution', 'status', 'importBatchId', 'createdAt', 'committedAt'
   ],
   importRows: [
     'id', 'importFileId', 'rowIndex', 'rawJson', 'normalizedJson',
@@ -182,6 +182,9 @@ export function initDatabase() {
       parserName TEXT,
       headerSignature TEXT,
       rowCount INTEGER DEFAULT 0,
+      sourceType TEXT,
+      parserPriority INTEGER,
+      institution TEXT,
       status TEXT DEFAULT 'previewed',
       importBatchId TEXT,
       createdAt TEXT,
@@ -281,6 +284,17 @@ export function initDatabase() {
   const transactionColumns = db.prepare('PRAGMA table_info(transactions)').all().map(column => column.name);
   if (!transactionColumns.includes('fingerprint')) {
     db.prepare('ALTER TABLE transactions ADD COLUMN fingerprint TEXT').run();
+  }
+
+  const importFileColumns = db.prepare('PRAGMA table_info(importFiles)').all().map(column => column.name);
+  for (const [column, definition] of [
+    ['sourceType', 'TEXT'],
+    ['parserPriority', 'INTEGER'],
+    ['institution', 'TEXT'],
+  ]) {
+    if (!importFileColumns.includes(column)) {
+      db.prepare(`ALTER TABLE importFiles ADD COLUMN ${column} ${definition}`).run();
+    }
   }
 }
 

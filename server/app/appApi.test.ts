@@ -274,7 +274,8 @@ test('app imports commit inserts unique transactions and updates account balance
 
   const firstCommit = await postJson('/api/app/imports/commit', {
     accountId,
-    transactions: preview.transactions,
+    importFileId: preview.importFileId,
+    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
     importMeta: {
       importFileId: preview.importFileId,
       headers: preview.headers,
@@ -291,12 +292,18 @@ test('app imports commit inserts unique transactions and updates account balance
   const importFile = getDb().prepare('SELECT * FROM importFiles WHERE id = ?').get(preview.importFileId) as {
     status: string;
     parserName: string;
+    sourceType: string;
+    parserPriority: number;
+    institution: string;
     rowCount: number;
     importBatchId: string;
   };
   expect(importFile).toMatchObject({
     status: 'committed',
     parserName: 'chase-credit-card-csv',
+    sourceType: 'activity-export',
+    parserPriority: 100,
+    institution: 'Chase',
     rowCount: 10,
     importBatchId: firstCommit.importBatchId,
   });
@@ -335,7 +342,8 @@ test('app imports commit inserts unique transactions and updates account balance
 
   const secondCommit = await postJson('/api/app/imports/commit', {
     accountId,
-    transactions: preview.transactions,
+    importFileId: preview.importFileId,
+    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
     importMeta: {
       importFileId: preview.importFileId,
       headers: preview.headers,

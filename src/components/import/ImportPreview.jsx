@@ -47,7 +47,8 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
         method: 'POST',
         body: JSON.stringify({
           accountId,
-          transactions: validTransactions,
+          importFileId: importMeta?.importFileId,
+          importRowIds: validTransactions.map(transaction => transaction.importRowId),
           importMeta,
         })
       });

@@ -35,7 +35,9 @@ interface LegacyNormalizedTransaction {
 
 interface CommitImportOptions {
   accountId: number;
-  transactions: ImportTransactionInput[];
+  importFileId?: number | null;
+  importRowIds?: number[] | null;
+  transactions?: ImportTransactionInput[];
   importMeta?: {
     importFileId?: number | null;
     headers?: string[];
@@ -159,6 +161,9 @@ function saveImportPreview({
   text,
   headers,
   parserName,
+  sourceType,
+  parserPriority,
+  institution,
   rawRows,
   parsedTransactions,
 }: {
@@ -166,6 +171,9 @@ function saveImportPreview({
   text: string;
   headers: string[];
   parserName: string | null;
+  sourceType?: string | null;
+  parserPriority?: number | null;
+  institution?: string | null;
   rawRows: Array<Record<string, string>>;
   parsedTransactions: Array<ParsedImportTransaction | null>;
 }) {
@@ -177,6 +185,9 @@ function saveImportPreview({
     parserName,
     headerSignature,
     rowCount: rawRows.length,
+    sourceType,
+    parserPriority,
+    institution,
     status: 'previewed',
     createdAt: now,
   });
@@ -194,6 +205,34 @@ function saveImportPreview({
   }
 
   return { importFileId: Number(importFileId), rowIds };
+}
+
+function toNumberSet(values: number[] | null | undefined) {
+  if (!values?.length) return null;
+  return new Set(values.map(value => Number(value)).filter(Number.isFinite));
+}
+
+function readStagedTransactions(importFileId: number, importRowIds: number[] | null | undefined) {
+  const selectedIds = toNumberSet(importRowIds);
+  const rows = getDb().prepare(`
+    SELECT id, importFileId, normalizedJson
+    FROM importRows
+    WHERE importFileId = @importFileId
+      AND normalizedJson IS NOT NULL
+    ORDER BY rowIndex ASC
+  `).all({ importFileId }) as Array<{
+    id: number;
+    importFileId: number;
+    normalizedJson: string;
+  }>;
+
+  return rows
+    .filter(row => !selectedIds || selectedIds.has(row.id))
+    .map(row => toPreviewTransaction(
+      JSON.parse(row.normalizedJson) as ParsedImportTransaction,
+      row.importFileId,
+      row.id
+    ));
 }
 
 export function previewImport({ fileName, text, customProfile = null }: PreviewImportOptions) {
@@ -222,6 +261,9 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
       text,
       headers,
       parserName: appParser.id,
+      sourceType: appParser.sourceType,
+      parserPriority: appParser.priority,
+      institution: appParser.institution,
       rawRows: parsed.data,
       parsedTransactions: parsedResult.transactions,
     });
@@ -250,6 +292,9 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
       text,
       headers,
       parserName: null,
+      sourceType: null,
+      parserPriority: null,
+      institution: null,
       rawRows: parsed.data,
       parsedTransactions: parsed.data.map(() => null),
     });
@@ -277,6 +322,9 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
     text,
     headers,
     parserName: profile.name,
+    sourceType: 'activity-export',
+    parserPriority: 0,
+    institution: profile.name,
     rawRows: parsed.data,
     parsedTransactions,
   });
@@ -297,9 +345,21 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
   };
 }
 
-export function commitImport({ accountId, transactions, importMeta = null }: CommitImportOptions) {
+export function commitImport({
+  accountId,
+  importFileId: stagedImportFileId = null,
+  importRowIds = null,
+  transactions = [],
+  importMeta = null,
+}: CommitImportOptions) {
   if (!accountId) throw new Error('accountId is required');
   if (!Array.isArray(transactions)) throw new Error('transactions must be an array');
+  if (importRowIds !== null && !Array.isArray(importRowIds)) throw new Error('importRowIds must be an array');
+
+  const stagedTransactions = stagedImportFileId
+    ? readStagedTransactions(stagedImportFileId, importRowIds)
+    : [];
+  const transactionsToCommit = stagedImportFileId ? stagedTransactions : transactions;
 
   const db = getDb();
   const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(accountId) as
@@ -315,7 +375,7 @@ export function commitImport({ accountId, transactions, importMeta = null }: Com
   const unique: CommitImportTransaction[] = [];
   const duplicates: Array<ImportTransactionInput & { fingerprint: string }> = [];
 
-  for (const transaction of transactions.filter(item => item && item.date && typeof item.amount === 'number')) {
+  for (const transaction of transactionsToCommit.filter(item => item && item.date && typeof item.amount === 'number')) {
     const fingerprint = getTransactionFingerprint(transaction, accountId);
     const withFingerprint = { ...transaction, fingerprint };
     if (seen.has(fingerprint)) {
@@ -350,13 +410,13 @@ export function commitImport({ accountId, transactions, importMeta = null }: Com
   const importBatchId = [
     'import',
     accountId,
-    unique[0]?.date || transactions[0]?.date || 'unknown-start',
-    unique.at(-1)?.date || transactions.at(-1)?.date || 'unknown-end',
-    transactions.length,
+    unique[0]?.date || transactionsToCommit[0]?.date || 'unknown-start',
+    unique.at(-1)?.date || transactionsToCommit.at(-1)?.date || 'unknown-end',
+    transactionsToCommit.length,
   ].join('-');
   const now = new Date().toISOString();
   const totalAmount = unique.reduce((sum, transaction) => sum + transaction.amount, 0);
-  const importFileId = importMeta?.importFileId || transactions.find(transaction => transaction.importFileId)?.importFileId || null;
+  const importFileId = stagedImportFileId || importMeta?.importFileId || transactionsToCommit.find(transaction => transaction.importFileId)?.importFileId || null;
 
   db.transaction(() => {
     for (const transaction of unique) {
