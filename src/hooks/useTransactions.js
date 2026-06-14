@@ -1,6 +1,5 @@
-import { useMemo } from 'react';
-import { add, apiAction, bulkAdd, remove, update } from '../db/api';
-import { useApiTable } from './useApiTable';
+import { useEffect, useMemo, useReducer, useState } from 'react';
+import { add, apiAction, appRequest, bulkAdd, remove, subscribeToDataChanges, update } from '../db/api';
 
 const normalizeId = (value) => {
   if (value === undefined || value === null || value === '') return undefined;
@@ -11,22 +10,38 @@ const normalizeId = (value) => {
 export function useTransactions(filters = {}) {
   const accountId = normalizeId(filters.accountId);
   const categoryId = normalizeId(filters.categoryId);
-  const allTransactions = useApiTable('transactions', accountId ? { accountId } : {}, [accountId]);
+  const [rows, setRows] = useState([]);
+  const [refreshToken, refresh] = useReducer(value => value + 1, 0);
+  const query = useMemo(() => ({
+    accountId,
+    categoryId,
+    startDate: filters.startDate,
+    endDate: filters.endDate,
+    search: filters.searchQuery,
+  }), [accountId, categoryId, filters.startDate, filters.endDate, filters.searchQuery]);
+  const queryKey = JSON.stringify(query);
+
+  useEffect(() => subscribeToDataChanges(refresh), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    appRequest('/transactions', JSON.parse(queryKey))
+      .then(data => {
+        if (!cancelled) setRows(data.transactions.map(fromAppTransaction));
+      })
+      .catch(error => {
+        console.error('Failed to load app transactions', error);
+        if (!cancelled) setRows([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [queryKey, refreshToken]);
 
   const transactions = useMemo(() => {
-    let result = allTransactions;
+    let result = rows;
 
-    if (filters.startDate) result = result.filter(t => t.date >= filters.startDate);
-    if (filters.endDate) result = result.filter(t => t.date <= filters.endDate);
-    if (categoryId) result = result.filter(t => t.categoryId === categoryId);
-    if (filters.searchQuery) {
-      const q = filters.searchQuery.toLowerCase();
-      result = result.filter(t =>
-        t.merchant?.toLowerCase().includes(q) ||
-        t.description?.toLowerCase().includes(q) ||
-        t.notes?.toLowerCase().includes(q)
-      );
-    }
     if (filters.type === 'income') {
       result = result.filter(t => t.amount > 0);
     } else if (filters.type === 'expense') {
@@ -34,7 +49,7 @@ export function useTransactions(filters = {}) {
     }
 
     return result;
-  }, [allTransactions, filters.startDate, filters.endDate, categoryId, filters.searchQuery, filters.type]);
+  }, [rows, filters.type]);
 
   async function addTransaction(transaction) {
     return add('transactions', {
@@ -69,5 +84,26 @@ export function useTransactions(filters = {}) {
     updateTransaction,
     deleteTransaction,
     deleteByImportBatch,
+  };
+}
+
+function fromAppTransaction(transaction) {
+  return {
+    id: transaction.id,
+    accountId: transaction.account?.id ?? null,
+    categoryId: transaction.category?.id ?? null,
+    date: transaction.date,
+    amount: transaction.amount,
+    description: transaction.description,
+    merchant: transaction.merchant,
+    originalDescription: transaction.originalDescription,
+    originalCategory: transaction.originalCategory,
+    type: transaction.type,
+    transactionKind: transaction.transactionKind,
+    status: transaction.status,
+    notes: transaction.notes,
+    importBatchId: transaction.importBatchId,
+    fingerprint: transaction.fingerprint,
+    createdAt: transaction.createdAt,
   };
 }

@@ -192,3 +192,25 @@ test('app transactions endpoint supports domain query filters', async () => {
 
   expect(body.transactions.map((transaction: { description: string }) => transaction.description)).toEqual(['Cafe']);
 });
+
+test('app transactions search includes notes', async () => {
+  const accountId = insertRow('accounts', {
+    name: 'Checking',
+    institution: 'Local Bank',
+    type: 'checking',
+  });
+
+  insertRow('transactions', {
+    accountId,
+    date: '2026-06-16',
+    amount: -12,
+    description: 'Card purchase',
+    merchant: 'Store',
+    notes: 'reimbursable team lunch',
+    type: 'expense',
+  });
+
+  const body = await getJson('/api/app/transactions?search=reimbursable');
+
+  expect(body.transactions.map((transaction: { notes: string }) => transaction.notes)).toEqual(['reimbursable team lunch']);
+});

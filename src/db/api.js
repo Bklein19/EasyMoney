@@ -23,6 +23,14 @@ async function request(path, options = {}) {
   return response.json();
 }
 
+export async function appRequest(path, query = {}) {
+  const params = new URLSearchParams(
+    Object.entries(query).filter(([, value]) => value !== undefined && value !== null && value !== '')
+  );
+  const suffix = params.toString() ? `?${params}` : '';
+  return request(`/app${path}${suffix}`);
+}
+
 export async function list(table, query = {}) {
   const params = new URLSearchParams(
     Object.entries(query).filter(([, value]) => value !== undefined && value !== null && value !== '')

@@ -114,14 +114,16 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
       t.description LIKE $search OR
       t.merchant LIKE $search OR
       t.originalDescription LIKE $search OR
+      t.notes LIKE $search OR
       c.name LIKE $search OR
       a.name LIKE $search
     )`);
     params.search = `%${search}%`;
   }
 
-  const limit = Math.min(optionalNumber(options.limit) ?? 500, 1000);
-  params.limit = limit;
+  const limit = optionalNumber(options.limit);
+  const limitClause = limit === null ? '' : 'LIMIT $limit';
+  if (limit !== null) params.limit = Math.min(limit, 1000);
 
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const rows = getDb()
@@ -155,7 +157,7 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
        LEFT JOIN categories c ON c.id = t.categoryId
        ${where}
        ORDER BY t.date DESC, t.id DESC
-       LIMIT $limit`
+       ${limitClause}`
     )
     .all(params) as TransactionRow[];
 
