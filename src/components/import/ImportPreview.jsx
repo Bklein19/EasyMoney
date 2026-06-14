@@ -151,13 +151,9 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
                 <td>{format(new Date(t.date), 'MMM d, yyyy')}</td>
                 <td className="description-cell">{t.merchant || t.description}</td>
                 <td>
-                  {isDuplicate ? (
-                    <span className="badge duplicate">Duplicate</span>
-                  ) : importingToCreditCard && t.amount > 0 ? (
-                    <span className="badge categorized">Card payment</span>
-                  ) : (
-                    <span className="badge uncategorized">Ready</span>
-                  )}
+                  <span className={`badge ${isDuplicate ? 'duplicate' : 'uncategorized'}`}>
+                    {isDuplicate ? 'Duplicate' : 'Ready'}
+                  </span>
                 </td>
                 <td className={`text-right font-medium ${t.amount >= 0 ? 'positive' : ''}`}>
                   {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(t.amount)}
