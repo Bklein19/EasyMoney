@@ -6,17 +6,7 @@ import {
   mappingFromProfile,
   normalizeTransaction,
 } from '../../src/utils/bankProfiles.js';
-
-interface ImportProfile {
-  name: string;
-  statementType?: string;
-  dateColumns?: string[];
-  dateFormats?: string[];
-  descriptionColumn?: string;
-  merchantColumn?: string;
-  categoryColumn?: string | null;
-  amountConfig?: Record<string, unknown>;
-}
+import type { CommitImportTransaction, ImportPreviewTransaction, ImportProfile, ParsedImportRecord } from './importTypes.ts';
 
 interface PreviewImportOptions {
   fileName: string;
@@ -24,27 +14,27 @@ interface PreviewImportOptions {
   customProfile?: ImportProfile | null;
 }
 
-interface PreviewTransaction {
-  importFileId?: number | null;
-  importRowId?: number | null;
-  sourceRowIndex?: number | null;
+type ImportTransactionInput = Partial<ImportPreviewTransaction> & {
+  date: string;
+  amount: number;
+};
+
+interface LegacyNormalizedTransaction {
   date: string;
   amount: number;
   description?: string | null;
   merchant?: string | null;
   originalDescription?: string | null;
   originalCategory?: string | null;
-  categoryId?: number | null;
   type?: string | null;
   transactionKind?: string | null;
   status?: string | null;
   notes?: string | null;
-  fingerprint?: string | null;
 }
 
 interface CommitImportOptions {
   accountId: number;
-  transactions: PreviewTransaction[];
+  transactions: ImportTransactionInput[];
   importMeta?: {
     importFileId?: number | null;
     headers?: string[];
@@ -77,7 +67,7 @@ function getHeaderSignature(headers: string[] = []) {
   return headers.map(header => normalizeText(header)).join('|');
 }
 
-function getTransactionFingerprint(transaction: PreviewTransaction, accountId: number) {
+function getTransactionFingerprint(transaction: ImportTransactionInput, accountId: number) {
   const text = normalizeText(
     transaction.originalDescription ||
     transaction.description ||
@@ -107,20 +97,47 @@ function parseCsv(text: string) {
   return result;
 }
 
+function toParsedImportRecord(transaction: LegacyNormalizedTransaction | null, sourceRowIndex: number): ParsedImportRecord | null {
+  if (!transaction) return null;
+
+  return {
+    sourceRowIndex,
+    date: transaction.date,
+    amount: transaction.amount,
+    description: transaction.description || '',
+    merchant: transaction.merchant || transaction.description || '',
+    originalDescription: transaction.originalDescription || transaction.description || '',
+    originalCategory: transaction.originalCategory || null,
+    type: transaction.type || (transaction.amount >= 0 ? 'credit' : 'debit'),
+    transactionKind: transaction.transactionKind || null,
+    status: transaction.status || 'cleared',
+    notes: transaction.notes || '',
+  };
+}
+
+function toPreviewTransaction(record: ParsedImportRecord, importFileId: number, importRowId: number): ImportPreviewTransaction {
+  return {
+    ...record,
+    importFileId,
+    importRowId,
+    categoryId: null,
+  };
+}
+
 function saveImportPreview({
   fileName,
   text,
   headers,
   parserName,
   rawRows,
-  normalizedRows,
+  parsedRecords,
 }: {
   fileName: string;
   text: string;
   headers: string[];
   parserName: string | null;
   rawRows: Array<Record<string, string>>;
-  normalizedRows: Array<PreviewTransaction | null>;
+  parsedRecords: Array<ParsedImportRecord | null>;
 }) {
   const now = new Date().toISOString();
   const headerSignature = getHeaderSignature(headers);
@@ -140,7 +157,7 @@ function saveImportPreview({
       importFileId,
       rowIndex: index,
       rawJson: JSON.stringify(row),
-      normalizedJson: normalizedRows[index] ? JSON.stringify(normalizedRows[index]) : null,
+      normalizedJson: parsedRecords[index] ? JSON.stringify(parsedRecords[index]) : null,
       createdAt: now,
     });
     rowIds[index] = Number(importRowId);
@@ -164,7 +181,7 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
       headers,
       parserName: null,
       rawRows: parsed.data,
-      normalizedRows: parsed.data.map(() => null),
+      parsedRecords: parsed.data.map(() => null),
     });
 
     return {
@@ -175,12 +192,12 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
     };
   }
 
-  const normalizedRows = parsed.data.map(row => normalizeTransaction(row, profile));
-  const indexedTransactions = normalizedRows
-    .map((transaction, sourceRowIndex) => transaction ? { sourceRowIndex, transaction } : null)
-    .filter((item): item is { sourceRowIndex: number; transaction: PreviewTransaction } => item !== null);
+  const parsedRecords = parsed.data.map((row, sourceRowIndex) =>
+    toParsedImportRecord(normalizeTransaction(row, profile) as LegacyNormalizedTransaction | null, sourceRowIndex)
+  );
+  const records = parsedRecords.filter((record): record is ParsedImportRecord => record !== null);
 
-  if (!indexedTransactions.length) {
+  if (!records.length) {
     throw new Error('Could not parse any valid transactions from this file.');
   }
 
@@ -190,16 +207,11 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
     headers,
     parserName: profile.name,
     rawRows: parsed.data,
-    normalizedRows: parsed.data.map((_, index) =>
-      indexedTransactions.find(item => item.sourceRowIndex === index)?.transaction || null
-    ),
+    parsedRecords,
   });
-  const transactions = indexedTransactions.map(({ sourceRowIndex, transaction }) => ({
-    ...transaction,
-    importFileId: preview.importFileId,
-    importRowId: preview.rowIds[sourceRowIndex],
-    sourceRowIndex,
-  }));
+  const transactions = records.map(record =>
+    toPreviewTransaction(record, preview.importFileId, preview.rowIds[record.sourceRowIndex])
+  );
 
   return {
     importFileId: preview.importFileId,
@@ -223,13 +235,13 @@ export function commitImport({ accountId, transactions, importMeta = null }: Com
     | undefined;
   if (!account) throw new Error(`Account not found: ${accountId}`);
 
-  const existing = db.prepare('SELECT * FROM transactions WHERE accountId = ?').all(accountId) as PreviewTransaction[];
+  const existing = db.prepare('SELECT * FROM transactions WHERE accountId = ?').all(accountId) as ImportTransactionInput[];
   const seen = new Set(existing.map(transaction =>
     transaction.fingerprint || getTransactionFingerprint(transaction, accountId)
   ));
 
-  const unique: Array<PreviewTransaction & { accountId: number; importBatchId: string; fingerprint: string }> = [];
-  const duplicates: Array<PreviewTransaction & { fingerprint: string }> = [];
+  const unique: CommitImportTransaction[] = [];
+  const duplicates: Array<ImportTransactionInput & { fingerprint: string }> = [];
 
   for (const transaction of transactions.filter(item => item && item.date && typeof item.amount === 'number')) {
     const fingerprint = getTransactionFingerprint(transaction, accountId);
@@ -242,6 +254,17 @@ export function commitImport({ accountId, transactions, importMeta = null }: Com
     seen.add(fingerprint);
     unique.push({
       ...withFingerprint,
+      importFileId: transaction.importFileId || importMeta?.importFileId || 0,
+      importRowId: transaction.importRowId || 0,
+      sourceRowIndex: transaction.sourceRowIndex || 0,
+      description: transaction.description || '',
+      merchant: transaction.merchant || transaction.description || '',
+      originalDescription: transaction.originalDescription || transaction.description || transaction.merchant || '',
+      originalCategory: transaction.originalCategory || null,
+      categoryId: null,
+      type: transaction.type || (transaction.amount >= 0 ? 'credit' : 'debit'),
+      status: transaction.status || 'cleared',
+      notes: transaction.notes || '',
       accountId,
       importBatchId: '',
       transactionKind: isCreditAccount(account) && transaction.amount > 0
