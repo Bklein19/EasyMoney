@@ -1,117 +1,13 @@
 import { parse, isValid } from 'date-fns';
+import { BANK_PROFILES } from '../import/parsers';
 
 /**
- * Bank profile definitions for auto-detecting CSV formats
+ * Bank profile definitions for auto-detecting CSV formats.
+ *
+ * Institution-specific profiles live under src/import/parsers; this module
+ * contains the generic detection, mapping, and normalization helpers.
  */
-export const BANK_PROFILES = [
-  {
-    name: 'Chase Credit Card',
-    headerFingerprint: ['Transaction Date', 'Post Date', 'Description', 'Category', 'Type', 'Amount'],
-    statementType: 'credit_card',
-    dateColumns: ['Transaction Date'],
-    dateFormats: ['MM/dd/yyyy'],
-    descriptionColumn: 'Description',
-    merchantColumn: 'Description',
-    amountConfig: { type: 'single', column: 'Amount', positiveIsCharge: false },
-    categoryColumn: 'Category',
-  },
-  {
-    name: 'Wells Fargo Checking',
-    headerFingerprint: ['Date', 'Description', 'Amount', 'CheckNumber', 'Status'],
-    dateColumns: ['Date'],
-    dateFormats: ['MM/dd/yyyy'],
-    descriptionColumn: 'Description',
-    merchantColumn: 'Description',
-    amountConfig: { type: 'single', column: 'Amount', negativeIsDebit: true },
-    categoryColumn: null,
-  },
-  {
-    name: 'Bank of America',
-    headerFingerprint: ['Date', 'Description', 'Amount', 'Running Bal.'],
-    dateColumns: ['Date'],
-    dateFormats: ['MM/dd/yyyy'],
-    descriptionColumn: 'Description',
-    merchantColumn: 'Description',
-    amountConfig: { type: 'single', column: 'Amount', negativeIsDebit: true },
-    categoryColumn: null,
-  },
-  {
-    name: 'Wells Fargo Credit Card',
-    headerFingerprint: ['DATE', 'DESCRIPTION', 'AMOUNT', 'CHECK #', 'STATUS'],
-    statementType: 'credit_card',
-    dateColumns: ['DATE'],
-    dateFormats: ['MM/dd/yyyy'],
-    descriptionColumn: 'DESCRIPTION',
-    merchantColumn: 'DESCRIPTION',
-    amountConfig: { type: 'single', column: 'AMOUNT', positiveIsCharge: false },
-    categoryColumn: null,
-  },
-  {
-    name: 'Robinhood Credit Card',
-    headerFingerprint: ['Date', 'Time', 'Cardholder', 'Amount', 'Points', 'Balance', 'Status', 'Type', 'Merchant', 'Description'],
-    statementType: 'credit_card',
-    dateColumns: ['Date'],
-    dateFormats: ['yyyy-MM-dd'],
-    descriptionColumn: 'Description',
-    merchantColumn: 'Merchant',
-    amountConfig: { type: 'single', column: 'Amount', positiveIsCharge: true },
-    categoryColumn: null,
-  },
-  {
-    name: 'American Express Credit Card',
-    headerFingerprint: ['Date', 'Description', 'Amount'],
-    fileNamePatterns: ['amex', 'american express'],
-    requireFileNameMatch: true,
-    statementType: 'credit_card',
-    dateColumns: ['Date'],
-    dateFormats: ['MM/dd/yyyy'],
-    descriptionColumn: 'Description',
-    merchantColumn: 'Description',
-    amountConfig: { type: 'single', column: 'Amount', positiveIsCharge: true },
-    categoryColumn: null,
-  },
-  {
-    name: 'Apple Card',
-    headerFingerprint: ['Transaction Date', 'Clearing Date', 'Description', 'Merchant', 'Category', 'Type', 'Amount (USD)', 'Purchased By'],
-    statementType: 'credit_card',
-    dateColumns: ['Transaction Date'],
-    dateFormats: ['MM/dd/yyyy'],
-    descriptionColumn: 'Description',
-    merchantColumn: 'Merchant',
-    amountConfig: { type: 'single', column: 'Amount (USD)', positiveIsCharge: true },
-    categoryColumn: 'Category',
-  },
-  {
-    name: 'Wells Fargo',
-    headerFingerprint: ['Date', 'Description', 'Deposits', 'Withdrawals'],
-    dateColumns: ['Date'],
-    dateFormats: ['MM/dd/yyyy'],
-    descriptionColumn: 'Description',
-    merchantColumn: 'Description',
-    amountConfig: { type: 'split', debitColumn: 'Withdrawals', creditColumn: 'Deposits' },
-    categoryColumn: null,
-  },
-  {
-    name: 'Capital One',
-    headerFingerprint: ['Transaction Date', 'Posted Date', 'Card No.', 'Description', 'Category', 'Debit', 'Credit'],
-    dateColumns: ['Transaction Date'],
-    dateFormats: ['yyyy-MM-dd'],
-    descriptionColumn: 'Description',
-    merchantColumn: 'Description',
-    amountConfig: { type: 'split', debitColumn: 'Debit', creditColumn: 'Credit' },
-    categoryColumn: 'Category',
-  },
-  {
-    name: 'Citi',
-    headerFingerprint: ['Status', 'Date', 'Description', 'Debit', 'Credit'],
-    dateColumns: ['Date'],
-    dateFormats: ['MM/dd/yyyy'],
-    descriptionColumn: 'Description',
-    merchantColumn: 'Description',
-    amountConfig: { type: 'split', debitColumn: 'Debit', creditColumn: 'Credit' },
-    categoryColumn: null,
-  },
-];
+export { BANK_PROFILES };
 
 const HEADER_HINTS = {
   date: ['transaction date', 'posted date', 'post date', 'date'],

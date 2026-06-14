@@ -1,0 +1,33 @@
+export const wellsFargoProfiles = [
+  {
+    name: 'Wells Fargo Checking',
+    headerFingerprint: ['Date', 'Description', 'Amount', 'CheckNumber', 'Status'],
+    dateColumns: ['Date'],
+    dateFormats: ['MM/dd/yyyy'],
+    descriptionColumn: 'Description',
+    merchantColumn: 'Description',
+    amountConfig: { type: 'single', column: 'Amount', negativeIsDebit: true },
+    categoryColumn: null,
+  },
+  {
+    name: 'Wells Fargo Credit Card',
+    headerFingerprint: ['DATE', 'DESCRIPTION', 'AMOUNT', 'CHECK #', 'STATUS'],
+    statementType: 'credit_card',
+    dateColumns: ['DATE'],
+    dateFormats: ['MM/dd/yyyy'],
+    descriptionColumn: 'DESCRIPTION',
+    merchantColumn: 'DESCRIPTION',
+    amountConfig: { type: 'single', column: 'AMOUNT', positiveIsCharge: false },
+    categoryColumn: null,
+  },
+  {
+    name: 'Wells Fargo',
+    headerFingerprint: ['Date', 'Description', 'Deposits', 'Withdrawals'],
+    dateColumns: ['Date'],
+    dateFormats: ['MM/dd/yyyy'],
+    descriptionColumn: 'Description',
+    merchantColumn: 'Description',
+    amountConfig: { type: 'split', debitColumn: 'Withdrawals', creditColumn: 'Deposits' },
+    categoryColumn: null,
+  },
+];

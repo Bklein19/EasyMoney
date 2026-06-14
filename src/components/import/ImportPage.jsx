@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useCSVImport } from '../../hooks/useCSVImport';
+import { SUPPORTED_BANK_NAMES } from '../../import/parsers';
 import { buildCustomProfile, mappingFromProfile } from '../../utils/bankProfiles';
 import { useImportProfiles } from '../../hooks/useImportProfiles';
 import { getHeaderSignature } from '../../utils/importIdentity';
@@ -120,7 +121,7 @@ export default function ImportPage() {
           
           <div className="supported-formats glass-card">
             <h3>Supported Banks</h3>
-            <p>We automatically detect formats from Chase, Bank of America, Wells Fargo, Wells Fargo Credit Card, Robinhood Credit Card, American Express, Apple Card, Capital One, and Citi. For other banks, you can easily map the columns yourself.</p>
+            <p>We automatically detect formats from {SUPPORTED_BANK_NAMES.join(', ')}. For other banks, you can easily map the columns yourself.</p>
           </div>
         </div>
       )}
