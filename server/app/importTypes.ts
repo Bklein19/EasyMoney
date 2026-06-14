@@ -23,6 +23,29 @@ export interface ParsedImportRecord {
   notes: string;
 }
 
+export interface AppImportParserMeta {
+  id: string;
+  name: string;
+  institution: string;
+  matches(file: { fileName: string; headers: string[]; sample: string }): boolean;
+}
+
+export interface AppImportParseInput {
+  fileName: string;
+  headers: string[];
+  rows: Array<Record<string, string>>;
+  text: string;
+}
+
+export interface AppImportParseResult {
+  records: Array<ParsedImportRecord | null>;
+}
+
+export interface AppImportParser {
+  meta: AppImportParserMeta;
+  parse(input: AppImportParseInput): AppImportParseResult;
+}
+
 export interface ImportPreviewTransaction extends ParsedImportRecord {
   importFileId: number;
   importRowId: number;

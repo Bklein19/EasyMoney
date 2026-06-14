@@ -295,7 +295,7 @@ test('app imports commit inserts unique transactions and updates account balance
   };
   expect(importFile).toMatchObject({
     status: 'committed',
-    parserName: 'Chase Credit Card',
+    parserName: 'chase-credit-card-csv',
     rowCount: 10,
     importBatchId: firstCommit.importBatchId,
   });
@@ -322,11 +322,8 @@ test('app imports commit inserts unique transactions and updates account balance
   expect(JSON.parse(sourceRow.rawJson).Description).toBe('ACME PAYROLL');
   expect(JSON.parse(sourceRow.normalizedJson).amount).toBe(1250);
 
-  const savedProfile = getDb().prepare('SELECT * FROM importProfiles').get() as { profileName: string; lastAccountId: number };
-  expect(savedProfile).toMatchObject({
-    profileName: 'Chase Credit Card',
-    lastAccountId: accountId,
-  });
+  const savedProfile = getDb().prepare('SELECT * FROM importProfiles').get();
+  expect(savedProfile).toBeNull();
 
   const secondCommit = await postJson('/api/app/imports/commit', {
     accountId,

@@ -7,6 +7,7 @@ import {
   normalizeTransaction,
 } from '../../src/utils/bankProfiles.js';
 import type { CommitImportTransaction, ImportPreviewTransaction, ImportProfile, ParsedImportRecord } from './importTypes.ts';
+import { resolveImportParser } from './importParsers/index.ts';
 
 interface PreviewImportOptions {
   fileName: string;
@@ -171,6 +172,45 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
   if (!parsed.data.length) throw new Error('No data found in CSV');
 
   const headers = parsed.meta.fields || Object.keys(parsed.data[0] || {});
+  const appParser = customProfile
+    ? null
+    : resolveImportParser({ fileName, headers, sample: text.slice(0, 4096) });
+
+  if (appParser) {
+    const parsedResult = appParser.parse({
+      fileName,
+      headers,
+      rows: parsed.data,
+      text,
+    });
+    const records = parsedResult.records.filter((record): record is ParsedImportRecord => record !== null);
+    if (!records.length) {
+      throw new Error('Could not parse any valid transactions from this file.');
+    }
+
+    const preview = saveImportPreview({
+      fileName,
+      text,
+      headers,
+      parserName: appParser.meta.id,
+      rawRows: parsed.data,
+      parsedRecords: parsedResult.records,
+    });
+    const transactions = records.map(record =>
+      toPreviewTransaction(record, preview.importFileId, preview.rowIds[record.sourceRowIndex])
+    );
+
+    return {
+      importFileId: preview.importFileId,
+      requiresMapping: false,
+      profileUsed: appParser.meta.name,
+      headers,
+      previewData: parsed.data.slice(0, 5),
+      mapping: mappingFromProfile(null, headers),
+      transactions,
+    };
+  }
+
   const detectedProfile = detectBank(headers, fileName);
   const profile = customProfile || enhanceProfileWithHeaders(detectedProfile, headers);
 
