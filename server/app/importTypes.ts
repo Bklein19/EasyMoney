@@ -23,6 +23,14 @@ export interface ParsedImportRecord {
   notes: string;
 }
 
+export interface ParsedImportBalance {
+  sourceRowIndex: number | null;
+  date: string;
+  balance: number;
+  accountName?: string | null;
+  institution?: string | null;
+}
+
 export interface AppImportParseInput {
   fileName: string;
   headers: string[];
@@ -32,6 +40,7 @@ export interface AppImportParseInput {
 
 export interface AppImportParseResult {
   records: Array<ParsedImportRecord | null>;
+  balances: ParsedImportBalance[];
 }
 
 export interface AppImportParser {

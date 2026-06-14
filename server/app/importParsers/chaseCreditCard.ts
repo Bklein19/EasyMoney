@@ -61,5 +61,6 @@ function parseRow(row: Record<string, string>, sourceRowIndex: number): ParsedIm
 function parse(input: AppImportParseInput): AppImportParseResult {
   return {
     records: input.rows.map((row, index) => parseRow(row, index)),
+    balances: [],
   };
 }

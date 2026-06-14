@@ -249,6 +249,7 @@ test('app imports preview parses a Chase CSV on the backend', async () => {
   expect(body.profileUsed).toBe('Chase Credit Card');
   expect(body.importFileId).toBe(1);
   expect(body.headers).toEqual(['Transaction Date', 'Post Date', 'Description', 'Category', 'Type', 'Amount']);
+  expect(body.balances).toEqual([]);
   expect(body.transactions).toHaveLength(10);
   expect(body.transactions[0]).toMatchObject({
     importFileId: 1,

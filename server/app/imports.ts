@@ -207,6 +207,7 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
       headers,
       previewData: parsed.data.slice(0, 5),
       mapping: mappingFromProfile(null, headers),
+      balances: parsedResult.balances,
       transactions,
     };
   }
@@ -229,6 +230,7 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
       requiresMapping: true,
       headers,
       previewData: parsed.data.slice(0, 5),
+      balances: [],
     };
   }
 
@@ -261,6 +263,7 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
     headers,
     previewData: parsed.data.slice(0, 5),
     mapping: mappingFromProfile(profile, headers),
+    balances: [],
     transactions,
   };
 }
