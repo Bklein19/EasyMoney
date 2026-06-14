@@ -42,6 +42,14 @@ function queryObject(request) {
   return Object.fromEntries(new URL(request.url).searchParams.entries());
 }
 
+function formBoolean(form, key, defaultValue = false) {
+  const value = form.get(key);
+  if (value === null || value === '') return defaultValue;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return defaultValue;
+}
+
 function safe(handler) {
   return async (request) => {
     try {
@@ -127,7 +135,7 @@ export const routes = wrapRoutes({
       const customProfile = typeof customProfileJson === 'string' && customProfileJson
         ? JSON.parse(customProfileJson)
         : null;
-      const inferCategories = form.get('inferCategories') !== 'false';
+      const inferCategories = formBoolean(form, 'inferCategories', true);
 
       return json(previewImport({
         fileName: file.name || 'import.csv',

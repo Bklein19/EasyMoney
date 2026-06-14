@@ -1,11 +1,15 @@
 import { useState, useCallback } from 'react';
 
+function optionBoolean(options, key, defaultValue = false) {
+  return typeof options[key] === 'boolean' ? options[key] : defaultValue;
+}
+
 export function useCSVImport() {
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState(null);
 
   const processImport = useCallback(async (file, customProfile = null, options = {}) => {
-    const inferCategories = options.inferCategories !== false;
+    const inferCategories = optionBoolean(options, 'inferCategories', true);
     setIsParsing(true);
     setError(null);
 
