@@ -113,3 +113,21 @@ test('import parser registry resolves Vanguard activity PDFs', () => {
   expect(parser?.sourceType).toBe('activity-export');
   expect(parser?.priority).toBe(100);
 });
+
+test('import parser registry resolves Vanguard statement PDFs', () => {
+  const namedParser = resolveImportParser({
+    fileName: 'vanguard-1234-2026-06-30-statement.pdf',
+    headers: [],
+    sample: '',
+  });
+  expect(namedParser?.id).toBe('vanguard-statement-pdf');
+  expect(namedParser?.sourceType).toBe('statement');
+  expect(namedParser?.priority).toBe(50);
+
+  const contentParser = resolveImportParser({
+    fileName: 'statement-4.pdf',
+    headers: [],
+    sample: 'Vanguard Brokerage Services',
+  });
+  expect(contentParser?.id).toBe('vanguard-statement-pdf');
+});
