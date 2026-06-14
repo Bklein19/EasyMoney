@@ -9,3 +9,9 @@ declare module 'papaparse' {
 
   export default Papa;
 }
+
+declare module '@napi-rs/canvas' {
+  export class Canvas {}
+  export interface SKRSContext2D {}
+  export type CanvasRenderingContext2D = SKRSContext2D;
+}

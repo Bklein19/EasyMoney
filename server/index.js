@@ -127,9 +127,11 @@ export const routes = wrapRoutes({
       const customProfile = typeof customProfileJson === 'string' && customProfileJson
         ? JSON.parse(customProfileJson)
         : null;
-      return json(previewImport({
+      const fileBytes = new Uint8Array(await file.arrayBuffer());
+      return json(await previewImport({
         fileName: file.name || 'import.csv',
-        text: await file.text(),
+        text: new TextDecoder().decode(fileBytes),
+        fileBytes,
         customProfile,
       }));
     },

@@ -37,6 +37,8 @@ export interface AppImportParseInput {
   headers: string[];
   rows: Array<Record<string, string>>;
   text: string;
+  filePath?: string;
+  fileBytes?: Uint8Array;
 }
 
 export interface AppImportParseResult {
@@ -51,7 +53,7 @@ export interface AppImportParser {
   sourceType: ImportParserSourceType;
   priority: number;
   matches(file: { fileName: string; headers: string[]; sample: string }): boolean;
-  parse(input: AppImportParseInput): AppImportParseResult;
+  parse(input: AppImportParseInput): AppImportParseResult | Promise<AppImportParseResult>;
 }
 
 export interface ImportPreviewTransaction {

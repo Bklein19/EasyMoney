@@ -1,8 +1,10 @@
 import type { AppImportParser } from '../importTypes.ts';
 import { chaseCreditCardParser } from './chaseCreditCard.ts';
+import { vanguardActivityParser } from './vanguardActivity.ts';
 
 export const IMPORT_PARSERS: AppImportParser[] = [
   chaseCreditCardParser,
+  vanguardActivityParser,
 ];
 
 export function resolveImportParser(file: { fileName: string; headers: string[]; sample: string }) {

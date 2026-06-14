@@ -1,4 +1,7 @@
 import Papa from 'papaparse';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { getDb, hashContent, insertRow, updateRow } from '../database.js';
 import {
   detectBank,
@@ -12,6 +15,7 @@ import { resolveImportParser } from './importParsers/index.ts';
 interface PreviewImportOptions {
   fileName: string;
   text: string;
+  fileBytes?: Uint8Array;
   customProfile?: ImportProfile | null;
 }
 
@@ -114,6 +118,27 @@ function parseCsv(text: string) {
   const fatalError = result.errors.find(error => error.type !== 'FieldMismatch');
   if (fatalError) throw new Error(fatalError.message);
   return result;
+}
+
+function isCsvFile(fileName: string) {
+  return /\.(csv|txt)$/i.test(fileName);
+}
+
+async function withTempImportFile<T>(fileName: string, bytes: Uint8Array | undefined, fn: (filePath: string) => Promise<T>) {
+  if (!bytes) return fn('');
+
+  const safeName = fileName.replace(/[^A-Za-z0-9._-]+/g, '-');
+  const filePath = path.join(
+    await fs.mkdtemp(path.join(os.tmpdir(), 'easymoney-import-')),
+    safeName || 'import-file'
+  );
+  await fs.writeFile(filePath, bytes);
+
+  try {
+    return await fn(filePath);
+  } finally {
+    await fs.rm(path.dirname(filePath), { recursive: true, force: true });
+  }
 }
 
 function toParsedImportTransaction(transaction: LegacyNormalizedTransaction | null, sourceRowIndex: number): ParsedImportTransaction | null {
@@ -247,26 +272,34 @@ function readStagedTransactions(importFileId: number, importRowIds: number[] | n
     ));
 }
 
-export function previewImport({ fileName, text, customProfile = null }: PreviewImportOptions) {
-  const parsed = parseCsv(text);
-  if (!parsed.data.length) throw new Error('No data found in CSV');
+export async function previewImport({ fileName, text, fileBytes, customProfile = null }: PreviewImportOptions) {
+  const parsed = isCsvFile(fileName) ? parseCsv(text) : null;
+  const rows = parsed?.data || [];
+  const headers = parsed?.meta.fields || Object.keys(rows[0] || {});
+  if (parsed && !rows.length) throw new Error('No data found in CSV');
 
-  const headers = parsed.meta.fields || Object.keys(parsed.data[0] || {});
   const appParser = customProfile
     ? null
     : resolveImportParser({ fileName, headers, sample: text.slice(0, 4096) });
 
   if (appParser) {
-    const parsedResult = appParser.parse({
+    const parsedResult = await withTempImportFile(fileName, fileBytes, filePath => Promise.resolve(appParser.parse({
       fileName,
       headers,
-      rows: parsed.data,
+      rows,
       text,
-    });
+      filePath: filePath || undefined,
+      fileBytes,
+    })));
     const transactions = parsedResult.transactions.filter((transaction): transaction is ParsedImportTransaction => transaction !== null);
     if (!transactions.length) {
       throw new Error('Could not parse any valid transactions from this file.');
     }
+    const rawRows = rows.length
+      ? rows
+      : parsedResult.transactions.map((transaction, index) => ({
+        sourceRowIndex: String(transaction?.sourceRowIndex ?? index),
+      }));
 
     const preview = saveImportPreview({
       fileName,
@@ -276,7 +309,7 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
       sourceType: appParser.sourceType,
       parserPriority: appParser.priority,
       institution: appParser.institution,
-      rawRows: parsed.data,
+      rawRows,
       parsedTransactions: parsedResult.transactions,
     });
     const previewTransactions = transactions.map(transaction =>
@@ -288,12 +321,14 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
       requiresMapping: false,
       profileUsed: appParser.name,
       headers,
-      previewData: parsed.data.slice(0, 5),
+      previewData: rows.slice(0, 5),
       mapping: mappingFromProfile(null, headers),
       balances: parsedResult.balances,
       transactions: previewTransactions,
     };
   }
+
+  if (!parsed || !rows.length) throw new Error('No parser matched this file.');
 
   const detectedProfile = detectBank(headers, fileName);
   const profile = customProfile || enhanceProfileWithHeaders(detectedProfile, headers);
@@ -307,20 +342,20 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
       sourceType: null,
       parserPriority: null,
       institution: null,
-      rawRows: parsed.data,
-      parsedTransactions: parsed.data.map(() => null),
+      rawRows: rows,
+      parsedTransactions: rows.map(() => null),
     });
 
     return {
       importFileId: preview.importFileId,
       requiresMapping: true,
       headers,
-      previewData: parsed.data.slice(0, 5),
+      previewData: rows.slice(0, 5),
       balances: [],
     };
   }
 
-  const parsedTransactions = parsed.data.map((row, sourceRowIndex) =>
+  const parsedTransactions = rows.map((row, sourceRowIndex) =>
     toParsedImportTransaction(normalizeTransaction(row, profile) as LegacyNormalizedTransaction | null, sourceRowIndex)
   );
   const transactions = parsedTransactions.filter((transaction): transaction is ParsedImportTransaction => transaction !== null);
@@ -337,7 +372,7 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
     sourceType: 'activity-export',
     parserPriority: 0,
     institution: profile.name,
-    rawRows: parsed.data,
+    rawRows: rows,
     parsedTransactions,
   });
   const previewTransactions = transactions.map(transaction =>
@@ -350,7 +385,7 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
     profileUsed: profile.name,
     profile,
     headers,
-    previewData: parsed.data.slice(0, 5),
+    previewData: rows.slice(0, 5),
     mapping: mappingFromProfile(profile, headers),
     balances: [],
     transactions: previewTransactions,
