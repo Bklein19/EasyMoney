@@ -18,6 +18,12 @@ import { commitImport, previewImport } from './app/imports.ts';
 import { listTransactions } from './app/transactions.ts';
 import index from '../index.html';
 
+type RouteParams = Record<string, string>;
+type AppRequest = Request & { params: RouteParams };
+type RouteHandler = (request: AppRequest) => Response | Promise<Response>;
+type RouteValue = Response | typeof index | RouteHandler | Record<string, RouteHandler | Response | typeof index>;
+type RouteMap = Record<string, RouteValue>;
+
 fs.mkdirSync(path.resolve(import.meta.dir, '..', 'data'), { recursive: true });
 
 initDatabase();
@@ -25,11 +31,11 @@ seedDatabase();
 
 const defaultPort = Number(process.env.PORT || process.env.VAULTVIEW_API_PORT || 4177);
 
-function json(data, status = 200) {
+function json(data: unknown, status = 200) {
   return Response.json(data, { status });
 }
 
-async function bodyJson(request) {
+async function bodyJson(request: Request): Promise<Record<string, any>> {
   if (request.headers.get('content-length') === '0') return {};
   try {
     return await request.json();
@@ -38,24 +44,24 @@ async function bodyJson(request) {
   }
 }
 
-function queryObject(request) {
+function queryObject(request: Request) {
   return Object.fromEntries(new URL(request.url).searchParams.entries());
 }
 
-function safe(handler) {
-  return async (request) => {
+function safe(handler: RouteHandler): RouteHandler {
+  return async (request: AppRequest) => {
     try {
       return await handler(request);
     } catch (error) {
       console.error(error);
-      return json({ error: error.message }, 500);
+      return json({ error: error instanceof Error ? error.message : 'Internal server error' }, 500);
     }
   };
 }
 
 const HTTP_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD']);
 
-function wrapRouteValue(value) {
+function wrapRouteValue(value: RouteValue): RouteValue {
   if (typeof value === 'function') return safe(value);
   if (!value || typeof value !== 'object') return value;
 
@@ -70,7 +76,7 @@ function wrapRouteValue(value) {
   );
 }
 
-function wrapRoutes(routeMap) {
+function wrapRoutes(routeMap: RouteMap) {
   return Object.fromEntries(
     Object.entries(routeMap).map(([route, value]) => [route, wrapRouteValue(value)])
   );
@@ -138,13 +144,13 @@ export const routes = wrapRoutes({
   },
 
   '/api/app/imports/commit': {
-    POST: async (request) => json(commitImport(await bodyJson(request)), 201),
+    POST: async (request) => json(commitImport(await bodyJson(request) as Parameters<typeof commitImport>[0]), 201),
   },
 
   '/api/accounts/:id/deep': {
     DELETE: (request) => {
       const db = getDb();
-      const remove = db.transaction((id) => {
+      const remove = db.transaction((id: number | string) => {
         db.prepare('DELETE FROM transactions WHERE accountId = ?').run(id);
         db.prepare('DELETE FROM balanceSnapshots WHERE accountId = ?').run(id);
         db.prepare('DELETE FROM accounts WHERE id = ?').run(id);
@@ -164,8 +170,8 @@ export const routes = wrapRoutes({
   '/api/categories/:id/delete': {
     POST: (request) => {
       const db = getDb();
-      const uncategorized = db.prepare("SELECT id FROM categories WHERE name = 'Uncategorized'").get();
-      const remove = db.transaction((id) => {
+      const uncategorized = db.prepare("SELECT id FROM categories WHERE name = 'Uncategorized'").get() as { id: number } | undefined;
+      const remove = db.transaction((id: number | string) => {
         if (uncategorized) {
           db.prepare('UPDATE transactions SET categoryId = ? WHERE categoryId = ?').run(uncategorized.id, id);
         }
@@ -232,8 +238,8 @@ export const routes = wrapRoutes({
   '/api/migrate': {
     POST: async (request) => {
       const db = getDb();
-      const hasTransactions = db.prepare('SELECT COUNT(*) AS count FROM transactions').get().count > 0;
-      const hasAccounts = db.prepare('SELECT COUNT(*) AS count FROM accounts').get().count > 0;
+      const hasTransactions = (db.prepare('SELECT COUNT(*) AS count FROM transactions').get() as { count: number }).count > 0;
+      const hasAccounts = (db.prepare('SELECT COUNT(*) AS count FROM accounts').get() as { count: number }).count > 0;
       if (hasTransactions || hasAccounts) {
         return json({ skipped: true });
       }
@@ -299,7 +305,7 @@ export const routes = wrapRoutes({
   '/*': index,
 });
 
-export function createServer(options = {}) {
+export function createServer(options: { port?: number } = {}) {
   return Bun.serve({
     port: options.port ?? defaultPort,
     routes,

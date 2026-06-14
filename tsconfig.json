@@ -13,6 +13,7 @@
     "types": ["bun-types"]
   },
   "include": [
+    "server/index.ts",
     "server/app/**/*.ts",
     "src/hooks/**/*.ts"
   ]

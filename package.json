@@ -7,12 +7,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "bun server/index.js",
-    "api": "bun server/index.js",
+    "dev": "bun server/index.ts",
+    "api": "bun server/index.ts",
     "import:robinhood": "bun scripts/import-robinhood-snapshot.js",
     "build": "NODE_ENV=production bun scripts/build-client.js",
     "build:client": "bun scripts/build-client.js",
-    "start": "bun server/index.js",
+    "start": "bun server/index.ts",
     "lint": "eslint .",
     "preview": "bun run build && bun run start",
     "typecheck": "bunx tsc --noEmit"

@@ -5,7 +5,7 @@ import path from 'node:path';
 
 process.env.EASYMONEY_DB_PATH = path.join(os.tmpdir(), `easymoney-app-api-${process.pid}.sqlite`);
 
-const { createServer } = await import('../index.js');
+const { createServer } = await import('../index.ts');
 const { getDb, initDatabase, insertRow } = await import('../database.js');
 const server = createServer({ port: 0 });
 const TEST_URL = `http://localhost:${server.port}`;
