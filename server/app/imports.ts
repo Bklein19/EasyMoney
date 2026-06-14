@@ -97,6 +97,10 @@ function getTransactionFingerprint(transaction: ImportTransactionInput, accountI
   ].join('|');
 }
 
+function getMaterializedImportBatchId(fingerprint: string) {
+  return `import-row-${hashContent(fingerprint).slice(0, 16)}`;
+}
+
 function isCreditAccount(account: { type?: string | null } | undefined) {
   return account?.type === 'credit' || account?.type === 'credit_card' || account?.type === 'credit-card';
 }
@@ -430,7 +434,7 @@ export function materializeImportTransactions({
     for (const transaction of unique) {
       const transactionId = insertRow('transactions', {
         ...transaction,
-        importBatchId,
+        importBatchId: getMaterializedImportBatchId(transaction.fingerprint),
         createdAt: now,
       });
 

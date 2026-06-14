@@ -63,6 +63,32 @@ async function postImportPreview(fileName: string, text: string) {
   return response.json();
 }
 
+function csvFromRows(rows: string[]) {
+  return [
+    'Transaction Date,Post Date,Description,Category,Type,Amount',
+    ...rows,
+  ].join('\n');
+}
+
+function snapshotAccountTransactions(accountId: number) {
+  return getDb().prepare(`
+    SELECT date, amount, description, merchant, originalCategory, transactionKind, fingerprint, importBatchId
+    FROM transactions
+    WHERE accountId = ?
+    ORDER BY fingerprint ASC
+  `).all(accountId);
+}
+
+function resetMaterializedImports(accountId: number) {
+  const db = getDb();
+  db.transaction(() => {
+    db.prepare('DELETE FROM transactions WHERE accountId = ?').run(accountId);
+    db.prepare('UPDATE accounts SET currentBalance = 0 WHERE id = ?').run(accountId);
+    db.prepare('UPDATE importRows SET fingerprint = NULL, transactionId = NULL').run();
+    db.prepare("UPDATE importFiles SET status = 'previewed', importBatchId = NULL, committedAt = NULL").run();
+  })();
+}
+
 beforeEach(() => {
   resetAppTables();
 });
@@ -355,4 +381,40 @@ test('app imports commit inserts unique transactions and updates account balance
 
   expect(secondCommit.importedCount).toBe(0);
   expect(secondCommit.skippedDuplicateCount).toBe(10);
+});
+
+test('app import materialization is independent of import file commit order', async () => {
+  const accountId = insertRow('accounts', {
+    name: 'Chase Sapphire',
+    institution: 'Chase',
+    type: 'credit',
+    currentBalance: 0,
+  });
+  const rows = [
+    '06/14/2026,06/14/2026,ACME PAYROLL,Payment,Payment,1250.00',
+    '06/13/2026,06/14/2026,TACO TEMPLE,Food & Drink,Sale,-42.37',
+    '06/12/2026,06/13/2026,WHOLE FOODS MARKET,Groceries,Sale,-132.18',
+    '06/11/2026,06/12/2026,SHELL OIL 123456,Gas,Sale,-47.52',
+  ];
+  const previewA = await postImportPreview('chase-a.csv', csvFromRows(rows.slice(0, 3)));
+  const previewB = await postImportPreview('chase-b.csv', csvFromRows(rows.slice(1, 4)));
+
+  const commitPreview = (preview: { importFileId: number; transactions: Array<{ importRowId: number }> }) =>
+    postJson('/api/app/imports/commit', {
+      accountId,
+      importFileId: preview.importFileId,
+      importRowIds: preview.transactions.map(transaction => transaction.importRowId),
+    }, 201);
+
+  await commitPreview(previewA);
+  await commitPreview(previewB);
+  const forward = snapshotAccountTransactions(accountId);
+
+  resetMaterializedImports(accountId);
+
+  await commitPreview(previewB);
+  await commitPreview(previewA);
+  const reverse = snapshotAccountTransactions(accountId);
+
+  expect(reverse).toEqual(forward);
 });
