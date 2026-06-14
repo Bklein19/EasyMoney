@@ -175,7 +175,7 @@ function toPreviewTransaction(transaction: ParsedImportTransaction, importFileId
   const status = typeof raw.status === 'string' ? raw.status : 'cleared';
   const transactionKind = typeof raw.transactionKind === 'string'
     ? raw.transactionKind
-    : amount > 0 ? 'card_payment' : null;
+    : null;
 
   return {
     ...transaction,
