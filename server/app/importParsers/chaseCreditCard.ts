@@ -1,6 +1,6 @@
-import type { AppImportParseInput, AppImportParseResult, AppImportParserMeta, ParsedImportRecord } from '../importTypes.ts';
+import type { AppImportParseInput, AppImportParseResult, AppImportParser, ParsedImportRecord } from '../importTypes.ts';
 
-export const meta: AppImportParserMeta = {
+export const chaseCreditCardParser: AppImportParser = {
   id: 'chase-credit-card-csv',
   name: 'Chase Credit Card',
   institution: 'Chase',
@@ -12,6 +12,7 @@ export const meta: AppImportParserMeta = {
     'Type',
     'Amount',
   ]),
+  parse,
 };
 
 function hasHeaders(headers: string[], expected: string[]) {
@@ -57,7 +58,7 @@ function parseRow(row: Record<string, string>, sourceRowIndex: number): ParsedIm
   };
 }
 
-export function parse(input: AppImportParseInput): AppImportParseResult {
+function parse(input: AppImportParseInput): AppImportParseResult {
   return {
     records: input.rows.map((row, index) => parseRow(row, index)),
   };

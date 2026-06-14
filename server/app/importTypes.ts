@@ -23,13 +23,6 @@ export interface ParsedImportRecord {
   notes: string;
 }
 
-export interface AppImportParserMeta {
-  id: string;
-  name: string;
-  institution: string;
-  matches(file: { fileName: string; headers: string[]; sample: string }): boolean;
-}
-
 export interface AppImportParseInput {
   fileName: string;
   headers: string[];
@@ -42,7 +35,10 @@ export interface AppImportParseResult {
 }
 
 export interface AppImportParser {
-  meta: AppImportParserMeta;
+  id: string;
+  name: string;
+  institution: string;
+  matches(file: { fileName: string; headers: string[]; sample: string }): boolean;
   parse(input: AppImportParseInput): AppImportParseResult;
 }
 

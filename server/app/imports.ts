@@ -192,7 +192,7 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
       fileName,
       text,
       headers,
-      parserName: appParser.meta.id,
+      parserName: appParser.id,
       rawRows: parsed.data,
       parsedRecords: parsedResult.records,
     });
@@ -203,7 +203,7 @@ export function previewImport({ fileName, text, customProfile = null }: PreviewI
     return {
       importFileId: preview.importFileId,
       requiresMapping: false,
-      profileUsed: appParser.meta.name,
+      profileUsed: appParser.name,
       headers,
       previewData: parsed.data.slice(0, 5),
       mapping: mappingFromProfile(null, headers),
