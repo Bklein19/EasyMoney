@@ -154,6 +154,7 @@ export default function ImportPage() {
           <ImportPreview 
             transactions={importResult.transactions}
             importMeta={{
+              importFileId: importResult.importFileId,
               headers: importResult.headers,
               profile: importResult.profile,
               mapping: importResult.mapping || mappingFromProfile(importResult.profile, importResult.headers),

@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -51,6 +52,14 @@ const TABLES = {
   balanceSnapshots: ['id', 'accountId', 'month', 'balance', 'capturedAt'],
   categorizationRules: ['id', 'categoryId', 'pattern', 'matchType', 'priority'],
   importProfiles: ['id', 'headerSignature', 'profileName', 'profileJson', 'mappingJson', 'lastAccountId', 'createdAt', 'updatedAt'],
+  importFiles: [
+    'id', 'fileName', 'contentHash', 'parserName', 'headerSignature', 'rowCount',
+    'status', 'importBatchId', 'createdAt', 'committedAt'
+  ],
+  importRows: [
+    'id', 'importFileId', 'rowIndex', 'rawJson', 'normalizedJson',
+    'fingerprint', 'transactionId', 'createdAt'
+  ],
   robinhoodAccounts: [
     'id', 'accountKey', 'label', 'accountNumberMasked', 'type', 'brokerageAccountType',
     'isDefault', 'agenticAllowed', 'createdAt', 'updatedAt'
@@ -80,6 +89,8 @@ const ORDER_BY = {
   balanceSnapshots: 'month ASC, id ASC',
   categorizationRules: 'priority DESC, id ASC',
   importProfiles: 'updatedAt DESC, id DESC',
+  importFiles: 'createdAt DESC, id DESC',
+  importRows: 'importFileId ASC, rowIndex ASC',
   robinhoodAccounts: 'isDefault DESC, id ASC',
   robinhoodSnapshots: 'fetchedAt DESC, id DESC',
   robinhoodAccountSnapshots: 'id ASC',
@@ -162,6 +173,32 @@ export function initDatabase() {
       lastAccountId INTEGER,
       createdAt TEXT,
       updatedAt TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS importFiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      fileName TEXT NOT NULL,
+      contentHash TEXT NOT NULL,
+      parserName TEXT,
+      headerSignature TEXT,
+      rowCount INTEGER DEFAULT 0,
+      status TEXT DEFAULT 'previewed',
+      importBatchId TEXT,
+      createdAt TEXT,
+      committedAt TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS importRows (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      importFileId INTEGER NOT NULL,
+      rowIndex INTEGER NOT NULL,
+      rawJson TEXT NOT NULL,
+      normalizedJson TEXT,
+      fingerprint TEXT,
+      transactionId INTEGER,
+      createdAt TEXT,
+      UNIQUE(importFileId, rowIndex),
+      FOREIGN KEY(importFileId) REFERENCES importFiles(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS robinhoodAccounts (
@@ -263,7 +300,7 @@ export function listRows(table, query = {}) {
   const clauses = [];
   const params = {};
 
-  for (const key of ['accountId', 'categoryId', 'month', 'headerSignature']) {
+  for (const key of ['accountId', 'categoryId', 'month', 'headerSignature', 'importFileId']) {
     if (query[key] !== undefined && query[key] !== '') {
       clauses.push(`${key} = @${key}`);
       params[key] = query[key];
@@ -309,4 +346,8 @@ export function deleteRow(table, id) {
 
 export function getDb() {
   return db;
+}
+
+export function hashContent(content) {
+  return crypto.createHash('sha256').update(content).digest('hex');
 }

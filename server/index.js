@@ -241,10 +241,10 @@ export const routes = wrapRoutes({
 
       const payload = await bodyJson(request);
       const migrate = db.transaction(() => {
-        for (const table of ['transactions', 'accounts', 'categories', 'budgets', 'balanceSnapshots', 'categorizationRules', 'importProfiles']) {
+        for (const table of ['importRows', 'importFiles', 'transactions', 'accounts', 'categories', 'budgets', 'balanceSnapshots', 'categorizationRules', 'importProfiles']) {
           db.prepare(`DELETE FROM ${table}`).run();
         }
-        for (const table of ['accounts', 'categories', 'budgets', 'balanceSnapshots', 'categorizationRules', 'importProfiles', 'transactions']) {
+        for (const table of ['accounts', 'categories', 'budgets', 'balanceSnapshots', 'categorizationRules', 'importProfiles', 'importFiles', 'importRows', 'transactions']) {
           if (Array.isArray(payload[table]) && payload[table].length) {
             insertRows(table, payload[table], true);
           }

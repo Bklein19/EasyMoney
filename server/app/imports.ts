@@ -1,5 +1,5 @@
 import Papa from 'papaparse';
-import { getDb, insertRow, listRows, updateRow } from '../database.js';
+import { getDb, hashContent, insertRow, listRows, updateRow } from '../database.js';
 import { categorizeTransactions } from '../../src/utils/categorizer.js';
 import {
   detectBank,
@@ -27,6 +27,9 @@ interface PreviewImportOptions {
 }
 
 interface PreviewTransaction {
+  importFileId?: number | null;
+  importRowId?: number | null;
+  sourceRowIndex?: number | null;
   date: string;
   amount: number;
   description?: string | null;
@@ -45,6 +48,7 @@ interface CommitImportOptions {
   accountId: number;
   transactions: PreviewTransaction[];
   importMeta?: {
+    importFileId?: number | null;
     headers?: string[];
     profile?: ImportProfile | null;
     mapping?: Record<string, unknown> | null;
@@ -105,6 +109,48 @@ function parseCsv(text: string) {
   return result;
 }
 
+function saveImportPreview({
+  fileName,
+  text,
+  headers,
+  parserName,
+  rawRows,
+  normalizedRows,
+}: {
+  fileName: string;
+  text: string;
+  headers: string[];
+  parserName: string | null;
+  rawRows: Array<Record<string, string>>;
+  normalizedRows: Array<PreviewTransaction | null>;
+}) {
+  const now = new Date().toISOString();
+  const headerSignature = getHeaderSignature(headers);
+  const importFileId = insertRow('importFiles', {
+    fileName,
+    contentHash: hashContent(text),
+    parserName,
+    headerSignature,
+    rowCount: rawRows.length,
+    status: 'previewed',
+    createdAt: now,
+  });
+
+  const rowIds: number[] = [];
+  for (const [index, row] of rawRows.entries()) {
+    const importRowId = insertRow('importRows', {
+      importFileId,
+      rowIndex: index,
+      rawJson: JSON.stringify(row),
+      normalizedJson: normalizedRows[index] ? JSON.stringify(normalizedRows[index]) : null,
+      createdAt: now,
+    });
+    rowIds[index] = Number(importRowId);
+  }
+
+  return { importFileId: Number(importFileId), rowIds };
+}
+
 export function previewImport({ fileName, text, customProfile = null, inferCategories = true }: PreviewImportOptions) {
   const parsed = parseCsv(text);
   if (!parsed.data.length) throw new Error('No data found in CSV');
@@ -114,30 +160,63 @@ export function previewImport({ fileName, text, customProfile = null, inferCateg
   const profile = customProfile || enhanceProfileWithHeaders(detectedProfile, headers);
 
   if (!profile) {
+    const preview = saveImportPreview({
+      fileName,
+      text,
+      headers,
+      parserName: null,
+      rawRows: parsed.data,
+      normalizedRows: parsed.data.map(() => null),
+    });
+
     return {
+      importFileId: preview.importFileId,
       requiresMapping: true,
       headers,
       previewData: parsed.data.slice(0, 5),
     };
   }
 
-  let transactions = parsed.data
-    .map(row => normalizeTransaction(row, profile))
-    .filter((transaction): transaction is PreviewTransaction => transaction !== null);
+  const normalizedRows = parsed.data.map(row => normalizeTransaction(row, profile));
+  let indexedTransactions = normalizedRows
+    .map((transaction, sourceRowIndex) => transaction ? { sourceRowIndex, transaction } : null)
+    .filter((item): item is { sourceRowIndex: number; transaction: PreviewTransaction } => item !== null);
 
-  if (!transactions.length) {
+  if (!indexedTransactions.length) {
     throw new Error('Could not parse any valid transactions from this file.');
   }
 
   if (inferCategories) {
-    transactions = categorizeTransactions(
-      transactions,
+    const categorized = categorizeTransactions(
+      indexedTransactions.map(item => item.transaction),
       listRows('categorizationRules'),
       listRows('categories')
     );
+    indexedTransactions = indexedTransactions.map((item, index) => ({
+      ...item,
+      transaction: categorized[index],
+    }));
   }
 
+  const preview = saveImportPreview({
+    fileName,
+    text,
+    headers,
+    parserName: profile.name,
+    rawRows: parsed.data,
+    normalizedRows: parsed.data.map((_, index) =>
+      indexedTransactions.find(item => item.sourceRowIndex === index)?.transaction || null
+    ),
+  });
+  const transactions = indexedTransactions.map(({ sourceRowIndex, transaction }) => ({
+    ...transaction,
+    importFileId: preview.importFileId,
+    importRowId: preview.rowIds[sourceRowIndex],
+    sourceRowIndex,
+  }));
+
   return {
+    importFileId: preview.importFileId,
     requiresMapping: false,
     profileUsed: profile.name,
     profile,
@@ -195,14 +274,29 @@ export function commitImport({ accountId, transactions, importMeta = null }: Com
   ].join('-');
   const now = new Date().toISOString();
   const totalAmount = unique.reduce((sum, transaction) => sum + transaction.amount, 0);
+  const importFileId = importMeta?.importFileId || transactions.find(transaction => transaction.importFileId)?.importFileId || null;
 
   db.transaction(() => {
     for (const transaction of unique) {
-      insertRow('transactions', {
+      const transactionId = insertRow('transactions', {
         ...transaction,
         importBatchId,
         createdAt: now,
       });
+
+      if (transaction.importRowId) {
+        db.prepare(`
+          UPDATE importRows
+          SET fingerprint = @fingerprint, transactionId = @transactionId
+          WHERE id = @importRowId
+            AND importFileId = @importFileId
+        `).run({
+          fingerprint: transaction.fingerprint,
+          transactionId,
+          importFileId,
+          importRowId: transaction.importRowId,
+        });
+      }
     }
 
     if (unique.length) {
@@ -234,6 +328,14 @@ export function commitImport({ accountId, transactions, importMeta = null }: Com
           createdAt: now,
         });
       }
+    }
+
+    if (importFileId) {
+      updateRow('importFiles', importFileId, {
+        status: 'committed',
+        importBatchId,
+        committedAt: now,
+      });
     }
   })();
 

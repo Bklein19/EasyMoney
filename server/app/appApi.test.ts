@@ -19,6 +19,8 @@ function resetAppTables() {
   initDatabase();
   db.transaction(() => {
     for (const table of [
+      'importRows',
+      'importFiles',
       'transactions',
       'balanceSnapshots',
       'budgets',
@@ -246,9 +248,13 @@ test('app imports preview parses a Chase CSV on the backend', async () => {
 
   expect(body.requiresMapping).toBe(false);
   expect(body.profileUsed).toBe('Chase Credit Card');
+  expect(body.importFileId).toBe(1);
   expect(body.headers).toEqual(['Transaction Date', 'Post Date', 'Description', 'Category', 'Type', 'Amount']);
   expect(body.transactions).toHaveLength(10);
   expect(body.transactions[0]).toMatchObject({
+    importFileId: 1,
+    importRowId: 1,
+    sourceRowIndex: 0,
     date: '2026-06-14T00:00:00.000Z',
     description: 'ACME PAYROLL',
     amount: 1250,
@@ -270,6 +276,7 @@ test('app imports commit inserts unique transactions and updates account balance
     accountId,
     transactions: preview.transactions,
     importMeta: {
+      importFileId: preview.importFileId,
       headers: preview.headers,
       profile: preview.profile,
       mapping: preview.mapping,
@@ -280,6 +287,19 @@ test('app imports commit inserts unique transactions and updates account balance
   expect(firstCommit.importedCount).toBe(10);
   expect(firstCommit.skippedDuplicateCount).toBe(0);
   expect(firstCommit.insertedFingerprints).toHaveLength(10);
+
+  const importFile = getDb().prepare('SELECT * FROM importFiles WHERE id = ?').get(preview.importFileId) as {
+    status: string;
+    parserName: string;
+    rowCount: number;
+    importBatchId: string;
+  };
+  expect(importFile).toMatchObject({
+    status: 'committed',
+    parserName: 'Chase Credit Card',
+    rowCount: 10,
+    importBatchId: firstCommit.importBatchId,
+  });
 
   const account = getDb().prepare('SELECT currentBalance FROM accounts WHERE id = ?').get(accountId) as { currentBalance: number };
   expect(account.currentBalance).toBeCloseTo(1350.22);
@@ -292,6 +312,17 @@ test('app imports commit inserts unique transactions and updates account balance
     fingerprint: firstCommit.insertedFingerprints[0],
   });
 
+  const sourceRow = getDb().prepare('SELECT * FROM importRows WHERE id = ?').get(preview.transactions[0].importRowId) as {
+    transactionId: number;
+    fingerprint: string;
+    rawJson: string;
+    normalizedJson: string;
+  };
+  expect(sourceRow.transactionId).toBe(imported[0].id);
+  expect(sourceRow.fingerprint).toBe(firstCommit.insertedFingerprints[0]);
+  expect(JSON.parse(sourceRow.rawJson).Description).toBe('ACME PAYROLL');
+  expect(JSON.parse(sourceRow.normalizedJson).amount).toBe(1250);
+
   const savedProfile = getDb().prepare('SELECT * FROM importProfiles').get() as { profileName: string; lastAccountId: number };
   expect(savedProfile).toMatchObject({
     profileName: 'Chase Credit Card',
@@ -302,6 +333,7 @@ test('app imports commit inserts unique transactions and updates account balance
     accountId,
     transactions: preview.transactions,
     importMeta: {
+      importFileId: preview.importFileId,
       headers: preview.headers,
       profile: preview.profile,
       mapping: preview.mapping,
