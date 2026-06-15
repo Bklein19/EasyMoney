@@ -108,6 +108,17 @@ function getMaterializedImportBatchId(fingerprint: string) {
   return `import-row-${hashContent(fingerprint).slice(0, 16)}`;
 }
 
+function getStableSourceTransactionId(importFileId: number, transaction: ParsedImportTransaction) {
+  return `src_txn_${hashContent([
+    importFileId,
+    transaction.sourceRowIndex,
+    transaction.date,
+    transaction.amountCents,
+    normalizeText(transaction.description),
+    transaction.sourceRole,
+  ].join('|')).slice(0, 32)}`;
+}
+
 function isCreditAccount(account: { type?: string | null } | undefined) {
   return account?.type === 'credit' || account?.type === 'credit_card' || account?.type === 'credit-card';
 }
@@ -233,18 +244,73 @@ function saveImportPreview({
     status: 'previewed',
     createdAt: now,
   });
+  const sourceFileId = insertRow('sourceFiles', {
+    importFileId,
+    fileName,
+    contentHash: hashContent(text),
+    parserName,
+    sourceType,
+    parserPriority,
+    institution,
+    coveredFrom: [
+      ...parsedTransactions.filter((item): item is ParsedImportTransaction => item !== null).map(item => item.date),
+      ...parsedBalances.map(item => item.date),
+    ].sort()[0] || null,
+    coveredTo: [
+      ...parsedTransactions.filter((item): item is ParsedImportTransaction => item !== null).map(item => item.date),
+      ...parsedBalances.map(item => item.date),
+    ].sort().at(-1) || null,
+    status: 'previewed',
+    createdAt: now,
+  });
+  const sourceAccountIds = new Map<string, number>();
+  const getSourceAccountId = (item: Pick<ParsedImportTransaction | ParsedImportBalance, 'institution' | 'account' | 'raw'>) => {
+    const sourceInstitution = item.institution || institution || null;
+    const sourceAccountName = item.account || 'Selected account';
+    const sourceAccountKey = `${sourceInstitution || 'unknown'}|${sourceAccountName}`;
+    const existing = sourceAccountIds.get(sourceAccountKey);
+    if (existing) return existing;
+
+    const sourceAccountId = Number(insertRow('sourceAccounts', {
+      sourceFileId,
+      institution: sourceInstitution,
+      sourceAccountKey,
+      sourceAccountName,
+      rawJson: JSON.stringify({ account: item.account, institution: item.institution }),
+      createdAt: now,
+    }));
+    sourceAccountIds.set(sourceAccountKey, sourceAccountId);
+    return sourceAccountId;
+  };
 
   const rowIds: number[] = [];
   for (const [index, row] of rawRows.entries()) {
+    const parsedTransaction = parsedTransactions[index];
     const importRowId = insertRow('importRows', {
       importFileId,
       rowIndex: index,
       rowType: 'transaction',
       rawJson: JSON.stringify(row),
-      normalizedJson: parsedTransactions[index] ? JSON.stringify(parsedTransactions[index]) : null,
+      normalizedJson: parsedTransaction ? JSON.stringify(parsedTransaction) : null,
       createdAt: now,
     });
     rowIds[index] = Number(importRowId);
+
+    if (parsedTransaction) {
+      insertRow('sourceTransactions', {
+        sourceFileId,
+        sourceAccountId: getSourceAccountId(parsedTransaction),
+        importRowId,
+        stableSourceId: getStableSourceTransactionId(importFileId, parsedTransaction),
+        date: parsedTransaction.date,
+        amountCents: parsedTransaction.amountCents,
+        description: parsedTransaction.description,
+        sourceRole: parsedTransaction.sourceRole,
+        priority: parserPriority,
+        rawJson: JSON.stringify(parsedTransaction.raw || {}),
+        createdAt: now,
+      });
+    }
   }
 
   const balanceRowIds: number[] = [];
@@ -258,6 +324,16 @@ function saveImportPreview({
       createdAt: now,
     });
     balanceRowIds[index] = Number(importRowId);
+    insertRow('sourceBalances', {
+      sourceFileId,
+      sourceAccountId: getSourceAccountId(balance),
+      importRowId,
+      date: balance.date,
+      balanceCents: balance.balanceCents,
+      priority: parserPriority,
+      rawJson: JSON.stringify(balance.raw || {}),
+      createdAt: now,
+    });
   }
 
   return { importFileId: Number(importFileId), rowIds, balanceRowIds };
@@ -592,6 +668,14 @@ export function materializeImportTransactions({
       updateRow('importFiles', importFileId, {
         status: 'committed',
         importBatchId,
+        committedAt: now,
+      });
+      getDb().prepare(`
+        UPDATE sourceFiles
+        SET status = 'committed', committedAt = @committedAt
+        WHERE importFileId = @importFileId
+      `).run({
+        importFileId,
         committedAt: now,
       });
     }

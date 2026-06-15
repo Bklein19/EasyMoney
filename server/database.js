@@ -62,6 +62,21 @@ const TABLES = {
     'id', 'importFileId', 'rowIndex', 'rowType', 'rawJson', 'normalizedJson',
     'fingerprint', 'transactionId', 'createdAt'
   ],
+  sourceFiles: [
+    'id', 'importFileId', 'fileName', 'contentHash', 'parserName', 'sourceType',
+    'parserPriority', 'institution', 'coveredFrom', 'coveredTo', 'status', 'createdAt', 'committedAt'
+  ],
+  sourceAccounts: [
+    'id', 'sourceFileId', 'institution', 'sourceAccountKey', 'sourceAccountName', 'rawJson', 'createdAt'
+  ],
+  sourceTransactions: [
+    'id', 'sourceFileId', 'sourceAccountId', 'importRowId', 'stableSourceId', 'date',
+    'amountCents', 'description', 'sourceRole', 'priority', 'rawJson', 'createdAt'
+  ],
+  sourceBalances: [
+    'id', 'sourceFileId', 'sourceAccountId', 'importRowId', 'date', 'balanceCents',
+    'priority', 'rawJson', 'createdAt'
+  ],
   robinhoodAccounts: [
     'id', 'accountKey', 'label', 'accountNumberMasked', 'type', 'brokerageAccountType',
     'isDefault', 'agenticAllowed', 'createdAt', 'updatedAt'
@@ -94,6 +109,10 @@ const ORDER_BY = {
   importProfiles: 'updatedAt DESC, id DESC',
   importFiles: 'createdAt DESC, id DESC',
   importRows: 'importFileId ASC, rowIndex ASC',
+  sourceFiles: 'createdAt DESC, id DESC',
+  sourceAccounts: 'sourceFileId ASC, id ASC',
+  sourceTransactions: 'date DESC, id DESC',
+  sourceBalances: 'date DESC, id DESC',
   robinhoodAccounts: 'isDefault DESC, id ASC',
   robinhoodSnapshots: 'fetchedAt DESC, id DESC',
   robinhoodAccountSnapshots: 'id ASC',
@@ -216,6 +235,71 @@ export function initDatabase() {
       createdAt TEXT,
       UNIQUE(importFileId, rowIndex),
       FOREIGN KEY(importFileId) REFERENCES importFiles(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS sourceFiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      importFileId INTEGER,
+      fileName TEXT NOT NULL,
+      contentHash TEXT NOT NULL,
+      parserName TEXT,
+      sourceType TEXT,
+      parserPriority INTEGER,
+      institution TEXT,
+      coveredFrom TEXT,
+      coveredTo TEXT,
+      status TEXT DEFAULT 'previewed',
+      createdAt TEXT,
+      committedAt TEXT,
+      UNIQUE(importFileId),
+      FOREIGN KEY(importFileId) REFERENCES importFiles(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS sourceAccounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sourceFileId INTEGER NOT NULL,
+      institution TEXT,
+      sourceAccountKey TEXT NOT NULL,
+      sourceAccountName TEXT,
+      rawJson TEXT,
+      createdAt TEXT,
+      UNIQUE(sourceFileId, institution, sourceAccountKey),
+      FOREIGN KEY(sourceFileId) REFERENCES sourceFiles(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS sourceTransactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sourceFileId INTEGER NOT NULL,
+      sourceAccountId INTEGER NOT NULL,
+      importRowId INTEGER,
+      stableSourceId TEXT NOT NULL,
+      date TEXT NOT NULL,
+      amountCents INTEGER NOT NULL,
+      description TEXT,
+      sourceRole TEXT,
+      priority INTEGER,
+      rawJson TEXT,
+      createdAt TEXT,
+      UNIQUE(sourceFileId, stableSourceId),
+      FOREIGN KEY(sourceFileId) REFERENCES sourceFiles(id) ON DELETE CASCADE,
+      FOREIGN KEY(sourceAccountId) REFERENCES sourceAccounts(id) ON DELETE CASCADE,
+      FOREIGN KEY(importRowId) REFERENCES importRows(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS sourceBalances (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sourceFileId INTEGER NOT NULL,
+      sourceAccountId INTEGER NOT NULL,
+      importRowId INTEGER,
+      date TEXT NOT NULL,
+      balanceCents INTEGER NOT NULL,
+      priority INTEGER,
+      rawJson TEXT,
+      createdAt TEXT,
+      UNIQUE(sourceFileId, sourceAccountId, date),
+      FOREIGN KEY(sourceFileId) REFERENCES sourceFiles(id) ON DELETE CASCADE,
+      FOREIGN KEY(sourceAccountId) REFERENCES sourceAccounts(id) ON DELETE CASCADE,
+      FOREIGN KEY(importRowId) REFERENCES importRows(id) ON DELETE SET NULL
     );
 
     CREATE TABLE IF NOT EXISTS robinhoodAccounts (

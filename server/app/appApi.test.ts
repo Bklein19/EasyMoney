@@ -19,6 +19,10 @@ function resetAppTables() {
   initDatabase();
   db.transaction(() => {
     for (const table of [
+      'sourceBalances',
+      'sourceTransactions',
+      'sourceAccounts',
+      'sourceFiles',
       'importRows',
       'importFiles',
       'transactionAnnotations',
@@ -342,6 +346,19 @@ test('app imports preview parses a Chase CSV on the backend', async () => {
     amount: 1250,
     originalCategory: 'Payment',
   });
+
+  const sourceFile = getDb().prepare('SELECT * FROM sourceFiles WHERE importFileId = ?').get(body.importFileId) as {
+    parserName: string;
+    sourceType: string;
+    status: string;
+  };
+  expect(sourceFile).toMatchObject({
+    parserName: 'chase-credit-card-csv',
+    sourceType: 'activity-export',
+    status: 'previewed',
+  });
+  const sourceTransactionCount = getDb().prepare('SELECT COUNT(*) AS count FROM sourceTransactions').get() as { count: number };
+  expect(sourceTransactionCount.count).toBe(10);
 });
 
 test('app imports commit inserts unique transactions and updates account balance', async () => {
@@ -389,6 +406,9 @@ test('app imports commit inserts unique transactions and updates account balance
     rowCount: 10,
     importBatchId: firstCommit.importBatchId,
   });
+  expect(
+    (getDb().prepare('SELECT status FROM sourceFiles WHERE importFileId = ?').get(preview.importFileId) as { status: string }).status
+  ).toBe('committed');
 
   const account = getDb().prepare('SELECT currentBalance FROM accounts WHERE id = ?').get(accountId) as { currentBalance: number };
   expect(account.currentBalance).toBeCloseTo(1350.22);
