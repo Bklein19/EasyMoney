@@ -87,7 +87,7 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
 
   const categoryId = optionalNumber(options.categoryId);
   if (categoryId !== null) {
-    clauses.push('COALESCE(ta.categoryId, t.categoryId) = $categoryId');
+    clauses.push('ta.categoryId = $categoryId');
     params.categoryId = categoryId;
   }
 
@@ -115,7 +115,7 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
       t.description LIKE $search OR
       t.merchant LIKE $search OR
       t.originalDescription LIKE $search OR
-      COALESCE(ta.notes, t.notes) LIKE $search OR
+      ta.notes LIKE $search OR
       c.name LIKE $search OR
       a.name LIKE $search
     )`);
@@ -135,7 +135,7 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
         a.name AS accountName,
         a.institution AS accountInstitution,
         a.type AS accountType,
-        COALESCE(ta.categoryId, t.categoryId) AS categoryId,
+        ta.categoryId AS categoryId,
         c.name AS categoryName,
         c.type AS categoryType,
         c.color AS categoryColor,
@@ -149,7 +149,7 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
         t.type,
         t.transactionKind,
         t.status,
-        COALESCE(ta.notes, t.notes) AS notes,
+        ta.notes AS notes,
         t.importBatchId,
         t.fingerprint,
         t.ledgerTransactionId,
@@ -157,7 +157,7 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
        FROM transactions t
        LEFT JOIN accounts a ON a.id = t.accountId
        LEFT JOIN transactionAnnotations ta ON ta.ledgerTransactionId = t.ledgerTransactionId
-       LEFT JOIN categories c ON c.id = COALESCE(ta.categoryId, t.categoryId)
+       LEFT JOIN categories c ON c.id = ta.categoryId
        ${where}
        ORDER BY t.date DESC, t.id DESC
        ${limitClause}`

@@ -173,9 +173,8 @@ test('app transactions endpoint joins account and category details', async () =>
     color: '#22c55e',
     icon: 'shopping-cart',
   });
-  insertRow('transactions', {
+  const transactionId = insertRow('transactions', {
     accountId,
-    categoryId,
     date: '2026-06-14',
     amount: -42.5,
     description: 'Neighborhood Market',
@@ -185,10 +184,13 @@ test('app transactions endpoint joins account and category details', async () =>
     type: 'expense',
     transactionKind: 'debit',
     status: 'cleared',
-    notes: 'weekly shop',
     importBatchId: 'batch-1',
     fingerprint: 'fingerprint-1',
     createdAt: '2026-06-14T12:00:00.000Z',
+  });
+  await putJson(`/api/transactions/${transactionId}`, {
+    categoryId,
+    notes: 'weekly shop',
   });
 
   const body = await getJson('/api/app/transactions');
@@ -235,24 +237,25 @@ test('app transactions endpoint supports domain query filters', async () => {
   const foodId = insertRow('categories', { name: 'Food', type: 'expense' });
   const incomeId = insertRow('categories', { name: 'Income', type: 'income' });
 
-  insertRow('transactions', {
+  const cafeId = insertRow('transactions', {
     accountId,
-    categoryId: foodId,
     date: '2026-06-14',
     amount: -20,
     description: 'Cafe',
     merchant: 'Blue Cafe',
     type: 'expense',
   });
-  insertRow('transactions', {
+  await putJson(`/api/transactions/${cafeId}`, { categoryId: foodId });
+
+  const payrollId = insertRow('transactions', {
     accountId,
-    categoryId: incomeId,
     date: '2026-06-15',
     amount: 100,
     description: 'Payroll',
     merchant: 'Employer',
     type: 'income',
   });
+  await putJson(`/api/transactions/${payrollId}`, { categoryId: incomeId });
 
   const body = await getJson('/api/app/transactions?type=expense&search=cafe&startDate=2026-06-01&endDate=2026-06-30');
 
@@ -266,19 +269,81 @@ test('app transactions search includes notes', async () => {
     type: 'checking',
   });
 
-  insertRow('transactions', {
+  const transactionId = insertRow('transactions', {
     accountId,
     date: '2026-06-16',
     amount: -12,
     description: 'Card purchase',
     merchant: 'Store',
-    notes: 'reimbursable team lunch',
     type: 'expense',
   });
+  await putJson(`/api/transactions/${transactionId}`, { notes: 'reimbursable team lunch' });
 
   const body = await getJson('/api/app/transactions?search=reimbursable');
 
   expect(body.transactions.map((transaction: { notes: string }) => transaction.notes)).toEqual(['reimbursable team lunch']);
+});
+
+test('app transactions ignore legacy category and notes columns without annotations', async () => {
+  const accountId = insertRow('accounts', {
+    name: 'Checking',
+    institution: 'Local Bank',
+    type: 'checking',
+  });
+  const categoryId = insertRow('categories', { name: 'Legacy Category', type: 'expense' });
+  insertRow('transactions', {
+    accountId,
+    categoryId,
+    date: '2026-06-16',
+    amount: -12,
+    description: 'Legacy row',
+    merchant: 'Store',
+    notes: 'legacy-only-note',
+    type: 'expense',
+  });
+
+  const body = await getJson('/api/app/transactions');
+  expect(body.transactions[0].category).toBeNull();
+  expect(body.transactions[0].notes).toBeNull();
+
+  const categoryFiltered = await getJson(`/api/app/transactions?categoryId=${categoryId}`);
+  expect(categoryFiltered.transactions).toEqual([]);
+
+  const searchFiltered = await getJson('/api/app/transactions?search=legacy-only-note');
+  expect(searchFiltered.transactions).toEqual([]);
+});
+
+test('app transaction updates store category and notes only as annotations', async () => {
+  const accountId = insertRow('accounts', {
+    name: 'Checking',
+    institution: 'Local Bank',
+    type: 'checking',
+  });
+  const categoryId = insertRow('categories', { name: 'Groceries', type: 'expense' });
+  const transactionId = insertRow('transactions', {
+    accountId,
+    date: '2026-06-16',
+    amount: -12,
+    description: 'Card purchase',
+    merchant: 'Store',
+    type: 'expense',
+  });
+
+  await putJson(`/api/transactions/${transactionId}`, {
+    categoryId,
+    notes: 'annotation-only',
+  });
+
+  const transaction = getDb().prepare('SELECT categoryId, notes FROM transactions WHERE id = ?').get(transactionId) as {
+    categoryId: number | null;
+    notes: string | null;
+  };
+  expect(transaction.categoryId).toBeNull();
+  expect(transaction.notes).toBeNull();
+
+  const body = await getJson('/api/app/transactions?search=annotation-only');
+  expect(body.transactions[0].category.id).toBe(categoryId);
+  expect(body.transactions[0].notes).toBe('annotation-only');
 });
 
 test('transaction annotations survive transaction row rebuild', async () => {

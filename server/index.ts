@@ -174,7 +174,6 @@ export const routes = wrapRoutes({
       const uncategorized = db.prepare("SELECT id FROM categories WHERE name = 'Uncategorized'").get() as { id: number } | undefined;
       const remove = db.transaction((id: number | string) => {
         if (uncategorized) {
-          db.prepare('UPDATE transactions SET categoryId = ? WHERE categoryId = ?').run(uncategorized.id, id);
           db.prepare('UPDATE transactionAnnotations SET categoryId = ? WHERE categoryId = ?').run(uncategorized.id, id);
         }
         db.prepare('DELETE FROM categorizationRules WHERE categoryId = ?').run(id);
