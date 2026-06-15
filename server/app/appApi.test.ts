@@ -67,9 +67,10 @@ async function putJson(path: string, payload: unknown, expectedStatus = 200) {
   return response.json();
 }
 
-async function postImportPreview(fileName: string, text: string) {
+async function postImportPreview(fileName: string, text: string, profile: unknown = null) {
   const form = new FormData();
   form.append('file', new File([text], fileName, { type: 'text/csv' }));
+  if (profile) form.append('profileJson', JSON.stringify(profile));
 
   const response = await fetch(`${TEST_URL}/api/app/imports/preview`, {
     method: 'POST',
@@ -434,6 +435,44 @@ test('app imports preview parses a Chase CSV on the backend', async () => {
   });
   const sourceTransactionCount = getDb().prepare('SELECT COUNT(*) AS count FROM sourceTransactions').get() as { count: number };
   expect(sourceTransactionCount.count).toBe(10);
+});
+
+test('app imports preview requires explicit mapping for unknown CSVs', async () => {
+  const csv = [
+    'When,Details,Value',
+    '06/14/2026,Coffee Shop,-6.75',
+  ].join('\n');
+
+  const unmapped = await postImportPreview('unknown-bank.csv', csv);
+  expect(unmapped.requiresMapping).toBe(true);
+  expect(unmapped.transactions).toBeUndefined();
+  expect(unmapped.mapping).toMatchObject({
+    dateColumn: '',
+    descriptionColumn: 'Details',
+    amountColumn: '',
+  });
+
+  const mapped = await postImportPreview('unknown-bank.csv', csv, {
+    name: 'Custom CSV',
+    statementType: 'bank',
+    dateColumns: ['When'],
+    dateFormats: ['MM/dd/yyyy'],
+    descriptionColumn: 'Details',
+    merchantColumn: 'Details',
+    categoryColumn: null,
+    amountConfig: { type: 'single', column: 'Value', negativeIsDebit: true },
+  });
+
+  expect(mapped.requiresMapping).toBe(false);
+  expect(mapped.profileUsed).toBe('Custom CSV');
+  expect(mapped.transactions).toHaveLength(1);
+  expect(mapped.transactions[0]).toMatchObject({
+    amount: -6.75,
+    description: 'Coffee Shop',
+    merchant: 'Coffee Shop',
+  });
+  const importFile = getDb().prepare('SELECT parserName FROM importFiles WHERE id = ?').get(mapped.importFileId) as { parserName: string };
+  expect(importFile.parserName).toBe('custom-csv');
 });
 
 test('app imports commit inserts unique transactions and updates account balance', async () => {

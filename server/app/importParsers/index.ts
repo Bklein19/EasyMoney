@@ -2,7 +2,7 @@ import type { AppImportParser } from '../importTypes.ts';
 import { bofaActivityParser } from './bofaActivity.ts';
 import { bofaStatementParser } from './bofaStatement.ts';
 import { chaseCreditCardParser } from './chaseCreditCard.ts';
-import { legacyCsvProfileParsers } from './legacyCsvProfiles.ts';
+import { easyMoneyCsvProfileParsers } from './easyMoneyCsvProfiles.ts';
 import { merrillActivityParser } from './merrillActivity.ts';
 import { tiaaActivityParser } from './tiaaActivity.ts';
 import { vanguardActivityParser } from './vanguardActivity.ts';
@@ -18,7 +18,7 @@ export const IMPORT_PARSERS: AppImportParser[] = [
   tiaaActivityParser,
   vanguardActivityParser,
   vanguardStatementParser,
-  ...legacyCsvProfileParsers,
+  ...easyMoneyCsvProfileParsers,
 ];
 
 export function resolveImportParser(file: { fileName: string; headers: string[]; sample: string }) {

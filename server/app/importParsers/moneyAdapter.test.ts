@@ -263,7 +263,7 @@ test.each([
   ['Capital One', 'capital-one-csv', 'capital-one.csv', ['Transaction Date', 'Posted Date', 'Card No.', 'Description', 'Category', 'Debit', 'Credit']],
   ['Citi', 'citi-csv', 'citi.csv', ['Status', 'Date', 'Description', 'Debit', 'Credit']],
   ['Robinhood Credit Card', 'robinhood-credit-card-csv', 'robinhood.csv', ['Date', 'Time', 'Cardholder', 'Amount', 'Points', 'Balance', 'Status', 'Type', 'Merchant', 'Description']],
-])('import parser registry resolves EasyMoney legacy CSV profile %s', (_name, expectedId, fileName, headers) => {
+])('import parser registry resolves EasyMoney CSV profile %s', (_name, expectedId, fileName, headers) => {
   const parser = resolveImportParser({
     fileName,
     headers,
@@ -275,7 +275,7 @@ test.each([
   expect(parser?.priority).toBe(10);
 });
 
-test('EasyMoney legacy CSV profile parser preserves credit-card semantics', async () => {
+test('EasyMoney CSV profile parser preserves credit-card semantics', async () => {
   const parser = resolveImportParser({
     fileName: 'apple-card.csv',
     headers: ['Transaction Date', 'Clearing Date', 'Description', 'Merchant', 'Category', 'Type', 'Amount (USD)', 'Purchased By'],
@@ -312,7 +312,7 @@ test('EasyMoney legacy CSV profile parser preserves credit-card semantics', asyn
       originalCategory: 'Food & Drink',
       status: 'cleared',
       transactionKind: null,
-      legacyProfile: 'Apple Card',
+      parser: 'apple-card-csv',
     },
   }]);
   expect(result.balances).toEqual([]);

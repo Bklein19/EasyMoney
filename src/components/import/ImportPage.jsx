@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useCSVImport } from '../../hooks/useCSVImport';
-import { SUPPORTED_BANK_NAMES } from '../../import/parsers';
-import { buildCustomProfile, mappingFromProfile } from '../../utils/bankProfiles';
+import { buildCustomProfile, mappingFromProfile } from '../../utils/csvMapping';
+import { SUPPORTED_IMPORT_FORMATS } from '../../utils/importFormats';
 import { useImportProfiles } from '../../hooks/useImportProfiles';
 import { getHeaderSignature } from '../../utils/importIdentity';
 import FileDropZone from './FileDropZone';
@@ -96,7 +96,7 @@ export default function ImportPage() {
           
           <div className="supported-formats glass-card">
             <h3>Supported Banks</h3>
-            <p>We automatically detect formats from {SUPPORTED_BANK_NAMES.join(', ')}. For other banks, you can easily map the columns yourself.</p>
+            <p>We automatically detect formats from {SUPPORTED_IMPORT_FORMATS.join(', ')}. For other CSVs, map the columns yourself.</p>
           </div>
         </div>
       )}
