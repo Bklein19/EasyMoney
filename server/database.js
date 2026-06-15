@@ -343,7 +343,6 @@ export function initDatabase() {
       priority INTEGER,
       rawJson TEXT,
       createdAt TEXT,
-      UNIQUE(sourceFileId, sourceAccountId, date),
       FOREIGN KEY(sourceFileId) REFERENCES sourceFiles(id) ON DELETE CASCADE,
       FOREIGN KEY(sourceAccountId) REFERENCES sourceAccounts(id) ON DELETE CASCADE,
       FOREIGN KEY(importRowId) REFERENCES importRows(id) ON DELETE SET NULL
@@ -511,6 +510,44 @@ export function initDatabase() {
   const sourceAccountColumns = db.prepare('PRAGMA table_info(sourceAccounts)').all().map(column => column.name);
   if (!sourceAccountColumns.includes('accountId')) {
     db.prepare('ALTER TABLE sourceAccounts ADD COLUMN accountId INTEGER').run();
+  }
+
+  const sourceBalanceIndexes = db.prepare('PRAGMA index_list(sourceBalances)').all();
+  const hasLegacySourceBalanceUniqueIndex = sourceBalanceIndexes.some(index =>
+    index.unique === 1 &&
+    index.origin === 'u' &&
+    db.prepare(`PRAGMA index_info(${index.name})`).all().map(column => column.name).join(',') === 'sourceFileId,sourceAccountId,date'
+  );
+  if (hasLegacySourceBalanceUniqueIndex) {
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE sourceBalances_next (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          sourceFileId INTEGER NOT NULL,
+          sourceAccountId INTEGER NOT NULL,
+          importRowId INTEGER,
+          date TEXT NOT NULL,
+          balanceCents INTEGER NOT NULL,
+          priority INTEGER,
+          rawJson TEXT,
+          createdAt TEXT,
+          FOREIGN KEY(sourceFileId) REFERENCES sourceFiles(id) ON DELETE CASCADE,
+          FOREIGN KEY(sourceAccountId) REFERENCES sourceAccounts(id) ON DELETE CASCADE,
+          FOREIGN KEY(importRowId) REFERENCES importRows(id) ON DELETE SET NULL
+        );
+      `);
+      db.prepare(`
+        INSERT INTO sourceBalances_next (
+          id, sourceFileId, sourceAccountId, importRowId, date, balanceCents, priority, rawJson, createdAt
+        )
+        SELECT id, sourceFileId, sourceAccountId, importRowId, date, balanceCents, priority, rawJson, createdAt
+        FROM sourceBalances
+      `).run();
+      db.exec(`
+        DROP TABLE sourceBalances;
+        ALTER TABLE sourceBalances_next RENAME TO sourceBalances;
+      `);
+    })();
   }
 }
 

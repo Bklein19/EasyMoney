@@ -677,6 +677,51 @@ test('app imports commit materializes staged statement balances', async () => {
   expect(JSON.parse(balanceRow.normalizedJson)).toMatchObject({ balanceCents: 987654 });
 });
 
+test('app import preview allows native parsers to handle malformed institution CSV quoting', async () => {
+  const preview = await postImportPreview('bofa-checking-1234-2026-01-01-to-2026-01-31.csv', [
+    'Description,,Summary Amt.',
+    'Opening Balance,,"1,000.00"',
+    'Date,Description,Amount,Running Bal.',
+    '01/05/2026,"Zelle payment from Renter for "JAN RENT"; Conf# ABC123","1,500.00","2,500.00"',
+  ].join('\n'));
+
+  expect(preview.profileUsed).toBe('Bank of America Activity');
+  expect(preview.transactions).toHaveLength(1);
+  expect(preview.transactions[0]).toMatchObject({
+    date: '2026-01-05',
+    amount: 1500,
+    description: 'Zelle payment from Renter for JAN RENT; Conf# ABC123',
+    account: 'Adv Plus Banking - 1234',
+  });
+  expect(preview.balanceRowIds).toHaveLength(1);
+});
+
+test('app import preview stages multiple source balances for the same account and date', async () => {
+  const preview = await postImportPreview('bofa-savings-1234-2026-01-01-to-2026-01-31.csv', [
+    'Description,,Summary Amt.',
+    'Opening Balance,,"1,000.00"',
+    'Date,Description,Amount,Running Bal.',
+    '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+    '01/05/2026,UTILITY BILL,"-125.50","2,374.50"',
+  ].join('\n'));
+
+  expect(preview.profileUsed).toBe('Bank of America Activity');
+  expect(preview.transactions).toHaveLength(2);
+  expect(preview.balanceRowIds).toHaveLength(2);
+
+  const sourceBalances = getDb().prepare(`
+    SELECT sb.date, sb.balanceCents
+    FROM sourceBalances sb
+    JOIN sourceFiles sf ON sf.id = sb.sourceFileId
+    WHERE sf.importFileId = ?
+    ORDER BY sb.importRowId ASC
+  `).all(preview.importFileId);
+  expect(sourceBalances).toEqual([
+    { date: '2026-01-05', balanceCents: 250000 },
+    { date: '2026-01-05', balanceCents: 237450 },
+  ]);
+});
+
 test('app import materialization is independent of import file commit order', async () => {
   const accountId = insertRow('accounts', {
     name: 'Chase Sapphire',

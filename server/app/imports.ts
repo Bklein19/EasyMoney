@@ -391,7 +391,15 @@ function readStagedBalances(importFileId: number, balanceRowIds: number[] | null
 }
 
 export async function previewImport({ fileName, text, fileBytes, customProfile = null }: PreviewImportOptions) {
-  const parsed = isCsvFile(fileName) ? parseCsv(text) : null;
+  let parsed: ReturnType<typeof parseCsv> | null = null;
+  let csvParseError: Error | null = null;
+  if (isCsvFile(fileName)) {
+    try {
+      parsed = parseCsv(text);
+    } catch (error) {
+      csvParseError = error as Error;
+    }
+  }
   const rows = parsed?.data || [];
   const headers = parsed?.meta.fields || Object.keys(rows[0] || {});
   if (parsed && !rows.length) throw new Error('No data found in CSV');
@@ -450,6 +458,7 @@ export async function previewImport({ fileName, text, fileBytes, customProfile =
     };
   }
 
+  if (csvParseError) throw csvParseError;
   if (!parsed || !rows.length) throw new Error('No parser matched this file.');
 
   const detectedProfile = detectBank(headers, fileName);
