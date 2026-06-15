@@ -178,9 +178,9 @@
 
 .tx-delete-btn:hover,
 .tx-delete-btn:focus-visible {
-  background: rgba(239, 68, 68, 0.12);
-  border-color: rgba(239, 68, 68, 0.35);
-  color: var(--accent-red);
+  background: var(--color-danger-bg);
+  border-color: color-mix(in srgb, var(--color-danger) 35%, transparent);
+  color: var(--color-danger);
   outline: none;
 }
 

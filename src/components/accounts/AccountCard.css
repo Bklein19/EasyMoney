@@ -10,7 +10,7 @@
 
 .account-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-md);
 }
 
 .account-card::before {
@@ -20,7 +20,7 @@
   left: 0;
   width: 100%;
   height: 4px;
-  background: linear-gradient(90deg, var(--accent-blue) 0%, var(--accent-purple) 100%);
+  background: linear-gradient(90deg, var(--accent-blue) 0%, var(--accent-violet) 100%);
   opacity: 0.5;
   transition: opacity 0.2s ease;
 }
@@ -38,18 +38,18 @@
 
 .account-icon-wrapper {
   padding: 0.75rem;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--bg-subtle);
   border-radius: 0.75rem;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
-.account-icon.checking { color: #34d399; }
+.account-icon.checking { color: var(--color-success); }
 .account-icon.savings { color: #60a5fa; }
 .account-icon.credit { color: #f472b6; }
-.account-icon.investment { color: #fbbf24; }
-.account-icon.default { color: #94a3b8; }
+.account-icon.investment { color: var(--color-warning); }
+.account-icon.default { color: var(--text-secondary); }
 
 .icon-btn {
   background: transparent;
@@ -70,7 +70,7 @@
 }
 
 .icon-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--bg-subtle-hover);
   color: var(--text-primary);
 }
 
@@ -87,13 +87,13 @@
 }
 
 .save-btn:hover {
-  background: rgba(34, 197, 94, 0.12);
-  color: #22c55e;
+  background: var(--color-success-bg);
+  color: var(--color-success);
 }
 
 .delete-btn:hover {
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
 }
 
 .save-btn:disabled:hover,
@@ -150,14 +150,14 @@
   letter-spacing: 0.05em;
   padding: 0.25rem 0.5rem;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--bg-subtle-hover);
   color: var(--text-secondary);
 }
 
 .account-balance {
   margin-top: auto;
   padding-top: 1rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid var(--hairline);
 }
 
 .balance-label {
@@ -171,5 +171,5 @@
   font-weight: 700;
 }
 
-.balance-value.positive { color: #fff; }
-.balance-value.negative { color: #fca5a5; }
+.balance-value.positive { color: var(--text-primary); }
+.balance-value.negative { color: var(--color-danger); }

@@ -5,9 +5,9 @@
 }
 
 .error-banner {
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.2);
-  color: #ef4444;
+  background: var(--color-danger-bg);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 24%, transparent);
+  color: var(--color-danger);
   padding: 1rem;
   border-radius: 0.5rem;
   margin-bottom: 2rem;
@@ -86,8 +86,8 @@
 .success-icon-wrapper {
   width: 64px;
   height: 64px;
-  background: rgba(52, 211, 153, 0.1);
-  color: #34d399;
+  background: var(--color-success-bg);
+  color: var(--color-success);
   border-radius: 50%;
   display: flex;
   align-items: center;

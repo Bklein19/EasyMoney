@@ -1,5 +1,5 @@
 .file-drop-zone {
-  border: 2px dashed rgba(255, 255, 255, 0.2);
+  border: 2px dashed var(--glass-border);
   border-radius: 1rem;
   padding: 4rem 2rem;
   text-align: center;
@@ -9,7 +9,7 @@
 
 .file-drop-zone.dragging {
   border-color: var(--accent-blue);
-  background: rgba(59, 130, 246, 0.05);
+  background: var(--color-info-bg);
 }
 
 .file-drop-zone.parsing {

@@ -44,7 +44,7 @@
   align-items: center;
   gap: 1rem;
   flex-wrap: wrap;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--bg-base);
   padding: 1rem;
   border-radius: 0.75rem;
 }
@@ -66,7 +66,7 @@
   align-items: center;
   padding: 0.25rem 0.6rem;
   border-radius: 999px;
-  background: rgba(148, 163, 184, 0.12);
+  background: var(--bg-subtle-hover);
   color: var(--text-secondary);
   font-size: 0.75rem;
   font-weight: 600;
@@ -74,13 +74,13 @@
 }
 
 .account-kind-badge.credit {
-  background: rgba(59, 130, 246, 0.16);
-  color: #93c5fd;
+  background: var(--color-info-bg);
+  color: var(--color-info);
 }
 
 .account-kind-badge.manual {
-  background: rgba(245, 158, 11, 0.14);
-  color: #fbbf24;
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
 }
 
 .preview-stats {
@@ -108,8 +108,8 @@
   font-weight: 700;
 }
 
-.stat-value.positive { color: #34d399; }
-.stat-value.negative { color: #f87171; }
+.stat-value.positive { color: var(--color-success); }
+.stat-value.negative { color: var(--color-danger); }
 
 .preview-table-container {
   border-radius: 1rem;
@@ -125,18 +125,18 @@
 .preview-table td {
   padding: 1rem;
   text-align: left;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--hairline);
 }
 
 .preview-table th {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--bg-subtle);
   font-weight: 500;
   color: var(--text-secondary);
   font-size: 0.875rem;
 }
 
 .preview-table tbody tr:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--bg-subtle);
 }
 
 .preview-table tbody tr.duplicate-row {
@@ -152,7 +152,7 @@
 
 .text-right { text-align: right !important; }
 .font-medium { font-weight: 500; }
-.positive { color: #34d399 !important; }
+.positive { color: var(--color-success) !important; }
 
 .badge {
   font-size: 0.75rem;
@@ -161,18 +161,18 @@
 }
 
 .badge.categorized {
-  background: rgba(52, 211, 153, 0.1);
-  color: #34d399;
+  background: var(--color-success-bg);
+  color: var(--color-success);
 }
 
 .badge.uncategorized {
-  background: rgba(148, 163, 184, 0.1);
-  color: #94a3b8;
+  background: var(--bg-subtle-hover);
+  color: var(--text-secondary);
 }
 
 .badge.duplicate {
-  background: rgba(245, 158, 11, 0.14);
-  color: #fbbf24;
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
 }
 
 .table-footer {
@@ -180,7 +180,7 @@
   text-align: center;
   color: var(--text-secondary);
   font-size: 0.875rem;
-  background: rgba(255, 255, 255, 0.01);
+  background: var(--bg-base);
 }
 
 .preview-actions {

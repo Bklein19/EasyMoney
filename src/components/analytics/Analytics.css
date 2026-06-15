@@ -405,14 +405,14 @@
   min-width: 0;
   overflow: hidden;
   border-radius: var(--radius-sm);
-  background: rgba(148, 163, 184, 0.1);
+  background: var(--bg-subtle-hover);
 }
 
 .category-bar-fill {
   display: block;
   height: 100%;
   border-radius: inherit;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  box-shadow: inset 0 0 0 1px var(--inset-highlight);
 }
 
 .category-bar-value {
@@ -894,7 +894,7 @@
   padding: var(--space-3);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
-  background: rgba(15, 23, 42, 0.35);
+  background: var(--bg-base);
 }
 
 .drilldown-search {

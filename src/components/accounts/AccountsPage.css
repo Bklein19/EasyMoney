@@ -43,7 +43,7 @@
   min-height: 220px;
   border: 1px dashed var(--glass-border);
   border-radius: var(--radius-lg);
-  background: rgba(148, 163, 184, 0.04);
+  background: var(--bg-subtle);
 }
 
 @media (max-width: 768px) {
