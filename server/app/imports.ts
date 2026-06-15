@@ -333,14 +333,16 @@ export async function previewImport({ fileName, text, fileBytes, customProfile =
       fileBytes,
     })));
     const transactions = parsedResult.transactions.filter((transaction): transaction is ParsedImportTransaction => transaction !== null);
-    if (!transactions.length) {
-      throw new Error('Could not parse any valid transactions from this file.');
+    if (!transactions.length && !parsedResult.balances.length) {
+      throw new Error('Could not parse any valid transactions or balances from this file.');
     }
     const rawRows = rows.length
       ? rows
-      : parsedResult.transactions.map((transaction, index) => ({
-        sourceRowIndex: String(transaction?.sourceRowIndex ?? index),
-      }));
+      : parsedResult.transactions.length
+        ? parsedResult.transactions.map((transaction, index) => ({
+          sourceRowIndex: String(transaction?.sourceRowIndex ?? index),
+        }))
+        : [];
 
     const preview = saveImportPreview({
       fileName,
