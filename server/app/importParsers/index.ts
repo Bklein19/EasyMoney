@@ -1,10 +1,14 @@
 import type { AppImportParser } from '../importTypes.ts';
+import { bofaActivityParser } from './bofaActivity.ts';
+import { bofaStatementParser } from './bofaStatement.ts';
 import { chaseCreditCardParser } from './chaseCreditCard.ts';
 import { vanguardActivityParser } from './vanguardActivity.ts';
 import { vanguardStatementParser } from './vanguardStatement.ts';
 
 export const IMPORT_PARSERS: AppImportParser[] = [
   chaseCreditCardParser,
+  bofaActivityParser,
+  bofaStatementParser,
   vanguardActivityParser,
   vanguardStatementParser,
 ];

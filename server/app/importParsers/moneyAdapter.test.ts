@@ -1,4 +1,7 @@
 import { expect, test } from 'bun:test';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { resolveImportParser } from './index.ts';
 import { createMoneyParserAdapter } from './moneyAdapter.ts';
 
@@ -130,4 +133,126 @@ test('import parser registry resolves Vanguard statement PDFs', () => {
     sample: 'Vanguard Brokerage Services',
   });
   expect(contentParser?.id).toBe('vanguard-statement-pdf');
+});
+
+test('import parser registry resolves Bank of America activity CSV exports', () => {
+  const namedParser = resolveImportParser({
+    fileName: 'bofa-checking-1234-2026-01-01-to-2026-06-30.csv',
+    headers: [],
+    sample: '',
+  });
+  expect(namedParser?.id).toBe('bofa-activity-csv');
+  expect(namedParser?.sourceType).toBe('activity-export');
+  expect(namedParser?.priority).toBe(100);
+
+  const contentParser = resolveImportParser({
+    fileName: 'download.csv',
+    headers: [],
+    sample: [
+      'Description,,Summary Amt.',
+      'Opening Balance,,"1,234.56"',
+      'Date,Description,Amount,Running Bal.',
+    ].join('\n'),
+  });
+  expect(contentParser?.id).toBe('bofa-activity-csv');
+});
+
+test('Bank of America activity adapter parses sanitized CSV exports', async () => {
+  const parser = resolveImportParser({
+    fileName: 'bofa-checking-1234-2026-01-01-to-2026-01-31.csv',
+    headers: [],
+    sample: '',
+  });
+  expect(parser?.id).toBe('bofa-activity-csv');
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'bofa-activity-test-'));
+  const filePath = path.join(dir, 'bofa-checking-1234-2026-01-01-to-2026-01-31.csv');
+  await fs.writeFile(filePath, [
+    'Description,,Summary Amt.',
+    'Opening Balance,,1000.00',
+    'Date,Description,Amount,Running Bal.',
+    '01/05/2026,ACME PAYROLL,2500.00,3500.00',
+    '01/06/2026,UTILITY BILL,-125.50,3374.50',
+  ].join('\n'));
+
+  try {
+    const result = await parser!.parse({
+      fileName: path.basename(filePath),
+      headers: [],
+      rows: [],
+      text: await fs.readFile(filePath, 'utf8'),
+      filePath,
+    });
+
+    expect(result.transactions).toEqual([
+      {
+        sourceRowIndex: 0,
+        date: '2026-01-05',
+        amountCents: 250000,
+        description: 'ACME PAYROLL',
+        institution: 'Bank of America',
+        account: 'Adv Plus Banking - 1234',
+        sourceRole: 'activity',
+        raw: {
+          moneyId: result.transactions[0]?.raw?.moneyId,
+          moneyCategory: 'activity',
+          source: 'bofa-csv',
+          runningBalance: '3500.00',
+        },
+      },
+      {
+        sourceRowIndex: 1,
+        date: '2026-01-06',
+        amountCents: -12550,
+        description: 'UTILITY BILL',
+        institution: 'Bank of America',
+        account: 'Adv Plus Banking - 1234',
+        sourceRole: 'activity',
+        raw: {
+          moneyId: result.transactions[1]?.raw?.moneyId,
+          moneyCategory: 'activity',
+          source: 'bofa-csv',
+          runningBalance: '3374.50',
+        },
+      },
+    ]);
+    expect(result.balances).toEqual([
+      {
+        sourceRowIndex: 0,
+        date: '2026-01-05',
+        balanceCents: 350000,
+        institution: 'Bank of America',
+        account: 'Adv Plus Banking - 1234',
+        raw: {},
+      },
+      {
+        sourceRowIndex: 1,
+        date: '2026-01-06',
+        balanceCents: 337450,
+        institution: 'Bank of America',
+        account: 'Adv Plus Banking - 1234',
+        raw: {},
+      },
+    ]);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('import parser registry resolves Bank of America statement PDFs', () => {
+  const depositParser = resolveImportParser({
+    fileName: 'bofa-checking-1234-2026-june-statement.pdf',
+    headers: [],
+    sample: '',
+  });
+  expect(depositParser?.id).toBe('bofa-statement-pdf');
+  expect(depositParser?.sourceType).toBe('statement');
+  expect(depositParser?.priority).toBe(50);
+
+  const contentParser = resolveImportParser({
+    fileName: 'statement.pdf',
+    headers: [],
+    sample: 'Bank of America Payment Information New Balance Total',
+  });
+  expect(contentParser?.id).toBe('bofa-statement-pdf');
 });
