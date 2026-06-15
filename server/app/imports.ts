@@ -11,7 +11,7 @@ import {
 } from '../../src/utils/bankProfiles.js';
 import type { CommitImportTransaction, ImportPreviewTransaction, ImportProfile, ParsedImportBalance, ParsedImportTransaction } from './importTypes.ts';
 import { resolveImportParser } from './importParsers/index.ts';
-import { getLedgerTransactionId } from './transactionIdentity.ts';
+import { assignLedgerTransactionIdentities } from './transactionIdentity.ts';
 
 interface PreviewImportOptions {
   fileName: string;
@@ -557,7 +557,6 @@ export function materializeImportTransactions({
       continue;
     }
 
-    seen.add(fingerprint);
     unique.push({
       ...withFingerprint,
       importFileId: transaction.importFileId || fallbackImportFileId || 0,
@@ -595,23 +594,10 @@ export function materializeImportTransactions({
     .sort((a, b) => a.date.localeCompare(b.date))
     .at(-1);
   const importFileId = stagedImportFileId || fallbackImportFileId || transactionsToCommit.find(transaction => transaction.importFileId)?.importFileId || null;
-  const occurrenceCounts = new Map<string, number>();
+  const transactionsWithLedgerIds = assignLedgerTransactionIdentities(unique);
 
   db.transaction(() => {
-    for (const transaction of unique) {
-      const occurrenceBaseKey = [
-        transaction.accountId,
-        normalizeDate(transaction.date),
-        normalizeAmount(transaction.amount),
-        normalizeText(transaction.originalDescription || transaction.description || transaction.merchant || ''),
-        transaction.sourceRole || transaction.transactionKind || 'activity',
-      ].join('|');
-      const occurrenceIndex = occurrenceCounts.get(occurrenceBaseKey) || 0;
-      occurrenceCounts.set(occurrenceBaseKey, occurrenceIndex + 1);
-      const ledgerTransactionId = getLedgerTransactionId({
-        ...transaction,
-        occurrenceIndex,
-      });
+    for (const { transaction, occurrenceIndex, ledgerTransactionId } of transactionsWithLedgerIds) {
       const transactionId = insertRow('transactions', {
         ...transaction,
         ledgerTransactionId,

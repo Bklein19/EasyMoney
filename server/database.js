@@ -27,6 +27,51 @@ function normalizeParams(params) {
   );
 }
 
+function normalizeIdentityText(value = '') {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeIdentityDate(value = '') {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
+  return date.toISOString().slice(0, 10);
+}
+
+function transactionIdentityBaseKey(transaction) {
+  return [
+    transaction.accountId || '',
+    normalizeIdentityDate(transaction.date),
+    Number(transaction.amount || 0).toFixed(2),
+    normalizeIdentityText(transaction.originalDescription || transaction.description || transaction.merchant || ''),
+    normalizeIdentityText(transaction.sourceRole || transaction.transactionKind || 'activity'),
+  ].join('|');
+}
+
+function transactionOccurrenceSortKey(transaction) {
+  const token = value => typeof value === 'number' ? String(value).padStart(16, '0') : String(value || '');
+  return [
+    transaction.stableSourceId || '',
+    token(transaction.importFileId),
+    token(transaction.importRowId),
+    token(transaction.sourceRowIndex),
+    transaction.fingerprint || '',
+    transaction.createdAt || '',
+    token(transaction.id),
+    normalizeIdentityDate(transaction.date),
+    Number(transaction.amount || 0).toFixed(2),
+    normalizeIdentityText(transaction.originalDescription || transaction.description || transaction.merchant || ''),
+  ].join('|');
+}
+
+function ledgerTransactionIdFor(transaction, occurrenceIndex) {
+  return `txn_${hashContent(`${transactionIdentityBaseKey(transaction)}|${occurrenceIndex}`).slice(0, 32)}`;
+}
+
 function wrapStatement(statement) {
   return {
     all: (...params) => statement.all(...params.map(normalizeParams)),
@@ -392,28 +437,48 @@ export function initDatabase() {
   db.prepare('CREATE INDEX IF NOT EXISTS idx_transactions_ledger_id ON transactions (ledgerTransactionId)').run();
 
   const transactionsNeedingLedgerIds = db.prepare(`
-    SELECT id, accountId, date, amount, description, merchant, originalDescription, transactionKind, occurrenceIndex
-    FROM transactions
-    WHERE ledgerTransactionId IS NULL OR ledgerTransactionId = ''
-    ORDER BY accountId ASC, date ASC, amount ASC, description ASC, id ASC
+    SELECT
+      t.id,
+      t.accountId,
+      t.date,
+      t.amount,
+      t.description,
+      t.merchant,
+      t.originalDescription,
+      t.transactionKind,
+      t.occurrenceIndex,
+      t.importBatchId,
+      t.fingerprint,
+      t.createdAt,
+      ir.importFileId,
+      ir.id AS importRowId,
+      ir.rowIndex AS sourceRowIndex,
+      st.stableSourceId
+    FROM transactions t
+    LEFT JOIN importRows ir ON ir.transactionId = t.id
+    LEFT JOIN sourceTransactions st ON st.importRowId = ir.id
+    WHERE t.ledgerTransactionId IS NULL OR t.ledgerTransactionId = ''
   `).all();
-  const groupCounts = new Map();
+  const groups = new Map();
   for (const transaction of transactionsNeedingLedgerIds) {
-    const baseKey = [
-      transaction.accountId || '',
-      transaction.date || '',
-      Number(transaction.amount || 0).toFixed(2),
-      String(transaction.originalDescription || transaction.description || transaction.merchant || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(),
-      transaction.transactionKind || 'activity',
-    ].join('|');
-    const occurrenceIndex = groupCounts.get(baseKey) || 0;
-    groupCounts.set(baseKey, occurrenceIndex + 1);
-    const ledgerTransactionId = `txn_${hashContent(`${baseKey}|${occurrenceIndex}`).slice(0, 32)}`;
-    db.prepare('UPDATE transactions SET ledgerTransactionId = ?, occurrenceIndex = ? WHERE id = ?').run(
-      ledgerTransactionId,
-      occurrenceIndex,
-      transaction.id
-    );
+    const baseKey = transactionIdentityBaseKey(transaction);
+    const group = groups.get(baseKey);
+    if (group) {
+      group.push(transaction);
+    } else {
+      groups.set(baseKey, [transaction]);
+    }
+  }
+  for (const group of groups.values()) {
+    group
+      .sort((a, b) => transactionOccurrenceSortKey(a).localeCompare(transactionOccurrenceSortKey(b)))
+      .forEach((transaction, occurrenceIndex) => {
+        db.prepare('UPDATE transactions SET ledgerTransactionId = ?, occurrenceIndex = ? WHERE id = ?').run(
+          ledgerTransactionIdFor(transaction, occurrenceIndex),
+          occurrenceIndex,
+          transaction.id
+        );
+      });
   }
 
   db.prepare(`
