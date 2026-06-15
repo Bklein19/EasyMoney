@@ -112,7 +112,7 @@ const TABLES = {
     'parserPriority', 'institution', 'coveredFrom', 'coveredTo', 'status', 'createdAt', 'committedAt'
   ],
   sourceAccounts: [
-    'id', 'sourceFileId', 'institution', 'sourceAccountKey', 'sourceAccountName', 'rawJson', 'createdAt'
+    'id', 'sourceFileId', 'accountId', 'institution', 'sourceAccountKey', 'sourceAccountName', 'rawJson', 'createdAt'
   ],
   sourceTransactions: [
     'id', 'sourceFileId', 'sourceAccountId', 'importRowId', 'stableSourceId', 'date',
@@ -303,13 +303,15 @@ export function initDatabase() {
     CREATE TABLE IF NOT EXISTS sourceAccounts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       sourceFileId INTEGER NOT NULL,
+      accountId INTEGER,
       institution TEXT,
       sourceAccountKey TEXT NOT NULL,
       sourceAccountName TEXT,
       rawJson TEXT,
       createdAt TEXT,
       UNIQUE(sourceFileId, institution, sourceAccountKey),
-      FOREIGN KEY(sourceFileId) REFERENCES sourceFiles(id) ON DELETE CASCADE
+      FOREIGN KEY(sourceFileId) REFERENCES sourceFiles(id) ON DELETE CASCADE,
+      FOREIGN KEY(accountId) REFERENCES accounts(id) ON DELETE SET NULL
     );
 
     CREATE TABLE IF NOT EXISTS sourceTransactions (
@@ -504,6 +506,11 @@ export function initDatabase() {
   const importRowColumns = db.prepare('PRAGMA table_info(importRows)').all().map(column => column.name);
   if (!importRowColumns.includes('rowType')) {
     db.prepare("ALTER TABLE importRows ADD COLUMN rowType TEXT DEFAULT 'transaction'").run();
+  }
+
+  const sourceAccountColumns = db.prepare('PRAGMA table_info(sourceAccounts)').all().map(column => column.name);
+  if (!sourceAccountColumns.includes('accountId')) {
+    db.prepare('ALTER TABLE sourceAccounts ADD COLUMN accountId INTEGER').run();
   }
 }
 

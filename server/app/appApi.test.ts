@@ -7,6 +7,7 @@ process.env.EASYMONEY_DB_PATH = path.join(os.tmpdir(), `easymoney-app-api-${proc
 
 const { createServer } = await import('../index.ts');
 const { getDb, initDatabase, insertRow } = await import('../database.js');
+const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
 const server = createServer({ port: 0 });
 const TEST_URL = `http://localhost:${server.port}`;
 
@@ -87,10 +88,19 @@ function csvFromRows(rows: string[]) {
 
 function snapshotAccountTransactions(accountId: number) {
   return getDb().prepare(`
-    SELECT date, amount, description, merchant, originalCategory, transactionKind, fingerprint, importBatchId
+    SELECT date, amount, description, merchant, originalDescription, originalCategory, type, transactionKind, status, fingerprint, importBatchId, ledgerTransactionId, occurrenceIndex
     FROM transactions
     WHERE accountId = ?
-    ORDER BY fingerprint ASC
+    ORDER BY ledgerTransactionId ASC
+  `).all(accountId);
+}
+
+function snapshotBalanceSnapshots(accountId: number) {
+  return getDb().prepare(`
+    SELECT accountId, month, balance, capturedAt
+    FROM balanceSnapshots
+    WHERE accountId = ?
+    ORDER BY month ASC
   `).all(accountId);
 }
 
@@ -522,6 +532,62 @@ test('app imports commit inserts unique transactions and updates account balance
 
   expect(secondCommit.importedCount).toBe(0);
   expect(secondCommit.skippedDuplicateCount).toBe(10);
+});
+
+test('source facts can rebuild committed transaction app rows without losing annotations', async () => {
+  const csv = fs.readFileSync(path.resolve(import.meta.dir, '..', '..', 'sample-imports', 'chase-credit-card-demo.csv'), 'utf8');
+  const accountId = insertRow('accounts', {
+    name: 'Chase Sapphire',
+    institution: 'Chase',
+    type: 'credit',
+    currentBalance: 100,
+  });
+  const categoryId = insertRow('categories', {
+    name: 'Income',
+    type: 'income',
+  });
+  const preview = await postImportPreview('chase-credit-card-demo.csv', csv);
+  await postJson('/api/app/imports/commit', {
+    accountId,
+    importFileId: preview.importFileId,
+    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+  }, 201);
+
+  const payroll = getDb().prepare("SELECT id, ledgerTransactionId FROM transactions WHERE description = 'ACME PAYROLL'").get() as {
+    id: number;
+    ledgerTransactionId: string;
+  };
+  await putJson(`/api/transactions/${payroll.id}`, {
+    categoryId,
+    notes: 'source-fact-safe',
+  });
+
+  const beforeTransactions = snapshotAccountTransactions(accountId);
+  const beforeBalances = snapshotBalanceSnapshots(accountId);
+  const builtLedger = buildLedgerFromSourceFacts(getDb());
+  const firstFingerprint = ledgerFingerprint(builtLedger);
+  expect(builtLedger.transactions).toHaveLength(10);
+
+  getDb().transaction(() => {
+    getDb().prepare('DELETE FROM transactions').run();
+    getDb().prepare('DELETE FROM balanceSnapshots').run();
+  })();
+
+  const rebuiltLedger = buildLedgerFromSourceFacts(getDb());
+  expect(ledgerFingerprint(rebuiltLedger)).toBe(firstFingerprint);
+  materializeLedger(getDb(), rebuiltLedger);
+
+  expect(snapshotAccountTransactions(accountId)).toEqual(beforeTransactions);
+  expect(snapshotBalanceSnapshots(accountId)).toEqual(beforeBalances);
+
+  const body = await getJson('/api/app/transactions?search=source-fact-safe');
+  expect(body.transactions).toHaveLength(1);
+  expect(body.transactions[0].category.id).toBe(categoryId);
+  expect(body.transactions[0].notes).toBe('source-fact-safe');
+  expect(body.transactions[0].description).toBe('ACME PAYROLL');
+  expect(
+    (getDb().prepare("SELECT ledgerTransactionId FROM transactions WHERE description = 'ACME PAYROLL'").get() as { ledgerTransactionId: string }).ledgerTransactionId
+  ).toBe(payroll.ledgerTransactionId);
 });
 
 test('app imports commit materializes staged statement balances', async () => {

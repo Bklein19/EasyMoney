@@ -597,6 +597,19 @@ export function materializeImportTransactions({
   const transactionsWithLedgerIds = assignLedgerTransactionIdentities(unique);
 
   db.transaction(() => {
+    if (importFileId) {
+      getDb().prepare(`
+        UPDATE sourceAccounts
+        SET accountId = @accountId
+        WHERE sourceFileId IN (
+          SELECT id FROM sourceFiles WHERE importFileId = @importFileId
+        )
+      `).run({
+        accountId,
+        importFileId,
+      });
+    }
+
     for (const { transaction, occurrenceIndex, ledgerTransactionId } of transactionsWithLedgerIds) {
       const transactionId = insertRow('transactions', {
         ...transaction,
