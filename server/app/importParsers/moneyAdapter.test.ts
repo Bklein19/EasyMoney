@@ -317,3 +317,142 @@ test('EasyMoney legacy CSV profile parser preserves credit-card semantics', asyn
   }]);
   expect(result.balances).toEqual([]);
 });
+
+test.each([
+  ['Wells Fargo Activity', 'wells-fargo-activity-csv', 'wells-fargo-checking-1234-2026-01-01-to-2026-01-31.csv', ['DATE', 'DESCRIPTION', 'AMOUNT', 'CHECK #', 'STATUS']],
+  ['Merrill Activity', 'merrill-activity-csv', 'merrill-activity-2026.csv', ['Trade Date', 'Settlement Date', 'Pending/Settled', 'Account Nickname', 'Account Registration', 'Account #', 'Type', 'Description 1', 'Description 2', 'Symbol/CUSIP #', 'Quantity', 'Price ($)', 'Amount ($)']],
+  ['TIAA Activity', 'tiaa-activity-csv', 'tiaa-retirement-annuity-2026.csv', ['Date', 'AccountId', 'Action', 'Security', 'Price', 'Quantity', 'Amount', 'Text', 'Memo', 'Commission']],
+])('import parser registry resolves money CSV parser %s', (_name, expectedId, fileName, headers) => {
+  const parser = resolveImportParser({
+    fileName,
+    headers,
+    sample: headers.join(','),
+  });
+
+  expect(parser?.id).toBe(expectedId);
+  expect(parser?.sourceType).toBe('activity-export');
+  expect(parser?.priority).toBe(100);
+});
+
+test('Wells Fargo activity adapter parses account and liability semantics', async () => {
+  const parser = resolveImportParser({
+    fileName: 'wells-fargo-autograph-visa-4321-2026-01-01-to-2026-01-31.csv',
+    headers: ['DATE', 'DESCRIPTION', 'AMOUNT', 'CHECK #', 'STATUS'],
+    sample: '',
+  });
+  expect(parser?.id).toBe('wells-fargo-activity-csv');
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wells-fargo-activity-test-'));
+  const filePath = path.join(dir, 'wells-fargo-autograph-visa-4321-2026-01-01-to-2026-01-31.csv');
+  await fs.writeFile(filePath, [
+    '"DATE","DESCRIPTION","AMOUNT","CHECK #","STATUS"',
+    '"01/05/2026","COFFEE SHOP","6.75","","Posted"',
+    '"01/06/2026","PENDING AUTH","12.00","","Pending"',
+  ].join('\n'));
+
+  try {
+    const result = await parser!.parse({
+      fileName: path.basename(filePath),
+      headers: ['DATE', 'DESCRIPTION', 'AMOUNT', 'CHECK #', 'STATUS'],
+      rows: [],
+      text: await fs.readFile(filePath, 'utf8'),
+      filePath,
+    });
+
+    expect(result.transactions).toEqual([{
+      sourceRowIndex: 0,
+      date: '2026-01-05',
+      amountCents: -675,
+      description: 'COFFEE SHOP',
+      institution: 'Wells Fargo',
+      account: 'Autograph Visa - 4321',
+      sourceRole: 'activity',
+      raw: {
+        moneyId: result.transactions[0]?.raw?.moneyId,
+        moneyCategory: 'activity',
+        source: 'wells-fargo-csv',
+        checkNumber: undefined,
+        status: 'Posted',
+      },
+    }]);
+    expect(result.balances).toEqual([]);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('Merrill activity adapter parses investment CSV rows', async () => {
+  const parser = resolveImportParser({
+    fileName: 'merrill-activity-2026.csv',
+    headers: ['Trade Date', 'Settlement Date', 'Pending/Settled', 'Account Nickname', 'Account Registration', 'Account #', 'Type', 'Description 1', 'Description 2', 'Symbol/CUSIP #', 'Quantity', 'Price ($)', 'Amount ($)'],
+    sample: '',
+  });
+  expect(parser?.id).toBe('merrill-activity-csv');
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'merrill-activity-test-'));
+  const filePath = path.join(dir, 'merrill-activity-2026.csv');
+  await fs.writeFile(filePath, [
+    '"Trade Date","Settlement Date","Pending/Settled","Account Nickname","Account Registration","Account #","Type","Description 1","Description 2","Symbol/CUSIP #","Quantity","Price ($)","Amount ($)"',
+    '"01/05/2026","01/06/2026","Settled","Taxable","Individual","1234","DividendAndInterest","Dividend","VTI","VTI","0","0","12.34"',
+  ].join('\n'));
+
+  try {
+    const result = await parser!.parse({
+      fileName: path.basename(filePath),
+      headers: ['Trade Date', 'Settlement Date', 'Pending/Settled', 'Account Nickname', 'Account Registration', 'Account #', 'Type', 'Description 1', 'Description 2', 'Symbol/CUSIP #', 'Quantity', 'Price ($)', 'Amount ($)'],
+      rows: [],
+      text: await fs.readFile(filePath, 'utf8'),
+      filePath,
+    });
+
+    expect(result.transactions[0]).toMatchObject({
+      sourceRowIndex: 0,
+      date: '2026-01-06',
+      amountCents: 1234,
+      description: 'Dividend | VTI | VTI | DividendAndInterest',
+      institution: 'Merrill',
+      account: 'Individual - 1234',
+      sourceRole: 'activity',
+    });
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('TIAA activity adapter parses retirement CSV rows', async () => {
+  const parser = resolveImportParser({
+    fileName: 'tiaa-retirement-annuity-2026.csv',
+    headers: ['Date', 'AccountId', 'Action', 'Security', 'Price', 'Quantity', 'Amount', 'Text', 'Memo', 'Commission'],
+    sample: '',
+  });
+  expect(parser?.id).toBe('tiaa-activity-csv');
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'tiaa-activity-test-'));
+  const filePath = path.join(dir, 'tiaa-retirement-annuity-2026.csv');
+  await fs.writeFile(filePath, [
+    'Date,AccountId,Action,Security,Price,Quantity,Amount,Text,Memo,Commission',
+    '01/05/2026,RET123,Contribution,TIAA Traditional,1.00,100,100.00,Employee contribution,,0',
+  ].join('\n'));
+
+  try {
+    const result = await parser!.parse({
+      fileName: path.basename(filePath),
+      headers: ['Date', 'AccountId', 'Action', 'Security', 'Price', 'Quantity', 'Amount', 'Text', 'Memo', 'Commission'],
+      rows: [],
+      text: await fs.readFile(filePath, 'utf8'),
+      filePath,
+    });
+
+    expect(result.transactions[0]).toMatchObject({
+      sourceRowIndex: 0,
+      date: '2026-01-05',
+      amountCents: 10000,
+      description: 'Contribution | TIAA Traditional',
+      institution: 'TIAA',
+      account: 'Retirement Annuity',
+      sourceRole: 'activity',
+    });
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
