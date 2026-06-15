@@ -256,3 +256,64 @@ test('import parser registry resolves Bank of America statement PDFs', () => {
   });
   expect(contentParser?.id).toBe('bofa-statement-pdf');
 });
+
+test.each([
+  ['American Express Credit Card', 'american-express-credit-card-csv', 'american express activity.csv', ['Date', 'Description', 'Amount']],
+  ['Apple Card', 'apple-card-csv', 'apple-card.csv', ['Transaction Date', 'Clearing Date', 'Description', 'Merchant', 'Category', 'Type', 'Amount (USD)', 'Purchased By']],
+  ['Capital One', 'capital-one-csv', 'capital-one.csv', ['Transaction Date', 'Posted Date', 'Card No.', 'Description', 'Category', 'Debit', 'Credit']],
+  ['Citi', 'citi-csv', 'citi.csv', ['Status', 'Date', 'Description', 'Debit', 'Credit']],
+  ['Robinhood Credit Card', 'robinhood-credit-card-csv', 'robinhood.csv', ['Date', 'Time', 'Cardholder', 'Amount', 'Points', 'Balance', 'Status', 'Type', 'Merchant', 'Description']],
+])('import parser registry resolves EasyMoney legacy CSV profile %s', (_name, expectedId, fileName, headers) => {
+  const parser = resolveImportParser({
+    fileName,
+    headers,
+    sample: '',
+  });
+
+  expect(parser?.id).toBe(expectedId);
+  expect(parser?.sourceType).toBe('activity-export');
+  expect(parser?.priority).toBe(10);
+});
+
+test('EasyMoney legacy CSV profile parser preserves credit-card semantics', async () => {
+  const parser = resolveImportParser({
+    fileName: 'apple-card.csv',
+    headers: ['Transaction Date', 'Clearing Date', 'Description', 'Merchant', 'Category', 'Type', 'Amount (USD)', 'Purchased By'],
+    sample: '',
+  });
+
+  const result = await parser!.parse({
+    fileName: 'apple-card.csv',
+    headers: ['Transaction Date', 'Clearing Date', 'Description', 'Merchant', 'Category', 'Type', 'Amount (USD)', 'Purchased By'],
+    rows: [{
+      'Transaction Date': '06/14/2026',
+      'Clearing Date': '06/15/2026',
+      Description: 'Coffee Shop',
+      Merchant: 'Coffee Shop',
+      Category: 'Food & Drink',
+      Type: 'Purchase',
+      'Amount (USD)': '6.75',
+      'Purchased By': 'Primary',
+    }],
+    text: '',
+  });
+
+  expect(result.transactions).toEqual([{
+    sourceRowIndex: 0,
+    date: '2026-06-14T00:00:00.000Z',
+    amountCents: -675,
+    description: 'Coffee Shop',
+    institution: 'Apple Card',
+    account: null,
+    sourceRole: 'activity',
+    raw: {
+      merchant: 'Coffee Shop',
+      originalDescription: 'Coffee Shop',
+      originalCategory: 'Food & Drink',
+      status: 'cleared',
+      transactionKind: null,
+      legacyProfile: 'Apple Card',
+    },
+  }]);
+  expect(result.balances).toEqual([]);
+});
