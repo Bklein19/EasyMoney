@@ -21,6 +21,7 @@ function resetAppTables() {
     for (const table of [
       'importRows',
       'importFiles',
+      'transactionAnnotations',
       'transactions',
       'balanceSnapshots',
       'budgets',
@@ -44,6 +45,16 @@ async function getJson(path: string) {
 async function postJson(path: string, payload: unknown, expectedStatus = 200) {
   const response = await fetch(`${TEST_URL}${path}`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  expect(response.status).toBe(expectedStatus);
+  return response.json();
+}
+
+async function putJson(path: string, payload: unknown, expectedStatus = 200) {
+  const response = await fetch(`${TEST_URL}${path}`, {
+    method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
@@ -264,6 +275,51 @@ test('app transactions search includes notes', async () => {
   const body = await getJson('/api/app/transactions?search=reimbursable');
 
   expect(body.transactions.map((transaction: { notes: string }) => transaction.notes)).toEqual(['reimbursable team lunch']);
+});
+
+test('transaction annotations survive transaction row rebuild', async () => {
+  const accountId = insertRow('accounts', {
+    name: 'Checking',
+    institution: 'Local Bank',
+    type: 'checking',
+  });
+  const categoryId = insertRow('categories', { name: 'Groceries', type: 'expense' });
+  const transactionId = insertRow('transactions', {
+    accountId,
+    date: '2026-06-16',
+    amount: -12,
+    description: 'Card purchase',
+    merchant: 'Store',
+    type: 'expense',
+  });
+
+  await putJson(`/api/transactions/${transactionId}`, {
+    categoryId,
+    notes: 'household groceries',
+  });
+
+  const annotation = getDb().prepare('SELECT * FROM transactionAnnotations').get() as {
+    ledgerTransactionId: string;
+    categoryId: number;
+    notes: string;
+  };
+  expect(annotation.categoryId).toBe(categoryId);
+  expect(annotation.notes).toBe('household groceries');
+
+  getDb().prepare('DELETE FROM transactions WHERE id = ?').run(transactionId);
+  insertRow('transactions', {
+    accountId,
+    ledgerTransactionId: annotation.ledgerTransactionId,
+    date: '2026-06-16',
+    amount: -12,
+    description: 'Card purchase',
+    merchant: 'Store',
+    type: 'expense',
+  });
+
+  const body = await getJson('/api/app/transactions');
+  expect(body.transactions[0].category.id).toBe(categoryId);
+  expect(body.transactions[0].notes).toBe('household groceries');
 });
 
 test('app imports preview parses a Chase CSV on the backend', async () => {

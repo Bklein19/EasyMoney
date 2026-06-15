@@ -45,8 +45,10 @@ const TABLES = {
   accounts: ['id', 'name', 'institution', 'type', 'currentBalance', 'currency', 'createdAt', 'updatedAt'],
   transactions: [
     'id', 'accountId', 'categoryId', 'date', 'amount', 'importBatchId', 'description', 'merchant',
-    'originalDescription', 'originalCategory', 'type', 'transactionKind', 'status', 'notes', 'fingerprint', 'createdAt'
+    'originalDescription', 'originalCategory', 'type', 'transactionKind', 'status', 'notes', 'fingerprint',
+    'ledgerTransactionId', 'occurrenceIndex', 'createdAt'
   ],
+  transactionAnnotations: ['ledgerTransactionId', 'categoryId', 'notes', 'createdAt', 'updatedAt'],
   categories: ['id', 'name', 'parentId', 'type', 'color', 'icon'],
   budgets: ['id', 'categoryId', 'month', 'amount'],
   balanceSnapshots: ['id', 'accountId', 'month', 'balance', 'capturedAt'],
@@ -84,6 +86,7 @@ const TABLES = {
 const ORDER_BY = {
   accounts: 'id ASC',
   transactions: 'date DESC, id DESC',
+  transactionAnnotations: 'updatedAt DESC, ledgerTransactionId ASC',
   categories: 'id ASC',
   budgets: 'month DESC, id DESC',
   balanceSnapshots: 'month ASC, id ASC',
@@ -127,7 +130,17 @@ export function initDatabase() {
       status TEXT,
       notes TEXT,
       fingerprint TEXT,
+      ledgerTransactionId TEXT,
+      occurrenceIndex INTEGER DEFAULT 0,
       createdAt TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS transactionAnnotations (
+      ledgerTransactionId TEXT PRIMARY KEY,
+      categoryId INTEGER,
+      notes TEXT,
+      createdAt TEXT,
+      updatedAt TEXT
     );
 
     CREATE TABLE IF NOT EXISTS categories (
@@ -286,6 +299,47 @@ export function initDatabase() {
   if (!transactionColumns.includes('fingerprint')) {
     db.prepare('ALTER TABLE transactions ADD COLUMN fingerprint TEXT').run();
   }
+  if (!transactionColumns.includes('ledgerTransactionId')) {
+    db.prepare('ALTER TABLE transactions ADD COLUMN ledgerTransactionId TEXT').run();
+  }
+  if (!transactionColumns.includes('occurrenceIndex')) {
+    db.prepare('ALTER TABLE transactions ADD COLUMN occurrenceIndex INTEGER DEFAULT 0').run();
+  }
+  db.prepare('CREATE INDEX IF NOT EXISTS idx_transactions_ledger_id ON transactions (ledgerTransactionId)').run();
+
+  const transactionsNeedingLedgerIds = db.prepare(`
+    SELECT id, accountId, date, amount, description, merchant, originalDescription, transactionKind, occurrenceIndex
+    FROM transactions
+    WHERE ledgerTransactionId IS NULL OR ledgerTransactionId = ''
+    ORDER BY accountId ASC, date ASC, amount ASC, description ASC, id ASC
+  `).all();
+  const groupCounts = new Map();
+  for (const transaction of transactionsNeedingLedgerIds) {
+    const baseKey = [
+      transaction.accountId || '',
+      transaction.date || '',
+      Number(transaction.amount || 0).toFixed(2),
+      String(transaction.originalDescription || transaction.description || transaction.merchant || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(),
+      transaction.transactionKind || 'activity',
+    ].join('|');
+    const occurrenceIndex = groupCounts.get(baseKey) || 0;
+    groupCounts.set(baseKey, occurrenceIndex + 1);
+    const ledgerTransactionId = `txn_${hashContent(`${baseKey}|${occurrenceIndex}`).slice(0, 32)}`;
+    db.prepare('UPDATE transactions SET ledgerTransactionId = ?, occurrenceIndex = ? WHERE id = ?').run(
+      ledgerTransactionId,
+      occurrenceIndex,
+      transaction.id
+    );
+  }
+
+  db.prepare(`
+    INSERT OR IGNORE INTO transactionAnnotations (ledgerTransactionId, categoryId, notes, createdAt, updatedAt)
+    SELECT ledgerTransactionId, categoryId, notes, COALESCE(createdAt, datetime('now')), datetime('now')
+    FROM transactions
+    WHERE ledgerTransactionId IS NOT NULL
+      AND ledgerTransactionId != ''
+      AND (categoryId IS NOT NULL OR COALESCE(notes, '') != '')
+  `).run();
 
   const importFileColumns = db.prepare('PRAGMA table_info(importFiles)').all().map(column => column.name);
   for (const [column, definition] of [

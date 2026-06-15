@@ -15,6 +15,7 @@ import { getLatestRobinhoodSnapshot, saveRobinhoodSnapshot } from './robinhoodSn
 import { listAccounts } from './app/accounts.ts';
 import { listCategories } from './app/categories.ts';
 import { commitImport, previewImport } from './app/imports.ts';
+import { splitTransactionAnnotationChanges, upsertTransactionAnnotation } from './app/transactionAnnotations.ts';
 import { listTransactions } from './app/transactions.ts';
 import index from '../index.html';
 
@@ -174,6 +175,7 @@ export const routes = wrapRoutes({
       const remove = db.transaction((id: number | string) => {
         if (uncategorized) {
           db.prepare('UPDATE transactions SET categoryId = ? WHERE categoryId = ?').run(uncategorized.id, id);
+          db.prepare('UPDATE transactionAnnotations SET categoryId = ? WHERE categoryId = ?').run(uncategorized.id, id);
         }
         db.prepare('DELETE FROM categorizationRules WHERE categoryId = ?').run(id);
         db.prepare('DELETE FROM categories WHERE id = ?').run(id);
@@ -246,10 +248,10 @@ export const routes = wrapRoutes({
 
       const payload = await bodyJson(request);
       const migrate = db.transaction(() => {
-        for (const table of ['importRows', 'importFiles', 'transactions', 'accounts', 'categories', 'budgets', 'balanceSnapshots', 'categorizationRules', 'importProfiles']) {
+        for (const table of ['importRows', 'importFiles', 'transactionAnnotations', 'transactions', 'accounts', 'categories', 'budgets', 'balanceSnapshots', 'categorizationRules', 'importProfiles']) {
           db.prepare(`DELETE FROM ${table}`).run();
         }
-        for (const table of ['accounts', 'categories', 'budgets', 'balanceSnapshots', 'categorizationRules', 'importProfiles', 'importFiles', 'importRows', 'transactions']) {
+        for (const table of ['accounts', 'categories', 'budgets', 'balanceSnapshots', 'categorizationRules', 'importProfiles', 'importFiles', 'importRows', 'transactions', 'transactionAnnotations']) {
           if (Array.isArray(payload[table]) && payload[table].length) {
             insertRows(table, payload[table], true);
           }
@@ -289,7 +291,22 @@ export const routes = wrapRoutes({
     PUT: async (request) => {
       const table = request.params.table;
       assertTable(table);
-      updateRow(table, request.params.id, await bodyJson(request));
+      const changes = await bodyJson(request);
+      if (table === 'transactions') {
+        const {
+          transactionChanges,
+          annotationChanges,
+          hasAnnotationChanges,
+        } = splitTransactionAnnotationChanges(changes);
+        if (Object.keys(transactionChanges).length) {
+          updateRow(table, request.params.id, transactionChanges);
+        }
+        if (hasAnnotationChanges) {
+          upsertTransactionAnnotation(request.params.id, annotationChanges);
+        }
+      } else {
+        updateRow(table, request.params.id, changes);
+      }
       return json({ ok: true });
     },
     DELETE: (request) => {
