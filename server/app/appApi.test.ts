@@ -383,6 +383,93 @@ test('app imports commit inserts unique transactions and updates account balance
   expect(secondCommit.skippedDuplicateCount).toBe(10);
 });
 
+test('app imports commit materializes staged statement balances', async () => {
+  const accountId = insertRow('accounts', {
+    name: 'Fixture Account',
+    institution: 'Fixture Bank',
+    type: 'investment',
+    currentBalance: 0,
+  });
+  const now = new Date().toISOString();
+  const importFileId = Number(insertRow('importFiles', {
+    fileName: 'fixture-statement.pdf',
+    contentHash: 'fixture-hash',
+    parserName: 'fixture-statement-parser',
+    sourceType: 'statement',
+    parserPriority: 50,
+    institution: 'Fixture Bank',
+    rowCount: 2,
+    status: 'previewed',
+    createdAt: now,
+  }));
+  const transactionRowId = Number(insertRow('importRows', {
+    importFileId,
+    rowIndex: 0,
+    rowType: 'transaction',
+    rawJson: JSON.stringify({ row: 'statement interest row' }),
+    normalizedJson: JSON.stringify({
+      sourceRowIndex: 0,
+      date: '2026-06-15',
+      amountCents: 12500,
+      description: 'Statement interest',
+      institution: 'Fixture Bank',
+      account: 'Fixture Account',
+      sourceRole: 'activity',
+      raw: { row: 'statement interest row' },
+    }),
+    createdAt: now,
+  }));
+  const balanceRowId = Number(insertRow('importRows', {
+    importFileId,
+    rowIndex: 1,
+    rowType: 'balance',
+    rawJson: JSON.stringify({ row: 'statement balance row' }),
+    normalizedJson: JSON.stringify({
+      sourceRowIndex: 0,
+      date: '2026-06-30',
+      balanceCents: 987654,
+      institution: 'Fixture Bank',
+      account: 'Fixture Account',
+      raw: { row: 'statement balance row' },
+    }),
+    createdAt: now,
+  }));
+
+  const commit = await postJson('/api/app/imports/commit', {
+    accountId,
+    importFileId,
+    importRowIds: [],
+    balanceRowIds: [balanceRowId],
+  }, 201);
+
+  expect(transactionRowId).toBe(1);
+  expect(commit.importedCount).toBe(0);
+  expect(commit.importedBalanceCount).toBe(1);
+
+  const snapshot = getDb().prepare('SELECT * FROM balanceSnapshots WHERE accountId = ?').get(accountId) as {
+    month: string;
+    balance: number;
+    capturedAt: string;
+  };
+  expect(snapshot).toMatchObject({
+    month: '2026-06',
+    balance: 9876.54,
+    capturedAt: '2026-06-30T00:00:00.000Z',
+  });
+
+  const account = getDb().prepare('SELECT currentBalance FROM accounts WHERE id = ?').get(accountId) as { currentBalance: number };
+  expect(account.currentBalance).toBe(9876.54);
+  const transactionCount = getDb().prepare('SELECT COUNT(*) AS count FROM transactions WHERE accountId = ?').get(accountId) as { count: number };
+  expect(transactionCount.count).toBe(0);
+
+  const balanceRow = getDb().prepare("SELECT * FROM importRows WHERE rowType = 'balance'").get() as {
+    rawJson: string;
+    normalizedJson: string;
+  };
+  expect(JSON.parse(balanceRow.rawJson)).toEqual({ row: 'statement balance row' });
+  expect(JSON.parse(balanceRow.normalizedJson)).toMatchObject({ balanceCents: 987654 });
+});
+
 test('app import materialization is independent of import file commit order', async () => {
   const accountId = insertRow('accounts', {
     name: 'Chase Sapphire',

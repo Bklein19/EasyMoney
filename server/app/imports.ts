@@ -9,7 +9,7 @@ import {
   mappingFromProfile,
   normalizeTransaction,
 } from '../../src/utils/bankProfiles.js';
-import type { CommitImportTransaction, ImportPreviewTransaction, ImportProfile, ParsedImportTransaction } from './importTypes.ts';
+import type { CommitImportTransaction, ImportPreviewTransaction, ImportProfile, ParsedImportBalance, ParsedImportTransaction } from './importTypes.ts';
 import { resolveImportParser } from './importParsers/index.ts';
 
 interface PreviewImportOptions {
@@ -41,6 +41,7 @@ interface CommitImportOptions {
   accountId: number;
   importFileId?: number | null;
   importRowIds?: number[] | null;
+  balanceRowIds?: number[] | null;
   transactions?: ImportTransactionInput[];
   importMeta?: {
     importFileId?: number | null;
@@ -55,6 +56,7 @@ interface MaterializeImportTransactionsOptions {
   accountId: number;
   importFileId?: number | null;
   importRowIds?: number[] | null;
+  balanceRowIds?: number[] | null;
   transactions?: ImportTransactionInput[];
   fallbackImportFileId?: number | null;
 }
@@ -203,6 +205,7 @@ function saveImportPreview({
   institution,
   rawRows,
   parsedTransactions,
+  parsedBalances = [],
 }: {
   fileName: string;
   text: string;
@@ -213,6 +216,7 @@ function saveImportPreview({
   institution?: string | null;
   rawRows: Array<Record<string, string>>;
   parsedTransactions: Array<ParsedImportTransaction | null>;
+  parsedBalances?: ParsedImportBalance[];
 }) {
   const now = new Date().toISOString();
   const headerSignature = getHeaderSignature(headers);
@@ -234,6 +238,7 @@ function saveImportPreview({
     const importRowId = insertRow('importRows', {
       importFileId,
       rowIndex: index,
+      rowType: 'transaction',
       rawJson: JSON.stringify(row),
       normalizedJson: parsedTransactions[index] ? JSON.stringify(parsedTransactions[index]) : null,
       createdAt: now,
@@ -241,11 +246,24 @@ function saveImportPreview({
     rowIds[index] = Number(importRowId);
   }
 
-  return { importFileId: Number(importFileId), rowIds };
+  const balanceRowIds: number[] = [];
+  for (const [index, balance] of parsedBalances.entries()) {
+    const importRowId = insertRow('importRows', {
+      importFileId,
+      rowIndex: rawRows.length + index,
+      rowType: 'balance',
+      rawJson: JSON.stringify(balance.raw || {}),
+      normalizedJson: JSON.stringify(balance),
+      createdAt: now,
+    });
+    balanceRowIds[index] = Number(importRowId);
+  }
+
+  return { importFileId: Number(importFileId), rowIds, balanceRowIds };
 }
 
 function toNumberSet(values: number[] | null | undefined) {
-  if (!values?.length) return null;
+  if (values === null || values === undefined) return null;
   return new Set(values.map(value => Number(value)).filter(Number.isFinite));
 }
 
@@ -255,6 +273,7 @@ function readStagedTransactions(importFileId: number, importRowIds: number[] | n
     SELECT id, importFileId, normalizedJson
     FROM importRows
     WHERE importFileId = @importFileId
+      AND COALESCE(rowType, 'transaction') = 'transaction'
       AND normalizedJson IS NOT NULL
     ORDER BY rowIndex ASC
   `).all({ importFileId }) as Array<{
@@ -270,6 +289,28 @@ function readStagedTransactions(importFileId: number, importRowIds: number[] | n
       row.importFileId,
       row.id
     ));
+}
+
+function readStagedBalances(importFileId: number, balanceRowIds: number[] | null | undefined) {
+  const selectedIds = toNumberSet(balanceRowIds);
+  const rows = getDb().prepare(`
+    SELECT id, normalizedJson
+    FROM importRows
+    WHERE importFileId = @importFileId
+      AND rowType = 'balance'
+      AND normalizedJson IS NOT NULL
+    ORDER BY rowIndex ASC
+  `).all({ importFileId }) as Array<{
+    id: number;
+    normalizedJson: string;
+  }>;
+
+  return rows
+    .filter(row => !selectedIds || selectedIds.has(row.id))
+    .map(row => ({
+      importRowId: row.id,
+      balance: JSON.parse(row.normalizedJson) as ParsedImportBalance,
+    }));
 }
 
 export async function previewImport({ fileName, text, fileBytes, customProfile = null }: PreviewImportOptions) {
@@ -311,6 +352,7 @@ export async function previewImport({ fileName, text, fileBytes, customProfile =
       institution: appParser.institution,
       rawRows,
       parsedTransactions: parsedResult.transactions,
+      parsedBalances: parsedResult.balances,
     });
     const previewTransactions = transactions.map(transaction =>
       toPreviewTransaction(transaction, preview.importFileId, preview.rowIds[transaction.sourceRowIndex])
@@ -324,6 +366,7 @@ export async function previewImport({ fileName, text, fileBytes, customProfile =
       previewData: rows.slice(0, 5),
       mapping: mappingFromProfile(null, headers),
       balances: parsedResult.balances,
+      balanceRowIds: preview.balanceRowIds,
       transactions: previewTransactions,
     };
   }
@@ -396,15 +439,20 @@ export function materializeImportTransactions({
   accountId,
   importFileId: stagedImportFileId = null,
   importRowIds = null,
+  balanceRowIds = null,
   transactions = [],
   fallbackImportFileId = null,
 }: MaterializeImportTransactionsOptions) {
   if (!accountId) throw new Error('accountId is required');
   if (!Array.isArray(transactions)) throw new Error('transactions must be an array');
   if (importRowIds !== null && !Array.isArray(importRowIds)) throw new Error('importRowIds must be an array');
+  if (balanceRowIds !== null && !Array.isArray(balanceRowIds)) throw new Error('balanceRowIds must be an array');
 
   const stagedTransactions = stagedImportFileId
     ? readStagedTransactions(stagedImportFileId, importRowIds)
+    : [];
+  const stagedBalances = stagedImportFileId
+    ? readStagedBalances(stagedImportFileId, balanceRowIds)
     : [];
   const transactionsToCommit = stagedImportFileId ? stagedTransactions : transactions;
 
@@ -463,6 +511,10 @@ export function materializeImportTransactions({
   ].join('-');
   const now = new Date().toISOString();
   const totalAmount = unique.reduce((sum, transaction) => sum + transaction.amount, 0);
+  const latestBalance = stagedBalances
+    .map(item => item.balance)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .at(-1);
   const importFileId = stagedImportFileId || fallbackImportFileId || transactionsToCommit.find(transaction => transaction.importFileId)?.importFileId || null;
 
   db.transaction(() => {
@@ -495,6 +547,28 @@ export function materializeImportTransactions({
       });
     }
 
+    for (const { balance } of stagedBalances) {
+      db.prepare(`
+        INSERT INTO balanceSnapshots (accountId, month, balance, capturedAt)
+        VALUES (@accountId, @month, @balance, @capturedAt)
+        ON CONFLICT(accountId, month) DO UPDATE SET
+          balance = excluded.balance,
+          capturedAt = excluded.capturedAt
+      `).run({
+        accountId,
+        month: balance.date.slice(0, 7),
+        balance: dollarsFromCents(balance.balanceCents),
+        capturedAt: `${balance.date.slice(0, 10)}T00:00:00.000Z`,
+      });
+    }
+
+    if (latestBalance) {
+      updateRow('accounts', accountId, {
+        currentBalance: dollarsFromCents(latestBalance.balanceCents),
+        updatedAt: now,
+      });
+    }
+
     if (importFileId) {
       updateRow('importFiles', importFileId, {
         status: 'committed',
@@ -507,6 +581,7 @@ export function materializeImportTransactions({
   return {
     importedCount: unique.length,
     skippedDuplicateCount: duplicates.length,
+    importedBalanceCount: stagedBalances.length,
     importBatchId,
     insertedFingerprints: unique.map(transaction => transaction.fingerprint),
   };
@@ -516,6 +591,7 @@ export function commitImport({
   accountId,
   importFileId = null,
   importRowIds = null,
+  balanceRowIds = null,
   transactions = [],
   importMeta = null,
 }: CommitImportOptions) {
@@ -523,6 +599,7 @@ export function commitImport({
     accountId,
     importFileId,
     importRowIds,
+    balanceRowIds,
     transactions,
     fallbackImportFileId: importMeta?.importFileId || null,
   });

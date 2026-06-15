@@ -57,7 +57,7 @@ const TABLES = {
     'sourceType', 'parserPriority', 'institution', 'status', 'importBatchId', 'createdAt', 'committedAt'
   ],
   importRows: [
-    'id', 'importFileId', 'rowIndex', 'rawJson', 'normalizedJson',
+    'id', 'importFileId', 'rowIndex', 'rowType', 'rawJson', 'normalizedJson',
     'fingerprint', 'transactionId', 'createdAt'
   ],
   robinhoodAccounts: [
@@ -195,6 +195,7 @@ export function initDatabase() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       importFileId INTEGER NOT NULL,
       rowIndex INTEGER NOT NULL,
+      rowType TEXT DEFAULT 'transaction',
       rawJson TEXT NOT NULL,
       normalizedJson TEXT,
       fingerprint TEXT,
@@ -295,6 +296,11 @@ export function initDatabase() {
     if (!importFileColumns.includes(column)) {
       db.prepare(`ALTER TABLE importFiles ADD COLUMN ${column} ${definition}`).run();
     }
+  }
+
+  const importRowColumns = db.prepare('PRAGMA table_info(importRows)').all().map(column => column.name);
+  if (!importRowColumns.includes('rowType')) {
+    db.prepare("ALTER TABLE importRows ADD COLUMN rowType TEXT DEFAULT 'transaction'").run();
   }
 }
 
