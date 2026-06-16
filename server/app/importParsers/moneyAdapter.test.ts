@@ -279,6 +279,16 @@ test.each([
   expect(parser?.priority).toBe(priority);
 });
 
+test('import parser registry resolves raw files with stored content-hash prefixes', () => {
+  const parser = resolveImportParser({
+    fileName: '013c8649ea149890da3193c2b041eec637f06191ebc3743617106beac8f8e95a-morgan-stanley-0854-2023-06-30-consolidated-statement.pdf',
+    headers: [],
+    sample: '',
+  });
+
+  expect(parser?.id).toBe('morgan-stanley-pdf');
+});
+
 test.each([
   ['American Express Credit Card', 'american-express-credit-card-csv', 'american express activity.csv', ['Date', 'Description', 'Amount']],
   ['Apple Card', 'apple-card-csv', 'apple-card.csv', ['Transaction Date', 'Clearing Date', 'Description', 'Merchant', 'Category', 'Type', 'Amount (USD)', 'Purchased By']],

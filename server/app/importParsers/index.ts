@@ -37,8 +37,16 @@ export const IMPORT_PARSERS: AppImportParser[] = [
   ...easyMoneyCsvProfileParsers,
 ];
 
+function originalImportFileName(fileName: string) {
+  return fileName.replace(/^[0-9a-f]{64}-/, '');
+}
+
 export function resolveImportParser(file: { fileName: string; headers: string[]; sample: string }) {
-  const hits = IMPORT_PARSERS.filter(parser => parser.matches(file));
+  const matchFile = {
+    ...file,
+    fileName: originalImportFileName(file.fileName),
+  };
+  const hits = IMPORT_PARSERS.filter(parser => parser.matches(matchFile));
   if (hits.length === 1) return hits[0];
   if (hits.length > 1) {
     throw new Error(`Multiple import parsers match ${file.fileName}: ${hits.map(hit => hit.id).join(', ')}`);
