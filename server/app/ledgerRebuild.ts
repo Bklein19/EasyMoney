@@ -45,6 +45,7 @@ export interface RebuiltTransaction {
   type: string;
   transactionKind: string | null;
   status: string;
+  sourceRole: string;
   fingerprint: string;
   importRowId: number | null;
 }
@@ -184,10 +185,11 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
       originalDescription,
       originalCategory,
       type: amount >= 0 ? 'credit' : 'debit',
-      transactionKind,
-      status: typeof raw.status === 'string' ? raw.status : 'cleared',
-      fingerprint,
-      importBatchId: getMaterializedImportBatchId(fingerprint),
+    transactionKind,
+    status: typeof raw.status === 'string' ? raw.status : 'cleared',
+    sourceRole: row.sourceRole || 'activity',
+    fingerprint,
+    importBatchId: getMaterializedImportBatchId(fingerprint),
     };
   });
 
@@ -205,6 +207,7 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
     type: item.transaction.type,
     transactionKind: item.transaction.transactionKind,
     status: item.transaction.status,
+    sourceRole: item.transaction.sourceRole,
     fingerprint: item.transaction.fingerprint,
     importRowId: item.transaction.importRowId,
   })).sort((a, b) => a.ledgerTransactionId.localeCompare(b.ledgerTransactionId));
@@ -255,6 +258,8 @@ export function ledgerFingerprint(ledger: RebuiltLedger) {
 
 export function materializeLedger(db = getDb(), ledger = buildLedgerFromSourceFacts(db)) {
   db.transaction(() => {
+    db.prepare('DELETE FROM ledgerTransactions').run();
+    db.prepare('DELETE FROM ledgerBalances').run();
     db.prepare('DELETE FROM transactions').run();
     db.prepare('DELETE FROM balanceSnapshots').run();
 
@@ -302,6 +307,62 @@ export function materializeLedger(db = getDb(), ledger = buildLedgerFromSourceFa
       SET transactionId = @transactionId, fingerprint = @fingerprint
       WHERE id = @importRowId
     `);
+    const insertLedgerTransaction = db.prepare(`
+      INSERT INTO ledgerTransactions (
+        ledgerTransactionId,
+        legacyTransactionId,
+        accountId,
+        date,
+        amountCents,
+        importBatchId,
+        description,
+        merchant,
+        originalDescription,
+        originalCategory,
+        type,
+        transactionKind,
+        status,
+        fingerprint,
+        sourceRole,
+        occurrenceIndex,
+        importFileId,
+        importRowId,
+        sourceTransactionId,
+        createdAt,
+        updatedAt
+      ) VALUES (
+        @ledgerTransactionId,
+        @legacyTransactionId,
+        @accountId,
+        @date,
+        @amountCents,
+        @importBatchId,
+        @description,
+        @merchant,
+        @originalDescription,
+        @originalCategory,
+        @type,
+        @transactionKind,
+        @status,
+        @fingerprint,
+        @sourceRole,
+        @occurrenceIndex,
+        (
+          SELECT importFileId
+          FROM importRows
+          WHERE id = @importRowId
+        ),
+        @importRowId,
+        (
+          SELECT id
+          FROM sourceTransactions
+          WHERE importRowId = @importRowId
+          LIMIT 1
+        ),
+        @createdAt,
+        @updatedAt
+      )
+    `);
     const now = new Date().toISOString();
     for (const transaction of ledger.transactions) {
       const result = insertTransaction.run({
@@ -315,14 +376,55 @@ export function materializeLedger(db = getDb(), ledger = buildLedgerFromSourceFa
           fingerprint: transaction.fingerprint,
         });
       }
+      insertLedgerTransaction.run({
+        ...transaction,
+        legacyTransactionId: result.lastInsertRowid,
+        amountCents: Math.round(transaction.amount * 100),
+        sourceRole: transaction.sourceRole,
+        createdAt: now,
+        updatedAt: now,
+      });
     }
 
     const insertBalance = db.prepare(`
       INSERT INTO balanceSnapshots (accountId, month, balance, capturedAt)
       VALUES (@accountId, @month, @balance, @capturedAt)
     `);
+    const insertLedgerBalance = db.prepare(`
+      INSERT INTO ledgerBalances (
+        accountId,
+        month,
+        balanceCents,
+        capturedAt,
+        sourceBalanceId,
+        createdAt,
+        updatedAt
+      ) VALUES (
+        @accountId,
+        @month,
+        @balanceCents,
+        @capturedAt,
+        (
+          SELECT sb.id
+          FROM sourceBalances sb
+          JOIN sourceAccounts sa ON sa.id = sb.sourceAccountId
+          WHERE sa.accountId = @accountId
+            AND substr(sb.date, 1, 7) = @month
+          ORDER BY sb.date DESC, sb.id DESC
+          LIMIT 1
+        ),
+        @createdAt,
+        @updatedAt
+      )
+    `);
     for (const balance of ledger.balanceSnapshots) {
       insertBalance.run(balance);
+      insertLedgerBalance.run({
+        ...balance,
+        balanceCents: Math.round(balance.balance * 100),
+        createdAt: now,
+        updatedAt: now,
+      });
     }
   })();
 

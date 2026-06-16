@@ -26,6 +26,8 @@ function resetAppTables() {
       'sourceFiles',
       'importRows',
       'importFiles',
+      'ledgerTransactions',
+      'ledgerBalances',
       'transactionAnnotations',
       'transactions',
       'balanceSnapshots',
@@ -109,6 +111,7 @@ function resetMaterializedImports(accountId: number) {
   const db = getDb();
   db.transaction(() => {
     db.prepare('DELETE FROM transactions WHERE accountId = ?').run(accountId);
+    db.prepare('DELETE FROM ledgerTransactions WHERE accountId = ?').run(accountId);
     db.prepare('UPDATE accounts SET currentBalance = 0 WHERE id = ?').run(accountId);
     db.prepare('UPDATE importRows SET fingerprint = NULL, transactionId = NULL').run();
     db.prepare("UPDATE importFiles SET status = 'previewed', importBatchId = NULL, committedAt = NULL").run();
@@ -402,6 +405,78 @@ test('transaction annotations survive transaction row rebuild', async () => {
   expect(body.transactions[0].notes).toBe('household groceries');
 });
 
+test('init database backfills ledger read model from legacy app tables', () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Checking',
+    institution: 'Local Bank',
+    type: 'checking',
+  }));
+  const categoryId = Number(insertRow('categories', { name: 'Dining', type: 'expense' }));
+  const transactionId = Number(insertRow('transactions', {
+    accountId,
+    categoryId,
+    date: '2026-06-14',
+    amount: -18.42,
+    description: 'Lunch',
+    merchant: 'Cafe',
+    originalDescription: 'POS CAFE',
+    originalCategory: 'Food',
+    type: 'expense',
+    status: 'cleared',
+    notes: 'legacy-note',
+    fingerprint: 'legacy-fingerprint',
+    createdAt: '2026-06-14T12:00:00.000Z',
+  }));
+  insertRow('balanceSnapshots', {
+    accountId,
+    month: '2026-06',
+    balance: 1234.56,
+    capturedAt: '2026-06-30T00:00:00.000Z',
+  });
+
+  initDatabase();
+
+  const transaction = getDb().prepare('SELECT ledgerTransactionId FROM transactions WHERE id = ?').get(transactionId) as {
+    ledgerTransactionId: string;
+  };
+  expect(transaction.ledgerTransactionId.startsWith('txn_')).toBe(true);
+
+  const ledgerTransaction = getDb().prepare('SELECT * FROM ledgerTransactions WHERE legacyTransactionId = ?').get(transactionId) as {
+    ledgerTransactionId: string;
+    accountId: number;
+    amountCents: number;
+    description: string;
+    originalDescription: string;
+    fingerprint: string;
+  };
+  expect(ledgerTransaction).toMatchObject({
+    ledgerTransactionId: transaction.ledgerTransactionId,
+    accountId,
+    amountCents: -1842,
+    description: 'Lunch',
+    originalDescription: 'POS CAFE',
+    fingerprint: 'legacy-fingerprint',
+  });
+
+  const annotation = getDb().prepare('SELECT * FROM transactionAnnotations WHERE ledgerTransactionId = ?').get(transaction.ledgerTransactionId) as {
+    categoryId: number;
+    notes: string;
+  };
+  expect(annotation).toMatchObject({
+    categoryId,
+    notes: 'legacy-note',
+  });
+
+  const ledgerBalance = getDb().prepare('SELECT * FROM ledgerBalances WHERE accountId = ? AND month = ?').get(accountId, '2026-06') as {
+    balanceCents: number;
+    capturedAt: string;
+  };
+  expect(ledgerBalance).toMatchObject({
+    balanceCents: 123456,
+    capturedAt: '2026-06-30T00:00:00.000Z',
+  });
+});
+
 test('app imports preview parses a Chase CSV on the backend', async () => {
   const csv = fs.readFileSync(path.resolve(import.meta.dir, '..', '..', 'sample-imports', 'chase-credit-card-demo.csv'), 'utf8');
 
@@ -551,6 +626,30 @@ test('app imports commit inserts unique transactions and updates account balance
     raw: {
       category: 'Payment',
     },
+  });
+
+  const ledgerRows = getDb().prepare(`
+    SELECT lt.*, t.id AS transactionId
+    FROM ledgerTransactions lt
+    JOIN transactions t ON t.ledgerTransactionId = lt.ledgerTransactionId
+    WHERE lt.accountId = ?
+    ORDER BY lt.date DESC
+  `).all(accountId) as Array<{
+    transactionId: number;
+    legacyTransactionId: number;
+    amountCents: number;
+    description: string;
+    sourceRole: string;
+    importRowId: number;
+  }>;
+  expect(ledgerRows).toHaveLength(10);
+  expect(ledgerRows[0]).toMatchObject({
+    transactionId: imported[0].id,
+    legacyTransactionId: imported[0].id,
+    amountCents: 125000,
+    description: 'ACME PAYROLL',
+    sourceRole: 'activity',
+    importRowId: preview.transactions[0].importRowId,
   });
 
   const savedProfile = getDb().prepare('SELECT * FROM importProfiles').get();

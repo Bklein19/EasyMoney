@@ -571,6 +571,101 @@ export function materializeImportTransactions({
           importRowId: transaction.importRowId,
         });
       }
+
+      db.prepare(`
+        INSERT INTO ledgerTransactions (
+          ledgerTransactionId,
+          legacyTransactionId,
+          accountId,
+          date,
+          amountCents,
+          importBatchId,
+          description,
+          merchant,
+          originalDescription,
+          originalCategory,
+          type,
+          transactionKind,
+          status,
+          fingerprint,
+          sourceRole,
+          occurrenceIndex,
+          importFileId,
+          importRowId,
+          sourceTransactionId,
+          createdAt,
+          updatedAt
+        )
+        VALUES (
+          @ledgerTransactionId,
+          @legacyTransactionId,
+          @accountId,
+          @date,
+          @amountCents,
+          @importBatchId,
+          @description,
+          @merchant,
+          @originalDescription,
+          @originalCategory,
+          @type,
+          @transactionKind,
+          @status,
+          @fingerprint,
+          @sourceRole,
+          @occurrenceIndex,
+          @importFileId,
+          @importRowId,
+          (
+            SELECT id
+            FROM sourceTransactions
+            WHERE importRowId = @importRowId
+            LIMIT 1
+          ),
+          @createdAt,
+          @updatedAt
+        )
+        ON CONFLICT(ledgerTransactionId) DO UPDATE SET
+          legacyTransactionId = excluded.legacyTransactionId,
+          accountId = excluded.accountId,
+          date = excluded.date,
+          amountCents = excluded.amountCents,
+          importBatchId = excluded.importBatchId,
+          description = excluded.description,
+          merchant = excluded.merchant,
+          originalDescription = excluded.originalDescription,
+          originalCategory = excluded.originalCategory,
+          type = excluded.type,
+          transactionKind = excluded.transactionKind,
+          status = excluded.status,
+          fingerprint = excluded.fingerprint,
+          sourceRole = excluded.sourceRole,
+          occurrenceIndex = excluded.occurrenceIndex,
+          importFileId = excluded.importFileId,
+          importRowId = excluded.importRowId,
+          sourceTransactionId = excluded.sourceTransactionId,
+          updatedAt = excluded.updatedAt
+      `).run({
+        ledgerTransactionId,
+        legacyTransactionId: transactionId,
+        accountId: transaction.accountId,
+        date: transaction.date,
+        amountCents: transaction.amountCents,
+        importBatchId: getMaterializedImportBatchId(transaction.fingerprint),
+        description: transaction.description,
+        merchant: transaction.merchant,
+        originalDescription: transaction.originalDescription,
+        originalCategory: transaction.originalCategory,
+        type: transaction.type,
+        transactionKind: transaction.transactionKind,
+        status: transaction.status,
+        fingerprint: transaction.fingerprint,
+        sourceRole: transaction.sourceRole,
+        occurrenceIndex,
+        importFileId: transaction.importFileId || importFileId,
+        importRowId: transaction.importRowId || null,
+        createdAt: now,
+        updatedAt: now,
+      });
     }
 
     if (unique.length) {
@@ -580,7 +675,7 @@ export function materializeImportTransactions({
       });
     }
 
-    for (const { balance } of stagedBalances) {
+    for (const { importRowId, balance } of stagedBalances) {
       db.prepare(`
         INSERT INTO balanceSnapshots (accountId, month, balance, capturedAt)
         VALUES (@accountId, @month, @balance, @capturedAt)
@@ -592,6 +687,45 @@ export function materializeImportTransactions({
         month: balance.date.slice(0, 7),
         balance: dollarsFromCents(balance.balanceCents),
         capturedAt: `${balance.date.slice(0, 10)}T00:00:00.000Z`,
+      });
+
+      db.prepare(`
+        INSERT INTO ledgerBalances (
+          accountId,
+          month,
+          balanceCents,
+          capturedAt,
+          sourceBalanceId,
+          createdAt,
+          updatedAt
+        )
+        VALUES (
+          @accountId,
+          @month,
+          @balanceCents,
+          @capturedAt,
+          (
+            SELECT id
+            FROM sourceBalances
+            WHERE importRowId = @importRowId
+            LIMIT 1
+          ),
+          @createdAt,
+          @updatedAt
+        )
+        ON CONFLICT(accountId, month) DO UPDATE SET
+          balanceCents = excluded.balanceCents,
+          capturedAt = excluded.capturedAt,
+          sourceBalanceId = excluded.sourceBalanceId,
+          updatedAt = excluded.updatedAt
+      `).run({
+        accountId,
+        month: balance.date.slice(0, 7),
+        balanceCents: balance.balanceCents,
+        capturedAt: `${balance.date.slice(0, 10)}T00:00:00.000Z`,
+        importRowId,
+        createdAt: now,
+        updatedAt: now,
       });
     }
 

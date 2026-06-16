@@ -19,6 +19,8 @@ function resetAppTables() {
       'sourceFiles',
       'importRows',
       'importFiles',
+      'ledgerTransactions',
+      'ledgerBalances',
       'transactionAnnotations',
       'transactions',
       'balanceSnapshots',
@@ -245,6 +247,8 @@ test('sanitized Vanguard source facts rebuild investment activity and statement 
     notes: 'sanitized vanguard contribution',
   });
 
+  getDb().prepare('DELETE FROM ledgerTransactions').run();
+  getDb().prepare('DELETE FROM ledgerBalances').run();
   getDb().prepare('DELETE FROM transactions').run();
   getDb().prepare('DELETE FROM balanceSnapshots').run();
 
@@ -269,5 +273,11 @@ test('sanitized Vanguard source facts rebuild investment activity and statement 
   });
   expect(
     (getDb().prepare('SELECT COUNT(*) AS count FROM balanceSnapshots').get() as { count: number }).count
+  ).toBe(1);
+  expect(
+    (getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get() as { count: number }).count
+  ).toBe(3);
+  expect(
+    (getDb().prepare('SELECT COUNT(*) AS count FROM ledgerBalances').get() as { count: number }).count
   ).toBe(1);
 });

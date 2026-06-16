@@ -93,10 +93,17 @@ const TABLES = {
     'originalDescription', 'originalCategory', 'type', 'transactionKind', 'status', 'notes', 'fingerprint',
     'ledgerTransactionId', 'occurrenceIndex', 'createdAt'
   ],
+  ledgerTransactions: [
+    'id', 'ledgerTransactionId', 'legacyTransactionId', 'accountId', 'date', 'amountCents',
+    'importBatchId', 'description', 'merchant', 'originalDescription', 'originalCategory',
+    'type', 'transactionKind', 'status', 'fingerprint', 'sourceRole', 'occurrenceIndex',
+    'importFileId', 'importRowId', 'sourceTransactionId', 'createdAt', 'updatedAt'
+  ],
   transactionAnnotations: ['ledgerTransactionId', 'categoryId', 'notes', 'createdAt', 'updatedAt'],
   categories: ['id', 'name', 'parentId', 'type', 'color', 'icon'],
   budgets: ['id', 'categoryId', 'month', 'amount'],
   balanceSnapshots: ['id', 'accountId', 'month', 'balance', 'capturedAt'],
+  ledgerBalances: ['id', 'accountId', 'month', 'balanceCents', 'capturedAt', 'sourceBalanceId', 'createdAt', 'updatedAt'],
   categorizationRules: ['id', 'categoryId', 'pattern', 'matchType', 'priority'],
   importProfiles: ['id', 'headerSignature', 'profileName', 'profileJson', 'mappingJson', 'lastAccountId', 'createdAt', 'updatedAt'],
   importFiles: [
@@ -146,10 +153,12 @@ const TABLES = {
 const ORDER_BY = {
   accounts: 'id ASC',
   transactions: 'date DESC, id DESC',
+  ledgerTransactions: 'date DESC, id DESC',
   transactionAnnotations: 'updatedAt DESC, ledgerTransactionId ASC',
   categories: 'id ASC',
   budgets: 'month DESC, id DESC',
   balanceSnapshots: 'month ASC, id ASC',
+  ledgerBalances: 'month ASC, id ASC',
   categorizationRules: 'priority DESC, id ASC',
   importProfiles: 'updatedAt DESC, id DESC',
   importFiles: 'createdAt DESC, id DESC',
@@ -199,6 +208,36 @@ export function initDatabase() {
       createdAt TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS ledgerTransactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ledgerTransactionId TEXT NOT NULL UNIQUE,
+      legacyTransactionId INTEGER,
+      accountId INTEGER NOT NULL,
+      date TEXT NOT NULL,
+      amountCents INTEGER NOT NULL,
+      importBatchId TEXT,
+      description TEXT,
+      merchant TEXT,
+      originalDescription TEXT,
+      originalCategory TEXT,
+      type TEXT,
+      transactionKind TEXT,
+      status TEXT,
+      fingerprint TEXT,
+      sourceRole TEXT,
+      occurrenceIndex INTEGER DEFAULT 0,
+      importFileId INTEGER,
+      importRowId INTEGER,
+      sourceTransactionId INTEGER,
+      createdAt TEXT,
+      updatedAt TEXT,
+      FOREIGN KEY(accountId) REFERENCES accounts(id) ON DELETE CASCADE,
+      FOREIGN KEY(legacyTransactionId) REFERENCES transactions(id) ON DELETE SET NULL,
+      FOREIGN KEY(importFileId) REFERENCES importFiles(id) ON DELETE SET NULL,
+      FOREIGN KEY(importRowId) REFERENCES importRows(id) ON DELETE SET NULL,
+      FOREIGN KEY(sourceTransactionId) REFERENCES sourceTransactions(id) ON DELETE SET NULL
+    );
+
     CREATE TABLE IF NOT EXISTS transactionAnnotations (
       ledgerTransactionId TEXT PRIMARY KEY,
       categoryId INTEGER,
@@ -231,6 +270,20 @@ export function initDatabase() {
       balance REAL NOT NULL,
       capturedAt TEXT,
       UNIQUE(accountId, month)
+    );
+
+    CREATE TABLE IF NOT EXISTS ledgerBalances (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      accountId INTEGER NOT NULL,
+      month TEXT NOT NULL,
+      balanceCents INTEGER NOT NULL,
+      capturedAt TEXT,
+      sourceBalanceId INTEGER,
+      createdAt TEXT,
+      updatedAt TEXT,
+      UNIQUE(accountId, month),
+      FOREIGN KEY(accountId) REFERENCES accounts(id) ON DELETE CASCADE,
+      FOREIGN KEY(sourceBalanceId) REFERENCES sourceBalances(id) ON DELETE SET NULL
     );
 
     CREATE TABLE IF NOT EXISTS categorizationRules (
@@ -549,6 +602,126 @@ export function initDatabase() {
       `);
     })();
   }
+
+  db.prepare('CREATE INDEX IF NOT EXISTS idx_ledger_transactions_account_date ON ledgerTransactions (accountId, date)').run();
+  db.prepare('CREATE INDEX IF NOT EXISTS idx_ledger_transactions_legacy_id ON ledgerTransactions (legacyTransactionId)').run();
+  db.prepare('CREATE INDEX IF NOT EXISTS idx_ledger_balances_account_month ON ledgerBalances (accountId, month)').run();
+  syncLedgerReadModelFromLegacyTables();
+}
+
+export function syncLedgerReadModelFromLegacyTables() {
+  const now = new Date().toISOString();
+  db.transaction(() => {
+    db.prepare(`
+      INSERT INTO ledgerTransactions (
+        ledgerTransactionId,
+        legacyTransactionId,
+        accountId,
+        date,
+        amountCents,
+        importBatchId,
+        description,
+        merchant,
+        originalDescription,
+        originalCategory,
+        type,
+        transactionKind,
+        status,
+        fingerprint,
+        sourceRole,
+        occurrenceIndex,
+        importFileId,
+        importRowId,
+        sourceTransactionId,
+        createdAt,
+        updatedAt
+      )
+      SELECT
+        t.ledgerTransactionId,
+        t.id,
+        t.accountId,
+        t.date,
+        CAST(ROUND(t.amount * 100) AS INTEGER),
+        t.importBatchId,
+        t.description,
+        t.merchant,
+        t.originalDescription,
+        t.originalCategory,
+        t.type,
+        t.transactionKind,
+        t.status,
+        t.fingerprint,
+        COALESCE(st.sourceRole, t.transactionKind, 'activity'),
+        COALESCE(t.occurrenceIndex, 0),
+        ir.importFileId,
+        ir.id,
+        st.id,
+        COALESCE(t.createdAt, @now),
+        @now
+      FROM transactions t
+      LEFT JOIN importRows ir ON ir.transactionId = t.id
+      LEFT JOIN sourceTransactions st ON st.importRowId = ir.id
+      WHERE t.ledgerTransactionId IS NOT NULL
+        AND t.ledgerTransactionId != ''
+        AND t.accountId IS NOT NULL
+      ON CONFLICT(ledgerTransactionId) DO UPDATE SET
+        legacyTransactionId = excluded.legacyTransactionId,
+        accountId = excluded.accountId,
+        date = excluded.date,
+        amountCents = excluded.amountCents,
+        importBatchId = excluded.importBatchId,
+        description = excluded.description,
+        merchant = excluded.merchant,
+        originalDescription = excluded.originalDescription,
+        originalCategory = excluded.originalCategory,
+        type = excluded.type,
+        transactionKind = excluded.transactionKind,
+        status = excluded.status,
+        fingerprint = excluded.fingerprint,
+        sourceRole = excluded.sourceRole,
+        occurrenceIndex = excluded.occurrenceIndex,
+        importFileId = excluded.importFileId,
+        importRowId = excluded.importRowId,
+        sourceTransactionId = excluded.sourceTransactionId,
+        updatedAt = excluded.updatedAt
+    `).run({ now });
+
+    db.prepare(`
+      INSERT INTO ledgerBalances (
+        accountId,
+        month,
+        balanceCents,
+        capturedAt,
+        sourceBalanceId,
+        createdAt,
+        updatedAt
+      )
+      SELECT
+        bs.accountId,
+        bs.month,
+        CAST(ROUND(bs.balance * 100) AS INTEGER),
+        bs.capturedAt,
+        sb.id,
+        COALESCE(bs.capturedAt, @now),
+        @now
+      FROM balanceSnapshots bs
+      LEFT JOIN sourceBalances sb
+        ON sb.id = (
+          SELECT sb2.id
+          FROM sourceBalances sb2
+          JOIN sourceAccounts sa2 ON sa2.id = sb2.sourceAccountId
+          WHERE sa2.accountId = bs.accountId
+            AND substr(sb2.date, 1, 7) = bs.month
+          ORDER BY sb2.date DESC, sb2.id DESC
+          LIMIT 1
+        )
+      ON CONFLICT(accountId, month) DO UPDATE SET
+        balanceCents = excluded.balanceCents,
+        capturedAt = excluded.capturedAt,
+        sourceBalanceId = excluded.sourceBalanceId,
+        updatedAt = excluded.updatedAt
+    `).run({ now });
+  })();
 }
 
 export function assertTable(table) {
