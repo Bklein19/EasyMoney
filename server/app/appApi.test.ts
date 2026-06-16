@@ -1050,8 +1050,75 @@ test('app import preview allows native parsers to handle malformed institution C
     amount: 1500,
     description: 'Zelle payment from Renter for JAN RENT; Conf# ABC123',
     account: 'Adv Plus Banking - 1234',
+    sourceAccountId: expect.any(Number),
   });
+  expect(preview.accountMappings).toEqual([{
+    sourceAccountId: preview.transactions[0].sourceAccountId,
+    institution: 'Bank of America',
+    sourceAccountName: 'Adv Plus Banking - 1234',
+    resolvedAccountId: null,
+    resolution: 'auto-create',
+    transactionCount: 1,
+    balanceCount: 1,
+  }]);
   expect(preview.balanceRowIds).toHaveLength(1);
+});
+
+test('app imports commit uses source account mapping overrides', async () => {
+  const existingAccountId = Number(insertRow('accounts', {
+    name: 'BofA Checking',
+    institution: 'Bank of America',
+    type: 'checking',
+    currentBalance: 100,
+    currency: 'USD',
+  }));
+  const preview = await postImportPreview('bofa-checking-1234-2026-01-01-to-2026-01-31.csv', [
+    'Description,,Summary Amt.',
+    'Opening Balance,,"1,000.00"',
+    'Date,Description,Amount,Running Bal.',
+    '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+  ].join('\n'));
+
+  const sourceAccountId = preview.accountMappings[0].sourceAccountId;
+  const commit = await postJson('/api/app/imports/commit', {
+    accountId: null,
+    importFileId: preview.importFileId,
+    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    balanceRowIds: preview.balanceRowIds,
+    accountMappings: [{
+      sourceAccountId,
+      accountId: existingAccountId,
+    }],
+  }, 201);
+
+  expect(commit.importedCount).toBe(1);
+  expect(commit.importedBalanceCount).toBe(1);
+
+  const transactions = getDb().prepare('SELECT accountId, amount FROM transactions').all() as Array<{
+    accountId: number;
+    amount: number;
+  }>;
+  expect(transactions).toEqual([{ accountId: existingAccountId, amount: 1500 }]);
+
+  const duplicateAccount = getDb().prepare(`
+    SELECT id
+    FROM accounts
+    WHERE institution = 'Bank of America'
+      AND name = 'Adv Plus Banking - 1234'
+  `).get();
+  expect(duplicateAccount).toBeNull();
+
+  const alias = getDb().prepare(`
+    SELECT accountId
+    FROM accountAliases
+    WHERE institution = ? AND alias = ?
+  `).get('Bank of America', 'Adv Plus Banking - 1234') as { accountId: number };
+  expect(alias.accountId).toBe(existingAccountId);
+
+  const sourceAccount = getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(sourceAccountId) as {
+    accountId: number;
+  };
+  expect(sourceAccount.accountId).toBe(existingAccountId);
 });
 
 test('app import preview stages multiple source balances for the same account and date', async () => {

@@ -11,10 +11,17 @@ import './ImportPreview.css';
 
 export default function ImportPreview({ transactions, importMeta, onComplete, onCancel }) {
   const { accounts } = useAccounts();
+  const accountMappings = importMeta?.accountMappings || [];
   const initialAccountId = importMeta?.savedImportProfile?.lastAccountId
     ? String(importMeta.savedImportProfile.lastAccountId)
     : '';
   const [selectedAccountId, setSelectedAccountId] = useState(initialAccountId);
+  const [sourceAccountSelections, setSourceAccountSelections] = useState(() => Object.fromEntries(
+    accountMappings.map(mapping => [
+      String(mapping.sourceAccountId),
+      mapping.resolvedAccountId ? String(mapping.resolvedAccountId) : '__auto__',
+    ])
+  ));
   const { transactions: existingTransactions } = useTransactions(
     selectedAccountId ? { accountId: selectedAccountId } : {}
   );
@@ -27,8 +34,14 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
 
   const creditCount = validTransactions.filter(t => t.amount > 0).length;
   const chargeCount = validTransactions.filter(t => t.amount < 0).length;
-  const parserIdentifiedAccounts = validTransactions.length > 0 && validTransactions.every(t => t.account || t.sourceAccountId);
-  const canResolveAccounts = Boolean(selectedAccountId) || parserIdentifiedAccounts;
+  const parserIdentifiedAccounts = accountMappings.length > 0
+    ? accountMappings.every(mapping => mapping.resolution !== 'selected-fallback' && mapping.resolution !== 'unresolved')
+    : validTransactions.length > 0 && validTransactions.every(t => t.account || t.sourceAccountId);
+  const mappingSelectionsComplete = accountMappings.every(mapping => {
+    const selection = sourceAccountSelections[String(mapping.sourceAccountId)];
+    return selection === '__auto__' || Boolean(selection);
+  });
+  const canResolveAccounts = Boolean(selectedAccountId) || (parserIdentifiedAccounts && mappingSelectionsComplete);
   const accountId = selectedAccountId ? Number(selectedAccountId) : null;
   const { unique, duplicates } = accountId
     ? splitDuplicateTransactions(validTransactions, existingTransactions, accountId)
@@ -50,6 +63,13 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
           accountId: selectedAccountId ? Number(selectedAccountId) : null,
           importFileId: importMeta?.importFileId,
           importRowIds: validTransactions.map(transaction => transaction.importRowId),
+          accountMappings: accountMappings.map(mapping => {
+            const selection = sourceAccountSelections[String(mapping.sourceAccountId)];
+            return {
+              sourceAccountId: mapping.sourceAccountId,
+              accountId: selection && selection !== '__auto__' ? Number(selection) : null,
+            };
+          }),
           importMeta,
         })
       });
@@ -108,11 +128,56 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
           )}
           {!selectedAccount && parserIdentifiedAccounts && (
             <span className="account-kind-badge">
-              Parser identified {new Set(validTransactions.map(t => `${t.institution || ''}|${t.account || ''}`)).size} account{new Set(validTransactions.map(t => `${t.institution || ''}|${t.account || ''}`)).size === 1 ? '' : 's'}
+              Parser identified {accountMappings.length || new Set(validTransactions.map(t => `${t.institution || ''}|${t.account || ''}`)).size} account{(accountMappings.length || new Set(validTransactions.map(t => `${t.institution || ''}|${t.account || ''}`)).size) === 1 ? '' : 's'}
             </span>
           )}
         </div>
       </div>
+
+      {accountMappings.length > 0 && (
+        <div className="account-mapping-panel glass-card">
+          <div className="account-mapping-panel__header">
+            <h3>Account Mapping</h3>
+          </div>
+          <div className="account-mapping-list">
+            {accountMappings.map(mapping => {
+              const sourceName = mapping.sourceAccountName || 'Selected account';
+              const institution = mapping.institution || 'Unknown institution';
+              const selectionKey = String(mapping.sourceAccountId);
+              const selection = sourceAccountSelections[selectionKey] || '__auto__';
+
+              return (
+                <div className="account-mapping-row" key={mapping.sourceAccountId}>
+                  <div className="account-mapping-source">
+                    <div className="account-mapping-name">{sourceName}</div>
+                    <div className="account-mapping-meta">
+                      {institution} | {mapping.transactionCount} transaction{mapping.transactionCount === 1 ? '' : 's'}
+                      {mapping.balanceCount > 0 && ` | ${mapping.balanceCount} balance${mapping.balanceCount === 1 ? '' : 's'}`}
+                    </div>
+                  </div>
+                  <select
+                    value={selection}
+                    onChange={event => setSourceAccountSelections(previous => ({
+                      ...previous,
+                      [selectionKey]: event.target.value,
+                    }))}
+                    className="form-input account-mapping-select"
+                  >
+                    <option value="__auto__">
+                      {mapping.resolution === 'auto-create' ? 'Create or match automatically' : 'Use parser match'}
+                    </option>
+                    {accounts.map(account => (
+                      <option key={account.id} value={account.id}>
+                        {account.name} ({getAccountTypeLabel(account.type)})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="preview-stats">
         <div className="stat-card glass-card">

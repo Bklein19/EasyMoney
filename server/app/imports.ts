@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { getDb, hashContent, insertRow, updateRow } from '../database.js';
-import type { CommitImportTransaction, ImportPreviewTransaction, ImportProfile, ParsedImportBalance, ParsedImportTransaction } from './importTypes.ts';
+import type { CommitImportTransaction, ImportAccountMapping, ImportPreviewTransaction, ImportProfile, ParsedImportBalance, ParsedImportTransaction } from './importTypes.ts';
 import { CUSTOM_CSV_PARSER_ID, parseCustomCsv } from './importParsers/customCsv.ts';
 import { mappingFromProfile } from './importParsers/csvMapping.ts';
 import { resolveImportParser } from './importParsers/index.ts';
@@ -27,12 +27,14 @@ interface CommitImportOptions {
   importRowIds?: number[] | null;
   balanceRowIds?: number[] | null;
   transactions?: ImportTransactionInput[];
+  accountMappings?: Array<{ sourceAccountId: number; accountId: number | null }> | null;
   importMeta?: {
     importFileId?: number | null;
     headers?: string[];
     profile?: ImportProfile | null;
     mapping?: Record<string, unknown> | null;
     profileName?: string | null;
+    accountMappings?: Array<{ sourceAccountId: number; accountId: number | null }> | null;
   } | null;
 }
 
@@ -42,6 +44,7 @@ interface MaterializeImportTransactionsOptions {
   importRowIds?: number[] | null;
   balanceRowIds?: number[] | null;
   transactions?: ImportTransactionInput[];
+  accountMappings?: Array<{ sourceAccountId: number; accountId: number | null }> | null;
   fallbackImportFileId?: number | null;
 }
 
@@ -116,6 +119,128 @@ function inferAccountType(name: string | null, fallbackType?: string | null) {
   return 'other';
 }
 
+function upsertAccountAlias(sourceAccount: {
+  id: number;
+  institution: string | null;
+  sourceAccountName: string | null;
+}, accountId: number) {
+  const alias = (sourceAccount.sourceAccountName || '').trim();
+  if (!alias || alias === 'Selected account') return;
+
+  const institution = (sourceAccount.institution || 'Unknown Institution').trim();
+  const now = new Date().toISOString();
+  getDb().prepare(`
+    INSERT INTO accountAliases (institution, alias, accountId, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(institution, alias) DO UPDATE SET
+      accountId = excluded.accountId,
+      updatedAt = excluded.updatedAt
+  `).run(institution, alias, accountId, now, now);
+}
+
+function linkSourceAccount(sourceAccountId: number, accountId: number | null) {
+  const db = getDb();
+  if (accountId !== null) {
+    const account = db.prepare('SELECT id FROM accounts WHERE id = ?').get(accountId) as { id: number } | undefined;
+    if (!account) throw new Error(`Account not found: ${accountId}`);
+  }
+
+  const sourceAccount = db.prepare(`
+    SELECT id, institution, sourceAccountName
+    FROM sourceAccounts
+    WHERE id = ?
+  `).get(sourceAccountId) as
+    | { id: number; institution: string | null; sourceAccountName: string | null }
+    | undefined;
+  if (!sourceAccount) throw new Error(`Source account not found: ${sourceAccountId}`);
+
+  db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(accountId, sourceAccountId);
+  if (accountId !== null) upsertAccountAlias(sourceAccount, accountId);
+}
+
+function applyAccountMappingOverrides(accountMappings: Array<{ sourceAccountId: number; accountId: number | null }> | null | undefined) {
+  if (!accountMappings?.length) return;
+  for (const mapping of accountMappings) {
+    if (!Number.isFinite(Number(mapping.sourceAccountId))) continue;
+    const accountId = mapping.accountId === null || mapping.accountId === undefined ? null : Number(mapping.accountId);
+    if (accountId !== null && !Number.isFinite(accountId)) continue;
+    linkSourceAccount(Number(mapping.sourceAccountId), accountId);
+  }
+}
+
+function getImportAccountResolution(sourceAccount: {
+  id: number;
+  accountId: number | null;
+  institution: string | null;
+  sourceAccountName: string | null;
+}): Pick<ImportAccountMapping, 'resolvedAccountId' | 'resolution'> {
+  if (sourceAccount.accountId) {
+    return { resolvedAccountId: sourceAccount.accountId, resolution: 'linked' };
+  }
+
+  const alias = (sourceAccount.sourceAccountName || '').trim();
+  const institution = (sourceAccount.institution || 'Unknown Institution').trim();
+  if (!alias || alias === 'Selected account') {
+    return { resolvedAccountId: null, resolution: 'selected-fallback' };
+  }
+
+  const aliased = getDb().prepare(`
+    SELECT accountId
+    FROM accountAliases
+    WHERE institution = ? AND alias = ?
+  `).get(institution, alias) as { accountId: number } | undefined;
+  if (aliased) return { resolvedAccountId: aliased.accountId, resolution: 'alias' };
+
+  const exact = getDb().prepare(`
+    SELECT id
+    FROM accounts
+    WHERE institution IS ? AND name = ?
+  `).get(institution, alias) as { id: number } | undefined;
+  if (exact) return { resolvedAccountId: exact.id, resolution: 'exact' };
+
+  return { resolvedAccountId: null, resolution: 'auto-create' };
+}
+
+function getImportAccountMappings(importFileId: number): ImportAccountMapping[] {
+  const rows = getDb().prepare(`
+    SELECT
+      sa.id AS sourceAccountId,
+      sa.accountId,
+      sa.institution,
+      sa.sourceAccountName,
+      COUNT(DISTINCT st.id) AS transactionCount,
+      COUNT(DISTINCT sb.id) AS balanceCount
+    FROM sourceAccounts sa
+    JOIN sourceFiles sf ON sf.id = sa.sourceFileId
+    LEFT JOIN sourceTransactions st ON st.sourceAccountId = sa.id
+    LEFT JOIN sourceBalances sb ON sb.sourceAccountId = sa.id
+    WHERE sf.importFileId = ?
+    GROUP BY sa.id
+    ORDER BY sa.id ASC
+  `).all(importFileId) as Array<{
+    sourceAccountId: number;
+    accountId: number | null;
+    institution: string | null;
+    sourceAccountName: string | null;
+    transactionCount: number;
+    balanceCount: number;
+  }>;
+
+  return rows.map(row => ({
+    sourceAccountId: row.sourceAccountId,
+    institution: row.institution,
+    sourceAccountName: row.sourceAccountName,
+    ...getImportAccountResolution({
+      id: row.sourceAccountId,
+      accountId: row.accountId,
+      institution: row.institution,
+      sourceAccountName: row.sourceAccountName,
+    }),
+    transactionCount: Number(row.transactionCount || 0),
+    balanceCount: Number(row.balanceCount || 0),
+  }));
+}
+
 function resolveImportedAccount(sourceAccountId: number | null | undefined, fallbackAccountId: number | null | undefined) {
   const db = getDb();
   if (!sourceAccountId) {
@@ -171,13 +296,7 @@ function resolveImportedAccount(sourceAccountId: number | null | undefined, fall
     updatedAt: now,
   }));
 
-  db.prepare(`
-    INSERT INTO accountAliases (institution, alias, accountId, createdAt, updatedAt)
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(institution, alias) DO UPDATE SET
-      accountId = excluded.accountId,
-      updatedAt = excluded.updatedAt
-  `).run(institution, alias, accountId, now, now);
+  upsertAccountAlias(sourceAccount, accountId);
   db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(accountId, sourceAccount.id);
 
   return accountId;
@@ -375,7 +494,12 @@ function saveImportPreview({
     });
   }
 
-  return { importFileId: Number(importFileId), rowIds, balanceRowIds };
+  return {
+    importFileId: Number(importFileId),
+    rowIds,
+    balanceRowIds,
+    accountMappings: getImportAccountMappings(Number(importFileId)),
+  };
 }
 
 function toNumberSet(values: number[] | null | undefined) {
@@ -501,8 +625,9 @@ export async function previewImport({ fileName, text, fileBytes, customProfile =
       parsedTransactions: parsedResult.transactions,
       parsedBalances: parsedResult.balances,
     });
-    const previewTransactions = transactions.map(transaction =>
-      toPreviewTransaction(transaction, preview.importFileId, preview.rowIds[transaction.sourceRowIndex])
+    const previewTransactions = readStagedTransactions(
+      preview.importFileId,
+      transactions.map(transaction => preview.rowIds[transaction.sourceRowIndex])
     );
 
     return {
@@ -513,6 +638,7 @@ export async function previewImport({ fileName, text, fileBytes, customProfile =
       headers,
       previewData: rows.slice(0, 5),
       mapping: mappingFromProfile(customProfile, headers),
+      accountMappings: preview.accountMappings,
       balances: parsedResult.balances,
       balanceRowIds: preview.balanceRowIds,
       transactions: previewTransactions,
@@ -540,6 +666,7 @@ export async function previewImport({ fileName, text, fileBytes, customProfile =
     headers,
     previewData: rows.slice(0, 5),
     mapping: mappingFromProfile(null, headers),
+    accountMappings: preview.accountMappings,
     balances: [],
   };
 }
@@ -550,11 +677,14 @@ export function materializeImportTransactions({
   importRowIds = null,
   balanceRowIds = null,
   transactions = [],
+  accountMappings = null,
   fallbackImportFileId = null,
 }: MaterializeImportTransactionsOptions) {
   if (!Array.isArray(transactions)) throw new Error('transactions must be an array');
   if (importRowIds !== null && !Array.isArray(importRowIds)) throw new Error('importRowIds must be an array');
   if (balanceRowIds !== null && !Array.isArray(balanceRowIds)) throw new Error('balanceRowIds must be an array');
+
+  applyAccountMappingOverrides(accountMappings);
 
   const stagedTransactions = stagedImportFileId
     ? readStagedTransactions(stagedImportFileId, importRowIds)
@@ -879,6 +1009,7 @@ export function commitImport({
   importRowIds = null,
   balanceRowIds = null,
   transactions = [],
+  accountMappings = null,
   importMeta = null,
 }: CommitImportOptions) {
   const result = materializeImportTransactions({
@@ -887,6 +1018,7 @@ export function commitImport({
     importRowIds,
     balanceRowIds,
     transactions,
+    accountMappings: accountMappings || importMeta?.accountMappings || null,
     fallbackImportFileId: importMeta?.importFileId || null,
   });
 

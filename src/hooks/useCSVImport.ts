@@ -19,6 +19,15 @@ interface ImportPreviewResult {
   headers: string[];
   previewData?: Array<Record<string, string>>;
   mapping?: Record<string, unknown>;
+  accountMappings?: Array<{
+    sourceAccountId: number;
+    institution: string | null;
+    sourceAccountName: string | null;
+    resolvedAccountId: number | null;
+    resolution: string;
+    transactionCount: number;
+    balanceCount: number;
+  }>;
   transactions?: unknown[];
 }
 

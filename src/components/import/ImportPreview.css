@@ -83,6 +83,59 @@
   color: var(--color-warning);
 }
 
+.account-mapping-panel {
+  padding: 1.25rem;
+  border-radius: 1rem;
+}
+
+.account-mapping-panel__header {
+  margin-bottom: 1rem;
+}
+
+.account-mapping-panel__header h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.account-mapping-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.account-mapping-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--hairline);
+  border-radius: 0.5rem;
+  background: var(--bg-base);
+}
+
+.account-mapping-source {
+  min-width: 0;
+}
+
+.account-mapping-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-mapping-meta {
+  margin-top: 0.2rem;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+}
+
+.account-mapping-select {
+  width: 100%;
+}
+
 .preview-stats {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -188,4 +241,10 @@
   justify-content: flex-end;
   gap: 1rem;
   margin-top: 1rem;
+}
+
+@media (max-width: 720px) {
+  .account-mapping-row {
+    grid-template-columns: 1fr;
+  }
 }

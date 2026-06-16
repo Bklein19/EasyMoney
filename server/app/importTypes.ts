@@ -81,6 +81,24 @@ export interface ImportPreviewTransaction {
   resolvedAccountId?: number | null;
 }
 
+export type ImportAccountMappingResolution =
+  | 'linked'
+  | 'alias'
+  | 'exact'
+  | 'auto-create'
+  | 'selected-fallback'
+  | 'unresolved';
+
+export interface ImportAccountMapping {
+  sourceAccountId: number;
+  institution: string | null;
+  sourceAccountName: string | null;
+  resolvedAccountId: number | null;
+  resolution: ImportAccountMappingResolution;
+  transactionCount: number;
+  balanceCount: number;
+}
+
 export interface CommitImportTransaction extends ImportPreviewTransaction {
   accountId: number;
   importBatchId: string;
