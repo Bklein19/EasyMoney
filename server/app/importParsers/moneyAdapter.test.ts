@@ -258,6 +258,28 @@ test('import parser registry resolves Bank of America statement PDFs', () => {
 });
 
 test.each([
+  ['Wells Fargo checking statement', 'wells-fargo-statement-pdf', 'wells-fargo-checking-2432-2026-02-25.pdf', 'statement', 50],
+  ['Wells Fargo credit card statement', 'wells-fargo-statement-pdf', 'wells-fargo-autograph-visa-2856-2024-01-07.pdf', 'statement', 50],
+  ['Morgan Stanley statement', 'morgan-stanley-pdf', 'morgan-stanley-0854-2024-02-29-consolidated-statement.pdf', 'statement', 50],
+  ['Morgan Stanley activity export', 'morgan-stanley-activity-pdf', 'AllActivity.pdf', 'activity-export', 100],
+  ['Fidelity investment report', 'fidelity-investment-report-pdf', 'fidelity-Z19335125-2026-03-31.pdf', 'statement', 50],
+  ['Marcus savings statement', 'marcus-statement-pdf', 'marcus-online-savings-7453-2026-04-01-statement.pdf', 'statement', 50],
+  ['Merrill CMA statement', 'merrill-cma-statement-pdf', 'merrill-statement-2024-STMT_08302024_XXXXX092_CMAEdge.pdf', 'statement', 50],
+  ['Sequoia Fund statement', 'sequoia-fund-pdf', 'sequoia-fund-2026-03-31.pdf', 'statement', 50],
+  ['TIAA statement', 'tiaa-statement-pdf', 'tiaa-2024-04-01-retirement-q1-2024-1505352356.pdf', 'statement', 50],
+] as const)('import parser registry resolves %s', (_name, expectedId, fileName, sourceType, priority) => {
+  const parser = resolveImportParser({
+    fileName,
+    headers: [],
+    sample: '',
+  });
+
+  expect(parser?.id).toBe(expectedId);
+  expect(parser?.sourceType).toBe(sourceType);
+  expect(parser?.priority).toBe(priority);
+});
+
+test.each([
   ['American Express Credit Card', 'american-express-credit-card-csv', 'american express activity.csv', ['Date', 'Description', 'Amount']],
   ['Apple Card', 'apple-card-csv', 'apple-card.csv', ['Transaction Date', 'Clearing Date', 'Description', 'Merchant', 'Category', 'Type', 'Amount (USD)', 'Purchased By']],
   ['Capital One', 'capital-one-csv', 'capital-one.csv', ['Transaction Date', 'Posted Date', 'Card No.', 'Description', 'Category', 'Debit', 'Credit']],

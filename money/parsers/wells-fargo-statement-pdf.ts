@@ -9,7 +9,7 @@ export const meta: ParserMeta = {
   priority: 50,
   matches: ({ filename, sample }) =>
     /^wells-fargo-(checking|autograph-visa|platinum-card)-\d{4}-\d{4}-\d{2}-\d{2}\.pdf$/i.test(filename) ||
-    (/Wells Fargo/i.test(sample) &&
+    (/\.pdf$/i.test(filename) && /Wells Fargo/i.test(sample) &&
       (/Wells Fargo Everyday Checking/.test(sample) ||
         /WELLS FARGO AUTOGRAPH VISA/i.test(sample) ||
         (/WELLS FARGO CREDIT CARD/i.test(sample) && /Account ending in/.test(sample)))),

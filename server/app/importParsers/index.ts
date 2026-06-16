@@ -3,20 +3,36 @@ import { bofaActivityParser } from './bofaActivity.ts';
 import { bofaStatementParser } from './bofaStatement.ts';
 import { chaseCreditCardParser } from './chaseCreditCard.ts';
 import { easyMoneyCsvProfileParsers } from './easyMoneyCsvProfiles.ts';
+import { fidelityInvestmentReportParser } from './fidelityInvestmentReport.ts';
+import { marcusStatementParser } from './marcusStatement.ts';
 import { merrillActivityParser } from './merrillActivity.ts';
+import { merrillStatementParser } from './merrillStatement.ts';
+import { morganStanleyActivityParser } from './morganStanleyActivity.ts';
+import { morganStanleyStatementParser } from './morganStanleyStatement.ts';
+import { sequoiaFundStatementParser } from './sequoiaFundStatement.ts';
 import { tiaaActivityParser } from './tiaaActivity.ts';
+import { tiaaStatementParser } from './tiaaStatement.ts';
 import { vanguardActivityParser } from './vanguardActivity.ts';
 import { vanguardStatementParser } from './vanguardStatement.ts';
 import { wellsFargoActivityParser } from './wellsFargoActivity.ts';
+import { wellsFargoStatementParser } from './wellsFargoStatement.ts';
 
 export const IMPORT_PARSERS: AppImportParser[] = [
   chaseCreditCardParser,
   bofaActivityParser,
-  bofaStatementParser,
   wellsFargoActivityParser,
   merrillActivityParser,
   tiaaActivityParser,
   vanguardActivityParser,
+  morganStanleyActivityParser,
+  bofaStatementParser,
+  wellsFargoStatementParser,
+  morganStanleyStatementParser,
+  fidelityInvestmentReportParser,
+  marcusStatementParser,
+  merrillStatementParser,
+  sequoiaFundStatementParser,
+  tiaaStatementParser,
   vanguardStatementParser,
   ...easyMoneyCsvProfileParsers,
 ];
