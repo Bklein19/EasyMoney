@@ -225,6 +225,22 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
     };
   });
 
+  const sourceIdentityKey = (transaction: {
+    raw: Record<string, unknown>;
+    stableSourceId: string;
+  }) => typeof transaction.raw.moneyId === 'string'
+    ? `money:${transaction.raw.moneyId}`
+    : `source:${transaction.stableSourceId}`;
+  const uniqueTransactionInputs = new Map<string, (typeof transactionInputs)[number]>();
+  for (const transaction of transactionInputs) {
+    const key = sourceIdentityKey(transaction);
+    const existing = uniqueTransactionInputs.get(key);
+    if (!existing || (transaction.priority ?? 0) > (existing.priority ?? 0)) {
+      uniqueTransactionInputs.set(key, transaction);
+    }
+  }
+  const sourceUniqueTransactionInputs = [...uniqueTransactionInputs.values()];
+
   const exactKey = (transaction: {
     accountId: number;
     date: string;
@@ -239,7 +255,7 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
 
   const bestExactPriority = new Map<string, number>();
   const bestMonthBucketDetailPriority = new Map<string, number>();
-  for (const transaction of transactionInputs) {
+  for (const transaction of sourceUniqueTransactionInputs) {
     if (transaction.sourceRole !== 'activity') continue;
     const priority = transaction.priority ?? 0;
     const key = exactKey(transaction);
@@ -254,7 +270,7 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
     }
   }
 
-  const dedupedTransactionInputs = transactionInputs.filter(transaction => {
+  const dedupedTransactionInputs = sourceUniqueTransactionInputs.filter(transaction => {
     if (transaction.sourceRole !== 'activity') return true;
     const priority = transaction.priority ?? 0;
     if (isStatementSummary(transaction)) {

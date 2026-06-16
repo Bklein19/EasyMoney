@@ -426,3 +426,59 @@ test('source rebuild drops lower-priority statement summaries by activity bucket
     'Statement dividends/interest income',
   ]);
 });
+
+test('source rebuild de-duplicates parser-stable money ids across duplicate files', () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Sequoia',
+    institution: 'Sequoia Fund',
+    type: 'investment',
+    currentBalance: 0,
+  }));
+  const first = insertCommittedSourceFile({
+    fileName: 'sequoia-fund-2026-03-31.pdf',
+    parserName: 'sequoia-fund-pdf',
+    sourceType: 'statement',
+    priority: 50,
+    institution: 'Sequoia Fund',
+  });
+  const duplicate = insertCommittedSourceFile({
+    fileName: 'hash-sequoia-fund-2026-03-31.pdf',
+    parserName: 'sequoia-fund-pdf',
+    sourceType: 'statement',
+    priority: 50,
+    institution: 'Sequoia Fund',
+  });
+  const firstAccountId = insertSourceAccount(first.sourceFileId, accountId, 'sequoia', {
+    institution: 'Sequoia Fund',
+    sourceAccountName: 'Sequoia Fund',
+  });
+  const duplicateAccountId = insertSourceAccount(duplicate.sourceFileId, accountId, 'sequoia', {
+    institution: 'Sequoia Fund',
+    sourceAccountName: 'Sequoia Fund',
+  });
+
+  for (const [sourceFileId, sourceAccountId] of [
+    [first.sourceFileId, firstAccountId],
+    [duplicate.sourceFileId, duplicateAccountId],
+  ] as const) {
+    insertSourceTransaction({
+      sourceFileId,
+      sourceAccountId,
+      stableSourceId: `${sourceFileId}-duplicate-purchase`,
+      date: '2026-03-15',
+      amountCents: 40000,
+      description: 'Shares Purchased -ACH',
+      priority: 50,
+      raw: {
+        moneyId: 'sequoia-stable-purchase-id',
+      },
+    });
+  }
+
+  const ledger = buildLedgerFromSourceFacts(getDb());
+  expect(ledger.transactions).toHaveLength(1);
+  expect(ledger.transactions[0]).toMatchObject({
+    description: 'Shares Purchased -ACH',
+    amount: 400,
+  });
+});
