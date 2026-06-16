@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { add, apiAction, bulkAdd, remove, subscribeToDataChanges, update } from '../db/api';
+import { subscribeToDataChanges } from '../db/api';
 import { queryClient, trpc } from '../api/trpc';
 import type { TransactionListItem } from '../../server/app/types.ts';
 
@@ -14,6 +14,10 @@ interface TransactionFilters {
 }
 
 type TransactionRow = ReturnType<typeof fromAppTransaction>;
+type TransactionAnnotationChanges = {
+  categoryId?: string | number | null;
+  notes?: string | null;
+};
 
 const normalizeId = (value: string | number | null | undefined) => {
   if (value === undefined || value === null || value === '') return undefined;
@@ -61,54 +65,28 @@ export function useTransactions(filters: TransactionFilters = {}) {
     return result;
   }, [transactionsQuery.data, filters.type]);
 
-  async function addTransaction(transaction: Record<string, unknown>) {
-    return add('transactions', {
-      ...transaction,
-      createdAt: new Date().toISOString(),
-    });
-  }
+  async function updateTransaction(id: number | string, changes: TransactionAnnotationChanges) {
+    const fields = Object.keys(changes);
+    const unsupported = fields.filter(field => field !== 'categoryId' && field !== 'notes');
+    if (unsupported.length) {
+      throw new Error(`Transactions only support annotation updates: ${unsupported.join(', ')}`);
+    }
 
-  async function addTransactionsBatch(transactionsToAdd: Array<Record<string, unknown>>) {
-    return bulkAdd('transactions', transactionsToAdd.map(t => ({
-      ...t,
-      createdAt: new Date().toISOString(),
-    })));
-  }
-
-  async function updateTransaction(id: number | string, changes: Record<string, unknown>) {
-    const legacyChanges = { ...changes };
-    const categoryIdChanged = Object.hasOwn(legacyChanges, 'categoryId');
-    const notesChanged = Object.hasOwn(legacyChanges, 'notes');
-    const categoryId = legacyChanges.categoryId as string | number | null | undefined;
-    const notes = legacyChanges.notes as string | null | undefined;
+    const categoryIdChanged = Object.hasOwn(changes, 'categoryId');
+    const notesChanged = Object.hasOwn(changes, 'notes');
     if (categoryIdChanged || notesChanged) {
-      delete legacyChanges.categoryId;
-      delete legacyChanges.notes;
       await updateAnnotation.mutateAsync({
         id,
-        categoryId: categoryIdChanged ? categoryId : undefined,
-        notes: notesChanged ? notes : undefined,
+        categoryId: categoryIdChanged ? changes.categoryId : undefined,
+        notes: notesChanged ? changes.notes : undefined,
       });
     }
-    if (!Object.keys(legacyChanges).length) return { ok: true };
-    return update('transactions', id, legacyChanges);
-  }
-
-  async function deleteTransaction(id: number | string) {
-    return remove('transactions', id);
-  }
-
-  async function deleteByImportBatch(batchId: number | string) {
-    return apiAction(`/transactions/import-batch/${batchId}`, { method: 'DELETE' });
+    return { ok: true };
   }
 
   return {
     transactions,
-    addTransaction,
-    addTransactionsBatch,
     updateTransaction,
-    deleteTransaction,
-    deleteByImportBatch,
     isLoading: transactionsQuery.isLoading,
     isFetching: transactionsQuery.isFetching,
     error: transactionsQuery.error,

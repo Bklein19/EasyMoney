@@ -15,8 +15,8 @@ export default function TransactionsPage() {
   const [newBulkCategoryName, setNewBulkCategoryName] = useState('');
   const [pendingBulkCategoryValue, setPendingBulkCategoryValue] = useState(null);
   const deferredFilters = useDeferredValue(filters);
-  const { transactions, updateTransaction, deleteTransaction } = useTransactions(deferredFilters);
-  const { accounts, updateBalance } = useAccounts();
+  const { transactions, updateTransaction } = useTransactions(deferredFilters);
+  const { accounts } = useAccounts();
   const { categories, addCategory } = useCategories();
   const deferredTransactions = useDeferredValue(transactions);
   const deferredAccounts = useDeferredValue(accounts);
@@ -27,7 +27,6 @@ export default function TransactionsPage() {
     accounts !== deferredAccounts ||
     categories !== deferredCategories ||
     filters !== deferredFilters;
-  const currentAccountMap = useMemo(() => buildAccountMap(accounts), [accounts]);
   const accountMap = useMemo(() => buildAccountMap(deferredAccounts), [deferredAccounts]);
   const categoryMap = useMemo(() => {
     const map = {};
@@ -139,15 +138,6 @@ export default function TransactionsPage() {
       setFilters(nextFilters);
     });
   }, []);
-
-  const handleDeleteTransaction = async (transaction) => {
-    const account = currentAccountMap[transaction.accountId];
-    await deleteTransaction(transaction.id);
-
-    if (account) {
-      await updateBalance(account.id, (account.currentBalance || 0) - transaction.amount);
-    }
-  };
 
   const totals = useMemo(() => {
     return visibleTransactions.reduce((summary, tx) => {
@@ -277,7 +267,6 @@ export default function TransactionsPage() {
                   key={tx.id} 
                   transaction={tx} 
                   onUpdate={updateTransaction} 
-                  onDelete={handleDeleteTransaction}
                   account={accountMap[tx.accountId]}
                   categories={categories}
                   addCategory={addCategory}

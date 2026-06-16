@@ -10,7 +10,6 @@ export default function AddAccountModal({ onClose }) {
     name: '',
     institution: '',
     type: 'checking',
-    currentBalance: '0',
     currency: 'USD'
   });
 
@@ -21,10 +20,7 @@ export default function AddAccountModal({ onClose }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    await addAccount({
-      ...formData,
-      currentBalance: parseFloat(formData.currentBalance) || 0,
-    });
+    await addAccount(formData);
     onClose();
   };
 
@@ -97,24 +93,6 @@ export default function AddAccountModal({ onClose }) {
                 <option value="CAD">CAD ($)</option>
               </select>
             </div>
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="currentBalance">Current Balance</label>
-            <input
-              type="number"
-              id="currentBalance"
-              name="currentBalance"
-              step="0.01"
-              required
-              value={formData.currentBalance}
-              onChange={handleChange}
-              placeholder="0.00"
-              className="form-input"
-            />
-            {formData.type === 'credit' && (
-              <p className="form-hint">For credit cards, enter the current amount owed as a positive balance.</p>
-            )}
           </div>
 
           <div className="modal-footer">

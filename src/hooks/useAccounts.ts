@@ -1,9 +1,16 @@
 import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { add, apiAction, update } from '../db/api';
+import { add, update } from '../db/api';
 import { queryClient, trpc } from '../api/trpc';
 import { subscribeToDataChanges } from '../db/api';
 import type { AccountSummary } from '../../server/app/types.ts';
+
+type AccountMetadataChanges = {
+  name?: unknown;
+  institution?: unknown;
+  type?: unknown;
+  currency?: unknown;
+};
 
 export function useAccounts() {
   const accountsQuery = useQuery(trpc.accounts.list.queryOptions(undefined, {
@@ -22,26 +29,21 @@ export function useAccounts() {
   async function addAccount(account: Record<string, unknown>) {
     return add('accounts', {
       ...account,
-      currentBalance: account.currentBalance || 0,
+      currentBalance: 0,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
   }
 
-  async function updateAccount(id: number | string, changes: Record<string, unknown>) {
+  async function updateAccount(id: number | string, changes: AccountMetadataChanges) {
+    const allowed = new Set(['name', 'institution', 'type', 'currency']);
+    const unsupported = Object.keys(changes).filter(field => !allowed.has(field));
+    if (unsupported.length) {
+      throw new Error(`Accounts only support metadata updates: ${unsupported.join(', ')}`);
+    }
+
     return update('accounts', id, {
       ...changes,
-      updatedAt: new Date().toISOString(),
-    });
-  }
-
-  async function deleteAccount(id: number | string) {
-    return apiAction(`/accounts/${id}/deep`, { method: 'DELETE' });
-  }
-
-  async function updateBalance(id: number | string, newBalance: number) {
-    return update('accounts', id, {
-      currentBalance: newBalance,
       updatedAt: new Date().toISOString(),
     });
   }
@@ -50,8 +52,6 @@ export function useAccounts() {
     accounts: accountsQuery.data ?? [],
     addAccount,
     updateAccount,
-    deleteAccount,
-    updateBalance,
     isLoading: accountsQuery.isLoading,
     isFetching: accountsQuery.isFetching,
     error: accountsQuery.error,

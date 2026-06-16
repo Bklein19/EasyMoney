@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Building2, Check, CreditCard, Edit3, Landmark, PiggyBank, Trash2, X } from 'lucide-react';
+import { Building2, Check, CreditCard, Edit3, Landmark, PiggyBank, X } from 'lucide-react';
 import { useAccounts } from '../../hooks/useAccounts';
 import { getAccountTypeLabel } from '../../utils/formatters';
 import './AccountCard.css';
@@ -15,17 +15,11 @@ const getAccountIcon = (type) => {
 };
 
 export default function AccountCard({ account }) {
-  const { deleteAccount, updateAccount } = useAccounts();
+  const { updateAccount } = useAccounts();
   const [isEditing, setIsEditing] = useState(false);
   const [draftName, setDraftName] = useState(account.name || '');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
-
-  const handleDelete = () => {
-    if (window.confirm(`Are you sure you want to delete ${account.name}? This will also delete all associated transactions.`)) {
-      deleteAccount(account.id);
-    }
-  };
 
   const handleStartEdit = () => {
     setDraftName(account.name || '');
@@ -77,9 +71,6 @@ export default function AccountCard({ account }) {
         <div className="account-actions">
           <button className="icon-btn" onClick={handleStartEdit} title="Edit account name" disabled={isEditing}>
             <Edit3 size={16} />
-          </button>
-          <button className="icon-btn delete-btn" onClick={handleDelete} title="Delete account" disabled={isEditing}>
-            <Trash2 size={16} />
           </button>
         </div>
       </div>
