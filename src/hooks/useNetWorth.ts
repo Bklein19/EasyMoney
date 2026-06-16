@@ -1,19 +1,32 @@
 import { useMemo } from 'react';
 import { add, update } from '../db/api';
 import { useApiTable } from './useApiTable';
+import { useAccounts } from './useAccounts';
 import { calcNetWorth } from '../utils/calculations';
 import { isCreditAccount } from '../utils/transactionSemantics';
 
+interface BalanceSnapshot {
+  id: number;
+  accountId: number;
+  month: string;
+  balance: number;
+}
+
+interface NetWorthPoint {
+  month: string;
+  netWorth: number;
+}
+
 export function useNetWorth() {
-  const accounts = useApiTable('accounts');
-  const snapshots = useApiTable('balanceSnapshots');
+  const { accounts } = useAccounts();
+  const snapshots = useApiTable('balanceSnapshots') as BalanceSnapshot[];
 
   const currentNetWorth = useMemo(() => calcNetWorth(accounts), [accounts]);
 
   const historicalNetWorth = useMemo(() => {
     if (!snapshots.length) return [];
 
-    const byMonth = {};
+    const byMonth: Record<string, number> = {};
     for (const snap of snapshots) {
       if (!byMonth[snap.month]) byMonth[snap.month] = 0;
       byMonth[snap.month] += snap.balance;
@@ -22,7 +35,7 @@ export function useNetWorth() {
     return Object.entries(byMonth)
       .map(([month, netWorth]) => ({ month, netWorth }))
       .sort((a, b) => a.month.localeCompare(b.month));
-  }, [snapshots]);
+  }, [snapshots]) as NetWorthPoint[];
 
   const percentChange = useMemo(() => {
     if (historicalNetWorth.length < 2) return 0;
