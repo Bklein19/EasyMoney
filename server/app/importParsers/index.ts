@@ -3,6 +3,7 @@ import { bofaActivityParser } from './bofaActivity.ts';
 import { bofaStatementParser } from './bofaStatement.ts';
 import { chaseCreditCardParser } from './chaseCreditCard.ts';
 import { easyMoneyCsvProfileParsers } from './easyMoneyCsvProfiles.ts';
+import { fidelity401kParser } from './fidelity401k.ts';
 import { fidelityInvestmentReportParser } from './fidelityInvestmentReport.ts';
 import { marcusStatementParser } from './marcusStatement.ts';
 import { merrillActivityParser } from './merrillActivity.ts';
@@ -28,6 +29,7 @@ export const IMPORT_PARSERS: AppImportParser[] = [
   bofaStatementParser,
   wellsFargoStatementParser,
   morganStanleyStatementParser,
+  fidelity401kParser,
   fidelityInvestmentReportParser,
   marcusStatementParser,
   merrillStatementParser,

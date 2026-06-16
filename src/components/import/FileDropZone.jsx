@@ -4,6 +4,7 @@ import './FileDropZone.css';
 
 export default function FileDropZone({ onFileSelected, isParsing }) {
   const [isDragging, setIsDragging] = useState(false);
+  const isSupportedFile = (file) => /\.(csv|txt|pdf|html?)$/i.test(file.name);
 
   const handleDrag = useCallback((e) => {
     e.preventDefault();
@@ -31,10 +32,10 @@ export default function FileDropZone({ onFileSelected, isParsing }) {
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
-      if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
+      if (isSupportedFile(file)) {
         onFileSelected(file);
       } else {
-        alert('Please upload a CSV file.');
+        alert('Please upload a CSV, PDF, or HTML import file.');
       }
       e.dataTransfer.clearData();
     }
@@ -57,7 +58,7 @@ export default function FileDropZone({ onFileSelected, isParsing }) {
       <input
         type="file"
         id="fileInput"
-        accept=".csv,text/csv"
+        accept=".csv,.txt,.pdf,.html,.htm,text/csv,text/html,application/pdf"
         className="file-input-hidden"
         onChange={handleFileChange}
         disabled={isParsing}
@@ -65,10 +66,10 @@ export default function FileDropZone({ onFileSelected, isParsing }) {
       <label htmlFor="fileInput" className="drop-zone-content">
         <UploadCloud size={48} className="drop-icon" />
         {isParsing ? (
-          <h3>Parsing CSV...</h3>
+          <h3>Parsing file...</h3>
         ) : (
           <>
-            <h3>Drag & Drop your CSV file here</h3>
+            <h3>Drag & Drop your import file here</h3>
             <p>or click to browse your files</p>
           </>
         )}

@@ -78,7 +78,7 @@ export default function ImportPage() {
     <div className="import-page">
       <header className="page-header">
         <h1 className="page-title">Import Transactions</h1>
-        <p className="page-subtitle">Upload a CSV file from your bank to add transactions</p>
+        <p className="page-subtitle">Upload a bank export or statement to add transactions and balances</p>
       </header>
 
       {error && (
@@ -130,7 +130,8 @@ export default function ImportPage() {
               profile: importResult.profile,
               mapping: importResult.mapping || mappingFromProfile(importResult.profile, importResult.headers),
               profileName: importResult.profileUsed || importResult.profile?.name || 'Custom',
-              savedImportProfile: importResult.savedImportProfile
+              savedImportProfile: importResult.savedImportProfile,
+              accountMappings: importResult.accountMappings || [],
             }}
             onComplete={handleImportComplete}
             onCancel={resetImport}

@@ -124,6 +124,37 @@ function getMaterializedImportBatchId(fingerprint: string) {
   return `import-row-${hashContent(fingerprint).slice(0, 16)}`;
 }
 
+function isStatementSummary(transaction: {
+  raw: Record<string, unknown>;
+}) {
+  return transaction.raw.type === 'statement-cash-flow-summary';
+}
+
+function classifyFlow(description: string) {
+  const normalized = description.toLowerCase();
+  if (/dividend|cap gain rein|cg rein|income rein/.test(normalized)) return 'dividend';
+  if (normalized.includes('interest')) return 'interest';
+  if (
+    /funds received|funds transferred|transfer (in|out|from)|contribution|conversion|rollover|broker to broker|journaled|rsu vest|espp purchase|shares purchased|shares redeemed|fund purchase|statement net cash flow|\beft\b|\bach\b|direct deposit/.test(normalized)
+  ) {
+    return 'contribution';
+  }
+  return 'internal';
+}
+
+function activityBucket(transaction: {
+  description: string;
+  raw: Record<string, unknown>;
+}) {
+  if (transaction.raw.metric === 'netCashFlow') return 'contribution';
+  if (transaction.raw.metric === 'dividendsInterestIncome') return 'income';
+
+  const flow = classifyFlow(transaction.description);
+  if (flow === 'contribution') return 'contribution';
+  if (flow === 'dividend' || flow === 'interest') return 'income';
+  return 'other';
+}
+
 export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
   const sourceTransactions = db.prepare(`
     SELECT
@@ -184,16 +215,57 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
       merchant,
       originalDescription,
       originalCategory,
+      raw,
       type: amount >= 0 ? 'credit' : 'debit',
-    transactionKind,
-    status: typeof raw.status === 'string' ? raw.status : 'cleared',
-    sourceRole: row.sourceRole || 'activity',
-    fingerprint,
-    importBatchId: getMaterializedImportBatchId(fingerprint),
+      transactionKind,
+      status: typeof raw.status === 'string' ? raw.status : 'cleared',
+      sourceRole: row.sourceRole || 'activity',
+      fingerprint,
+      importBatchId: getMaterializedImportBatchId(fingerprint),
     };
   });
 
-  const transactions = assignLedgerTransactionIdentities(transactionInputs).map((item) => ({
+  const exactKey = (transaction: {
+    accountId: number;
+    date: string;
+    amountCents: number;
+  }) => `${transaction.accountId}\0${transaction.date}\0${transaction.amountCents}`;
+  const monthBucketKey = (transaction: {
+    accountId: number;
+    date: string;
+    description: string;
+    raw: Record<string, unknown>;
+  }) => `${transaction.accountId}\0${transaction.date.slice(0, 7)}\0${activityBucket(transaction)}`;
+
+  const bestExactPriority = new Map<string, number>();
+  const bestMonthBucketDetailPriority = new Map<string, number>();
+  for (const transaction of transactionInputs) {
+    if (transaction.sourceRole !== 'activity') continue;
+    const priority = transaction.priority ?? 0;
+    const key = exactKey(transaction);
+    if (priority > (bestExactPriority.get(key) ?? -Infinity)) {
+      bestExactPriority.set(key, priority);
+    }
+    if (!isStatementSummary(transaction)) {
+      const bucketKey = monthBucketKey(transaction);
+      if (priority > (bestMonthBucketDetailPriority.get(bucketKey) ?? -Infinity)) {
+        bestMonthBucketDetailPriority.set(bucketKey, priority);
+      }
+    }
+  }
+
+  const dedupedTransactionInputs = transactionInputs.filter(transaction => {
+    if (transaction.sourceRole !== 'activity') return true;
+    const priority = transaction.priority ?? 0;
+    if (isStatementSummary(transaction)) {
+      const best = bestMonthBucketDetailPriority.get(monthBucketKey(transaction));
+      return best === undefined || priority >= best;
+    }
+    const best = bestExactPriority.get(exactKey(transaction));
+    return best === undefined || priority >= best;
+  });
+
+  const transactions = assignLedgerTransactionIdentities(dedupedTransactionInputs).map((item) => ({
     ledgerTransactionId: item.ledgerTransactionId,
     occurrenceIndex: item.occurrenceIndex,
     accountId: item.transaction.accountId,

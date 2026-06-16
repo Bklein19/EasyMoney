@@ -7,6 +7,7 @@ import type { CommitImportTransaction, ImportAccountMapping, ImportPreviewTransa
 import { CUSTOM_CSV_PARSER_ID, parseCustomCsv } from './importParsers/customCsv.ts';
 import { mappingFromProfile } from './importParsers/csvMapping.ts';
 import { resolveImportParser } from './importParsers/index.ts';
+import { buildLedgerFromSourceFacts, materializeLedger } from './ledgerRebuild.ts';
 import { assignLedgerTransactionIdentities } from './transactionIdentity.ts';
 
 interface PreviewImportOptions {
@@ -92,6 +93,19 @@ function getTransactionFingerprint(transaction: ImportTransactionInput, accountI
 
 function getMaterializedImportBatchId(fingerprint: string) {
   return `import-row-${hashContent(fingerprint).slice(0, 16)}`;
+}
+
+function importFileHasSourceFacts(importFileId: number | null | undefined) {
+  if (!importFileId) return false;
+  const row = getDb().prepare(`
+    SELECT COUNT(*) AS count
+    FROM sourceFiles sf
+    LEFT JOIN sourceTransactions st ON st.sourceFileId = sf.id
+    LEFT JOIN sourceBalances sb ON sb.sourceFileId = sf.id
+    WHERE sf.importFileId = ?
+      AND (st.id IS NOT NULL OR sb.id IS NOT NULL)
+  `).get(importFileId) as { count: number };
+  return row.count > 0;
 }
 
 function getStableSourceTransactionId(importFileId: number, transaction: ParsedImportTransaction) {
@@ -1046,6 +1060,10 @@ export function commitImport({
         createdAt: now,
       });
     }
+  }
+
+  if (importFileHasSourceFacts(importFileId)) {
+    materializeLedger(getDb(), buildLedgerFromSourceFacts(getDb()));
   }
 
   return result;

@@ -262,6 +262,7 @@ test.each([
   ['Wells Fargo credit card statement', 'wells-fargo-statement-pdf', 'wells-fargo-autograph-visa-2856-2024-01-07.pdf', 'statement', 50],
   ['Morgan Stanley statement', 'morgan-stanley-pdf', 'morgan-stanley-0854-2024-02-29-consolidated-statement.pdf', 'statement', 50],
   ['Morgan Stanley activity export', 'morgan-stanley-activity-pdf', 'AllActivity.pdf', 'activity-export', 100],
+  ['Fidelity 401(k)', 'fidelity-401k-html', 'fidelity-401k-examplepayroll-2026-03.html', 'statement', 50],
   ['Fidelity investment report', 'fidelity-investment-report-pdf', 'fidelity-Z19335125-2026-03-31.pdf', 'statement', 50],
   ['Marcus savings statement', 'marcus-statement-pdf', 'marcus-online-savings-7453-2026-04-01-statement.pdf', 'statement', 50],
   ['Merrill CMA statement', 'merrill-cma-statement-pdf', 'merrill-statement-2024-STMT_08302024_XXXXX092_CMAEdge.pdf', 'statement', 50],

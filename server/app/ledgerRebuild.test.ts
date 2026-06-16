@@ -24,6 +24,7 @@ function resetAppTables() {
       'transactionAnnotations',
       'transactions',
       'balanceSnapshots',
+      'accountAliases',
       'budgets',
       'categorizationRules',
       'importProfiles',
@@ -78,14 +79,25 @@ function insertCommittedSourceFile({
   return { importFileId, sourceFileId };
 }
 
-function insertSourceAccount(sourceFileId: number, accountId: number, sourceAccountKey: string) {
+function insertSourceAccount(
+  sourceFileId: number,
+  accountId: number,
+  sourceAccountKey: string,
+  {
+    institution = 'Vanguard',
+    sourceAccountName = 'Roth IRA brokerage account-XXXX0000',
+  }: {
+    institution?: string;
+    sourceAccountName?: string;
+  } = {}
+) {
   return Number(insertRow('sourceAccounts', {
     sourceFileId,
     accountId,
-    institution: 'Vanguard',
+    institution,
     sourceAccountKey,
-    sourceAccountName: 'Roth IRA brokerage account-XXXX0000',
-    rawJson: JSON.stringify({ account: 'Roth IRA brokerage account-XXXX0000' }),
+    sourceAccountName,
+    rawJson: JSON.stringify({ account: sourceAccountName }),
     createdAt: new Date().toISOString(),
   }));
 }
@@ -280,4 +292,137 @@ test('sanitized Vanguard source facts rebuild investment activity and statement 
   expect(
     (getDb().prepare('SELECT COUNT(*) AS count FROM ledgerBalances').get() as { count: number }).count
   ).toBe(1);
+});
+
+test('source rebuild applies priority dedup while keeping statement-only transfers', () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Vanguard',
+    institution: 'Vanguard',
+    type: 'investment',
+    currentBalance: 0,
+  }));
+  const activity = insertCommittedSourceFile({
+    fileName: 'vanguard-activity.pdf',
+    parserName: 'vanguard-activity-pdf',
+    sourceType: 'activity-export',
+    priority: 100,
+    institution: 'Vanguard',
+  });
+  const statement = insertCommittedSourceFile({
+    fileName: 'vanguard-statement.pdf',
+    parserName: 'vanguard-statement-pdf',
+    sourceType: 'statement',
+    priority: 50,
+    institution: 'Vanguard',
+  });
+  const activityAccountId = insertSourceAccount(activity.sourceFileId, accountId, 'vanguard-activity-account');
+  const statementAccountId = insertSourceAccount(statement.sourceFileId, accountId, 'vanguard-statement-account');
+
+  insertSourceTransaction({
+    sourceFileId: activity.sourceFileId,
+    sourceAccountId: activityAccountId,
+    stableSourceId: 'activity-buy',
+    date: '2026-05-16',
+    amountCents: -100000,
+    description: 'Buy VTSAX',
+    priority: 100,
+  });
+  insertSourceTransaction({
+    sourceFileId: statement.sourceFileId,
+    sourceAccountId: statementAccountId,
+    stableSourceId: 'statement-buy-duplicate',
+    date: '2026-05-16',
+    amountCents: -100000,
+    description: 'Buy VTSAX from statement',
+    priority: 50,
+  });
+  insertSourceTransaction({
+    sourceFileId: statement.sourceFileId,
+    sourceAccountId: statementAccountId,
+    stableSourceId: 'statement-transfer-only',
+    date: '2026-05-17',
+    amountCents: 250000,
+    description: 'In-kind transfer',
+    sourceRole: 'statement-only',
+    priority: 50,
+  });
+
+  const ledger = buildLedgerFromSourceFacts(getDb());
+  expect(ledger.transactions.map(transaction => transaction.description).sort()).toEqual([
+    'Buy VTSAX',
+    'In-kind transfer',
+  ]);
+});
+
+test('source rebuild drops lower-priority statement summaries by activity bucket', () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Merrill Lynch',
+    institution: 'Merrill',
+    type: 'investment',
+    currentBalance: 0,
+  }));
+  const activity = insertCommittedSourceFile({
+    fileName: 'merrill-activity.csv',
+    parserName: 'merrill-activity-csv',
+    sourceType: 'activity-export',
+    priority: 100,
+    institution: 'Merrill',
+  });
+  const statement = insertCommittedSourceFile({
+    fileName: 'merrill-statement.pdf',
+    parserName: 'merrill-cma-statement-pdf',
+    sourceType: 'statement',
+    priority: 50,
+    institution: 'Merrill',
+  });
+  const activityAccountId = insertSourceAccount(activity.sourceFileId, accountId, 'merrill-activity-account', {
+    institution: 'Merrill',
+    sourceAccountName: 'CMA-Edge - 11W-22222',
+  });
+  const statementAccountId = insertSourceAccount(statement.sourceFileId, accountId, 'merrill-statement-account', {
+    institution: 'Merrill',
+    sourceAccountName: 'CMA-Edge - 11W-22222',
+  });
+
+  insertSourceTransaction({
+    sourceFileId: activity.sourceFileId,
+    sourceAccountId: activityAccountId,
+    stableSourceId: 'detailed-transfer',
+    date: '2026-03-05',
+    amountCents: -500000,
+    description: 'Funds transferred out',
+    priority: 100,
+  });
+  insertSourceTransaction({
+    sourceFileId: statement.sourceFileId,
+    sourceAccountId: statementAccountId,
+    stableSourceId: 'summary-net-cash-flow',
+    date: '2026-03-31',
+    amountCents: -500000,
+    description: 'Statement net cash flow',
+    priority: 50,
+    raw: {
+      type: 'statement-cash-flow-summary',
+      metric: 'netCashFlow',
+    },
+  });
+  insertSourceTransaction({
+    sourceFileId: statement.sourceFileId,
+    sourceAccountId: statementAccountId,
+    stableSourceId: 'summary-income',
+    date: '2026-03-31',
+    amountCents: 12345,
+    description: 'Statement dividends/interest income',
+    priority: 50,
+    raw: {
+      type: 'statement-cash-flow-summary',
+      metric: 'dividendsInterestIncome',
+    },
+  });
+
+  const ledger = buildLedgerFromSourceFacts(getDb());
+  expect(ledger.transactions.map(transaction => transaction.description).sort()).toEqual([
+    'Funds transferred out',
+    'Statement dividends/interest income',
+  ]);
 });
