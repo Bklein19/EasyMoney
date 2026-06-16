@@ -78,3 +78,14 @@ export interface AccountListResponse {
 export interface CategoryListResponse {
   categories: CategorySummary[];
 }
+
+export interface NetWorthHistoryPoint {
+  month: string;
+  netWorth: number;
+}
+
+export interface NetWorthReport {
+  currentNetWorth: number;
+  percentChange: number;
+  history: NetWorthHistoryPoint[];
+}

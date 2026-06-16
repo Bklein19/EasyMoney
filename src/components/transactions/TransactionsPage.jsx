@@ -15,7 +15,7 @@ export default function TransactionsPage() {
   const [newBulkCategoryName, setNewBulkCategoryName] = useState('');
   const [pendingBulkCategoryValue, setPendingBulkCategoryValue] = useState(null);
   const deferredFilters = useDeferredValue(filters);
-  const { transactions, updateTransaction } = useTransactions(deferredFilters);
+  const { transactions, updateTransaction, categorizeTransactions } = useTransactions(deferredFilters);
   const { accounts } = useAccounts();
   const { categories, addCategory } = useCategories();
   const deferredTransactions = useDeferredValue(transactions);
@@ -79,9 +79,7 @@ export default function TransactionsPage() {
 
   const handleBulkCategoryChange = async (categoryId) => {
     const nextCategoryId = categoryId ? Number(categoryId) : null;
-    await Promise.all(
-      visibleTransactions.map(tx => updateTransaction(tx.id, { categoryId: nextCategoryId }))
-    );
+    await categorizeTransactions(visibleTransactions.map(transaction => transaction.id), nextCategoryId);
   };
 
   const handleApplyBulkCategory = async (categoryValue = bulkCategorySelectValue) => {

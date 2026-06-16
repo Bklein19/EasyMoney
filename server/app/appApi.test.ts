@@ -465,7 +465,7 @@ test('app transactions endpoint reads and annotates ledger rows without legacy t
   expect(updated.transactions[0].ledgerTransactionId).toBe(ledgerTransactionId);
 });
 
-test('trpc transactions procedures read and update annotations', async () => {
+test('trpc transactions procedures read and categorize transactions', async () => {
   const accountId = insertRow('accounts', { name: 'Checking', type: 'checking', currentBalance: 0 });
   const categoryId = insertRow('categories', { name: 'Food', type: 'expense' });
   const transactionId = Number(insertRow('transactions', {
@@ -481,16 +481,45 @@ test('trpc transactions procedures read and update annotations', async () => {
   expect(before.transactions).toHaveLength(1);
   expect(before.transactions[0].category).toBeNull();
 
-  await trpcClient.transactions.updateAnnotation.mutate({
-    id: transactionId,
+  await trpcClient.transactions.categorize.mutate({
+    transactionIds: [transactionId],
     categoryId,
-    notes: 'typed mutation',
   });
 
-  const after = await trpcClient.transactions.list.query({ search: 'typed mutation', limit: 1 });
+  const after = await trpcClient.transactions.list.query({ search: 'TRPC Cafe', limit: 1 });
   expect(after.transactions).toHaveLength(1);
   expect(after.transactions[0].category?.id).toBe(categoryId);
-  expect(after.transactions[0].notes).toBe('typed mutation');
+});
+
+test('trpc net worth report is backend-owned and reads ledger balances', async () => {
+  const checkingId = insertRow('accounts', {
+    name: 'Checking',
+    type: 'checking',
+    currentBalance: 1500,
+  });
+  const creditId = insertRow('accounts', {
+    name: 'Card',
+    type: 'credit',
+    currentBalance: 250,
+  });
+
+  insertRow('balanceSnapshots', {
+    accountId: checkingId,
+    month: '2026-05',
+    balance: 1000,
+    capturedAt: '2026-05-31T00:00:00.000Z',
+  });
+  insertRow('balanceSnapshots', {
+    accountId: creditId,
+    month: '2026-05',
+    balance: 200,
+    capturedAt: '2026-05-31T00:00:00.000Z',
+  });
+
+  const report = await trpcClient.netWorth.report.query();
+  expect(report.currentNetWorth).toBe(1250);
+  expect(report.history).toEqual([{ month: '2026-05', netWorth: 800 }]);
+  expect(report.percentChange).toBeCloseTo(56.25);
 });
 
 test('init database backfills ledger read model from legacy app tables', () => {

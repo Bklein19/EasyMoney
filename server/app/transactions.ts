@@ -1,4 +1,5 @@
 import { getDb, syncLedgerReadModelFromLegacyTables } from '../database.js';
+import { upsertTransactionAnnotation } from './transactionAnnotations.ts';
 import type {
   ListTransactionsOptions,
   TransactionListItem,
@@ -169,4 +170,21 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
     .all(params) as LedgerTransactionRow[];
 
   return { transactions: rows.map(toTransactionListItem) };
+}
+
+export function categorizeTransactions(input: {
+  transactionIds: Array<number | string>;
+  categoryId?: number | string | null;
+}) {
+  const uniqueIds = [...new Set(input.transactionIds.map(id => String(id)).filter(Boolean))];
+  if (!uniqueIds.length) return { ok: true, count: 0 };
+
+  const apply = getDb().transaction(() => {
+    for (const id of uniqueIds) {
+      upsertTransactionAnnotation(id, { categoryId: input.categoryId ?? null });
+    }
+  });
+  apply();
+
+  return { ok: true, count: uniqueIds.length };
 }

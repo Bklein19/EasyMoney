@@ -2,8 +2,8 @@ import { initTRPC } from '@trpc/server';
 import { z } from 'zod';
 import { listAccounts } from './accounts.ts';
 import { listCategories } from './categories.ts';
-import { upsertTransactionAnnotation } from './transactionAnnotations.ts';
-import { listTransactions } from './transactions.ts';
+import { getNetWorthReport } from './netWorth.ts';
+import { categorizeTransactions, listTransactions } from './transactions.ts';
 
 const t = initTRPC.create();
 
@@ -31,19 +31,16 @@ export const appRouter = t.router({
       }).optional())
       .query(({ input }) => listTransactions(input ?? {})),
 
-    updateAnnotation: t.procedure
+    categorize: t.procedure
       .input(z.object({
-        id: z.union([z.string(), z.number()]),
+        transactionIds: z.array(z.union([z.string(), z.number()])).min(1),
         categoryId: optionalId,
-        notes: z.string().nullable().optional(),
       }))
-      .mutation(({ input }) => {
-        const ledgerTransactionId = upsertTransactionAnnotation(input.id, {
-          categoryId: input.categoryId,
-          notes: input.notes,
-        });
-        return { ok: true, ledgerTransactionId };
-      }),
+      .mutation(({ input }) => categorizeTransactions(input)),
+  }),
+
+  netWorth: t.router({
+    report: t.procedure.query(() => getNetWorthReport()),
   }),
 });
 

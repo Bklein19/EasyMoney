@@ -16,7 +16,6 @@ interface TransactionFilters {
 type TransactionRow = ReturnType<typeof fromAppTransaction>;
 type TransactionAnnotationChanges = {
   categoryId?: string | number | null;
-  notes?: string | null;
 };
 
 const normalizeId = (value: string | number | null | undefined) => {
@@ -40,7 +39,7 @@ export function useTransactions(filters: TransactionFilters = {}) {
     select: data => data.transactions.map(fromAppTransaction),
   }));
 
-  const updateAnnotation = useMutation(trpc.transactions.updateAnnotation.mutationOptions({
+  const categorize = useMutation(trpc.transactions.categorize.mutationOptions({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() }),
   }));
 
@@ -67,26 +66,33 @@ export function useTransactions(filters: TransactionFilters = {}) {
 
   async function updateTransaction(id: number | string, changes: TransactionAnnotationChanges) {
     const fields = Object.keys(changes);
-    const unsupported = fields.filter(field => field !== 'categoryId' && field !== 'notes');
+    const unsupported = fields.filter(field => field !== 'categoryId');
     if (unsupported.length) {
-      throw new Error(`Transactions only support annotation updates: ${unsupported.join(', ')}`);
+      throw new Error(`Transactions only support categorization updates: ${unsupported.join(', ')}`);
     }
 
     const categoryIdChanged = Object.hasOwn(changes, 'categoryId');
-    const notesChanged = Object.hasOwn(changes, 'notes');
-    if (categoryIdChanged || notesChanged) {
-      await updateAnnotation.mutateAsync({
-        id,
-        categoryId: categoryIdChanged ? changes.categoryId : undefined,
-        notes: notesChanged ? changes.notes : undefined,
+    if (categoryIdChanged) {
+      await categorize.mutateAsync({
+        transactionIds: [id],
+        categoryId: changes.categoryId,
       });
     }
-    return { ok: true };
+    return { ok: true, count: categoryIdChanged ? 1 : 0 };
+  }
+
+  async function categorizeTransactions(transactionIds: Array<number | string>, categoryId: string | number | null) {
+    if (!transactionIds.length) return { ok: true, count: 0 };
+    return categorize.mutateAsync({
+      transactionIds,
+      categoryId,
+    });
   }
 
   return {
     transactions,
     updateTransaction,
+    categorizeTransactions,
     isLoading: transactionsQuery.isLoading,
     isFetching: transactionsQuery.isFetching,
     error: transactionsQuery.error,

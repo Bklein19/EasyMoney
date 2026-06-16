@@ -97,7 +97,7 @@ export default function AnalyticsPage() {
     }
   }, [dateRange, customStartDate, customEndDate]);
 
-  const { transactions, updateTransaction } = useTransactions({ startDate, endDate, accountId });
+  const { transactions, categorizeTransactions } = useTransactions({ startDate, endDate, accountId });
   const { categories, addCategory } = useCategories();
   const { accounts } = useAccounts();
   const categoryFilterIds = useMemo(
@@ -288,9 +288,7 @@ export default function AnalyticsPage() {
 
   const handleBulkCategoryChange = async (categoryId) => {
     const nextCategoryId = categoryId ? Number(categoryId) : null;
-    await Promise.all(
-      visibleDrilldownTransactions.map(transaction => updateTransaction(transaction.id, { categoryId: nextCategoryId }))
-    );
+    await categorizeTransactions(visibleDrilldownTransactions.map(transaction => transaction.id), nextCategoryId);
   };
 
   const handleApplyDrilldownCategory = async (categoryValue = drilldownCategorySelectValue) => {
