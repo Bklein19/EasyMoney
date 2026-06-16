@@ -610,6 +610,7 @@ export function initDatabase() {
 }
 
 export function syncLedgerReadModelFromLegacyTables() {
+  assignMissingLegacyTransactionIds();
   const now = new Date().toISOString();
   db.transaction(() => {
     db.prepare(`
@@ -722,6 +723,53 @@ export function syncLedgerReadModelFromLegacyTables() {
         updatedAt = excluded.updatedAt
     `).run({ now });
   })();
+}
+
+function assignMissingLegacyTransactionIds() {
+  const transactionsNeedingLedgerIds = db.prepare(`
+    SELECT
+      t.id,
+      t.accountId,
+      t.date,
+      t.amount,
+      t.description,
+      t.merchant,
+      t.originalDescription,
+      t.transactionKind,
+      t.occurrenceIndex,
+      t.importBatchId,
+      t.fingerprint,
+      t.createdAt,
+      ir.importFileId,
+      ir.id AS importRowId,
+      ir.rowIndex AS sourceRowIndex,
+      st.stableSourceId
+    FROM transactions t
+    LEFT JOIN importRows ir ON ir.transactionId = t.id
+    LEFT JOIN sourceTransactions st ON st.importRowId = ir.id
+    WHERE t.ledgerTransactionId IS NULL OR t.ledgerTransactionId = ''
+  `).all();
+  const groups = new Map();
+  for (const transaction of transactionsNeedingLedgerIds) {
+    const baseKey = transactionIdentityBaseKey(transaction);
+    const group = groups.get(baseKey);
+    if (group) {
+      group.push(transaction);
+    } else {
+      groups.set(baseKey, [transaction]);
+    }
+  }
+  for (const group of groups.values()) {
+    group
+      .sort((a, b) => transactionOccurrenceSortKey(a).localeCompare(transactionOccurrenceSortKey(b)))
+      .forEach((transaction, occurrenceIndex) => {
+        db.prepare('UPDATE transactions SET ledgerTransactionId = ?, occurrenceIndex = ? WHERE id = ?').run(
+          ledgerTransactionIdFor(transaction, occurrenceIndex),
+          occurrenceIndex,
+          transaction.id
+        );
+      });
+  }
 }
 
 export function assertTable(table) {

@@ -209,37 +209,37 @@ test('app transactions endpoint joins account and category details', async () =>
 
   const body = await getJson('/api/app/transactions');
 
-  expect(body.transactions).toEqual([
-    {
-      id: 1,
-      account: {
-        id: accountId,
-        name: 'Checking',
-        institution: 'Local Bank',
-        type: 'checking',
-      },
-      category: {
-        id: categoryId,
-        name: 'Groceries',
-        type: 'expense',
-        color: '#22c55e',
-        icon: 'shopping-cart',
-      },
-      date: '2026-06-14',
-      amount: -42.5,
-      description: 'Neighborhood Market',
-      merchant: 'Market',
-      originalDescription: 'POS MARKET 123',
-      originalCategory: 'Shopping',
-      type: 'expense',
-      transactionKind: 'debit',
-      status: 'cleared',
-      notes: 'weekly shop',
-      importBatchId: 'batch-1',
-      fingerprint: 'fingerprint-1',
-      createdAt: '2026-06-14T12:00:00.000Z',
+  expect(body.transactions).toHaveLength(1);
+  expect(body.transactions[0].ledgerTransactionId.startsWith('txn_')).toBe(true);
+  expect(body.transactions[0]).toMatchObject({
+    id: 1,
+    account: {
+      id: accountId,
+      name: 'Checking',
+      institution: 'Local Bank',
+      type: 'checking',
     },
-  ]);
+    category: {
+      id: categoryId,
+      name: 'Groceries',
+      type: 'expense',
+      color: '#22c55e',
+      icon: 'shopping-cart',
+    },
+    date: '2026-06-14',
+    amount: -42.5,
+    description: 'Neighborhood Market',
+    merchant: 'Market',
+    originalDescription: 'POS MARKET 123',
+    originalCategory: 'Shopping',
+    type: 'expense',
+    transactionKind: 'debit',
+    status: 'cleared',
+    notes: 'weekly shop',
+    importBatchId: 'batch-1',
+    fingerprint: 'fingerprint-1',
+    createdAt: '2026-06-14T12:00:00.000Z',
+  });
 });
 
 test('app transactions endpoint supports domain query filters', async () => {
@@ -403,6 +403,61 @@ test('transaction annotations survive transaction row rebuild', async () => {
   const body = await getJson('/api/app/transactions');
   expect(body.transactions[0].category.id).toBe(categoryId);
   expect(body.transactions[0].notes).toBe('household groceries');
+});
+
+test('app transactions endpoint reads and annotates ledger rows without legacy transaction rows', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Checking',
+    institution: 'Local Bank',
+    type: 'checking',
+  }));
+  const categoryId = Number(insertRow('categories', { name: 'Dining', type: 'expense' }));
+  const transactionId = Number(insertRow('transactions', {
+    accountId,
+    date: '2026-06-16',
+    amount: -12.34,
+    description: 'Ledger Cafe',
+    merchant: 'Cafe',
+    originalDescription: 'POS LEDGER CAFE',
+    type: 'expense',
+    status: 'cleared',
+  }));
+
+  await putJson(`/api/transactions/${transactionId}`, {
+    categoryId,
+    notes: 'before legacy delete',
+  });
+
+  const beforeDelete = await getJson('/api/app/transactions?search=Ledger Cafe');
+  expect(beforeDelete.transactions).toHaveLength(1);
+  const ledgerTransactionId = beforeDelete.transactions[0].ledgerTransactionId;
+  expect(ledgerTransactionId.startsWith('txn_')).toBe(true);
+
+  getDb().prepare('DELETE FROM transactions WHERE id = ?').run(transactionId);
+
+  const ledgerOnly = await getJson('/api/app/transactions?search=Ledger Cafe');
+  expect(ledgerOnly.transactions).toHaveLength(1);
+  expect(ledgerOnly.transactions[0]).toMatchObject({
+    ledgerTransactionId,
+    account: {
+      id: accountId,
+      name: 'Checking',
+    },
+    category: {
+      id: categoryId,
+      name: 'Dining',
+    },
+    amount: -12.34,
+    notes: 'before legacy delete',
+  });
+  expect((getDb().prepare('SELECT COUNT(*) AS count FROM transactions').get() as { count: number }).count).toBe(0);
+
+  await putJson(`/api/transactions/${ledgerOnly.transactions[0].id}`, {
+    notes: 'ledger-only annotation',
+  });
+  const updated = await getJson('/api/app/transactions?search=ledger-only annotation');
+  expect(updated.transactions).toHaveLength(1);
+  expect(updated.transactions[0].ledgerTransactionId).toBe(ledgerTransactionId);
 });
 
 test('init database backfills ledger read model from legacy app tables', () => {

@@ -39,6 +39,7 @@ export interface TransactionAccount {
 
 export interface TransactionListItem {
   id: number;
+  ledgerTransactionId: string | null;
   account: TransactionAccount | null;
   category: TransactionCategory | null;
   date: string;

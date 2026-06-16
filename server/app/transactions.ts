@@ -1,13 +1,15 @@
-import { getDb } from '../database.js';
+import { getDb, syncLedgerReadModelFromLegacyTables } from '../database.js';
 import type {
   ListTransactionsOptions,
   TransactionListItem,
   TransactionListResponse,
 } from './types';
 
-interface TransactionRow {
+interface LedgerTransactionRow {
   id: number;
-  accountId: number | null;
+  ledgerRowId: number;
+  ledgerTransactionId: string | null;
+  accountId: number;
   accountName: string | null;
   accountInstitution: string | null;
   accountType: string | null;
@@ -28,7 +30,6 @@ interface TransactionRow {
   notes: string | null;
   importBatchId: string | null;
   fingerprint: string | null;
-  ledgerTransactionId: string | null;
   createdAt: string | null;
 }
 
@@ -43,9 +44,10 @@ function optionalString(value: string | number | null | undefined): string | nul
   return String(value);
 }
 
-function toTransactionListItem(row: TransactionRow): TransactionListItem {
+function toTransactionListItem(row: LedgerTransactionRow): TransactionListItem {
   return {
     id: row.id,
+    ledgerTransactionId: row.ledgerTransactionId,
     account: row.accountId === null ? null : {
       id: row.accountId,
       name: row.accountName ?? 'Unknown account',
@@ -76,6 +78,7 @@ function toTransactionListItem(row: TransactionRow): TransactionListItem {
 }
 
 export function listTransactions(options: ListTransactionsOptions = {}): TransactionListResponse {
+  syncLedgerReadModelFromLegacyTables();
   const clauses: string[] = [];
   const params: Record<string, string | number> = {};
 
@@ -130,7 +133,9 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
   const rows = getDb()
     .prepare(
       `SELECT
-        t.id,
+        COALESCE(t.legacyTransactionId, t.id) AS id,
+        t.id AS ledgerRowId,
+        t.ledgerTransactionId,
         t.accountId,
         a.name AS accountName,
         a.institution AS accountInstitution,
@@ -141,7 +146,7 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
         c.color AS categoryColor,
         c.icon AS categoryIcon,
         t.date,
-        t.amount,
+        t.amountCents / 100.0 AS amount,
         t.description,
         t.merchant,
         t.originalDescription,
@@ -152,9 +157,8 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
         ta.notes AS notes,
         t.importBatchId,
         t.fingerprint,
-        t.ledgerTransactionId,
         t.createdAt
-       FROM transactions t
+       FROM ledgerTransactions t
        LEFT JOIN accounts a ON a.id = t.accountId
        LEFT JOIN transactionAnnotations ta ON ta.ledgerTransactionId = t.ledgerTransactionId
        LEFT JOIN categories c ON c.id = ta.categoryId
@@ -162,7 +166,7 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
        ORDER BY t.date DESC, t.id DESC
        ${limitClause}`
     )
-    .all(params) as TransactionRow[];
+    .all(params) as LedgerTransactionRow[];
 
   return { transactions: rows.map(toTransactionListItem) };
 }

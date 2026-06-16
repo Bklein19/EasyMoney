@@ -24,6 +24,14 @@ interface AnnotationChanges {
 
 export function ensureLedgerTransactionId(transactionId: number | string) {
   const db = getDb();
+  const directLedgerId = String(transactionId || '');
+  if (directLedgerId.startsWith('txn_')) {
+    const existing = db.prepare('SELECT ledgerTransactionId FROM ledgerTransactions WHERE ledgerTransactionId = ?').get(directLedgerId) as
+      | { ledgerTransactionId: string }
+      | undefined;
+    if (existing) return existing.ledgerTransactionId;
+  }
+
   const row = db.prepare(`
     SELECT id, accountId, date, amount, description, merchant, originalDescription, transactionKind,
            ledgerTransactionId, occurrenceIndex, importBatchId, fingerprint, createdAt
@@ -31,7 +39,15 @@ export function ensureLedgerTransactionId(transactionId: number | string) {
     WHERE id = ?
   `).get(transactionId) as TransactionRow | undefined;
 
-  if (!row) throw new Error(`Transaction not found: ${transactionId}`);
+  if (!row) {
+    const ledgerRow = db.prepare(`
+      SELECT ledgerTransactionId
+      FROM ledgerTransactions
+      WHERE id = ?
+    `).get(transactionId) as { ledgerTransactionId: string } | undefined;
+    if (ledgerRow?.ledgerTransactionId) return ledgerRow.ledgerTransactionId;
+    throw new Error(`Transaction not found: ${transactionId}`);
+  }
   if (row.ledgerTransactionId) return row.ledgerTransactionId;
 
   const peers = db.prepare(`

@@ -90,6 +90,7 @@ export function useTransactions(filters = {}) {
 function fromAppTransaction(transaction) {
   return {
     id: transaction.id,
+    ledgerTransactionId: transaction.ledgerTransactionId,
     accountId: transaction.account?.id ?? null,
     categoryId: transaction.category?.id ?? null,
     date: transaction.date,
