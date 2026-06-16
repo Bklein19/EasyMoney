@@ -88,6 +88,7 @@ const db = {
 
 const TABLES = {
   accounts: ['id', 'name', 'institution', 'type', 'currentBalance', 'currency', 'createdAt', 'updatedAt'],
+  accountAliases: ['id', 'institution', 'alias', 'accountId', 'createdAt', 'updatedAt'],
   transactions: [
     'id', 'accountId', 'categoryId', 'date', 'amount', 'importBatchId', 'description', 'merchant',
     'originalDescription', 'originalCategory', 'type', 'transactionKind', 'status', 'notes', 'fingerprint',
@@ -185,6 +186,17 @@ export function initDatabase() {
       currency TEXT DEFAULT 'USD',
       createdAt TEXT,
       updatedAt TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS accountAliases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      institution TEXT NOT NULL,
+      alias TEXT NOT NULL,
+      accountId INTEGER NOT NULL,
+      createdAt TEXT,
+      updatedAt TEXT,
+      UNIQUE(institution, alias),
+      FOREIGN KEY(accountId) REFERENCES accounts(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS transactions (

@@ -36,6 +36,7 @@ function resetAppTables() {
       'transactionAnnotations',
       'transactions',
       'balanceSnapshots',
+      'accountAliases',
       'budgets',
       'categorizationRules',
       'importProfiles',
@@ -787,6 +788,108 @@ test('app imports commit inserts unique transactions and updates account balance
 
   expect(secondCommit.importedCount).toBe(0);
   expect(secondCommit.skippedDuplicateCount).toBe(10);
+});
+
+test('app imports commit resolves parser-emitted accounts without selected account', async () => {
+  const now = '2026-06-16T00:00:00.000Z';
+  const importFileId = Number(insertRow('importFiles', {
+    fileName: 'multi-account.csv',
+    contentHash: 'multi-account-hash',
+    parserName: 'test-parser',
+    headerSignature: 'date|description|amount',
+    rowCount: 2,
+    sourceType: 'activity-export',
+    parserPriority: 10,
+    institution: 'Fixture Bank',
+    status: 'previewed',
+    createdAt: now,
+  }));
+  const sourceFileId = Number(insertRow('sourceFiles', {
+    importFileId,
+    fileName: 'multi-account.csv',
+    contentHash: 'multi-account-hash',
+    parserName: 'test-parser',
+    sourceType: 'activity-export',
+    parserPriority: 10,
+    institution: 'Fixture Bank',
+    coveredFrom: '2026-06-15',
+    coveredTo: '2026-06-16',
+    status: 'previewed',
+    createdAt: now,
+  }));
+  const sourceAccountId = Number(insertRow('sourceAccounts', {
+    sourceFileId,
+    institution: 'Fixture Bank',
+    sourceAccountKey: 'Fixture Bank|Rewards Card - 1234',
+    sourceAccountName: 'Rewards Card - 1234',
+    rawJson: '{}',
+    createdAt: now,
+  }));
+  const transactionRowId = Number(insertRow('importRows', {
+    importFileId,
+    rowIndex: 0,
+    rowType: 'transaction',
+    rawJson: JSON.stringify({ row: 'charge' }),
+    normalizedJson: JSON.stringify({
+      sourceRowIndex: 0,
+      date: '2026-06-15',
+      amountCents: -4200,
+      description: 'Parser emitted charge',
+      institution: 'Fixture Bank',
+      account: 'Rewards Card - 1234',
+      sourceRole: 'activity',
+      raw: {},
+    }),
+    createdAt: now,
+  }));
+  insertRow('sourceTransactions', {
+    sourceFileId,
+    sourceAccountId,
+    importRowId: transactionRowId,
+    stableSourceId: 'src_txn_fixture_account',
+    date: '2026-06-15',
+    amountCents: -4200,
+    description: 'Parser emitted charge',
+    sourceRole: 'activity',
+    priority: 10,
+    rawJson: '{}',
+    createdAt: now,
+  });
+
+  const commit = await postJson('/api/app/imports/commit', {
+    accountId: null,
+    importFileId,
+    importRowIds: [transactionRowId],
+  }, 201);
+
+  expect(commit.importedCount).toBe(1);
+  const account = getDb().prepare(`
+    SELECT *
+    FROM accounts
+    WHERE institution = 'Fixture Bank' AND name = 'Rewards Card - 1234'
+  `).get() as { id: number; type: string; currentBalance: number };
+  expect(account).toMatchObject({
+    type: 'credit',
+    currentBalance: -42,
+  });
+  const alias = getDb().prepare('SELECT accountId FROM accountAliases WHERE institution = ? AND alias = ?')
+    .get('Fixture Bank', 'Rewards Card - 1234') as { accountId: number };
+  expect(alias.accountId).toBe(account.id);
+  const sourceAccount = getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(sourceAccountId) as { accountId: number };
+  expect(sourceAccount.accountId).toBe(account.id);
+  const transaction = getDb().prepare(`
+    SELECT t.accountId, t.amount
+    FROM transactions t
+    JOIN importRows ir ON ir.transactionId = t.id
+    WHERE ir.id = ?
+  `).get(transactionRowId) as {
+    accountId: number;
+    amount: number;
+  };
+  expect(transaction).toMatchObject({
+    accountId: account.id,
+    amount: -42,
+  });
 });
 
 test('source facts can rebuild committed transaction app rows without losing annotations', async () => {

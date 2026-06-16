@@ -22,7 +22,7 @@ type ImportTransactionInput = Partial<ImportPreviewTransaction> & {
 };
 
 interface CommitImportOptions {
-  accountId: number;
+  accountId?: number | null;
   importFileId?: number | null;
   importRowIds?: number[] | null;
   balanceRowIds?: number[] | null;
@@ -37,7 +37,7 @@ interface CommitImportOptions {
 }
 
 interface MaterializeImportTransactionsOptions {
-  accountId: number;
+  accountId?: number | null;
   importFileId?: number | null;
   importRowIds?: number[] | null;
   balanceRowIds?: number[] | null;
@@ -104,6 +104,83 @@ function getStableSourceTransactionId(importFileId: number, transaction: ParsedI
 
 function isCreditAccount(account: { type?: string | null } | undefined) {
   return account?.type === 'credit' || account?.type === 'credit_card' || account?.type === 'credit-card';
+}
+
+function inferAccountType(name: string | null, fallbackType?: string | null) {
+  if (fallbackType) return fallbackType;
+  const normalized = normalizeText(name || '');
+  if (/\b(credit|card|visa|mastercard|amex|discover)\b/.test(normalized)) return 'credit';
+  if (/\b(savings|save)\b/.test(normalized)) return 'savings';
+  if (/\b(ira|roth|brokerage|investment|merrill|vanguard|retirement|annuity)\b/.test(normalized)) return 'investment';
+  if (/\b(checking|chk)\b/.test(normalized)) return 'checking';
+  return 'other';
+}
+
+function resolveImportedAccount(sourceAccountId: number | null | undefined, fallbackAccountId: number | null | undefined) {
+  const db = getDb();
+  if (!sourceAccountId) {
+    if (!fallbackAccountId) throw new Error('accountId is required when parser does not identify an account');
+    return fallbackAccountId;
+  }
+
+  const sourceAccount = db.prepare(`
+    SELECT id, accountId, institution, sourceAccountName
+    FROM sourceAccounts
+    WHERE id = ?
+  `).get(sourceAccountId) as
+    | { id: number; accountId: number | null; institution: string | null; sourceAccountName: string | null }
+    | undefined;
+
+  if (!sourceAccount) {
+    if (!fallbackAccountId) throw new Error(`Source account not found: ${sourceAccountId}`);
+    return fallbackAccountId;
+  }
+  if (sourceAccount.accountId) return sourceAccount.accountId;
+
+  const alias = (sourceAccount.sourceAccountName || '').trim();
+  const institution = (sourceAccount.institution || 'Unknown Institution').trim();
+  if (!alias || alias === 'Selected account') {
+    if (!fallbackAccountId) throw new Error('accountId is required when parser does not identify an account');
+    db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(fallbackAccountId, sourceAccount.id);
+    return fallbackAccountId;
+  }
+
+  const aliased = db.prepare(`
+    SELECT accountId
+    FROM accountAliases
+    WHERE institution = ? AND alias = ?
+  `).get(institution, alias) as { accountId: number } | undefined;
+  if (aliased) {
+    db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(aliased.accountId, sourceAccount.id);
+    return aliased.accountId;
+  }
+
+  const exact = db.prepare(`
+    SELECT id
+    FROM accounts
+    WHERE institution IS ? AND name = ?
+  `).get(institution, alias) as { id: number } | undefined;
+  const now = new Date().toISOString();
+  const accountId = exact?.id ?? Number(insertRow('accounts', {
+    name: alias,
+    institution,
+    type: inferAccountType(alias),
+    currentBalance: 0,
+    currency: 'USD',
+    createdAt: now,
+    updatedAt: now,
+  }));
+
+  db.prepare(`
+    INSERT INTO accountAliases (institution, alias, accountId, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(institution, alias) DO UPDATE SET
+      accountId = excluded.accountId,
+      updatedAt = excluded.updatedAt
+  `).run(institution, alias, accountId, now, now);
+  db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(accountId, sourceAccount.id);
+
+  return accountId;
 }
 
 function parseCsv(text: string) {
@@ -309,39 +386,51 @@ function toNumberSet(values: number[] | null | undefined) {
 function readStagedTransactions(importFileId: number, importRowIds: number[] | null | undefined) {
   const selectedIds = toNumberSet(importRowIds);
   const rows = getDb().prepare(`
-    SELECT id, importFileId, normalizedJson
-    FROM importRows
-    WHERE importFileId = @importFileId
-      AND COALESCE(rowType, 'transaction') = 'transaction'
-      AND normalizedJson IS NOT NULL
-    ORDER BY rowIndex ASC
+    SELECT ir.id, ir.importFileId, ir.normalizedJson, st.sourceAccountId, sa.accountId AS resolvedAccountId
+    FROM importRows ir
+    LEFT JOIN sourceTransactions st ON st.importRowId = ir.id
+    LEFT JOIN sourceAccounts sa ON sa.id = st.sourceAccountId
+    WHERE ir.importFileId = @importFileId
+      AND COALESCE(ir.rowType, 'transaction') = 'transaction'
+      AND ir.normalizedJson IS NOT NULL
+    ORDER BY ir.rowIndex ASC
   `).all({ importFileId }) as Array<{
     id: number;
     importFileId: number;
     normalizedJson: string;
+    sourceAccountId: number | null;
+    resolvedAccountId: number | null;
   }>;
 
   return rows
     .filter(row => !selectedIds || selectedIds.has(row.id))
-    .map(row => toPreviewTransaction(
-      JSON.parse(row.normalizedJson) as ParsedImportTransaction,
-      row.importFileId,
-      row.id
-    ));
+    .map(row => ({
+      ...toPreviewTransaction(
+        JSON.parse(row.normalizedJson) as ParsedImportTransaction,
+        row.importFileId,
+        row.id
+      ),
+      sourceAccountId: row.sourceAccountId,
+      resolvedAccountId: row.resolvedAccountId,
+    }));
 }
 
 function readStagedBalances(importFileId: number, balanceRowIds: number[] | null | undefined) {
   const selectedIds = toNumberSet(balanceRowIds);
   const rows = getDb().prepare(`
-    SELECT id, normalizedJson
-    FROM importRows
-    WHERE importFileId = @importFileId
-      AND rowType = 'balance'
-      AND normalizedJson IS NOT NULL
-    ORDER BY rowIndex ASC
+    SELECT ir.id, ir.normalizedJson, sb.sourceAccountId, sa.accountId AS resolvedAccountId
+    FROM importRows ir
+    LEFT JOIN sourceBalances sb ON sb.importRowId = ir.id
+    LEFT JOIN sourceAccounts sa ON sa.id = sb.sourceAccountId
+    WHERE ir.importFileId = @importFileId
+      AND ir.rowType = 'balance'
+      AND ir.normalizedJson IS NOT NULL
+    ORDER BY ir.rowIndex ASC
   `).all({ importFileId }) as Array<{
     id: number;
     normalizedJson: string;
+    sourceAccountId: number | null;
+    resolvedAccountId: number | null;
   }>;
 
   return rows
@@ -349,6 +438,8 @@ function readStagedBalances(importFileId: number, balanceRowIds: number[] | null
     .map(row => ({
       importRowId: row.id,
       balance: JSON.parse(row.normalizedJson) as ParsedImportBalance,
+      sourceAccountId: row.sourceAccountId,
+      resolvedAccountId: row.resolvedAccountId,
     }));
 }
 
@@ -461,7 +552,6 @@ export function materializeImportTransactions({
   transactions = [],
   fallbackImportFileId = null,
 }: MaterializeImportTransactionsOptions) {
-  if (!accountId) throw new Error('accountId is required');
   if (!Array.isArray(transactions)) throw new Error('transactions must be an array');
   if (importRowIds !== null && !Array.isArray(importRowIds)) throw new Error('importRowIds must be an array');
   if (balanceRowIds !== null && !Array.isArray(balanceRowIds)) throw new Error('balanceRowIds must be an array');
@@ -475,21 +565,38 @@ export function materializeImportTransactions({
   const transactionsToCommit = stagedImportFileId ? stagedTransactions : transactions;
 
   const db = getDb();
-  const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(accountId) as
-    | { id: number; type?: string | null; currentBalance?: number | null }
-    | undefined;
-  if (!account) throw new Error(`Account not found: ${accountId}`);
+  const accountById = new Map<number, { id: number; type?: string | null; currentBalance?: number | null }>();
+  const getAccount = (id: number) => {
+    const existing = accountById.get(id);
+    if (existing) return existing;
+    const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as
+      | { id: number; type?: string | null; currentBalance?: number | null }
+      | undefined;
+    if (!account) throw new Error(`Account not found: ${id}`);
+    accountById.set(id, account);
+    return account;
+  };
 
-  const existing = db.prepare('SELECT * FROM transactions WHERE accountId = ?').all(accountId) as ImportTransactionInput[];
-  const seen = new Set(existing.map(transaction =>
-    transaction.fingerprint || getTransactionFingerprint(transaction, accountId)
-  ));
+  const seenByAccountId = new Map<number, Set<string>>();
+  const getSeen = (resolvedAccountId: number) => {
+    const existing = seenByAccountId.get(resolvedAccountId);
+    if (existing) return existing;
+    const accountTransactions = db.prepare('SELECT * FROM transactions WHERE accountId = ?').all(resolvedAccountId) as ImportTransactionInput[];
+    const seen = new Set(accountTransactions.map(transaction =>
+      transaction.fingerprint || getTransactionFingerprint(transaction, resolvedAccountId)
+    ));
+    seenByAccountId.set(resolvedAccountId, seen);
+    return seen;
+  };
 
   const unique: CommitImportTransaction[] = [];
   const duplicates: Array<ImportTransactionInput & { fingerprint: string }> = [];
 
   for (const transaction of transactionsToCommit.filter(item => item && item.date && typeof item.amount === 'number')) {
-    const fingerprint = getTransactionFingerprint(transaction, accountId);
+    const resolvedAccountId = transaction.resolvedAccountId || resolveImportedAccount(transaction.sourceAccountId, accountId);
+    const account = getAccount(resolvedAccountId);
+    const seen = getSeen(resolvedAccountId);
+    const fingerprint = getTransactionFingerprint(transaction, resolvedAccountId);
     const withFingerprint = { ...transaction, fingerprint };
     if (seen.has(fingerprint)) {
       duplicates.push(withFingerprint);
@@ -511,7 +618,7 @@ export function materializeImportTransactions({
       type: transaction.type || (transaction.amount >= 0 ? 'credit' : 'debit'),
       status: transaction.status || 'cleared',
       notes: transaction.notes || '',
-      accountId,
+      accountId: resolvedAccountId,
       importBatchId: '',
       transactionKind: isCreditAccount(account) && transaction.amount > 0
         ? 'card_payment'
@@ -521,34 +628,19 @@ export function materializeImportTransactions({
 
   const importBatchId = [
     'import',
-    accountId,
+    accountId || unique[0]?.accountId || 'resolved',
     unique[0]?.date || transactionsToCommit[0]?.date || 'unknown-start',
     unique.at(-1)?.date || transactionsToCommit.at(-1)?.date || 'unknown-end',
     transactionsToCommit.length,
   ].join('-');
   const now = new Date().toISOString();
-  const totalAmount = unique.reduce((sum, transaction) => sum + transaction.amount, 0);
   const latestBalance = stagedBalances
-    .map(item => item.balance)
-    .sort((a, b) => a.date.localeCompare(b.date))
+    .sort((a, b) => a.balance.date.localeCompare(b.balance.date))
     .at(-1);
   const importFileId = stagedImportFileId || fallbackImportFileId || transactionsToCommit.find(transaction => transaction.importFileId)?.importFileId || null;
   const transactionsWithLedgerIds = assignLedgerTransactionIdentities(unique);
 
   db.transaction(() => {
-    if (importFileId) {
-      getDb().prepare(`
-        UPDATE sourceAccounts
-        SET accountId = @accountId
-        WHERE sourceFileId IN (
-          SELECT id FROM sourceFiles WHERE importFileId = @importFileId
-        )
-      `).run({
-        accountId,
-        importFileId,
-      });
-    }
-
     for (const { transaction, occurrenceIndex, ledgerTransactionId } of transactionsWithLedgerIds) {
       const transactionId = insertRow('transactions', {
         ...transaction,
@@ -669,13 +761,31 @@ export function materializeImportTransactions({
     }
 
     if (unique.length) {
-      updateRow('accounts', accountId, {
-        currentBalance: Number(account.currentBalance || 0) + totalAmount,
-        updatedAt: now,
-      });
+      const totalsByAccountId = new Map<number, number>();
+      for (const transaction of unique) {
+        totalsByAccountId.set(transaction.accountId, (totalsByAccountId.get(transaction.accountId) || 0) + transaction.amount);
+      }
+      for (const [resolvedAccountId, amount] of totalsByAccountId) {
+        const account = getAccount(resolvedAccountId);
+        updateRow('accounts', resolvedAccountId, {
+          currentBalance: Number(account.currentBalance || 0) + amount,
+          updatedAt: now,
+        });
+      }
     }
 
-    for (const { importRowId, balance } of stagedBalances) {
+    for (const { importRowId, balance, sourceAccountId, resolvedAccountId } of stagedBalances) {
+      const balanceAccountId = resolvedAccountId || resolveImportedAccount(sourceAccountId, accountId);
+      getAccount(balanceAccountId);
+      db.prepare(`
+        UPDATE sourceAccounts
+        SET accountId = @accountId
+        WHERE id = @sourceAccountId
+      `).run({
+        accountId: balanceAccountId,
+        sourceAccountId,
+      });
+
       db.prepare(`
         INSERT INTO balanceSnapshots (accountId, month, balance, capturedAt)
         VALUES (@accountId, @month, @balance, @capturedAt)
@@ -683,7 +793,7 @@ export function materializeImportTransactions({
           balance = excluded.balance,
           capturedAt = excluded.capturedAt
       `).run({
-        accountId,
+        accountId: balanceAccountId,
         month: balance.date.slice(0, 7),
         balance: dollarsFromCents(balance.balanceCents),
         capturedAt: `${balance.date.slice(0, 10)}T00:00:00.000Z`,
@@ -719,7 +829,7 @@ export function materializeImportTransactions({
           sourceBalanceId = excluded.sourceBalanceId,
           updatedAt = excluded.updatedAt
       `).run({
-        accountId,
+        accountId: balanceAccountId,
         month: balance.date.slice(0, 7),
         balanceCents: balance.balanceCents,
         capturedAt: `${balance.date.slice(0, 10)}T00:00:00.000Z`,
@@ -730,8 +840,9 @@ export function materializeImportTransactions({
     }
 
     if (latestBalance) {
-      updateRow('accounts', accountId, {
-        currentBalance: dollarsFromCents(latestBalance.balanceCents),
+      const latestBalanceAccountId = resolveImportedAccount(latestBalance.sourceAccountId, accountId);
+      updateRow('accounts', latestBalanceAccountId, {
+        currentBalance: dollarsFromCents(latestBalance.balance.balanceCents),
         updatedAt: now,
       });
     }

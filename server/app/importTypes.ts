@@ -77,6 +77,8 @@ export interface ImportPreviewTransaction {
   raw?: Record<string, unknown>;
   categoryId: null;
   fingerprint?: string | null;
+  sourceAccountId?: number | null;
+  resolvedAccountId?: number | null;
 }
 
 export interface CommitImportTransaction extends ImportPreviewTransaction {

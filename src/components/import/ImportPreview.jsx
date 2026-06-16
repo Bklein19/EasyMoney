@@ -27,6 +27,8 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
 
   const creditCount = validTransactions.filter(t => t.amount > 0).length;
   const chargeCount = validTransactions.filter(t => t.amount < 0).length;
+  const parserIdentifiedAccounts = validTransactions.length > 0 && validTransactions.every(t => t.account || t.sourceAccountId);
+  const canResolveAccounts = Boolean(selectedAccountId) || parserIdentifiedAccounts;
   const accountId = selectedAccountId ? Number(selectedAccountId) : null;
   const { unique, duplicates } = accountId
     ? splitDuplicateTransactions(validTransactions, existingTransactions, accountId)
@@ -35,18 +37,17 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
   const uniqueTotalAmount = unique.reduce((sum, t) => sum + t.amount, 0);
 
   const handleImport = async () => {
-    if (!selectedAccountId) {
+    if (!canResolveAccounts) {
       alert("Please select an account to import these transactions into.");
       return;
     }
     
     setIsImporting(true);
     try {
-      const accountId = Number(selectedAccountId);
       const result = await apiAction('/app/imports/commit', {
         method: 'POST',
         body: JSON.stringify({
-          accountId,
+          accountId: selectedAccountId ? Number(selectedAccountId) : null,
           importFileId: importMeta?.importFileId,
           importRowIds: validTransactions.map(transaction => transaction.importRowId),
           importMeta,
@@ -103,6 +104,11 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
           {selectedAccount && (
             <span className={`account-kind-badge ${importingToCreditCard ? 'credit' : ''}`}>
               {importingToCreditCard ? 'Credit card mode' : `${getAccountTypeLabel(selectedAccount.type)} mode`}
+            </span>
+          )}
+          {!selectedAccount && parserIdentifiedAccounts && (
+            <span className="account-kind-badge">
+              Parser identified {new Set(validTransactions.map(t => `${t.institution || ''}|${t.account || ''}`)).size} account{new Set(validTransactions.map(t => `${t.institution || ''}|${t.account || ''}`)).size === 1 ? '' : 's'}
             </span>
           )}
         </div>
@@ -178,7 +184,7 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
         <button 
           className="btn btn-primary" 
           onClick={handleImport} 
-          disabled={isImporting || !selectedAccountId || unique.length === 0}
+          disabled={isImporting || !canResolveAccounts || unique.length === 0}
         >
           {isImporting ? 'Importing...' : (
             <>
