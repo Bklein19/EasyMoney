@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
 import {
   assertTable,
   deleteRow,
@@ -15,6 +16,7 @@ import { getLatestRobinhoodSnapshot, saveRobinhoodSnapshot } from './robinhoodSn
 import { listAccounts } from './app/accounts.ts';
 import { listCategories } from './app/categories.ts';
 import { commitImport, previewImport } from './app/imports.ts';
+import { appRouter } from './app/router.ts';
 import { splitTransactionAnnotationChanges, upsertTransactionAnnotation } from './app/transactionAnnotations.ts';
 import { listTransactions } from './app/transactions.ts';
 import index from '../index.html';
@@ -88,6 +90,21 @@ export const routes = wrapRoutes({
 
   '/api/health': {
     GET: () => json({ ok: true }),
+  },
+
+  '/api/trpc/*': {
+    GET: (request) => fetchRequestHandler({
+      endpoint: '/api/trpc',
+      req: request,
+      router: appRouter,
+      createContext: () => ({}),
+    }),
+    POST: (request) => fetchRequestHandler({
+      endpoint: '/api/trpc',
+      req: request,
+      router: appRouter,
+      createContext: () => ({}),
+    }),
   },
 
   '/api/robinhood/snapshot': {

@@ -8,6 +8,7 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "noEmit": true,
+    "skipLibCheck": true,
     "strict": true,
     "target": "ES2023",
     "types": ["bun-types"]
@@ -15,6 +16,7 @@
   "include": [
     "server/index.ts",
     "server/app/**/*.ts",
+    "src/api/**/*.ts",
     "src/hooks/**/*.ts"
   ]
 }

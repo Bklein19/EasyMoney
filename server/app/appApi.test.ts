@@ -1,7 +1,9 @@
 import { afterAll, beforeEach, expect, test } from 'bun:test';
+import { createTRPCClient, httpBatchLink } from '@trpc/client';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { AppRouter } from './router.ts';
 
 process.env.EASYMONEY_DB_PATH = path.join(os.tmpdir(), `easymoney-app-api-${process.pid}.sqlite`);
 
@@ -10,6 +12,9 @@ const { getDb, initDatabase, insertRow } = await import('../database.js');
 const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
 const server = createServer({ port: 0 });
 const TEST_URL = `http://localhost:${server.port}`;
+const trpcClient = createTRPCClient<AppRouter>({
+  links: [httpBatchLink({ url: `${TEST_URL}/api/trpc` })],
+});
 
 afterAll(() => {
   server.stop();
@@ -458,6 +463,34 @@ test('app transactions endpoint reads and annotates ledger rows without legacy t
   const updated = await getJson('/api/app/transactions?search=ledger-only annotation');
   expect(updated.transactions).toHaveLength(1);
   expect(updated.transactions[0].ledgerTransactionId).toBe(ledgerTransactionId);
+});
+
+test('trpc transactions procedures read and update annotations', async () => {
+  const accountId = insertRow('accounts', { name: 'Checking', type: 'checking', currentBalance: 0 });
+  const categoryId = insertRow('categories', { name: 'Food', type: 'expense' });
+  const transactionId = Number(insertRow('transactions', {
+    accountId,
+    date: '2026-06-02',
+    amount: -18.25,
+    description: 'TRPC Cafe',
+    type: 'expense',
+    status: 'cleared',
+  }));
+
+  const before = await trpcClient.transactions.list.query({ search: 'TRPC Cafe', limit: 1 });
+  expect(before.transactions).toHaveLength(1);
+  expect(before.transactions[0].category).toBeNull();
+
+  await trpcClient.transactions.updateAnnotation.mutate({
+    id: transactionId,
+    categoryId,
+    notes: 'typed mutation',
+  });
+
+  const after = await trpcClient.transactions.list.query({ search: 'typed mutation', limit: 1 });
+  expect(after.transactions).toHaveLength(1);
+  expect(after.transactions[0].category?.id).toBe(categoryId);
+  expect(after.transactions[0].notes).toBe('typed mutation');
 });
 
 test('init database backfills ledger read model from legacy app tables', () => {
