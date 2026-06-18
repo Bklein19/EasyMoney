@@ -6,7 +6,7 @@ interface AccountRow {
   name: string;
   institution: string | null;
   type: string;
-  currentBalance: number | null;
+  balanceCents: number | null;
   currency: string | null;
   updatedAt: string | null;
 }
@@ -17,7 +17,7 @@ function toAccountSummary(row: AccountRow): AccountSummary {
     name: row.name,
     institution: row.institution,
     type: row.type,
-    balance: row.currentBalance ?? 0,
+    balance: row.balanceCents === null ? 0 : row.balanceCents / 100,
     currency: row.currency ?? 'USD',
     updatedAt: row.updatedAt,
   };
@@ -26,9 +26,22 @@ function toAccountSummary(row: AccountRow): AccountSummary {
 export function listAccounts(): AccountListResponse {
   const rows = getDb()
     .prepare(
-      `SELECT id, name, institution, type, currentBalance, currency, updatedAt
-       FROM accounts
-       ORDER BY name ASC, id ASC`
+      `SELECT
+         a.id,
+         a.name,
+         a.institution,
+         a.type,
+         (
+           SELECT lb.balanceCents
+           FROM ledgerBalances lb
+           WHERE lb.accountId = a.id
+           ORDER BY lb.month DESC, lb.id DESC
+           LIMIT 1
+         ) AS balanceCents,
+         a.currency,
+         a.updatedAt
+       FROM accounts a
+       ORDER BY a.name ASC, a.id ASC`
     )
     .all() as AccountRow[];
 

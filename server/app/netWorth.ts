@@ -1,9 +1,9 @@
 import { getDb, syncLedgerReadModelFromLegacyTables } from '../database.js';
 import type { NetWorthReport } from './types.ts';
 
-interface CurrentBalanceRow {
+interface CurrentLedgerBalanceRow {
   type: string | null;
-  currentBalance: number | null;
+  balanceCents: number | null;
 }
 
 interface LedgerBalanceRow {
@@ -23,13 +23,25 @@ export function getNetWorthReport(): NetWorthReport {
   syncLedgerReadModelFromLegacyTables();
 
   const currentRows = getDb()
-    .prepare('SELECT type, currentBalance FROM accounts ORDER BY id ASC')
-    .all() as CurrentBalanceRow[];
+    .prepare(
+      `SELECT
+         a.type,
+         (
+           SELECT lb.balanceCents
+           FROM ledgerBalances lb
+           WHERE lb.accountId = a.id
+           ORDER BY lb.month DESC, lb.id DESC
+           LIMIT 1
+         ) AS balanceCents
+       FROM accounts a
+       ORDER BY a.id ASC`
+    )
+    .all() as CurrentLedgerBalanceRow[];
 
-  const currentNetWorth = currentRows.reduce((total, account) => {
-    const balance = account.currentBalance ?? 0;
+  const currentNetWorth = dollarsFromCents(currentRows.reduce((total, account) => {
+    const balance = account.balanceCents ?? 0;
     return total + (isCreditType(account.type) ? -Math.abs(balance) : balance);
-  }, 0);
+  }, 0));
 
   const history = getDb()
     .prepare(

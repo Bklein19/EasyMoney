@@ -27,6 +27,7 @@ interface SourceBalanceRow {
   date: string;
   balanceCents: number;
   priority: number | null;
+  sourceType: string | null;
   rawJson: string | null;
   accountId: number;
 }
@@ -55,6 +56,7 @@ export interface RebuiltBalanceSnapshot {
   month: string;
   balance: number;
   capturedAt: string;
+  sourceBalanceId: number;
 }
 
 export interface RebuiltLedger {
@@ -87,6 +89,23 @@ function dollarsFromCents(value: number) {
 
 function isCreditAccount(accountType: string | null | undefined) {
   return accountType === 'credit' || accountType === 'credit_card' || accountType === 'credit-card';
+}
+
+function getBalanceSourceRank(sourceType: string | null | undefined) {
+  return sourceType === 'statement' ? 2 : 1;
+}
+
+function compareSourceBalances(a: SourceBalanceRow, b: SourceBalanceRow) {
+  const sourceRankDelta = getBalanceSourceRank(a.sourceType) - getBalanceSourceRank(b.sourceType);
+  if (sourceRankDelta !== 0) return sourceRankDelta;
+
+  const priorityDelta = (a.priority ?? 0) - (b.priority ?? 0);
+  if (priorityDelta !== 0) return priorityDelta;
+
+  const dateDelta = a.date.localeCompare(b.date);
+  if (dateDelta !== 0) return dateDelta;
+
+  return a.id - b.id;
 }
 
 function parseRaw(rawJson: string | null) {
@@ -309,6 +328,7 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
       sb.date,
       sb.balanceCents,
       sb.priority,
+      sf.sourceType,
       sb.rawJson,
       sa.accountId
     FROM sourceBalances sb
@@ -319,13 +339,21 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
     ORDER BY sb.date ASC, sb.id ASC
   `).all() as SourceBalanceRow[];
   const balancesByAccountMonth = new Map<string, RebuiltBalanceSnapshot>();
+  const sourceBalanceByAccountMonth = new Map<string, SourceBalanceRow>();
   for (const balance of sourceBalances) {
     const month = balance.date.slice(0, 7);
-    balancesByAccountMonth.set(`${balance.accountId}|${month}`, {
+    const key = `${balance.accountId}|${month}`;
+    const existing = sourceBalanceByAccountMonth.get(key);
+    if (existing && compareSourceBalances(balance, existing) <= 0) {
+      continue;
+    }
+    sourceBalanceByAccountMonth.set(key, balance);
+    balancesByAccountMonth.set(key, {
       accountId: balance.accountId,
       month,
       balance: dollarsFromCents(balance.balanceCents),
       capturedAt: `${balance.date.slice(0, 10)}T00:00:00.000Z`,
+      sourceBalanceId: balance.id,
     });
   }
 
@@ -492,15 +520,7 @@ export function materializeLedger(db = getDb(), ledger = buildLedgerFromSourceFa
         @month,
         @balanceCents,
         @capturedAt,
-        (
-          SELECT sb.id
-          FROM sourceBalances sb
-          JOIN sourceAccounts sa ON sa.id = sb.sourceAccountId
-          WHERE sa.accountId = @accountId
-            AND substr(sb.date, 1, 7) = @month
-          ORDER BY sb.date DESC, sb.id DESC
-          LIMIT 1
-        ),
+        @sourceBalanceId,
         @createdAt,
         @updatedAt
       )
