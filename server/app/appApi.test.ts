@@ -129,13 +129,19 @@ beforeEach(() => {
 });
 
 test('app accounts endpoint returns domain-shaped accounts', async () => {
-  insertRow('accounts', {
+  const accountId = Number(insertRow('accounts', {
     name: 'Checking',
     institution: 'Local Bank',
     type: 'checking',
     currentBalance: 1234.56,
     currency: 'USD',
     updatedAt: '2026-06-14T12:00:00.000Z',
+  }));
+  insertRow('ledgerBalances', {
+    accountId,
+    month: '2026-06',
+    balanceCents: 234567,
+    capturedAt: '2026-06-30T00:00:00.000Z',
   });
 
   const body = await getJson('/api/app/accounts');
@@ -147,7 +153,7 @@ test('app accounts endpoint returns domain-shaped accounts', async () => {
         name: 'Checking',
         institution: 'Local Bank',
         type: 'checking',
-        balance: 1234.56,
+        balance: 2345.67,
         currency: 'USD',
         updatedAt: '2026-06-14T12:00:00.000Z',
       },
@@ -518,9 +524,9 @@ test('trpc net worth report is backend-owned and reads ledger balances', async (
   });
 
   const report = await trpcClient.netWorth.report.query();
-  expect(report.currentNetWorth).toBe(1250);
+  expect(report.currentNetWorth).toBe(800);
   expect(report.history).toEqual([{ month: '2026-05', netWorth: 800 }]);
-  expect(report.percentChange).toBeCloseTo(56.25);
+  expect(report.percentChange).toBeCloseTo(0);
 });
 
 test('init database backfills ledger read model from legacy app tables', () => {

@@ -244,6 +244,7 @@ test('sanitized Vanguard source facts rebuild investment activity and statement 
       month: '2026-05',
       balance: 30503.21,
       capturedAt: '2026-05-31T00:00:00.000Z',
+      sourceBalanceId: 1,
     },
   ]);
 
@@ -292,6 +293,66 @@ test('sanitized Vanguard source facts rebuild investment activity and statement 
   expect(
     (getDb().prepare('SELECT COUNT(*) AS count FROM ledgerBalances').get() as { count: number }).count
   ).toBe(1);
+});
+
+test('source rebuild prefers statement balances over activity running balances in the same month', () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'BofA Checking',
+    institution: 'Bank of America',
+    type: 'checking',
+    currentBalance: 0,
+  }));
+
+  const activity = insertCommittedSourceFile({
+    fileName: 'bofa-activity.csv',
+    parserName: 'bofa-activity-csv',
+    sourceType: 'activity-export',
+    priority: 100,
+    institution: 'Bank of America',
+  });
+  const statement = insertCommittedSourceFile({
+    fileName: 'bofa-statement.pdf',
+    parserName: 'bofa-statement-pdf',
+    sourceType: 'statement',
+    priority: 50,
+    institution: 'Bank of America',
+  });
+
+  const activityAccountId = insertSourceAccount(activity.sourceFileId, accountId, 'bofa-checking-5013', {
+    institution: 'Bank of America',
+    sourceAccountName: 'Adv Plus Banking - 5013',
+  });
+  const statementAccountId = insertSourceAccount(statement.sourceFileId, accountId, 'bofa-checking-5013', {
+    institution: 'Bank of America',
+    sourceAccountName: 'Adv Plus Banking - 5013',
+  });
+
+  insertSourceBalance({
+    sourceFileId: statement.sourceFileId,
+    sourceAccountId: statementAccountId,
+    date: '2026-06-04',
+    balanceCents: 620821,
+    priority: 50,
+  });
+  insertSourceBalance({
+    sourceFileId: activity.sourceFileId,
+    sourceAccountId: activityAccountId,
+    date: '2026-06-08',
+    balanceCents: 371821,
+    priority: 100,
+  });
+
+  const ledger = buildLedgerFromSourceFacts(getDb());
+
+  expect(ledger.balanceSnapshots).toEqual([
+    {
+      accountId,
+      month: '2026-06',
+      balance: 6208.21,
+      capturedAt: '2026-06-04T00:00:00.000Z',
+      sourceBalanceId: 1,
+    },
+  ]);
 });
 
 test('source rebuild applies priority dedup while keeping statement-only transfers', () => {
