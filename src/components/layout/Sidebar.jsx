@@ -9,7 +9,6 @@ import {
   LineChart,
   Wallet,
   PiggyBank,
-  CircleHelp,
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
@@ -41,7 +40,6 @@ const Sidebar = ({
     { path: '/performance', label: 'Performance', icon: LineChart },
     { path: '/savings-rate', label: 'Savings Rate', icon: Activity },
     { path: '/import', label: 'Import', icon: Upload },
-    { path: '/how-to-use', label: 'How To Use', icon: CircleHelp },
   ];
   const showAccountPicker = (
     !isCollapsed &&

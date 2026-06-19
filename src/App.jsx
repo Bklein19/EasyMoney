@@ -8,7 +8,6 @@ import AnalyticsPage from './components/analytics/AnalyticsPage';
 import BudgetingPage from './components/budgeting/BudgetingPage';
 import { NetWorthPage } from './components/investments/NetWorthPage';
 import { SavingsRatePage } from './components/investments/SavingsRatePage';
-import HowToUsePage from './components/help/HowToUsePage';
 import './App.css';
 
 const getInitialSidebarCollapsed = () => {
@@ -76,7 +75,6 @@ function App() {
               <Route path="/investments" element={<Navigate to="/net-worth" replace />} />
               <Route path="/import" element={<ImportPage />} />
               <Route path="/analytics" element={<Navigate to="/" replace />} />
-              <Route path="/how-to-use" element={<HowToUsePage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </main>
