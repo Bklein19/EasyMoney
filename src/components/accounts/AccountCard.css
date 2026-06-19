@@ -86,44 +86,12 @@
   gap: var(--space-1);
 }
 
-.account-delete-confirm {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding: var(--space-3);
-  border: 1px solid color-mix(in srgb, var(--color-danger) 24%, transparent);
-  border-radius: var(--radius-md);
-  background: var(--color-danger-bg);
-}
-
-.account-delete-confirm strong {
-  color: var(--text-primary);
-}
-
-.account-delete-confirm p {
-  margin: var(--space-1) 0 0;
-  color: var(--text-secondary);
-  font-size: var(--text-sm);
-}
-
-.account-delete-actions {
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-
 .save-btn:hover {
   background: var(--color-success-bg);
   color: var(--color-success);
 }
 
-.delete-btn:hover {
-  background: var(--color-danger-bg);
-  color: var(--color-danger);
-}
-
-.save-btn:disabled:hover,
-.delete-btn:disabled:hover {
+.save-btn:disabled:hover {
   background: transparent;
   color: var(--text-secondary);
 }

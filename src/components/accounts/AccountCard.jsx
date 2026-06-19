@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Building2, Check, CreditCard, Edit3, Landmark, PiggyBank, Trash2, X } from 'lucide-react';
+import { Building2, Check, CreditCard, Edit3, Landmark, PiggyBank, X } from 'lucide-react';
 import { useAccounts } from '../../hooks/useAccounts';
 import { getAccountTypeLabel } from '../../utils/formatters';
 import './AccountCard.css';
@@ -15,18 +15,15 @@ const getAccountIcon = (type) => {
 };
 
 export default function AccountCard({ account }) {
-  const { updateAccount, deleteAccount } = useAccounts();
+  const { updateAccount } = useAccounts();
   const [isEditing, setIsEditing] = useState(false);
-  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [draftName, setDraftName] = useState(account.name || '');
   const [isSaving, setIsSaving] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState('');
 
   const handleStartEdit = () => {
     setDraftName(account.name || '');
     setError('');
-    setIsConfirmingDelete(false);
     setIsEditing(true);
   };
 
@@ -34,25 +31,6 @@ export default function AccountCard({ account }) {
     setDraftName(account.name || '');
     setError('');
     setIsEditing(false);
-  };
-
-  const handleStartDelete = () => {
-    setError('');
-    setIsEditing(false);
-    setIsConfirmingDelete(true);
-  };
-
-  const handleDelete = async () => {
-    setIsDeleting(true);
-    setError('');
-
-    try {
-      await deleteAccount(account.id);
-    } catch (deleteError) {
-      setError(deleteError?.message || 'Could not delete account.');
-      setIsDeleting(false);
-      setIsConfirmingDelete(false);
-    }
   };
 
   const handleSaveName = async (event) => {
@@ -94,29 +72,8 @@ export default function AccountCard({ account }) {
           <button className="icon-btn" onClick={handleStartEdit} title="Edit account name" disabled={isEditing}>
             <Edit3 size={16} />
           </button>
-          <button className="icon-btn delete-btn" onClick={handleStartDelete} title="Delete account" disabled={isEditing || isDeleting}>
-            <Trash2 size={16} />
-          </button>
         </div>
       </div>
-
-      {isConfirmingDelete && (
-        <div className="account-delete-confirm">
-          <div>
-            <strong>Delete this account?</strong>
-            <p>Transactions and balances for this account will be removed.</p>
-          </div>
-          <div className="account-delete-actions">
-            <button className="btn btn--danger btn--sm" type="button" onClick={handleDelete} disabled={isDeleting}>
-              {isDeleting ? 'Deleting...' : 'Delete'}
-            </button>
-            <button className="btn btn--secondary btn--sm" type="button" onClick={() => setIsConfirmingDelete(false)} disabled={isDeleting}>
-              Cancel
-            </button>
-          </div>
-          {error && <div className="account-edit-error">{error}</div>}
-        </div>
-      )}
       
       <div className="account-info">
         {isEditing ? (

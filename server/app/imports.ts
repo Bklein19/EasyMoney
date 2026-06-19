@@ -160,60 +160,11 @@ export function unimportFile(importFileId: number | string) {
     | undefined;
   if (!importFile) throw new Error(`Import file not found: ${id}`);
 
-  const ledgerRows = db.prepare('SELECT ledgerTransactionId FROM ledgerTransactions WHERE importFileId = ?').all(id) as Array<{
-    ledgerTransactionId: string;
-  }>;
-  const accountDeltas = db.prepare(`
-    SELECT accountId, SUM(amountCents) AS amountCents
-    FROM ledgerTransactions
-    WHERE importFileId = ?
-    GROUP BY accountId
-  `).all(id) as Array<{
-    accountId: number;
-    amountCents: number;
-  }>;
-  const accountStartingBalances = new Map(accountDeltas.map(row => {
-    const account = db.prepare('SELECT currentBalance FROM accounts WHERE id = ?').get(row.accountId) as
-      | { currentBalance: number | null }
-      | undefined;
-    return [row.accountId, Number(account?.currentBalance || 0)];
-  }));
-  const transactionIds = db.prepare('SELECT transactionId FROM importRows WHERE importFileId = ? AND transactionId IS NOT NULL').all(id) as Array<{
-    transactionId: number;
-  }>;
-
   db.transaction(() => {
-    for (const row of ledgerRows) {
-      db.prepare('DELETE FROM transactionAnnotations WHERE ledgerTransactionId = ?').run(row.ledgerTransactionId);
-    }
-
-    db.prepare(`
-      DELETE FROM ledgerBalances
-      WHERE sourceBalanceId IN (
-        SELECT sb.id
-        FROM sourceBalances sb
-        JOIN importRows ir ON ir.id = sb.importRowId
-        WHERE ir.importFileId = ?
-      )
-    `).run(id);
-
-    db.prepare('DELETE FROM ledgerTransactions WHERE importFileId = ?').run(id);
-
-    for (const row of transactionIds) {
-      db.prepare('DELETE FROM transactions WHERE id = ?').run(row.transactionId);
-    }
-
     db.prepare(`
       UPDATE importRows
       SET transactionId = NULL, fingerprint = NULL
       WHERE importFileId = ?
-    `).run(id);
-    db.prepare(`
-      UPDATE sourceAccounts
-      SET accountId = NULL
-      WHERE sourceFileId IN (
-        SELECT id FROM sourceFiles WHERE importFileId = ?
-      )
     `).run(id);
     db.prepare(`
       UPDATE sourceFiles
@@ -228,22 +179,6 @@ export function unimportFile(importFileId: number | string) {
   })();
 
   materializeLedger(db, buildLedgerFromSourceFacts(db));
-  const now = new Date().toISOString();
-  for (const row of accountDeltas) {
-    const latestBalance = db.prepare(`
-      SELECT balance
-      FROM balanceSnapshots
-      WHERE accountId = ?
-      ORDER BY month DESC, capturedAt DESC, id DESC
-      LIMIT 1
-    `).get(row.accountId) as { balance: number } | undefined;
-    updateRow('accounts', row.accountId, {
-      currentBalance: latestBalance
-        ? latestBalance.balance
-        : Number(accountStartingBalances.get(row.accountId) || 0) - dollarsFromCents(row.amountCents),
-      updatedAt: now,
-    });
-  }
   return { ok: true, importFileId: id };
 }
 

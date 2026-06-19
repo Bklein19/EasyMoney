@@ -167,78 +167,6 @@ test('app accounts endpoint returns domain-shaped accounts', async () => {
   });
 });
 
-test('account deep delete removes materialized account data and unlinks source accounts', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Delete Me',
-    institution: 'Test Bank',
-    type: 'checking',
-    currentBalance: 50,
-  }));
-  const sourceFileId = Number(insertRow('sourceFiles', {
-    fileName: 'delete-test.csv',
-    contentHash: 'delete-test',
-    status: 'committed',
-    createdAt: new Date().toISOString(),
-  }));
-  const sourceAccountId = Number(insertRow('sourceAccounts', {
-    sourceFileId,
-    accountId,
-    institution: 'Test Bank',
-    sourceAccountKey: 'Test Bank|Delete Me',
-    sourceAccountName: 'Delete Me',
-    createdAt: new Date().toISOString(),
-  }));
-  const transactionId = Number(insertRow('transactions', {
-    accountId,
-    date: '2026-06-01T00:00:00.000Z',
-    amount: -12.34,
-    description: 'Delete row',
-    ledgerTransactionId: 'txn_delete_me',
-    createdAt: new Date().toISOString(),
-  }));
-  insertRow('ledgerTransactions', {
-    ledgerTransactionId: 'txn_delete_me',
-    legacyTransactionId: transactionId,
-    accountId,
-    date: '2026-06-01T00:00:00.000Z',
-    amountCents: -1234,
-    description: 'Delete row',
-    sourceRole: 'activity',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-  insertRow('transactionAnnotations', {
-    ledgerTransactionId: 'txn_delete_me',
-    notes: 'remove me',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-  insertRow('balanceSnapshots', {
-    accountId,
-    month: '2026-06',
-    balance: 50,
-    capturedAt: '2026-06-01T00:00:00.000Z',
-  });
-  insertRow('ledgerBalances', {
-    accountId,
-    month: '2026-06',
-    balanceCents: 5000,
-    capturedAt: '2026-06-01T00:00:00.000Z',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  });
-
-  await deleteJson(`/api/accounts/${accountId}/deep`);
-
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM accounts WHERE id = ?').get(accountId)).toMatchObject({ count: 0 });
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM transactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM transactionAnnotations WHERE ledgerTransactionId = ?').get('txn_delete_me')).toMatchObject({ count: 0 });
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM balanceSnapshots WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerBalances WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
-  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(sourceAccountId)).toMatchObject({ accountId: null });
-});
-
 test('app categories endpoint returns domain-shaped categories', async () => {
   insertRow('categories', {
     name: 'Groceries',
@@ -909,6 +837,19 @@ test('app import history lists committed files and can unimport one', async () =
     importFileId: preview.importFileId,
     importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
   }, 201);
+  const annotatedTransaction = getDb().prepare(`
+    SELECT ledgerTransactionId
+    FROM ledgerTransactions
+    WHERE importFileId = ?
+    ORDER BY ledgerTransactionId ASC
+    LIMIT 1
+  `).get(preview.importFileId) as { ledgerTransactionId: string };
+  insertRow('transactionAnnotations', {
+    ledgerTransactionId: annotatedTransaction.ledgerTransactionId,
+    notes: 'keep this user note',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
 
   const history = await getJson('/api/app/imports') as {
     imports: Array<{
@@ -931,7 +872,10 @@ test('app import history lists committed files and can unimport one', async () =
   expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
   expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(preview.importFileId)).toMatchObject({ status: 'unimported' });
   expect(getDb().prepare('SELECT status FROM sourceFiles WHERE importFileId = ?').get(preview.importFileId)).toMatchObject({ status: 'unimported' });
-  expect(getDb().prepare('SELECT currentBalance FROM accounts WHERE id = ?').get(accountId)).toMatchObject({ currentBalance: 100 });
+  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE sourceFileId = (SELECT id FROM sourceFiles WHERE importFileId = ?)').get(preview.importFileId)).toMatchObject({ accountId });
+  expect(getDb().prepare('SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId = ?').get(annotatedTransaction.ledgerTransactionId)).toMatchObject({
+    notes: 'keep this user note',
+  });
 });
 
 test('app imports commit resolves parser-emitted accounts without selected account', async () => {

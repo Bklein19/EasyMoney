@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { useCSVImport } from '../../hooks/useCSVImport';
 import { buildCustomProfile, mappingFromProfile } from '../../utils/csvMapping';
@@ -24,7 +24,7 @@ export default function ImportPage() {
   const [historyError, setHistoryError] = useState('');
   const [unimportingId, setUnimportingId] = useState(null);
 
-  const loadImportHistory = async () => {
+  const loadImportHistory = useCallback(async () => {
     setHistoryError('');
     try {
       const result = await appRequest('/imports');
@@ -32,11 +32,14 @@ export default function ImportPage() {
     } catch (loadError) {
       setHistoryError(loadError?.message || 'Could not load import history.');
     }
-  };
+  }, []);
 
   useEffect(() => {
-    loadImportHistory();
-  }, []);
+    const timeoutId = window.setTimeout(() => {
+      void loadImportHistory();
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [loadImportHistory]);
 
   const handleFileSelected = async (file) => {
     setCurrentFile(file);
