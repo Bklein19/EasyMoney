@@ -153,9 +153,6 @@ const Sidebar = ({
           )}
         </nav>
 
-        <div className="sidebar-footer">
-          {/* Optional: Add user settings or logout link here in the future */}
-        </div>
         {!isCollapsed && <div className="sidebar-resize-handle" onPointerDown={startSidebarResize} />}
       </div>
     </>

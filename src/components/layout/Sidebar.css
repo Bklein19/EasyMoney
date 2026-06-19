@@ -44,10 +44,10 @@ body.sidebar-resizing {
 
 .sidebar-header {
   position: relative;
-  height: var(--topbar-height);
+  height: 56px;
   display: flex;
   align-items: center;
-  padding: 0 var(--space-6);
+  padding: 0 var(--space-5);
   border-bottom: 1px solid var(--hairline-muted);
   transition: padding var(--transition-base);
 }
@@ -59,8 +59,8 @@ body.sidebar-resizing {
 .sidebar-brand {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  font-size: var(--text-lg);
+  gap: var(--space-2);
+  font-size: var(--text-base);
   font-weight: 700;
   color: var(--text-primary);
   text-decoration: none;
@@ -68,10 +68,10 @@ body.sidebar-resizing {
 }
 
 .sidebar-brand-icon {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   background: var(--accent-gradient);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -306,16 +306,6 @@ body.sidebar-resizing {
 .sidebar--collapsed .sidebar-link {
   justify-content: center;
   padding: var(--space-3);
-}
-
-.sidebar-footer {
-  padding: var(--space-6) var(--space-4);
-  border-top: 1px solid var(--hairline-muted);
-  transition: padding var(--transition-base);
-}
-
-.sidebar--collapsed .sidebar-footer {
-  padding: var(--space-4) var(--space-3);
 }
 
 @media (max-width: 768px) {
