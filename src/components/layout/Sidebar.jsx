@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { NavLink, useLocation } from 'react-router';
 import { 
   ArrowLeftRight, 
@@ -16,6 +17,9 @@ import { AccountPicker } from '../investments/AccountPicker';
 import './Sidebar.css';
 
 const REPORT_ROUTES = new Set(['/net-worth', '/performance', '/savings-rate']);
+const SIDEBAR_WIDTH_KEY = 'easymoney:sidebar-width';
+const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MAX_WIDTH = 520;
 
 const Sidebar = ({
   isMobileOpen,
@@ -27,6 +31,7 @@ const Sidebar = ({
   onReportAccountSelectionChange,
 }) => {
   const location = useLocation();
+  const sidebarRef = useRef(null);
   const navItems = [
     { path: '/', label: 'Analytics', icon: PieChart },
     { path: '/transactions', label: 'Transactions', icon: ArrowLeftRight },
@@ -45,6 +50,46 @@ const Sidebar = ({
     onReportAccountSelectionChange
   );
 
+  useEffect(() => {
+    const savedWidth = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
+    if (!Number.isFinite(savedWidth) || savedWidth <= 0) return;
+    const width = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, savedWidth));
+    document.documentElement.style.setProperty('--sidebar-width', `${width}px`);
+    sidebarRef.current?.style.setProperty('--sidebar-width', `${width}px`);
+  }, []);
+
+  const startSidebarResize = (event) => {
+    if (!sidebarRef.current || isCollapsed) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    document.body.classList.add('sidebar-resizing');
+    const left = sidebarRef.current.getBoundingClientRect().left;
+
+    const setWidth = (clientX) => {
+      if (!sidebarRef.current) return null;
+      const width = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, clientX - left));
+      document.documentElement.style.setProperty('--sidebar-width', `${width}px`);
+      sidebarRef.current.style.setProperty('--sidebar-width', `${width}px`);
+      return width;
+    };
+
+    const handlePointerMove = (moveEvent) => {
+      setWidth(moveEvent.clientX);
+    };
+    const handlePointerUp = (upEvent) => {
+      const width = setWidth(upEvent.clientX);
+      if (width) window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(Math.round(width)));
+      document.body.classList.remove('sidebar-resizing');
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
+  };
+
   return (
     <>
       {/* Mobile overlay */}
@@ -56,7 +101,10 @@ const Sidebar = ({
         />
       )}
       
-      <div className={`sidebar ${isMobileOpen ? 'mobile-open' : ''} ${isCollapsed ? 'sidebar--collapsed' : ''}`}>
+      <div
+        ref={sidebarRef}
+        className={`sidebar ${isMobileOpen ? 'mobile-open' : ''} ${isCollapsed ? 'sidebar--collapsed' : ''}`}
+      >
         <div className="sidebar-header">
           <NavLink to="/" className="sidebar-brand" onClick={onClose}>
             <div className="sidebar-brand-icon">
@@ -110,6 +158,7 @@ const Sidebar = ({
         <div className="sidebar-footer">
           {/* Optional: Add user settings or logout link here in the future */}
         </div>
+        {!isCollapsed && <div className="sidebar-resize-handle" onPointerDown={startSidebarResize} />}
       </div>
     </>
   );
