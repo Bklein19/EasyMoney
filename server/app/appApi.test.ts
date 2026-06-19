@@ -535,6 +535,110 @@ test('trpc net worth report is backend-owned and reads ledger balances', async (
   expect(report.percentChange).toBeCloseTo(0);
 });
 
+test('investment report endpoints expose money-style ledger reports', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Brokerage',
+    institution: 'Vanguard',
+    type: 'investment',
+    currentBalance: 0,
+  }));
+  insertRow('ledgerTransactions', {
+    ledgerTransactionId: 'txn_report_contribution',
+    accountId,
+    date: '2026-01-15',
+    amountCents: 100000,
+    description: 'ACH contribution',
+    sourceRole: 'activity',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  insertRow('ledgerTransactions', {
+    ledgerTransactionId: 'txn_report_dividend',
+    accountId,
+    date: '2026-02-15',
+    amountCents: 5000,
+    description: 'Dividend received',
+    sourceRole: 'activity',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  insertRow('ledgerBalances', {
+    accountId,
+    month: '2026-01',
+    balanceCents: 100000,
+    capturedAt: '2026-01-31T00:00:00.000Z',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  insertRow('ledgerBalances', {
+    accountId,
+    month: '2026-02',
+    balanceCents: 112000,
+    capturedAt: '2026-02-28T00:00:00.000Z',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  const netWorth = await getJson('/api/networth') as {
+    accounts: Array<{ id: number; name: string; institution: string; type: string }>;
+    rows: Array<{
+      month: string;
+      account_id: number;
+      contributions_cents: number;
+      dividends_cents: number;
+      gains_cents: number | null;
+      end_balance_cents: number | null;
+    }>;
+    returns: Array<{ account_id: number; ending_balance_cents: number }>;
+  };
+  expect(netWorth.accounts).toContainEqual(expect.objectContaining({
+    id: accountId,
+    name: 'Brokerage',
+    institution: 'Vanguard',
+    type: 'investment',
+  }));
+  expect(netWorth.rows).toContainEqual(expect.objectContaining({
+    month: '2026-01',
+    account_id: accountId,
+    contributions_cents: 100000,
+    end_balance_cents: 100000,
+  }));
+  expect(netWorth.rows).toContainEqual(expect.objectContaining({
+    month: '2026-02',
+    account_id: accountId,
+    dividends_cents: 5000,
+    gains_cents: 7000,
+    end_balance_cents: 112000,
+  }));
+  expect(netWorth.returns).toContainEqual(expect.objectContaining({
+    account_id: accountId,
+    ending_balance_cents: 112000,
+  }));
+
+  const savingsRate = await getJson('/api/savings-rate') as {
+    account_months: Array<{
+      account_id: number;
+      month: string;
+      income_cents: number;
+      market_income_cents: number;
+      investment_delta_cents: number;
+    }>;
+    income_sources: Array<{ label: string; amount_cents: number; is_market_income: boolean }>;
+  };
+  expect(savingsRate.account_months).toContainEqual(expect.objectContaining({
+    account_id: accountId,
+    month: '2026-02',
+    income_cents: 5000,
+    market_income_cents: 5000,
+    investment_delta_cents: 0,
+  }));
+  expect(savingsRate.income_sources).toContainEqual(expect.objectContaining({
+    label: 'Dividends',
+    amount_cents: 5000,
+    is_market_income: true,
+  }));
+});
+
 test('init database backfills ledger read model from legacy app tables', () => {
   const accountId = Number(insertRow('accounts', {
     name: 'Checking',

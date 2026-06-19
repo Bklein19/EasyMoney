@@ -6,7 +6,8 @@ import AccountsPage from './components/accounts/AccountsPage';
 import Sidebar from './components/layout/Sidebar';
 import AnalyticsPage from './components/analytics/AnalyticsPage';
 import BudgetingPage from './components/budgeting/BudgetingPage';
-import InvestmentsPage from './components/investments/InvestmentsPage';
+import { NetWorthPage } from './components/investments/NetWorthPage';
+import { SavingsRatePage } from './components/investments/SavingsRatePage';
 import HowToUsePage from './components/help/HowToUsePage';
 import './App.css';
 
@@ -40,7 +41,10 @@ function App() {
               <Route path="/transactions" element={<TransactionsPage />} />
               <Route path="/accounts" element={<AccountsPage />} />
               <Route path="/budgeting" element={<BudgetingPage />} />
-              <Route path="/investments" element={<InvestmentsPage />} />
+              <Route path="/net-worth" element={<NetWorthPage view="networth" />} />
+              <Route path="/performance" element={<NetWorthPage view="performance" />} />
+              <Route path="/savings-rate" element={<SavingsRatePage />} />
+              <Route path="/investments" element={<Navigate to="/net-worth" replace />} />
               <Route path="/import" element={<ImportPage />} />
               <Route path="/analytics" element={<Navigate to="/" replace />} />
               <Route path="/how-to-use" element={<HowToUsePage />} />

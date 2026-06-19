@@ -9,7 +9,6 @@
   "scripts": {
     "dev": "bun server/index.ts",
     "api": "bun server/index.ts",
-    "import:robinhood": "bun scripts/import-robinhood-snapshot.js",
     "rebuild:ledger": "bun scripts/rebuild-ledger.ts",
     "build": "NODE_ENV=production bun scripts/build-client.js",
     "build:client": "bun scripts/build-client.js",

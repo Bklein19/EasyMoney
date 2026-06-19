@@ -12,10 +12,10 @@ import {
   updateRow
 } from './database.js';
 import { seedDatabase } from './seed.js';
-import { getLatestRobinhoodSnapshot, saveRobinhoodSnapshot } from './robinhoodSnapshots.js';
 import { listAccounts } from './app/accounts.ts';
 import { listCategories } from './app/categories.ts';
 import { commitImport, listImportHistory, previewImport, unimportFile } from './app/imports.ts';
+import { getInvestmentNetWorthReport, getSavingsRateReport } from './app/investmentReports.ts';
 import { appRouter } from './app/router.ts';
 import { splitTransactionAnnotationChanges, upsertTransactionAnnotation } from './app/transactionAnnotations.ts';
 import { listTransactions } from './app/transactions.ts';
@@ -107,24 +107,12 @@ export const routes = wrapRoutes({
     }),
   },
 
-  '/api/robinhood/snapshot': {
-    GET: () => {
-      const snapshot = getLatestRobinhoodSnapshot();
-      if (!snapshot) {
-        return json({
-          connected: false,
-          accounts: [],
-          history: [],
-          message: 'No Robinhood snapshot has been persisted yet.'
-        });
-      }
+  '/api/networth': {
+    GET: () => json(getInvestmentNetWorthReport()),
+  },
 
-      return json({ connected: true, ...snapshot });
-    },
-    POST: async (request) => {
-      const snapshotId = saveRobinhoodSnapshot(await bodyJson(request));
-      return json({ id: snapshotId }, 201);
-    },
+  '/api/savings-rate': {
+    GET: () => json(getSavingsRateReport()),
   },
 
   '/api/app/accounts': {
@@ -171,13 +159,6 @@ export const routes = wrapRoutes({
 
   '/api/app/imports/:id': {
     DELETE: (request) => json(unimportFile(request.params.id)),
-  },
-
-  '/api/transactions/import-batch/:batchId': {
-    DELETE: (request) => {
-      const result = getDb().prepare('DELETE FROM transactions WHERE importBatchId = ?').run(request.params.batchId);
-      return json({ count: result.changes });
-    },
   },
 
   '/api/categories/:id/delete': {
