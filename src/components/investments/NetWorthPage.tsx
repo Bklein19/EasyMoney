@@ -128,9 +128,10 @@ const series = {
 
 interface NetWorthPageProps {
   view: "networth" | "performance";
+  selectedIds?: Set<number>;
 }
 
-export function NetWorthPage({ view }: NetWorthPageProps) {
+export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPageProps) {
   const [report, setReport] = useState<NetWorthReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [derivativePeriod, setDerivativePeriod] = useState<Period>("month");
@@ -142,10 +143,11 @@ export function NetWorthPage({ view }: NetWorthPageProps) {
       .catch((e) => setError(String(e)));
   }, []);
 
-  const selectedIds = useMemo(
+  const allAccountIds = useMemo(
     () => new Set(report?.accounts.map((account) => account.id) ?? []),
     [report],
   );
+  const selectedIds = selectedIdsProp ?? allAccountIds;
 
   const data: ChartPoint[] = useMemo(() => {
     if (!report) return [];

@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router';
+import { NavLink, useLocation } from 'react-router';
 import { 
   ArrowLeftRight, 
   WalletCards, 
@@ -12,9 +12,21 @@ import {
   ChevronLeft,
   ChevronRight
 } from 'lucide-react';
+import { AccountPicker } from '../investments/AccountPicker';
 import './Sidebar.css';
 
-const Sidebar = ({ isMobileOpen, onClose, isCollapsed = false, onCollapsedChange }) => {
+const REPORT_ROUTES = new Set(['/net-worth', '/performance', '/savings-rate']);
+
+const Sidebar = ({
+  isMobileOpen,
+  onClose,
+  isCollapsed = false,
+  onCollapsedChange,
+  reportAccounts = [],
+  selectedReportAccountIds = new Set(),
+  onReportAccountSelectionChange,
+}) => {
+  const location = useLocation();
   const navItems = [
     { path: '/', label: 'Analytics', icon: PieChart },
     { path: '/transactions', label: 'Transactions', icon: ArrowLeftRight },
@@ -26,6 +38,12 @@ const Sidebar = ({ isMobileOpen, onClose, isCollapsed = false, onCollapsedChange
     { path: '/import', label: 'Import', icon: Upload },
     { path: '/how-to-use', label: 'How To Use', icon: CircleHelp },
   ];
+  const showAccountPicker = (
+    !isCollapsed &&
+    REPORT_ROUTES.has(location.pathname) &&
+    reportAccounts.length > 0 &&
+    onReportAccountSelectionChange
+  );
 
   return (
     <>
@@ -73,6 +91,20 @@ const Sidebar = ({ isMobileOpen, onClose, isCollapsed = false, onCollapsedChange
               <span className="sidebar-link-label">{item.label}</span>
             </NavLink>
           ))}
+
+          {showAccountPicker && (
+            <section className="sidebar-account-picker" aria-label="Report accounts">
+              <div className="sidebar-account-picker__header">
+                <span>Accounts</span>
+                <span>{selectedReportAccountIds.size} of {reportAccounts.length}</span>
+              </div>
+              <AccountPicker
+                accounts={reportAccounts}
+                selectedIds={selectedReportAccountIds}
+                onChange={onReportAccountSelectionChange}
+              />
+            </section>
+          )}
         </nav>
 
         <div className="sidebar-footer">

@@ -112,7 +112,7 @@ const periodKey = (month: string, period: Period) => {
   return `${year} Q${Math.ceil(Number(month.slice(5, 7)) / 3)}`;
 };
 
-export function SavingsRatePage() {
+export function SavingsRatePage({ selectedIds: selectedIdsProp }: { selectedIds?: Set<number> }) {
   const [report, setReport] = useState<SavingsRateReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [period, setPeriod] = useState<Period>("year");
@@ -124,10 +124,11 @@ export function SavingsRatePage() {
       .catch((e) => setError(String(e)));
   }, []);
 
-  const selectedIds = useMemo(
+  const allAccountIds = useMemo(
     () => new Set(report?.account_months.map((row) => row.account_id) ?? []),
     [report],
   );
+  const selectedIds = selectedIdsProp ?? allAccountIds;
 
   // Rebuild monthly rows from per-account components, summing only the selected
   // accounts, then run the (non-additive) savings-rate allocation per month.

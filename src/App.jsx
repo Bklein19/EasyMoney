@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router';
 import ImportPage from './components/import/ImportPage';
 import TransactionsPage from './components/transactions/TransactionsPage';
@@ -21,11 +21,37 @@ const getInitialSidebarCollapsed = () => {
 
 function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(getInitialSidebarCollapsed);
+  const [reportAccounts, setReportAccounts] = useState([]);
+  const [selectedReportAccountIds, setSelectedReportAccountIds] = useState(null);
 
   const handleSidebarCollapsedChange = (nextValue) => {
     setIsSidebarCollapsed(nextValue);
     window.localStorage.setItem('easymoney:sidebar-collapsed', String(nextValue));
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/networth')
+      .then(response => {
+        if (!response.ok) throw new Error(`Account picker request failed: ${response.status}`);
+        return response.json();
+      })
+      .then(data => {
+        if (!cancelled) setReportAccounts(data.accounts || []);
+      })
+      .catch(() => {
+        if (!cancelled) setReportAccounts([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const reportSelectedIds = useMemo(
+    () => selectedReportAccountIds ?? new Set(reportAccounts.map(account => account.id)),
+    [reportAccounts, selectedReportAccountIds]
+  );
 
   return (
     <Router>
@@ -33,6 +59,9 @@ function App() {
         <Sidebar
           isCollapsed={isSidebarCollapsed}
           onCollapsedChange={handleSidebarCollapsedChange}
+          reportAccounts={reportAccounts}
+          selectedReportAccountIds={reportSelectedIds}
+          onReportAccountSelectionChange={setSelectedReportAccountIds}
         />
         <div className="app-content">
           <main className="app-main">
@@ -41,9 +70,9 @@ function App() {
               <Route path="/transactions" element={<TransactionsPage />} />
               <Route path="/accounts" element={<AccountsPage />} />
               <Route path="/budgeting" element={<BudgetingPage />} />
-              <Route path="/net-worth" element={<NetWorthPage view="networth" />} />
-              <Route path="/performance" element={<NetWorthPage view="performance" />} />
-              <Route path="/savings-rate" element={<SavingsRatePage />} />
+              <Route path="/net-worth" element={<NetWorthPage view="networth" selectedIds={reportSelectedIds} />} />
+              <Route path="/performance" element={<NetWorthPage view="performance" selectedIds={reportSelectedIds} />} />
+              <Route path="/savings-rate" element={<SavingsRatePage selectedIds={reportSelectedIds} />} />
               <Route path="/investments" element={<Navigate to="/net-worth" replace />} />
               <Route path="/import" element={<ImportPage />} />
               <Route path="/analytics" element={<Navigate to="/" replace />} />
