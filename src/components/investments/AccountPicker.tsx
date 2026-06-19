@@ -71,7 +71,14 @@ export function AccountPicker({
       onChange(next);
       return;
     }
-    onChange(new Set([id]));
+    if (selectedIds.size === allIds.length) {
+      onChange(new Set([id]));
+      return;
+    }
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onChange(next);
   };
 
   useEffect(() => {
@@ -128,7 +135,7 @@ export function AccountPicker({
             type="button"
             className={selectedIds.has(account.id) ? 'account-chip active' : 'account-chip'}
             aria-pressed={selectedIds.has(account.id)}
-            title="Command-click to toggle, Shift-click to select a range, Option-click to invert"
+            title="Click to add or remove this account from the report"
             onClick={event => selectAccount(account.id, event)}
           >
             <span className="account-chip-name">{account.name}</span>
