@@ -355,6 +355,181 @@ test('source rebuild prefers statement balances over activity running balances i
   ]);
 });
 
+test('source rebuild de-duplicates overlapping activity exports by source-file multiplicity', () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'WF Checking',
+    institution: 'Wells Fargo',
+    type: 'checking',
+    currentBalance: 0,
+  }));
+  const exportA = insertCommittedSourceFile({
+    fileName: 'checking-a.csv',
+    parserName: 'wells-fargo-generic-activity-csv',
+    sourceType: 'activity-export',
+    priority: 90,
+    institution: 'Wells Fargo',
+  });
+  const exportB = insertCommittedSourceFile({
+    fileName: 'checking-b.csv',
+    parserName: 'wells-fargo-generic-activity-csv',
+    sourceType: 'activity-export',
+    priority: 90,
+    institution: 'Wells Fargo',
+  });
+  const accountA = insertSourceAccount(exportA.sourceFileId, accountId, 'checking-a', {
+    institution: 'Wells Fargo',
+    sourceAccountName: 'Checking',
+  });
+  const accountB = insertSourceAccount(exportB.sourceFileId, accountId, 'checking-b', {
+    institution: 'Wells Fargo',
+    sourceAccountName: 'Checking',
+  });
+
+  insertSourceTransaction({
+    sourceFileId: exportA.sourceFileId,
+    sourceAccountId: accountA,
+    stableSourceId: 'a-starbucks',
+    date: '2026-06-18',
+    amountCents: -545,
+    description: 'STARBUCKS STORE 123',
+    priority: 90,
+  });
+  insertSourceTransaction({
+    sourceFileId: exportB.sourceFileId,
+    sourceAccountId: accountB,
+    stableSourceId: 'b-starbucks',
+    date: '2026-06-18',
+    amountCents: -545,
+    description: 'STARBUCKS STORE 123',
+    priority: 90,
+  });
+
+  const ledger = buildLedgerFromSourceFacts(getDb());
+
+  expect(ledger.transactions.map(transaction => transaction.description)).toEqual([
+    'STARBUCKS STORE 123',
+  ]);
+});
+
+test('source rebuild preserves same-day identical transactions seen multiple times in one activity export', () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'WF Checking',
+    institution: 'Wells Fargo',
+    type: 'checking',
+    currentBalance: 0,
+  }));
+  const exportA = insertCommittedSourceFile({
+    fileName: 'checking-a.csv',
+    parserName: 'wells-fargo-generic-activity-csv',
+    sourceType: 'activity-export',
+    priority: 90,
+    institution: 'Wells Fargo',
+  });
+  const exportB = insertCommittedSourceFile({
+    fileName: 'checking-b.csv',
+    parserName: 'wells-fargo-generic-activity-csv',
+    sourceType: 'activity-export',
+    priority: 90,
+    institution: 'Wells Fargo',
+  });
+  const accountA = insertSourceAccount(exportA.sourceFileId, accountId, 'checking-a', {
+    institution: 'Wells Fargo',
+    sourceAccountName: 'Checking',
+  });
+  const accountB = insertSourceAccount(exportB.sourceFileId, accountId, 'checking-b', {
+    institution: 'Wells Fargo',
+    sourceAccountName: 'Checking',
+  });
+
+  for (const suffix of ['first', 'second']) {
+    insertSourceTransaction({
+      sourceFileId: exportA.sourceFileId,
+      sourceAccountId: accountA,
+      stableSourceId: `a-starbucks-${suffix}`,
+      date: '2026-06-18',
+      amountCents: -545,
+      description: 'STARBUCKS STORE 123',
+      priority: 90,
+    });
+    insertSourceTransaction({
+      sourceFileId: exportB.sourceFileId,
+      sourceAccountId: accountB,
+      stableSourceId: `b-starbucks-${suffix}`,
+      date: '2026-06-18',
+      amountCents: -545,
+      description: 'STARBUCKS STORE 123',
+      priority: 90,
+    });
+  }
+
+  const ledger = buildLedgerFromSourceFacts(getDb());
+
+  expect(ledger.transactions.map(transaction => transaction.description)).toEqual([
+    'STARBUCKS STORE 123',
+    'STARBUCKS STORE 123',
+  ]);
+  expect(ledger.transactions.map(transaction => transaction.occurrenceIndex).sort()).toEqual([0, 1]);
+});
+
+test('source rebuild keeps the larger multiplicity from uneven overlapping activity exports', () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'WF Checking',
+    institution: 'Wells Fargo',
+    type: 'checking',
+    currentBalance: 0,
+  }));
+  const exportA = insertCommittedSourceFile({
+    fileName: 'checking-a.csv',
+    parserName: 'wells-fargo-generic-activity-csv',
+    sourceType: 'activity-export',
+    priority: 90,
+    institution: 'Wells Fargo',
+  });
+  const exportB = insertCommittedSourceFile({
+    fileName: 'checking-b.csv',
+    parserName: 'wells-fargo-generic-activity-csv',
+    sourceType: 'activity-export',
+    priority: 90,
+    institution: 'Wells Fargo',
+  });
+  const accountA = insertSourceAccount(exportA.sourceFileId, accountId, 'checking-a', {
+    institution: 'Wells Fargo',
+    sourceAccountName: 'Checking',
+  });
+  const accountB = insertSourceAccount(exportB.sourceFileId, accountId, 'checking-b', {
+    institution: 'Wells Fargo',
+    sourceAccountName: 'Checking',
+  });
+
+  for (const suffix of ['first', 'second']) {
+    insertSourceTransaction({
+      sourceFileId: exportA.sourceFileId,
+      sourceAccountId: accountA,
+      stableSourceId: `a-coffee-${suffix}`,
+      date: '2026-06-18',
+      amountCents: -545,
+      description: 'STARBUCKS STORE 123',
+      priority: 90,
+    });
+  }
+  insertSourceTransaction({
+    sourceFileId: exportB.sourceFileId,
+    sourceAccountId: accountB,
+    stableSourceId: 'b-coffee',
+    date: '2026-06-18',
+    amountCents: -545,
+    description: 'STARBUCKS STORE 123',
+    priority: 90,
+  });
+
+  const ledger = buildLedgerFromSourceFacts(getDb());
+
+  expect(ledger.transactions.map(transaction => transaction.description)).toEqual([
+    'STARBUCKS STORE 123',
+    'STARBUCKS STORE 123',
+  ]);
+});
+
 test('source rebuild applies priority dedup while keeping statement-only transfers', () => {
   const accountId = Number(insertRow('accounts', {
     name: 'Vanguard',

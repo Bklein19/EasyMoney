@@ -1,5 +1,9 @@
 import { getDb, hashContent } from '../database.js';
-import { assignLedgerTransactionIdentities } from './transactionIdentity.ts';
+import {
+  assignLedgerTransactionIdentities,
+  getLedgerTransactionBaseKey,
+  getTransactionOccurrenceSortKey,
+} from './transactionIdentity.ts';
 
 interface SourceTransactionRow {
   id: number;
@@ -12,6 +16,7 @@ interface SourceTransactionRow {
   description: string | null;
   sourceRole: string | null;
   priority: number | null;
+  sourceType: string | null;
   rawJson: string | null;
   accountId: number;
   accountType: string | null;
@@ -187,6 +192,7 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
       st.description,
       st.sourceRole,
       st.priority,
+      sf.sourceType,
       st.rawJson,
       sa.accountId,
       a.type AS accountType,
@@ -300,7 +306,52 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
     return best === undefined || priority >= best;
   });
 
-  const transactions = assignLedgerTransactionIdentities(dedupedTransactionInputs).map((item) => ({
+  const activityExportGroups = new Map<string, typeof dedupedTransactionInputs>();
+  const retainedTransactionInputs = new Set(dedupedTransactionInputs);
+  for (const transaction of dedupedTransactionInputs) {
+    if (transaction.sourceRole !== 'activity' || transaction.sourceType !== 'activity-export') continue;
+    const key = [
+      transaction.priority ?? 0,
+      getLedgerTransactionBaseKey(transaction),
+    ].join('\0');
+    const group = activityExportGroups.get(key);
+    if (group) {
+      group.push(transaction);
+    } else {
+      activityExportGroups.set(key, [transaction]);
+    }
+  }
+
+  for (const group of activityExportGroups.values()) {
+    const bySourceFile = new Map<number, typeof group>();
+    for (const transaction of group) {
+      const sourceGroup = bySourceFile.get(transaction.sourceFileId);
+      if (sourceGroup) {
+        sourceGroup.push(transaction);
+      } else {
+        bySourceFile.set(transaction.sourceFileId, [transaction]);
+      }
+    }
+    if (bySourceFile.size <= 1) continue;
+
+    const representative = [...bySourceFile.entries()]
+      .sort(([sourceFileIdA, rowsA], [sourceFileIdB, rowsB]) =>
+        rowsB.length - rowsA.length ||
+        sourceFileIdA - sourceFileIdB
+      )[0]?.[1] ?? [];
+    const selected = new Set(
+      representative
+        .sort((a, b) => getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b)))
+    );
+
+    for (const transaction of group) {
+      if (!selected.has(transaction)) {
+        retainedTransactionInputs.delete(transaction);
+      }
+    }
+  }
+
+  const transactions = assignLedgerTransactionIdentities([...retainedTransactionInputs]).map((item) => ({
     ledgerTransactionId: item.ledgerTransactionId,
     occurrenceIndex: item.occurrenceIndex,
     accountId: item.transaction.accountId,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
 import { Check, AlertTriangle, X } from 'lucide-react';
 import { useAccounts } from '../../hooks/useAccounts';
@@ -6,7 +6,7 @@ import { useTransactions } from '../../hooks/useTransactions';
 import { apiAction } from '../../db/api';
 import { isCreditAccount } from '../../utils/transactionSemantics';
 import { getAccountTypeLabel } from '../../utils/formatters';
-import { getTransactionFingerprint, splitDuplicateTransactions } from '../../utils/importIdentity';
+import { splitDuplicateTransactions } from '../../utils/importIdentity';
 import './ImportPreview.css';
 
 export default function ImportPreview({ transactions, importMeta, onComplete, onCancel }) {
@@ -59,15 +59,18 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
 
   useEffect(() => {
     if (duplicates.length > 0 && duplicateModalKey !== duplicateModalSeenKey) {
-      setIsDuplicateModalOpen(true);
-      setDuplicateModalSeenKey(duplicateModalKey);
+      const timeoutId = window.setTimeout(() => {
+        setIsDuplicateModalOpen(true);
+        setDuplicateModalSeenKey(duplicateModalKey);
+      }, 0);
+      return () => window.clearTimeout(timeoutId);
     }
   }, [duplicates.length, duplicateModalKey, duplicateModalSeenKey]);
 
-  const duplicateModalRows = useMemo(() => duplicates.map(duplicate => ({
+  const duplicateModalRows = duplicates.map(duplicate => ({
     ...duplicate,
     forceImport: forceImportRowIds.has(duplicate.importRowId),
-  })), [duplicates, forceImportRowIds]);
+  }));
 
   const toggleForceImport = (importRowId) => {
     setForceImportRowIds(previous => {
