@@ -37,7 +37,6 @@ export default function FileDropZone({ onFileSelected, isParsing }) {
       } else {
         alert('Please upload a CSV, PDF, or HTML import file.');
       }
-      e.dataTransfer.clearData();
     }
   }, [onFileSelected]);
 

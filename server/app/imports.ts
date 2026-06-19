@@ -8,7 +8,7 @@ import { CUSTOM_CSV_PARSER_ID, parseCustomCsv } from './importParsers/customCsv.
 import { mappingFromProfile } from './importParsers/csvMapping.ts';
 import { resolveImportParser } from './importParsers/index.ts';
 import { buildLedgerFromSourceFacts, materializeLedger } from './ledgerRebuild.ts';
-import { assignLedgerTransactionIdentities } from './transactionIdentity.ts';
+import { assignLedgerTransactionIdentities, getLedgerTransactionBaseKey } from './transactionIdentity.ts';
 
 interface PreviewImportOptions {
   fileName: string;
@@ -26,6 +26,7 @@ interface CommitImportOptions {
   accountId?: number | null;
   importFileId?: number | null;
   importRowIds?: number[] | null;
+  forceImportRowIds?: number[] | null;
   balanceRowIds?: number[] | null;
   transactions?: ImportTransactionInput[];
   accountMappings?: Array<{ sourceAccountId: number; accountId: number | null }> | null;
@@ -43,6 +44,7 @@ interface MaterializeImportTransactionsOptions {
   accountId?: number | null;
   importFileId?: number | null;
   importRowIds?: number[] | null;
+  forceImportRowIds?: number[] | null;
   balanceRowIds?: number[] | null;
   transactions?: ImportTransactionInput[];
   accountMappings?: Array<{ sourceAccountId: number; accountId: number | null }> | null;
@@ -689,6 +691,7 @@ export function materializeImportTransactions({
   accountId,
   importFileId: stagedImportFileId = null,
   importRowIds = null,
+  forceImportRowIds = null,
   balanceRowIds = null,
   transactions = [],
   accountMappings = null,
@@ -696,7 +699,9 @@ export function materializeImportTransactions({
 }: MaterializeImportTransactionsOptions) {
   if (!Array.isArray(transactions)) throw new Error('transactions must be an array');
   if (importRowIds !== null && !Array.isArray(importRowIds)) throw new Error('importRowIds must be an array');
+  if (forceImportRowIds !== null && !Array.isArray(forceImportRowIds)) throw new Error('forceImportRowIds must be an array');
   if (balanceRowIds !== null && !Array.isArray(balanceRowIds)) throw new Error('balanceRowIds must be an array');
+  const forcedImportRowIds = toNumberSet(forceImportRowIds) || new Set<number>();
 
   applyAccountMappingOverrides(accountMappings);
 
@@ -742,7 +747,8 @@ export function materializeImportTransactions({
     const seen = getSeen(resolvedAccountId);
     const fingerprint = getTransactionFingerprint(transaction, resolvedAccountId);
     const withFingerprint = { ...transaction, fingerprint };
-    if (seen.has(fingerprint)) {
+    const forceImport = Boolean(transaction.importRowId && forcedImportRowIds.has(transaction.importRowId));
+    if (seen.has(fingerprint) && !forceImport) {
       duplicates.push(withFingerprint);
       continue;
     }
@@ -782,7 +788,31 @@ export function materializeImportTransactions({
     .sort((a, b) => a.balance.date.localeCompare(b.balance.date))
     .at(-1);
   const importFileId = stagedImportFileId || fallbackImportFileId || transactionsToCommit.find(transaction => transaction.importFileId)?.importFileId || null;
-  const transactionsWithLedgerIds = assignLedgerTransactionIdentities(unique);
+  const uniqueBaseKeys = new Set(unique.map(transaction => getLedgerTransactionBaseKey(transaction)));
+  const existingLedgerTransactions = unique.length
+    ? db.prepare(`
+        SELECT *
+        FROM ledgerTransactions
+        WHERE accountId IN (${[...new Set(unique.map(transaction => transaction.accountId))].map(() => '?').join(',')})
+      `).all([...new Set(unique.map(transaction => transaction.accountId))]) as ImportTransactionInput[]
+    : [];
+  const existingLedgerPlaceholders = existingLedgerTransactions
+    .map(transaction => ({
+      ...transaction,
+      amount: dollarsFromCents(Number(transaction.amountCents || 0)),
+    }))
+    .filter(transaction => uniqueBaseKeys.has(getLedgerTransactionBaseKey(transaction)));
+  const assignedTransactions = assignLedgerTransactionIdentities([
+    ...existingLedgerPlaceholders,
+    ...unique,
+  ]);
+  const transactionsWithLedgerIds = assignedTransactions
+    .filter(({ transaction }) => unique.includes(transaction as CommitImportTransaction))
+    .map(({ transaction, occurrenceIndex, ledgerTransactionId }) => ({
+      transaction: transaction as CommitImportTransaction,
+      occurrenceIndex,
+      ledgerTransactionId,
+    }));
 
   db.transaction(() => {
     for (const { transaction, occurrenceIndex, ledgerTransactionId } of transactionsWithLedgerIds) {
@@ -1021,6 +1051,7 @@ export function commitImport({
   accountId,
   importFileId = null,
   importRowIds = null,
+  forceImportRowIds = null,
   balanceRowIds = null,
   transactions = [],
   accountMappings = null,
@@ -1030,6 +1061,7 @@ export function commitImport({
     accountId,
     importFileId,
     importRowIds,
+    forceImportRowIds,
     balanceRowIds,
     transactions,
     accountMappings: accountMappings || importMeta?.accountMappings || null,
@@ -1062,7 +1094,7 @@ export function commitImport({
     }
   }
 
-  if (importFileHasSourceFacts(importFileId)) {
+  if (importFileHasSourceFacts(importFileId) && !(forceImportRowIds?.length)) {
     materializeLedger(getDb(), buildLedgerFromSourceFacts(getDb()));
   }
 

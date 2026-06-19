@@ -8,8 +8,7 @@ export const meta: ParserMeta = {
   kind: "activity-export",
   priority: 100,
   matches: ({ filename, sample }) =>
-    /^wells-fargo-(checking|autograph-visa|platinum-card)-\d{4}-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv$/i.test(filename) ||
-    (/^"DATE","DESCRIPTION","AMOUNT","CHECK #","STATUS"/.test(sample) && /wells[- ]fargo/i.test(filename)),
+    /^wells-fargo-(checking|autograph-visa|platinum-card)-\d{4}-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv$/i.test(filename),
 };
 
 function parseCsv(text: string): string[][] {
@@ -62,6 +61,21 @@ function isoDate(value: string): string {
   return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
+function normalizedHeader(value = ""): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function isWellsFargoActivityHeader(row: string[]): boolean {
+  const headers = row.map(normalizedHeader);
+  return (
+    headers[0] === "date" &&
+    headers[1] === "description" &&
+    headers[2] === "amount" &&
+    (headers[3] === "check" || headers[3] === "checknumber") &&
+    headers[4] === "status"
+  );
+}
+
 function accountFromFilename(filePath: string): { account: string; liability: boolean } {
   const filename = basename(filePath).replace(/^[0-9a-f]{64}-/, "");
   const m = filename.match(/^wells-fargo-(checking|autograph-visa|platinum-card)-(\d{4})-/i);
@@ -80,11 +94,24 @@ function coveredRangeFromFilename(filePath: string): { covered_from?: string; co
   return { covered_from: m?.[1], covered_to: m?.[2] };
 }
 
+function isLikelyPayment(description: string): boolean {
+  return /\b(payment|pmt|autopay|auto pay|online transfer|thank you)\b/i.test(description);
+}
+
+function normalizeAmountCents(amountRaw: string, description: string, liability: boolean): number {
+  const signedAmount = cents(amountRaw);
+  if (!liability) return signedAmount;
+
+  if (signedAmount > 0 && !isLikelyPayment(description)) {
+    return -signedAmount;
+  }
+
+  return signedAmount;
+}
+
 export default async function parse(filePath: string): Promise<ParseResult> {
   const rows = parseCsv(await Bun.file(filePath).text());
-  const headerIndex = rows.findIndex(
-    (row) => row[0] === "DATE" && row[1] === "DESCRIPTION" && row[2] === "AMOUNT"
-  );
+  const headerIndex = rows.findIndex(isWellsFargoActivityHeader);
   if (headerIndex === -1) throw new Error("Could not find Wells Fargo CSV transaction header");
 
   const { account, liability } = accountFromFilename(filePath);
@@ -95,12 +122,12 @@ export default async function parse(filePath: string): Promise<ParseResult> {
     if (!dateRaw || !descriptionRaw || !amountRaw) continue;
     if (statusRaw?.trim() && statusRaw.trim().toLowerCase() !== "posted") continue;
 
-    const signedAmount = cents(amountRaw);
+    const description = descriptionRaw.replace(/\s+/g, " ").trim();
     transactions.push(
       makeTx({
         date: isoDate(dateRaw),
-        amount_cents: liability ? -signedAmount : signedAmount,
-        description: descriptionRaw.replace(/\s+/g, " ").trim(),
+        amount_cents: normalizeAmountCents(amountRaw, description, liability),
+        description,
         account,
         institution: "Wells Fargo",
         raw: {

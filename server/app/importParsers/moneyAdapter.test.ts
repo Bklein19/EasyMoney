@@ -308,6 +308,57 @@ test.each([
   expect(parser?.priority).toBe(10);
 });
 
+test('import parser registry resolves Robinhood banking UUID exports', async () => {
+  const parser = resolveImportParser({
+    fileName: '26611d63-2108-411a-8e6d-faa71d80999c.csv',
+    headers: ['Date', 'Description', 'Amount'],
+    sample: 'Date,Description,Amount',
+  });
+
+  expect(parser?.id).toBe('robinhood-banking-csv');
+  expect(parser?.sourceType).toBe('activity-export');
+  expect(parser?.priority).toBe(90);
+
+  const result = await parser!.parse({
+    fileName: '26611d63-2108-411a-8e6d-faa71d80999c.csv',
+    headers: ['Date', 'Description', 'Amount'],
+    rows: [{
+      Date: '2026-06-01',
+      Description: 'Incoming transfer',
+      Amount: '100.00',
+    }, {
+      Date: '2026-06-02',
+      Description: 'Card purchase',
+      Amount: '-12.34',
+    }],
+    text: '',
+  });
+
+  expect(result.transactions).toEqual([{
+    sourceRowIndex: 0,
+    date: '2026-06-01T00:00:00.000Z',
+    amountCents: 10000,
+    description: 'Incoming transfer',
+    institution: 'Robinhood',
+    account: null,
+    sourceRole: 'activity',
+    raw: {
+      parser: 'robinhood-banking-csv',
+    },
+  }, {
+    sourceRowIndex: 1,
+    date: '2026-06-02T00:00:00.000Z',
+    amountCents: -1234,
+    description: 'Card purchase',
+    institution: 'Robinhood',
+    account: null,
+    sourceRole: 'activity',
+    raw: {
+      parser: 'robinhood-banking-csv',
+    },
+  }]);
+});
+
 test('EasyMoney CSV profile parser preserves credit-card semantics', async () => {
   const parser = resolveImportParser({
     fileName: 'apple-card.csv',
@@ -367,6 +418,21 @@ test.each([
   expect(parser?.priority).toBe(100);
 });
 
+test.each([
+  ['Wells Fargo default checking export', 'Checking.csv', ['Date', 'Description', 'Amount', 'CheckNumber', 'Status']],
+  ['Wells Fargo default credit card export', 'CreditCard.csv', ['DATE', 'DESCRIPTION', 'AMOUNT', 'CHECK #', 'STATUS']],
+])('import parser registry resolves generic Wells Fargo CSV parser for %s', (_name, fileName, headers) => {
+  const parser = resolveImportParser({
+    fileName,
+    headers,
+    sample: headers.join(','),
+  });
+
+  expect(parser?.id).toBe('wells-fargo-generic-activity-csv');
+  expect(parser?.sourceType).toBe('activity-export');
+  expect(parser?.priority).toBe(90);
+});
+
 test('Wells Fargo activity adapter parses account and liability semantics', async () => {
   const parser = resolveImportParser({
     fileName: 'wells-fargo-autograph-visa-4321-2026-01-01-to-2026-01-31.csv',
@@ -378,9 +444,10 @@ test('Wells Fargo activity adapter parses account and liability semantics', asyn
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'wells-fargo-activity-test-'));
   const filePath = path.join(dir, 'wells-fargo-autograph-visa-4321-2026-01-01-to-2026-01-31.csv');
   await fs.writeFile(filePath, [
-    '"DATE","DESCRIPTION","AMOUNT","CHECK #","STATUS"',
-    '"01/05/2026","COFFEE SHOP","6.75","","Posted"',
-    '"01/06/2026","PENDING AUTH","12.00","","Pending"',
+    'DATE,DESCRIPTION,AMOUNT,CHECK #,STATUS',
+    '01/05/2026,COFFEE SHOP,-6.75,,Posted',
+    '01/06/2026,AUTOMATIC PAYMENT,100.00,,Posted',
+    '01/07/2026,PENDING AUTH,-12.00,,Pending',
   ].join('\n'));
 
   try {
@@ -407,11 +474,74 @@ test('Wells Fargo activity adapter parses account and liability semantics', asyn
         checkNumber: undefined,
         status: 'Posted',
       },
+    }, {
+      sourceRowIndex: 1,
+      date: '2026-01-06',
+      amountCents: 10000,
+      description: 'AUTOMATIC PAYMENT',
+      institution: 'Wells Fargo',
+      account: 'Autograph Visa - 4321',
+      sourceRole: 'activity',
+      raw: {
+        moneyId: result.transactions[1]?.raw?.moneyId,
+        moneyCategory: 'activity',
+        source: 'wells-fargo-csv',
+        checkNumber: undefined,
+        status: 'Posted',
+      },
     }]);
     expect(result.balances).toEqual([]);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+test('generic Wells Fargo CSV parser parses default checking export without inferring account', async () => {
+  const parser = resolveImportParser({
+    fileName: 'Checking.csv',
+    headers: ['Date', 'Description', 'Amount', 'CheckNumber', 'Status'],
+    sample: 'Date,Description,Amount,CheckNumber,Status',
+  });
+  expect(parser?.id).toBe('wells-fargo-generic-activity-csv');
+
+  const result = await parser!.parse({
+    fileName: 'Checking.csv',
+    headers: ['Date', 'Description', 'Amount', 'CheckNumber', 'Status'],
+    rows: [{
+      Date: '01/05/2026',
+      Description: 'ACME PAYROLL',
+      Amount: '2500.00',
+      CheckNumber: '',
+      Status: 'Posted',
+    }, {
+      Date: '01/06/2026',
+      Description: 'UTILITY BILL',
+      Amount: '-125.50',
+      CheckNumber: '',
+      Status: 'Posted',
+    }],
+    text: '',
+  });
+
+  expect(result.transactions.filter(transaction => transaction !== null).map(transaction => ({
+    date: transaction.date,
+    amountCents: transaction.amountCents,
+    account: transaction.account,
+    description: transaction.description,
+  }))).toEqual([
+    {
+      date: '2026-01-05T00:00:00.000Z',
+      amountCents: 250000,
+      account: null,
+      description: 'ACME PAYROLL',
+    },
+    {
+      date: '2026-01-06T00:00:00.000Z',
+      amountCents: -12550,
+      account: null,
+      description: 'UTILITY BILL',
+    },
+  ]);
 });
 
 test('Merrill activity adapter parses investment CSV rows', async () => {

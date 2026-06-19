@@ -788,6 +788,26 @@ test('app imports commit inserts unique transactions and updates account balance
 
   expect(secondCommit.importedCount).toBe(0);
   expect(secondCommit.skippedDuplicateCount).toBe(10);
+
+  const forcedCommit = await postJson('/api/app/imports/commit', {
+    accountId,
+    importFileId: preview.importFileId,
+    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    forceImportRowIds: [preview.transactions[0].importRowId],
+    importMeta: {
+      importFileId: preview.importFileId,
+      headers: preview.headers,
+      profile: preview.profile,
+      mapping: preview.mapping,
+      profileName: preview.profileUsed,
+    },
+  }, 201);
+
+  expect(forcedCommit.importedCount).toBe(1);
+  expect(forcedCommit.skippedDuplicateCount).toBe(9);
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM transactions WHERE accountId = ?').get(accountId)).toMatchObject({
+    count: 11,
+  });
 });
 
 test('app imports commit resolves parser-emitted accounts without selected account', async () => {

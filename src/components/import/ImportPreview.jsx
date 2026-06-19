@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
-import { Check, AlertTriangle } from 'lucide-react';
+import { Check, AlertTriangle, X } from 'lucide-react';
 import { useAccounts } from '../../hooks/useAccounts';
 import { useTransactions } from '../../hooks/useTransactions';
 import { apiAction } from '../../db/api';
@@ -22,6 +22,9 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
       mapping.resolvedAccountId ? String(mapping.resolvedAccountId) : '__auto__',
     ])
   ));
+  const [forceImportRowIds, setForceImportRowIds] = useState(() => new Set());
+  const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
+  const [duplicateModalSeenKey, setDuplicateModalSeenKey] = useState('');
   const { transactions: existingTransactions } = useTransactions(
     selectedAccountId ? { accountId: selectedAccountId } : {}
   );
@@ -46,8 +49,37 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
   const { unique, duplicates } = accountId
     ? splitDuplicateTransactions(validTransactions, existingTransactions, accountId)
     : { unique: validTransactions, duplicates: [] };
-  const duplicateFingerprints = new Set(duplicates.map(duplicate => duplicate.fingerprint));
-  const uniqueTotalAmount = unique.reduce((sum, t) => sum + t.amount, 0);
+  const duplicateModalKey = `${accountId || 'none'}:${duplicates.map(duplicate => duplicate.importRowId).join(',')}`;
+  const forcedDuplicates = duplicates.filter(duplicate => forceImportRowIds.has(duplicate.importRowId));
+  const activeDuplicates = duplicates.filter(duplicate => !forceImportRowIds.has(duplicate.importRowId));
+  const effectiveUnique = [...unique, ...forcedDuplicates];
+  const activeDuplicateRowIds = new Set(activeDuplicates.map(duplicate => duplicate.importRowId));
+  const uniqueTotalAmount = effectiveUnique.reduce((sum, t) => sum + t.amount, 0);
+  const forcedDuplicateCount = forcedDuplicates.length;
+
+  useEffect(() => {
+    if (duplicates.length > 0 && duplicateModalKey !== duplicateModalSeenKey) {
+      setIsDuplicateModalOpen(true);
+      setDuplicateModalSeenKey(duplicateModalKey);
+    }
+  }, [duplicates.length, duplicateModalKey, duplicateModalSeenKey]);
+
+  const duplicateModalRows = useMemo(() => duplicates.map(duplicate => ({
+    ...duplicate,
+    forceImport: forceImportRowIds.has(duplicate.importRowId),
+  })), [duplicates, forceImportRowIds]);
+
+  const toggleForceImport = (importRowId) => {
+    setForceImportRowIds(previous => {
+      const next = new Set(previous);
+      if (next.has(importRowId)) {
+        next.delete(importRowId);
+      } else {
+        next.add(importRowId);
+      }
+      return next;
+    });
+  };
 
   const handleImport = async () => {
     if (!canResolveAccounts) {
@@ -63,6 +95,7 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
           accountId: selectedAccountId ? Number(selectedAccountId) : null,
           importFileId: importMeta?.importFileId,
           importRowIds: validTransactions.map(transaction => transaction.importRowId),
+          forceImportRowIds: [...forceImportRowIds],
           accountMappings: accountMappings.map(mapping => {
             const selection = sourceAccountSelections[String(mapping.sourceAccountId)];
             return {
@@ -100,7 +133,8 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
           <h2>Review Import</h2>
           <p>
             We found {validTransactions.length} transactions.
-            {selectedAccountId && duplicates.length > 0 && ` ${duplicates.length} duplicate${duplicates.length === 1 ? '' : 's'} will be skipped.`}
+            {selectedAccountId && activeDuplicates.length > 0 && ` ${activeDuplicates.length} duplicate${activeDuplicates.length === 1 ? '' : 's'} will be skipped.`}
+            {selectedAccountId && forcedDuplicateCount > 0 && ` ${forcedDuplicateCount} duplicate${forcedDuplicateCount === 1 ? '' : 's'} marked to import anyway.`}
           </p>
         </div>
         
@@ -197,10 +231,25 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
         {selectedAccountId && (
           <div className="stat-card glass-card">
             <div className="stat-label">Duplicates Skipped</div>
-            <div className="stat-value">{duplicates.length}</div>
+            <div className="stat-value">{activeDuplicates.length}</div>
           </div>
         )}
       </div>
+
+      {selectedAccountId && duplicates.length > 0 && (
+        <div className="duplicate-review-callout glass-card">
+          <div>
+            <h3>Duplicate Review</h3>
+            <p>
+              {activeDuplicates.length} duplicate{activeDuplicates.length === 1 ? '' : 's'} will be skipped.
+              {forcedDuplicateCount > 0 && ` ${forcedDuplicateCount} marked to import anyway.`}
+            </p>
+          </div>
+          <button type="button" className="btn btn-secondary" onClick={() => setIsDuplicateModalOpen(true)}>
+            Review duplicates
+          </button>
+        </div>
+      )}
 
       <div className="preview-table-container glass-card">
         <table className="preview-table">
@@ -215,16 +264,17 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
           <tbody>
             {validTransactions.slice(0, 50).map((t, i) => {
               const isDuplicate = accountId
-                ? duplicateFingerprints.has(getTransactionFingerprint(t, accountId))
+                ? activeDuplicateRowIds.has(t.importRowId)
                 : false;
+              const isForcedDuplicate = forceImportRowIds.has(t.importRowId);
 
               return (
-              <tr key={i} className={isDuplicate ? 'duplicate-row' : ''}>
+              <tr key={i} className={isDuplicate ? 'duplicate-row' : isForcedDuplicate ? 'forced-duplicate-row' : ''}>
                 <td>{format(new Date(t.date), 'MMM d, yyyy')}</td>
                 <td className="description-cell">{t.merchant || t.description}</td>
                 <td>
-                  <span className={`badge ${isDuplicate ? 'duplicate' : 'uncategorized'}`}>
-                    {isDuplicate ? 'Duplicate' : 'Ready'}
+                  <span className={`badge ${isDuplicate ? 'duplicate' : isForcedDuplicate ? 'forced' : 'uncategorized'}`}>
+                    {isDuplicate ? 'Duplicate' : isForcedDuplicate ? 'Import anyway' : 'Ready'}
                   </span>
                 </td>
                 <td className={`text-right font-medium ${t.amount >= 0 ? 'positive' : ''}`}>
@@ -249,16 +299,61 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
         <button 
           className="btn btn-primary" 
           onClick={handleImport} 
-          disabled={isImporting || !canResolveAccounts || unique.length === 0}
+          disabled={isImporting || !canResolveAccounts || effectiveUnique.length === 0}
         >
           {isImporting ? 'Importing...' : (
             <>
               <Check size={18} />
-              Import {unique.length} Transaction{unique.length === 1 ? '' : 's'}
+              Import {effectiveUnique.length} Transaction{effectiveUnique.length === 1 ? '' : 's'}
             </>
           )}
         </button>
       </div>
+
+      {isDuplicateModalOpen && (
+        <div className="duplicate-modal-overlay" role="presentation">
+          <div className="duplicate-modal" role="dialog" aria-modal="true" aria-labelledby="duplicate-modal-title">
+            <div className="duplicate-modal__header">
+              <div>
+                <h3 id="duplicate-modal-title">Review Duplicates</h3>
+                <p>Click any row to import it anyway.</p>
+              </div>
+              <button type="button" className="icon-button" aria-label="Close duplicate review" onClick={() => setIsDuplicateModalOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <div className="duplicate-modal__list">
+              {duplicateModalRows.map(duplicate => (
+                <button
+                  type="button"
+                  key={duplicate.importRowId}
+                  className={`duplicate-modal__row ${duplicate.forceImport ? 'selected' : ''}`}
+                  onClick={() => toggleForceImport(duplicate.importRowId)}
+                >
+                  <div className="duplicate-modal__main">
+                    <span>{format(new Date(duplicate.date), 'MMM d, yyyy')}</span>
+                    <strong>{duplicate.merchant || duplicate.description}</strong>
+                  </div>
+                  <div className="duplicate-modal__side">
+                    <span className={duplicate.amount >= 0 ? 'positive' : ''}>
+                      {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(duplicate.amount)}
+                    </span>
+                    <span className={`badge ${duplicate.forceImport ? 'forced' : 'duplicate'}`}>
+                      {duplicate.forceImport ? 'Import anyway' : 'Skip duplicate'}
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div className="duplicate-modal__footer">
+              <span>{forcedDuplicateCount} selected to import</span>
+              <button type="button" className="btn btn-primary" onClick={() => setIsDuplicateModalOpen(false)}>
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
