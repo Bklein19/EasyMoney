@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router';
 import ImportPage from './components/import/ImportPage';
-import DashboardPage from './components/dashboard/DashboardPage';
 import TransactionsPage from './components/transactions/TransactionsPage';
 import AccountsPage from './components/accounts/AccountsPage';
 import Sidebar from './components/layout/Sidebar';
@@ -37,13 +36,13 @@ function App() {
         <div className="app-content">
           <main className="app-main">
             <Routes>
-              <Route path="/" element={<DashboardPage />} />
+              <Route path="/" element={<AnalyticsPage />} />
               <Route path="/transactions" element={<TransactionsPage />} />
               <Route path="/accounts" element={<AccountsPage />} />
               <Route path="/budgeting" element={<BudgetingPage />} />
               <Route path="/investments" element={<InvestmentsPage />} />
               <Route path="/import" element={<ImportPage />} />
-              <Route path="/analytics" element={<AnalyticsPage />} />
+              <Route path="/analytics" element={<Navigate to="/" replace />} />
               <Route path="/how-to-use" element={<HowToUsePage />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

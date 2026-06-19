@@ -1,6 +1,5 @@
 import { NavLink } from 'react-router';
 import { 
-  LayoutDashboard, 
   ArrowLeftRight, 
   WalletCards, 
   Upload, 
@@ -16,11 +15,10 @@ import './Sidebar.css';
 
 const Sidebar = ({ isMobileOpen, onClose, isCollapsed = false, onCollapsedChange }) => {
   const navItems = [
-    { path: '/', label: 'Dashboard', icon: LayoutDashboard },
+    { path: '/', label: 'Analytics', icon: PieChart },
     { path: '/transactions', label: 'Transactions', icon: ArrowLeftRight },
     { path: '/accounts', label: 'Accounts', icon: WalletCards },
     { path: '/budgeting', label: 'Budgeting', icon: PiggyBank },
-    { path: '/analytics', label: 'Analytics', icon: PieChart },
     { path: '/investments', label: 'Investments', icon: TrendingUp },
     { path: '/import', label: 'Import', icon: Upload },
     { path: '/how-to-use', label: 'How To Use', icon: CircleHelp },

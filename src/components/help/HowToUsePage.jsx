@@ -38,7 +38,7 @@ const setupSteps = [
     title: 'Analyze without double counting',
     description: 'Internal Transfer and Investment categories are excluded from spending and net flow. Credit card charges still count as spending, while card payments do not.',
     icon: BarChart3,
-    action: { to: '/analytics', label: 'Open Analytics' }
+    action: { to: '/', label: 'Open Analytics' }
   },
   {
     title: 'Save budget templates',
