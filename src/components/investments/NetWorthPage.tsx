@@ -449,6 +449,17 @@ export function NetWorthPage({ view }: NetWorthPageProps) {
 
   return (
     <div className={`page page-networth ${view === "networth" ? "page-networth-dashboard" : "page-performance-dashboard"}`}>
+      <div className="page__header report-page__header">
+        <div>
+          <h1 className="page__title">{view === "networth" ? "Net Worth" : "Performance"}</h1>
+          <p className="page__subtitle">
+            {view === "networth"
+              ? "Ledger balances, contributions, and investment gains over time."
+              : "Investment returns calculated from imported balances and cash flows."}
+          </p>
+        </div>
+      </div>
+
       {view === "networth" ? (
         <div className="networth-dashboard">
           <div className="networth-dashboard-main">
@@ -519,12 +530,6 @@ export function NetWorthPage({ view }: NetWorthPageProps) {
         </div>
       ) : (
       <section className="returns-section performance-page">
-        <div className="chart-section-header returns-header">
-          <div>
-            <div className="chart-title">Performance</div>
-            <div className="chart-subtitle">Investment returns and period account returns</div>
-          </div>
-        </div>
         <div className="return-subsection-title">Investment Returns</div>
         <div className="chart-container returns-investment-chart">
           <ResponsiveContainer width="100%" height={320}>

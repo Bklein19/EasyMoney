@@ -229,11 +229,14 @@ export function SavingsRatePage() {
 
   return (
     <div className="page page-savings-rate">
-      <div className="chart-section-header returns-header">
+      <div className="page__header report-page__header">
         <div>
-          <div className="chart-title">Savings Rate</div>
-          <div className="chart-subtitle">Income excluding dividends and interest, split into retained wealth and poof</div>
+          <h1 className="page__title">Savings Rate</h1>
+          <p className="page__subtitle">Income excluding investment income, split into retained wealth and spending.</p>
         </div>
+      </div>
+
+      <div className="report-toolbar">
         <div className="segmented-control" role="group" aria-label="Savings rate period">
           {(["month", "quarter", "year"] as const).map((p) => (
             <button key={p} type="button" className={period === p ? "active" : ""} onClick={() => setPeriod(p)}>
