@@ -15,7 +15,7 @@ import { seedDatabase } from './seed.js';
 import { getLatestRobinhoodSnapshot, saveRobinhoodSnapshot } from './robinhoodSnapshots.js';
 import { listAccounts } from './app/accounts.ts';
 import { listCategories } from './app/categories.ts';
-import { commitImport, previewImport } from './app/imports.ts';
+import { commitImport, listImportHistory, previewImport, unimportFile } from './app/imports.ts';
 import { appRouter } from './app/router.ts';
 import { splitTransactionAnnotationChanges, upsertTransactionAnnotation } from './app/transactionAnnotations.ts';
 import { listTransactions } from './app/transactions.ts';
@@ -165,12 +165,30 @@ export const routes = wrapRoutes({
     POST: async (request) => json(commitImport(await bodyJson(request) as Parameters<typeof commitImport>[0]), 201),
   },
 
+  '/api/app/imports': {
+    GET: () => json({ imports: listImportHistory() }),
+  },
+
+  '/api/app/imports/:id': {
+    DELETE: (request) => json(unimportFile(request.params.id)),
+  },
+
   '/api/accounts/:id/deep': {
     DELETE: (request) => {
       const db = getDb();
       const remove = db.transaction((id: number | string) => {
+        const ledgerRows = db.prepare('SELECT ledgerTransactionId FROM ledgerTransactions WHERE accountId = ?').all(id) as Array<{
+          ledgerTransactionId: string;
+        }>;
+        for (const row of ledgerRows) {
+          db.prepare('DELETE FROM transactionAnnotations WHERE ledgerTransactionId = ?').run(row.ledgerTransactionId);
+        }
+        db.prepare('UPDATE sourceAccounts SET accountId = NULL WHERE accountId = ?').run(id);
+        db.prepare('DELETE FROM ledgerBalances WHERE accountId = ?').run(id);
+        db.prepare('DELETE FROM ledgerTransactions WHERE accountId = ?').run(id);
         db.prepare('DELETE FROM transactions WHERE accountId = ?').run(id);
         db.prepare('DELETE FROM balanceSnapshots WHERE accountId = ?').run(id);
+        db.prepare('DELETE FROM accountAliases WHERE accountId = ?').run(id);
         db.prepare('DELETE FROM accounts WHERE id = ?').run(id);
       });
       remove(request.params.id);

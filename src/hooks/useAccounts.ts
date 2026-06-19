@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { add, update } from '../db/api';
+import { add, apiAction, update } from '../db/api';
 import { queryClient, trpc } from '../api/trpc';
 import { subscribeToDataChanges } from '../db/api';
 import type { AccountSummary } from '../../server/app/types.ts';
@@ -48,10 +48,15 @@ export function useAccounts() {
     });
   }
 
+  async function deleteAccount(id: number | string) {
+    return apiAction(`/accounts/${id}/deep`, { method: 'DELETE' });
+  }
+
   return {
     accounts: accountsQuery.data ?? [],
     addAccount,
     updateAccount,
+    deleteAccount,
     isLoading: accountsQuery.isLoading,
     isFetching: accountsQuery.isFetching,
     error: accountsQuery.error,

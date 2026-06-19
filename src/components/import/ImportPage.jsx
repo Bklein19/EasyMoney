@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { Trash2 } from 'lucide-react';
 import { useCSVImport } from '../../hooks/useCSVImport';
 import { buildCustomProfile, mappingFromProfile } from '../../utils/csvMapping';
-import { SUPPORTED_IMPORT_FORMATS } from '../../utils/importFormats';
 import { useImportProfiles } from '../../hooks/useImportProfiles';
 import { getHeaderSignature } from '../../utils/importIdentity';
+import { apiAction, appRequest } from '../../db/api';
 import FileDropZone from './FileDropZone';
 import ColumnMapper from './ColumnMapper';
 import ImportPreview from './ImportPreview';
@@ -19,6 +20,23 @@ export default function ImportPage() {
   const [importResult, setImportResult] = useState(null);
   const [importedCount, setImportedCount] = useState(0);
   const [skippedDuplicateCount, setSkippedDuplicateCount] = useState(0);
+  const [importHistory, setImportHistory] = useState([]);
+  const [historyError, setHistoryError] = useState('');
+  const [unimportingId, setUnimportingId] = useState(null);
+
+  const loadImportHistory = async () => {
+    setHistoryError('');
+    try {
+      const result = await appRequest('/imports');
+      setImportHistory(result.imports || []);
+    } catch (loadError) {
+      setHistoryError(loadError?.message || 'Could not load import history.');
+    }
+  };
+
+  useEffect(() => {
+    loadImportHistory();
+  }, []);
 
   const handleFileSelected = async (file) => {
     setCurrentFile(file);
@@ -63,6 +81,7 @@ export default function ImportPage() {
   const handleImportComplete = (count, skipped = 0) => {
     setImportedCount(count);
     setSkippedDuplicateCount(skipped);
+    loadImportHistory();
     setStage('success');
   };
 
@@ -72,6 +91,22 @@ export default function ImportPage() {
     setImportResult(null);
     setImportedCount(0);
     setSkippedDuplicateCount(0);
+  };
+
+  const handleUnimport = async (item) => {
+    const confirmed = window.confirm(`Unimport ${item.fileName}? This removes transactions and balances created by that import.`);
+    if (!confirmed) return;
+
+    setUnimportingId(item.id);
+    setHistoryError('');
+    try {
+      await apiAction(`/app/imports/${item.id}`, { method: 'DELETE' });
+      await loadImportHistory();
+    } catch (unimportError) {
+      setHistoryError(unimportError?.message || 'Could not unimport file.');
+    } finally {
+      setUnimportingId(null);
+    }
   };
 
   return (
@@ -93,11 +128,12 @@ export default function ImportPage() {
             onFileSelected={handleFileSelected} 
             isParsing={isParsing} 
           />
-          
-          <div className="supported-formats glass-card">
-            <h3>Supported Banks</h3>
-            <p>We automatically detect formats from {SUPPORTED_IMPORT_FORMATS.join(', ')}. For other CSVs, map the columns yourself.</p>
-          </div>
+          <ImportHistory
+            imports={importHistory}
+            error={historyError}
+            unimportingId={unimportingId}
+            onUnimport={handleUnimport}
+          />
         </div>
       )}
 
@@ -156,6 +192,59 @@ export default function ImportPage() {
               Import Another File
             </button>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ImportHistory({ imports, error, unimportingId, onUnimport }) {
+  return (
+    <div className="import-history glass-card">
+      <div className="import-history__header">
+        <div>
+          <h3>Import History</h3>
+          <p>Remove a prior import if you need to test the file again.</p>
+        </div>
+      </div>
+
+      {error && <div className="import-history__error">{error}</div>}
+
+      {imports.length === 0 ? (
+        <div className="import-history__empty">No imports yet.</div>
+      ) : (
+        <div className="import-history__list">
+          {imports.map(item => {
+            const committed = item.status === 'committed';
+            const date = item.committedAt || item.createdAt;
+            return (
+              <div className="import-history__row" key={item.id}>
+                <div className="import-history__main">
+                  <strong>{item.fileName}</strong>
+                  <span>
+                    {item.institution || item.parserName || 'Unknown format'}
+                    {date && ` | ${new Date(date).toLocaleString()}`}
+                  </span>
+                </div>
+                <div className="import-history__meta">
+                  <span className={`import-history__status ${committed ? 'committed' : ''}`}>
+                    {item.status || 'previewed'}
+                  </span>
+                  <span>{item.transactionCount || 0} tx</span>
+                  {item.balanceCount > 0 && <span>{item.balanceCount} bal</span>}
+                </div>
+                <button
+                  type="button"
+                  className="icon-btn delete-btn"
+                  title="Unimport file"
+                  onClick={() => onUnimport(item)}
+                  disabled={!committed || unimportingId === item.id}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

@@ -55,6 +55,21 @@
   gap: 1rem;
 }
 
+.account-selector__control {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: min(100%, 420px);
+}
+
+.account-selector__control select {
+  min-width: 220px;
+}
+
+.account-selector__add {
+  white-space: nowrap;
+}
+
 .account-selector label {
   font-weight: 500;
   color: var(--text-primary);
@@ -393,6 +408,18 @@
 }
 
 @media (max-width: 720px) {
+  .account-selector__field,
+  .account-selector__control {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .account-selector__control select {
+    min-width: 0;
+    width: 100%;
+  }
+
   .account-mapping-row {
     grid-template-columns: 1fr;
   }

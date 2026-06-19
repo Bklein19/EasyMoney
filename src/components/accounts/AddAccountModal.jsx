@@ -3,7 +3,7 @@ import { X } from 'lucide-react';
 import { useAccounts } from '../../hooks/useAccounts';
 import './AddAccountModal.css';
 
-export default function AddAccountModal({ onClose }) {
+export default function AddAccountModal({ onClose, onCreated }) {
   const { addAccount } = useAccounts();
   
   const [formData, setFormData] = useState({
@@ -20,7 +20,8 @@ export default function AddAccountModal({ onClose }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    await addAccount(formData);
+    const id = await addAccount(formData);
+    onCreated?.(id);
     onClose();
   };
 

@@ -40,6 +40,21 @@ interface CommitImportOptions {
   } | null;
 }
 
+export interface ImportHistoryItem {
+  id: number;
+  fileName: string;
+  parserName: string | null;
+  institution: string | null;
+  status: string | null;
+  rowCount: number | null;
+  sourceType: string | null;
+  importBatchId: string | null;
+  createdAt: string | null;
+  committedAt: string | null;
+  transactionCount: number;
+  balanceCount: number;
+}
+
 interface MaterializeImportTransactionsOptions {
   accountId?: number | null;
   importFileId?: number | null;
@@ -108,6 +123,128 @@ function importFileHasSourceFacts(importFileId: number | null | undefined) {
       AND (st.id IS NOT NULL OR sb.id IS NOT NULL)
   `).get(importFileId) as { count: number };
   return row.count > 0;
+}
+
+export function listImportHistory(): ImportHistoryItem[] {
+  return getDb().prepare(`
+    SELECT
+      ifs.id,
+      ifs.fileName,
+      ifs.parserName,
+      ifs.institution,
+      ifs.status,
+      ifs.rowCount,
+      ifs.sourceType,
+      ifs.importBatchId,
+      ifs.createdAt,
+      ifs.committedAt,
+      COUNT(DISTINCT lt.id) AS transactionCount,
+      COUNT(DISTINCT lb.id) AS balanceCount
+    FROM importFiles ifs
+    LEFT JOIN ledgerTransactions lt ON lt.importFileId = ifs.id
+    LEFT JOIN importRows irb ON irb.importFileId = ifs.id AND irb.rowType = 'balance'
+    LEFT JOIN sourceBalances sb ON sb.importRowId = irb.id
+    LEFT JOIN ledgerBalances lb ON lb.sourceBalanceId = sb.id
+    GROUP BY ifs.id
+    ORDER BY COALESCE(ifs.committedAt, ifs.createdAt) DESC, ifs.id DESC
+  `).all() as ImportHistoryItem[];
+}
+
+export function unimportFile(importFileId: number | string) {
+  const id = Number(importFileId);
+  if (!Number.isFinite(id)) throw new Error('Invalid import file id');
+
+  const db = getDb();
+  const importFile = db.prepare('SELECT * FROM importFiles WHERE id = ?').get(id) as
+    | { id: number; status?: string | null }
+    | undefined;
+  if (!importFile) throw new Error(`Import file not found: ${id}`);
+
+  const ledgerRows = db.prepare('SELECT ledgerTransactionId FROM ledgerTransactions WHERE importFileId = ?').all(id) as Array<{
+    ledgerTransactionId: string;
+  }>;
+  const accountDeltas = db.prepare(`
+    SELECT accountId, SUM(amountCents) AS amountCents
+    FROM ledgerTransactions
+    WHERE importFileId = ?
+    GROUP BY accountId
+  `).all(id) as Array<{
+    accountId: number;
+    amountCents: number;
+  }>;
+  const accountStartingBalances = new Map(accountDeltas.map(row => {
+    const account = db.prepare('SELECT currentBalance FROM accounts WHERE id = ?').get(row.accountId) as
+      | { currentBalance: number | null }
+      | undefined;
+    return [row.accountId, Number(account?.currentBalance || 0)];
+  }));
+  const transactionIds = db.prepare('SELECT transactionId FROM importRows WHERE importFileId = ? AND transactionId IS NOT NULL').all(id) as Array<{
+    transactionId: number;
+  }>;
+
+  db.transaction(() => {
+    for (const row of ledgerRows) {
+      db.prepare('DELETE FROM transactionAnnotations WHERE ledgerTransactionId = ?').run(row.ledgerTransactionId);
+    }
+
+    db.prepare(`
+      DELETE FROM ledgerBalances
+      WHERE sourceBalanceId IN (
+        SELECT sb.id
+        FROM sourceBalances sb
+        JOIN importRows ir ON ir.id = sb.importRowId
+        WHERE ir.importFileId = ?
+      )
+    `).run(id);
+
+    db.prepare('DELETE FROM ledgerTransactions WHERE importFileId = ?').run(id);
+
+    for (const row of transactionIds) {
+      db.prepare('DELETE FROM transactions WHERE id = ?').run(row.transactionId);
+    }
+
+    db.prepare(`
+      UPDATE importRows
+      SET transactionId = NULL, fingerprint = NULL
+      WHERE importFileId = ?
+    `).run(id);
+    db.prepare(`
+      UPDATE sourceAccounts
+      SET accountId = NULL
+      WHERE sourceFileId IN (
+        SELECT id FROM sourceFiles WHERE importFileId = ?
+      )
+    `).run(id);
+    db.prepare(`
+      UPDATE sourceFiles
+      SET status = 'unimported', committedAt = NULL
+      WHERE importFileId = ?
+    `).run(id);
+    db.prepare(`
+      UPDATE importFiles
+      SET status = 'unimported', importBatchId = NULL, committedAt = NULL
+      WHERE id = ?
+    `).run(id);
+  })();
+
+  materializeLedger(db, buildLedgerFromSourceFacts(db));
+  const now = new Date().toISOString();
+  for (const row of accountDeltas) {
+    const latestBalance = db.prepare(`
+      SELECT balance
+      FROM balanceSnapshots
+      WHERE accountId = ?
+      ORDER BY month DESC, capturedAt DESC, id DESC
+      LIMIT 1
+    `).get(row.accountId) as { balance: number } | undefined;
+    updateRow('accounts', row.accountId, {
+      currentBalance: latestBalance
+        ? latestBalance.balance
+        : Number(accountStartingBalances.get(row.accountId) || 0) - dollarsFromCents(row.amountCents),
+      updatedAt: now,
+    });
+  }
+  return { ok: true, importFileId: id };
 }
 
 function getStableSourceTransactionId(importFileId: number, transaction: ParsedImportTransaction) {

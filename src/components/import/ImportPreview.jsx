@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { format } from 'date-fns';
-import { Check, AlertTriangle, X } from 'lucide-react';
+import { Check, AlertTriangle, Plus, X } from 'lucide-react';
 import { useAccounts } from '../../hooks/useAccounts';
 import { useTransactions } from '../../hooks/useTransactions';
+import AddAccountModal from '../accounts/AddAccountModal';
 import { apiAction } from '../../db/api';
 import { isCreditAccount } from '../../utils/transactionSemantics';
 import { getAccountTypeLabel } from '../../utils/formatters';
@@ -24,6 +25,7 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
   ));
   const [forceImportRowIds, setForceImportRowIds] = useState(() => new Set());
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
+  const [isAddAccountOpen, setIsAddAccountOpen] = useState(false);
   const [duplicateModalSeenKey, setDuplicateModalSeenKey] = useState('');
   const { transactions: existingTransactions } = useTransactions(
     selectedAccountId ? { accountId: selectedAccountId } : {}
@@ -144,19 +146,29 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
         <div className="account-selector">
           <div className="account-selector__field">
             <label htmlFor="accountId">Import to Account:</label>
-            <select 
-              id="accountId" 
-              value={selectedAccountId} 
-              onChange={e => setSelectedAccountId(e.target.value)}
-              className="form-input"
-            >
-              <option value="">-- Select an Account --</option>
-              {accounts.map(a => (
-                <option key={a.id} value={a.id}>
-                  {a.name} ({getAccountTypeLabel(a.type)})
-                </option>
-              ))}
-            </select>
+            <div className="account-selector__control">
+              <select
+                id="accountId"
+                value={selectedAccountId}
+                onChange={e => setSelectedAccountId(e.target.value)}
+                className="form-input"
+              >
+                <option value="">-- Select an Account --</option>
+                {accounts.map(a => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({getAccountTypeLabel(a.type)})
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="btn btn-secondary account-selector__add"
+                onClick={() => setIsAddAccountOpen(true)}
+              >
+                <Plus size={16} />
+                New Account
+              </button>
+            </div>
           </div>
           {selectedAccount && (
             <span className={`account-kind-badge ${importingToCreditCard ? 'credit' : ''}`}>
@@ -356,6 +368,13 @@ export default function ImportPreview({ transactions, importMeta, onComplete, on
             </div>
           </div>
         </div>
+      )}
+
+      {isAddAccountOpen && (
+        <AddAccountModal
+          onClose={() => setIsAddAccountOpen(false)}
+          onCreated={(id) => setSelectedAccountId(String(id))}
+        />
       )}
     </div>
   );

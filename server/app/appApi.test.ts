@@ -75,6 +75,12 @@ async function putJson(path: string, payload: unknown, expectedStatus = 200) {
   return response.json();
 }
 
+async function deleteJson(path: string, expectedStatus = 200) {
+  const response = await fetch(`${TEST_URL}${path}`, { method: 'DELETE' });
+  expect(response.status).toBe(expectedStatus);
+  return response.json();
+}
+
 async function postImportPreview(fileName: string, text: string, profile: unknown = null) {
   const form = new FormData();
   form.append('file', new File([text], fileName, { type: 'text/csv' }));
@@ -159,6 +165,78 @@ test('app accounts endpoint returns domain-shaped accounts', async () => {
       },
     ],
   });
+});
+
+test('account deep delete removes materialized account data and unlinks source accounts', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Delete Me',
+    institution: 'Test Bank',
+    type: 'checking',
+    currentBalance: 50,
+  }));
+  const sourceFileId = Number(insertRow('sourceFiles', {
+    fileName: 'delete-test.csv',
+    contentHash: 'delete-test',
+    status: 'committed',
+    createdAt: new Date().toISOString(),
+  }));
+  const sourceAccountId = Number(insertRow('sourceAccounts', {
+    sourceFileId,
+    accountId,
+    institution: 'Test Bank',
+    sourceAccountKey: 'Test Bank|Delete Me',
+    sourceAccountName: 'Delete Me',
+    createdAt: new Date().toISOString(),
+  }));
+  const transactionId = Number(insertRow('transactions', {
+    accountId,
+    date: '2026-06-01T00:00:00.000Z',
+    amount: -12.34,
+    description: 'Delete row',
+    ledgerTransactionId: 'txn_delete_me',
+    createdAt: new Date().toISOString(),
+  }));
+  insertRow('ledgerTransactions', {
+    ledgerTransactionId: 'txn_delete_me',
+    legacyTransactionId: transactionId,
+    accountId,
+    date: '2026-06-01T00:00:00.000Z',
+    amountCents: -1234,
+    description: 'Delete row',
+    sourceRole: 'activity',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  insertRow('transactionAnnotations', {
+    ledgerTransactionId: 'txn_delete_me',
+    notes: 'remove me',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  insertRow('balanceSnapshots', {
+    accountId,
+    month: '2026-06',
+    balance: 50,
+    capturedAt: '2026-06-01T00:00:00.000Z',
+  });
+  insertRow('ledgerBalances', {
+    accountId,
+    month: '2026-06',
+    balanceCents: 5000,
+    capturedAt: '2026-06-01T00:00:00.000Z',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  await deleteJson(`/api/accounts/${accountId}/deep`);
+
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM accounts WHERE id = ?').get(accountId)).toMatchObject({ count: 0 });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM transactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM transactionAnnotations WHERE ledgerTransactionId = ?').get('txn_delete_me')).toMatchObject({ count: 0 });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM balanceSnapshots WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerBalances WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
+  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(sourceAccountId)).toMatchObject({ accountId: null });
 });
 
 test('app categories endpoint returns domain-shaped categories', async () => {
@@ -814,6 +892,46 @@ test('app imports commit inserts unique transactions and updates account balance
   expect(getDb().prepare('SELECT COUNT(*) AS count FROM transactions WHERE accountId = ?').get(accountId)).toMatchObject({
     count: 11,
   });
+});
+
+test('app import history lists committed files and can unimport one', async () => {
+  const csv = fs.readFileSync(path.resolve(import.meta.dir, '..', '..', 'sample-imports', 'chase-credit-card-demo.csv'), 'utf8');
+  const accountId = insertRow('accounts', {
+    name: 'Chase Sapphire',
+    institution: 'Chase',
+    type: 'credit',
+    currentBalance: 100,
+  });
+  const preview = await postImportPreview('chase-credit-card-demo.csv', csv);
+
+  await postJson('/api/app/imports/commit', {
+    accountId,
+    importFileId: preview.importFileId,
+    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+  }, 201);
+
+  const history = await getJson('/api/app/imports') as {
+    imports: Array<{
+      id: number;
+      fileName: string;
+      status: string;
+      transactionCount: number;
+    }>;
+  };
+  expect(history.imports[0]).toMatchObject({
+    id: preview.importFileId,
+    fileName: 'chase-credit-card-demo.csv',
+    status: 'committed',
+    transactionCount: 10,
+  });
+
+  await deleteJson(`/api/app/imports/${preview.importFileId}`);
+
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM transactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
+  expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(preview.importFileId)).toMatchObject({ status: 'unimported' });
+  expect(getDb().prepare('SELECT status FROM sourceFiles WHERE importFileId = ?').get(preview.importFileId)).toMatchObject({ status: 'unimported' });
+  expect(getDb().prepare('SELECT currentBalance FROM accounts WHERE id = ?').get(accountId)).toMatchObject({ currentBalance: 100 });
 });
 
 test('app imports commit resolves parser-emitted accounts without selected account', async () => {
