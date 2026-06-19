@@ -86,6 +86,7 @@ export type ImportAccountMappingResolution =
   | 'alias'
   | 'exact'
   | 'auto-create'
+  | 'archived-match'
   | 'selected-fallback'
   | 'unresolved';
 
@@ -94,6 +95,7 @@ export interface ImportAccountMapping {
   institution: string | null;
   sourceAccountName: string | null;
   resolvedAccountId: number | null;
+  resolvedAccountStatus?: string | null;
   resolution: ImportAccountMappingResolution;
   transactionCount: number;
   balanceCount: number;

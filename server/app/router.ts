@@ -11,7 +11,11 @@ const optionalId = z.union([z.string(), z.number()]).nullish();
 
 export const appRouter = t.router({
   accounts: t.router({
-    list: t.procedure.query(() => listAccounts()),
+    list: t.procedure
+      .input(z.object({
+        includeArchived: z.boolean().optional(),
+      }).optional())
+      .query(({ input }) => listAccounts(input ?? {})),
   }),
 
   categories: t.router({
@@ -28,6 +32,7 @@ export const appRouter = t.router({
         search: z.string().nullish(),
         type: z.string().nullish(),
         limit: optionalId,
+        includeArchived: z.boolean().nullish(),
       }).optional())
       .query(({ input }) => listTransactions(input ?? {})),
 

@@ -24,10 +24,12 @@ interface ImportPreviewResult {
     institution: string | null;
     sourceAccountName: string | null;
     resolvedAccountId: number | null;
+    resolvedAccountStatus?: string | null;
     resolution: string;
     transactionCount: number;
     balanceCount: number;
   }>;
+  balanceRowIds?: number[];
   transactions?: unknown[];
 }
 
@@ -37,7 +39,8 @@ export function useCSVImport() {
 
   const processImport = useCallback(async (
     file: File,
-    customProfile: ImportProfile | null = null
+    customProfile: ImportProfile | null = null,
+    options: { throwOnError?: boolean } = {}
   ): Promise<ImportPreviewResult | null> => {
     setIsParsing(true);
     setError(null);
@@ -61,7 +64,12 @@ export function useCSVImport() {
       return response.json() as Promise<ImportPreviewResult>;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Import preview failed';
-      setError(message);
+      const fileLabel = file.webkitRelativePath || file.name || 'selected file';
+      const labeledMessage = `${fileLabel}: ${message}`;
+      setError(labeledMessage);
+      if (options.throwOnError) {
+        throw new Error(labeledMessage);
+      }
       return null;
     } finally {
       setIsParsing(false);

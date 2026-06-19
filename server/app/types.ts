@@ -10,6 +10,8 @@ export interface AccountSummary {
   type: AccountType;
   balance: number;
   currency: string;
+  status: 'active' | 'archived' | string;
+  archivedAt: string | null;
   updatedAt: string | null;
 }
 
@@ -65,6 +67,7 @@ export interface ListTransactionsOptions {
   search?: string | null;
   type?: string | null;
   limit?: string | number | null;
+  includeArchived?: boolean | string | null;
 }
 
 export interface TransactionListResponse {

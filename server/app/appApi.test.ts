@@ -75,6 +75,16 @@ async function putJson(path: string, payload: unknown, expectedStatus = 200) {
   return response.json();
 }
 
+async function patchJson(path: string, payload: unknown, expectedStatus = 200) {
+  const response = await fetch(`${TEST_URL}${path}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  expect(response.status).toBe(expectedStatus);
+  return response.json();
+}
+
 async function deleteJson(path: string, expectedStatus = 200) {
   const response = await fetch(`${TEST_URL}${path}`, { method: 'DELETE' });
   expect(response.status).toBe(expectedStatus);
@@ -161,9 +171,89 @@ test('app accounts endpoint returns domain-shaped accounts', async () => {
         type: 'checking',
         balance: 2345.67,
         currency: 'USD',
+        status: 'active',
+        archivedAt: null,
         updatedAt: '2026-06-14T12:00:00.000Z',
       },
     ],
+  });
+});
+
+test('app account archive hides defaults without deleting source links or annotations', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Archive Me',
+    institution: 'Local Bank',
+    type: 'checking',
+    currentBalance: 0,
+  }));
+  const importFileId = Number(insertRow('importFiles', {
+    fileName: 'archive.csv',
+    contentHash: 'archive-hash',
+    parserName: 'fixture',
+    status: 'committed',
+    createdAt: new Date().toISOString(),
+    committedAt: new Date().toISOString(),
+  }));
+  const sourceFileId = Number(insertRow('sourceFiles', {
+    importFileId,
+    fileName: 'archive.csv',
+    contentHash: 'archive-hash',
+    parserName: 'fixture',
+    status: 'committed',
+    createdAt: new Date().toISOString(),
+    committedAt: new Date().toISOString(),
+  }));
+  const sourceAccountId = Number(insertRow('sourceAccounts', {
+    sourceFileId,
+    accountId,
+    institution: 'Local Bank',
+    sourceAccountKey: 'local|archive',
+    sourceAccountName: 'Archive Me',
+    rawJson: '{}',
+    createdAt: new Date().toISOString(),
+  }));
+  insertRow('sourceTransactions', {
+    sourceFileId,
+    sourceAccountId,
+    stableSourceId: 'archive-txn',
+    date: '2026-06-01',
+    amountCents: -1200,
+    description: 'Archived transaction',
+    sourceRole: 'activity',
+    priority: 1,
+    rawJson: '{}',
+    createdAt: new Date().toISOString(),
+  });
+  materializeLedger(getDb(), buildLedgerFromSourceFacts(getDb()));
+  const ledgerTransaction = getDb().prepare('SELECT ledgerTransactionId FROM ledgerTransactions WHERE accountId = ?').get(accountId) as {
+    ledgerTransactionId: string;
+  };
+  insertRow('transactionAnnotations', {
+    ledgerTransactionId: ledgerTransaction.ledgerTransactionId,
+    notes: 'keep archived note',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  await postJson(`/api/app/accounts/${accountId}/archive`, {});
+
+  expect(await getJson('/api/app/accounts')).toEqual({ accounts: [] });
+  const withArchived = await getJson('/api/app/accounts?includeArchived=true') as { accounts: Array<{ id: number; status: string; archivedAt: string | null }> };
+  expect(withArchived.accounts).toMatchObject([{ id: accountId, status: 'archived' }]);
+  expect(withArchived.accounts[0].archivedAt).toEqual(expect.any(String));
+  expect(await getJson('/api/app/transactions')).toMatchObject({ transactions: [] });
+  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(sourceAccountId)).toMatchObject({ accountId });
+  expect(getDb().prepare('SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId = ?').get(ledgerTransaction.ledgerTransactionId)).toMatchObject({
+    notes: 'keep archived note',
+  });
+
+  await postJson(`/api/app/accounts/${accountId}/unarchive`, {});
+  expect(await getJson('/api/app/accounts')).toMatchObject({
+    accounts: [expect.objectContaining({ id: accountId, status: 'active', archivedAt: null })],
+  });
+  await patchJson(`/api/app/accounts/${accountId}`, { name: 'Archive Restored' });
+  expect(await getJson('/api/app/accounts')).toMatchObject({
+    accounts: [expect.objectContaining({ name: 'Archive Restored' })],
   });
 });
 
@@ -980,6 +1070,63 @@ test('app import history lists committed files and can unimport one', async () =
   expect(getDb().prepare('SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId = ?').get(annotatedTransaction.ledgerTransactionId)).toMatchObject({
     notes: 'keep this user note',
   });
+
+  const reimport = await postJson(`/api/app/imports/${preview.importFileId}/reimport`, {});
+  expect(reimport).toMatchObject({
+    ok: true,
+    importFileId: preview.importFileId,
+    transactionCount: 10,
+  });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM transactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 10 });
+  expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(preview.importFileId)).toMatchObject({ status: 'committed' });
+  expect(getDb().prepare('SELECT status FROM sourceFiles WHERE importFileId = ?').get(preview.importFileId)).toMatchObject({ status: 'committed' });
+  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE sourceFileId = (SELECT id FROM sourceFiles WHERE importFileId = ?)').get(preview.importFileId)).toMatchObject({ accountId });
+  expect(getDb().prepare('SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId = ?').get(annotatedTransaction.ledgerTransactionId)).toMatchObject({
+    notes: 'keep this user note',
+  });
+});
+
+test('app import history can bulk unimport and reimport committed source facts', async () => {
+  const accountId = insertRow('accounts', {
+    name: 'Chase Sapphire',
+    institution: 'Chase',
+    type: 'credit',
+    currentBalance: 100,
+  });
+  const firstCsv = csvFromRows([
+    '06/14/2026,06/14/2026,TACO TEMPLE,Food & Drink,Sale,-42.37',
+  ]);
+  const secondCsv = csvFromRows([
+    '06/15/2026,06/15/2026,WHOLE FOODS MARKET,Groceries,Sale,-132.18',
+  ]);
+  const firstPreview = await postImportPreview('chase-credit-card-first.csv', firstCsv);
+  const secondPreview = await postImportPreview('chase-credit-card-second.csv', secondCsv);
+
+  await postJson('/api/app/imports/commit', {
+    accountId,
+    importFileId: firstPreview.importFileId,
+    importRowIds: firstPreview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+  }, 201);
+  await postJson('/api/app/imports/commit', {
+    accountId,
+    importFileId: secondPreview.importFileId,
+    importRowIds: secondPreview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+  }, 201);
+
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 2 });
+
+  const importFileIds = [firstPreview.importFileId, secondPreview.importFileId];
+  const unimport = await postJson('/api/app/imports/bulk-unimport', { importFileIds });
+  expect(unimport).toMatchObject({ ok: true, count: 2, importFileIds });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
+  expect(getDb().prepare("SELECT COUNT(*) AS count FROM importFiles WHERE status = 'unimported'").get()).toMatchObject({ count: 2 });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM sourceAccounts WHERE accountId = ?').get(accountId)).toMatchObject({ count: 2 });
+
+  const reimport = await postJson('/api/app/imports/bulk-reimport', { importFileIds });
+  expect(reimport).toMatchObject({ ok: true, count: 2, importFileIds, transactionCount: 2 });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 2 });
+  expect(getDb().prepare("SELECT COUNT(*) AS count FROM importFiles WHERE status = 'committed'").get()).toMatchObject({ count: 2 });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM sourceAccounts WHERE accountId = ?').get(accountId)).toMatchObject({ count: 2 });
 });
 
 test('app imports commit resolves parser-emitted accounts without selected account', async () => {
@@ -1249,6 +1396,7 @@ test('app import preview allows native parsers to handle malformed institution C
     institution: 'Bank of America',
     sourceAccountName: 'Adv Plus Banking - 1234',
     resolvedAccountId: null,
+    resolvedAccountStatus: null,
     resolution: 'auto-create',
     transactionCount: 1,
     balanceCount: 1,
@@ -1311,6 +1459,115 @@ test('app imports commit uses source account mapping overrides', async () => {
     accountId: number;
   };
   expect(sourceAccount.accountId).toBe(existingAccountId);
+});
+
+test('app import preview reports archived matches and commit requires explicit unarchive decision', async () => {
+  const archivedAccountId = Number(insertRow('accounts', {
+    name: 'Adv Plus Banking - 1234',
+    institution: 'Bank of America',
+    type: 'checking',
+    currentBalance: 0,
+    currency: 'USD',
+    status: 'archived',
+    archivedAt: '2026-06-01T00:00:00.000Z',
+  }));
+  insertRow('accountAliases', {
+    institution: 'Bank of America',
+    alias: 'Adv Plus Banking - 1234',
+    accountId: archivedAccountId,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  const preview = await postImportPreview('bofa-checking-1234-2026-01-01-to-2026-01-31.csv', [
+    'Description,,Summary Amt.',
+    'Opening Balance,,"1,000.00"',
+    'Date,Description,Amount,Running Bal.',
+    '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+  ].join('\n'));
+
+  expect(preview.accountMappings[0]).toMatchObject({
+    resolvedAccountId: archivedAccountId,
+    resolvedAccountStatus: 'archived',
+    resolution: 'archived-match',
+  });
+
+  const rejected = await fetch(`${TEST_URL}/api/app/imports/commit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+    accountId: null,
+    importFileId: preview.importFileId,
+    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    accountMappings: [{ sourceAccountId: preview.accountMappings[0].sourceAccountId, mode: 'auto' }],
+    }),
+  });
+  expect(rejected.status).toBe(500);
+
+  const commit = await postJson('/api/app/imports/commit', {
+    accountId: null,
+    importFileId: preview.importFileId,
+    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    balanceRowIds: preview.balanceRowIds,
+    accountMappings: [{
+      sourceAccountId: preview.accountMappings[0].sourceAccountId,
+      mode: 'unarchive',
+      accountId: archivedAccountId,
+    }],
+  }, 201);
+
+  expect(commit.importedCount).toBe(1);
+  expect(getDb().prepare('SELECT status, archivedAt FROM accounts WHERE id = ?').get(archivedAccountId)).toMatchObject({
+    status: 'active',
+    archivedAt: null,
+  });
+  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(preview.accountMappings[0].sourceAccountId)).toMatchObject({
+    accountId: archivedAccountId,
+  });
+});
+
+test('app imports commit creates accounts from explicit source account mapping decisions', async () => {
+  const preview = await postImportPreview('bofa-savings-4321-2026-01-01-to-2026-01-31.csv', [
+    'Description,,Summary Amt.',
+    'Opening Balance,,"1,000.00"',
+    'Date,Description,Amount,Running Bal.',
+    '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+  ].join('\n'));
+
+  const commit = await postJson('/api/app/imports/commit', {
+    accountId: null,
+    importFileId: preview.importFileId,
+    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    balanceRowIds: preview.balanceRowIds,
+    accountMappings: [{
+      sourceAccountId: preview.accountMappings[0].sourceAccountId,
+      mode: 'create',
+      account: {
+        name: 'Imported Savings',
+        institution: 'Bank of America',
+        type: 'savings',
+        currency: 'USD',
+      },
+    }],
+  }, 201);
+
+  expect(commit.importedCount).toBe(1);
+  const account = getDb().prepare("SELECT * FROM accounts WHERE name = 'Imported Savings'").get() as {
+    id: number;
+    institution: string;
+    type: string;
+    status: string;
+  };
+  expect(account).toMatchObject({
+    institution: 'Bank of America',
+    type: 'savings',
+    status: 'active',
+  });
+  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(preview.accountMappings[0].sourceAccountId)).toMatchObject({
+    accountId: account.id,
+  });
+  expect(getDb().prepare('SELECT accountId FROM accountAliases WHERE alias = ?').get('Advantage Savings - 4321')).toMatchObject({
+    accountId: account.id,
+  });
 });
 
 test('app import preview stages multiple source balances for the same account and date', async () => {

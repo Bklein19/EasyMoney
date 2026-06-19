@@ -8,6 +8,8 @@ import { meta as vgStmtMeta, default as vgStmtParse } from "./vanguard-statement
 import { meta as vgActMeta, default as vgActParse } from "./vanguard-activity-pdf";
 import { meta as fidInvMeta, default as fidInvParse } from "./fidelity-investment-report-pdf";
 import { meta as fid401kMeta, default as fid401kParse } from "./fidelity-401k-html";
+import { meta as fidNetBenefitsMeta, default as fidNetBenefitsParse } from "./fidelity-netbenefits-statement-pdf";
+import { meta as fidPortfolioMeta, default as fidPortfolioParse } from "./fidelity-portfolio-statement-pdf";
 import { meta as seqMeta, default as seqParse } from "./sequoia-fund-pdf";
 import { meta as merrillActMeta, default as merrillActParse } from "./merrill-activity-csv";
 import { meta as merrillStmtMeta, default as merrillStmtParse } from "./merrill-cma-statement-pdf";
@@ -18,6 +20,7 @@ import { meta as wellsFargoStatementMeta, default as wellsFargoStatementParse } 
 import { meta as tiaaActivityMeta, default as tiaaActivityParse } from "./tiaa-activity-csv";
 import { meta as tiaaStatementMeta, default as tiaaStatementParse } from "./tiaa-statement-pdf";
 import { meta as marcusStatementMeta, default as marcusStatementParse } from "./marcus-statement-pdf";
+import { meta as robinhoodStatementMeta, default as robinhoodStatementParse } from "./robinhood-statement-pdf";
 
 export const PARSERS: ParserModule[] = [
   { meta: msStmtMeta, parse: msStmtParse },
@@ -26,6 +29,8 @@ export const PARSERS: ParserModule[] = [
   { meta: vgActMeta, parse: vgActParse },
   { meta: fidInvMeta, parse: fidInvParse },
   { meta: fid401kMeta, parse: fid401kParse },
+  { meta: fidNetBenefitsMeta, parse: fidNetBenefitsParse },
+  { meta: fidPortfolioMeta, parse: fidPortfolioParse },
   { meta: seqMeta, parse: seqParse },
   { meta: merrillActMeta, parse: merrillActParse },
   { meta: merrillStmtMeta, parse: merrillStmtParse },
@@ -36,6 +41,7 @@ export const PARSERS: ParserModule[] = [
   { meta: tiaaActivityMeta, parse: tiaaActivityParse },
   { meta: tiaaStatementMeta, parse: tiaaStatementParse },
   { meta: marcusStatementMeta, parse: marcusStatementParse },
+  { meta: robinhoodStatementMeta, parse: robinhoodStatementParse },
 ];
 
 export function getParserById(id: string): ParserModule | undefined {

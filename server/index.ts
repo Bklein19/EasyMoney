@@ -12,9 +12,9 @@ import {
   updateRow
 } from './database.js';
 import { seedDatabase } from './seed.js';
-import { listAccounts } from './app/accounts.ts';
+import { archiveAccount, listAccounts, unarchiveAccount, updateAccountMetadata } from './app/accounts.ts';
 import { listCategories } from './app/categories.ts';
-import { commitImport, listImportHistory, previewImport, unimportFile } from './app/imports.ts';
+import { commitImport, listImportHistory, previewImport, reimportFile, reimportFiles, unimportFile, unimportFiles } from './app/imports.ts';
 import { getInvestmentNetWorthReport, getSavingsRateReport } from './app/investmentReports.ts';
 import { appRouter } from './app/router.ts';
 import { splitTransactionAnnotationChanges, upsertTransactionAnnotation } from './app/transactionAnnotations.ts';
@@ -116,7 +116,21 @@ export const routes = wrapRoutes({
   },
 
   '/api/app/accounts': {
-    GET: () => json(listAccounts()),
+    GET: (request) => json(listAccounts({
+      includeArchived: queryObject(request).includeArchived === 'true',
+    })),
+  },
+
+  '/api/app/accounts/:id': {
+    PATCH: async (request) => json(updateAccountMetadata(request.params.id, await bodyJson(request))),
+  },
+
+  '/api/app/accounts/:id/archive': {
+    POST: (request) => json(archiveAccount(request.params.id)),
+  },
+
+  '/api/app/accounts/:id/unarchive': {
+    POST: (request) => json(unarchiveAccount(request.params.id)),
   },
 
   '/api/app/categories': {
@@ -157,8 +171,20 @@ export const routes = wrapRoutes({
     GET: () => json({ imports: listImportHistory() }),
   },
 
+  '/api/app/imports/bulk-unimport': {
+    POST: async (request) => json(unimportFiles((await bodyJson(request)).importFileIds)),
+  },
+
+  '/api/app/imports/bulk-reimport': {
+    POST: async (request) => json(reimportFiles((await bodyJson(request)).importFileIds)),
+  },
+
   '/api/app/imports/:id': {
     DELETE: (request) => json(unimportFile(request.params.id)),
+  },
+
+  '/api/app/imports/:id/reimport': {
+    POST: (request) => json(reimportFile(request.params.id)),
   },
 
   '/api/categories/:id/delete': {

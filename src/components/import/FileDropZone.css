@@ -54,3 +54,16 @@
   color: var(--text-secondary);
   font-size: 0.95rem;
 }
+
+.drop-zone-actions {
+  display: flex;
+  justify-content: center;
+  margin-top: 1.25rem;
+}
+
+.drop-zone-folder {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}

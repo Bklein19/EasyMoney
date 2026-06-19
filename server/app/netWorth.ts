@@ -34,6 +34,7 @@ export function getNetWorthReport(): NetWorthReport {
            LIMIT 1
          ) AS balanceCents
        FROM accounts a
+       WHERE COALESCE(a.status, 'active') != 'archived'
        ORDER BY a.id ASC`
     )
     .all() as CurrentLedgerBalanceRow[];
@@ -53,6 +54,7 @@ export function getNetWorthReport(): NetWorthReport {
         END) AS netWorthCents
        FROM ledgerBalances lb
        JOIN accounts a ON a.id = lb.accountId
+       WHERE COALESCE(a.status, 'active') != 'archived'
        GROUP BY lb.month
        ORDER BY lb.month ASC`
     )

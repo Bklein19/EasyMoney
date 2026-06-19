@@ -1,27 +1,20 @@
-import { useState } from 'react';
-import { Plus } from 'lucide-react';
 import { useAccounts } from '../../hooks/useAccounts';
 import AccountCard from './AccountCard';
-import AddAccountModal from './AddAccountModal';
 import './AccountsPage.css';
 
 export default function AccountsPage() {
-  const { accounts } = useAccounts();
-  const [isModalOpen, setIsModalOpen] = useState(false);
+  const { accounts } = useAccounts({ includeArchived: true });
 
-  const totalBalance = accounts.reduce((sum, acc) => sum + (acc.currentBalance || 0), 0);
+  const activeAccounts = accounts.filter(account => account.status !== 'archived');
+  const totalBalance = activeAccounts.reduce((sum, acc) => sum + (acc.currentBalance || 0), 0);
 
   return (
     <div className="page accounts-page">
       <header className="page__header">
         <div>
           <h1 className="page__title">Accounts</h1>
-          <p className="page__subtitle">Manage your financial accounts and view balances</p>
+          <p className="page__subtitle">Manage imported financial accounts and view active balances</p>
         </div>
-        <button className="btn btn--primary" onClick={() => setIsModalOpen(true)}>
-          <Plus size={20} />
-          Add Account
-        </button>
       </header>
 
       <div className="summary-cards">
@@ -36,10 +29,7 @@ export default function AccountsPage() {
       <div className="accounts-grid">
         {accounts.length === 0 ? (
           <div className="empty-state">
-            <p>No accounts added yet.</p>
-            <button className="btn btn--secondary mt-4" onClick={() => setIsModalOpen(true)}>
-              Add your first account
-            </button>
+            <p>No accounts yet. Import a file to create or match an account.</p>
           </div>
         ) : (
           accounts.map(account => (
@@ -47,10 +37,6 @@ export default function AccountsPage() {
           ))
         )}
       </div>
-
-      {isModalOpen && (
-        <AddAccountModal onClose={() => setIsModalOpen(false)} />
-      )}
     </div>
   );
 }

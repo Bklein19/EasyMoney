@@ -1,10 +1,30 @@
 import { useCallback, useState } from 'react';
-import { UploadCloud } from 'lucide-react';
+import { FolderOpen, UploadCloud } from 'lucide-react';
 import './FileDropZone.css';
 
-export default function FileDropZone({ onFileSelected, isParsing }) {
+export default function FileDropZone({ onFileSelected, onFilesSelected, isParsing }) {
   const [isDragging, setIsDragging] = useState(false);
   const isSupportedFile = (file) => /\.(csv|txt|pdf|html?)$/i.test(file.name);
+
+  const submitFiles = useCallback((files) => {
+    const supportedFiles = Array.from(files).filter(isSupportedFile);
+    if (supportedFiles.length === 0) {
+      alert('Please upload CSV, PDF, or HTML import files.');
+      return;
+    }
+    if (supportedFiles.length !== files.length) {
+      alert(`Skipped ${files.length - supportedFiles.length} unsupported file${files.length - supportedFiles.length === 1 ? '' : 's'}.`);
+    }
+    if (supportedFiles.length === 1 && onFileSelected) {
+      onFileSelected(supportedFiles[0]);
+      return;
+    }
+    if (onFilesSelected) {
+      onFilesSelected(supportedFiles);
+      return;
+    }
+    onFileSelected?.(supportedFiles[0]);
+  }, [onFileSelected, onFilesSelected]);
 
   const handleDrag = useCallback((e) => {
     e.preventDefault();
@@ -30,19 +50,16 @@ export default function FileDropZone({ onFileSelected, isParsing }) {
     e.stopPropagation();
     setIsDragging(false);
 
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const file = e.dataTransfer.files[0];
-      if (isSupportedFile(file)) {
-        onFileSelected(file);
-      } else {
-        alert('Please upload a CSV, PDF, or HTML import file.');
-      }
+    const files = e.dataTransfer.files ? Array.from(e.dataTransfer.files) : [];
+    if (files.length > 0) {
+      submitFiles(files);
     }
-  }, [onFileSelected]);
+  }, [submitFiles]);
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files.length > 0) {
-      onFileSelected(e.target.files[0]);
+      submitFiles(Array.from(e.target.files));
+      e.target.value = '';
     }
   };
 
@@ -58,6 +75,18 @@ export default function FileDropZone({ onFileSelected, isParsing }) {
         type="file"
         id="fileInput"
         accept=".csv,.txt,.pdf,.html,.htm,text/csv,text/html,application/pdf"
+        multiple
+        className="file-input-hidden"
+        onChange={handleFileChange}
+        disabled={isParsing}
+      />
+      <input
+        type="file"
+        id="folderInput"
+        accept=".csv,.txt,.pdf,.html,.htm,text/csv,text/html,application/pdf"
+        multiple
+        webkitdirectory=""
+        directory=""
         className="file-input-hidden"
         onChange={handleFileChange}
         disabled={isParsing}
@@ -65,14 +94,22 @@ export default function FileDropZone({ onFileSelected, isParsing }) {
       <label htmlFor="fileInput" className="drop-zone-content">
         <UploadCloud size={48} className="drop-icon" />
         {isParsing ? (
-          <h3>Parsing file...</h3>
+          <h3>Parsing files...</h3>
         ) : (
           <>
-            <h3>Drag & Drop your import file here</h3>
-            <p>or click to browse your files</p>
+            <h3>Drag & drop import files here</h3>
+            <p>or click to browse files</p>
           </>
         )}
       </label>
+      {!isParsing && (
+        <div className="drop-zone-actions">
+          <label htmlFor="folderInput" className="btn btn-secondary drop-zone-folder">
+            <FolderOpen size={16} />
+            Select Folder
+          </label>
+        </div>
+      )}
     </div>
   );
 }

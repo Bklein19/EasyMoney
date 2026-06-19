@@ -82,11 +82,14 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
   syncLedgerReadModelFromLegacyTables();
   const clauses: string[] = [];
   const params: Record<string, string | number> = {};
+  const includeArchived = options.includeArchived === true || options.includeArchived === 'true';
 
   const accountId = optionalNumber(options.accountId);
   if (accountId !== null) {
     clauses.push('t.accountId = $accountId');
     params.accountId = accountId;
+  } else if (!includeArchived) {
+    clauses.push("COALESCE(a.status, 'active') != 'archived'");
   }
 
   const categoryId = optionalNumber(options.categoryId);

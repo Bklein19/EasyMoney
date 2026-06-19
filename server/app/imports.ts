@@ -22,6 +22,21 @@ type ImportTransactionInput = Partial<ImportPreviewTransaction> & {
   amount: number;
 };
 
+type AccountMappingDecision =
+  | { sourceAccountId: number; mode?: 'existing'; accountId: number | null }
+  | { sourceAccountId: number; mode: 'auto'; accountId?: number | null }
+  | { sourceAccountId: number; mode: 'unarchive'; accountId: number }
+  | {
+      sourceAccountId: number;
+      mode: 'create';
+      account: {
+        name?: string | null;
+        institution?: string | null;
+        type?: string | null;
+        currency?: string | null;
+      };
+    };
+
 interface CommitImportOptions {
   accountId?: number | null;
   importFileId?: number | null;
@@ -29,14 +44,14 @@ interface CommitImportOptions {
   forceImportRowIds?: number[] | null;
   balanceRowIds?: number[] | null;
   transactions?: ImportTransactionInput[];
-  accountMappings?: Array<{ sourceAccountId: number; accountId: number | null }> | null;
+  accountMappings?: AccountMappingDecision[] | null;
   importMeta?: {
     importFileId?: number | null;
     headers?: string[];
     profile?: ImportProfile | null;
     mapping?: Record<string, unknown> | null;
     profileName?: string | null;
-    accountMappings?: Array<{ sourceAccountId: number; accountId: number | null }> | null;
+    accountMappings?: AccountMappingDecision[] | null;
   } | null;
 }
 
@@ -53,6 +68,7 @@ export interface ImportHistoryItem {
   committedAt: string | null;
   transactionCount: number;
   balanceCount: number;
+  unresolvedSourceAccountCount: number;
 }
 
 interface MaterializeImportTransactionsOptions {
@@ -62,7 +78,7 @@ interface MaterializeImportTransactionsOptions {
   forceImportRowIds?: number[] | null;
   balanceRowIds?: number[] | null;
   transactions?: ImportTransactionInput[];
-  accountMappings?: Array<{ sourceAccountId: number; accountId: number | null }> | null;
+  accountMappings?: AccountMappingDecision[] | null;
   fallbackImportFileId?: number | null;
 }
 
@@ -139,11 +155,18 @@ export function listImportHistory(): ImportHistoryItem[] {
       ifs.createdAt,
       ifs.committedAt,
       COUNT(DISTINCT lt.id) AS transactionCount,
-      COUNT(DISTINCT lb.id) AS balanceCount
+      COUNT(DISTINCT lb.id) AS balanceCount,
+      COUNT(DISTINCT CASE
+        WHEN sa.accountId IS NULL AND (st.id IS NOT NULL OR sb.id IS NOT NULL) THEN sa.id
+        ELSE NULL
+      END) AS unresolvedSourceAccountCount
     FROM importFiles ifs
     LEFT JOIN ledgerTransactions lt ON lt.importFileId = ifs.id
     LEFT JOIN importRows irb ON irb.importFileId = ifs.id AND irb.rowType = 'balance'
     LEFT JOIN sourceBalances sb ON sb.importRowId = irb.id
+    LEFT JOIN sourceFiles sf ON sf.importFileId = ifs.id
+    LEFT JOIN sourceAccounts sa ON sa.sourceFileId = sf.id
+    LEFT JOIN sourceTransactions st ON st.sourceAccountId = sa.id
     LEFT JOIN ledgerBalances lb ON lb.sourceBalanceId = sb.id
     GROUP BY ifs.id
     ORDER BY COALESCE(ifs.committedAt, ifs.createdAt) DESC, ifs.id DESC
@@ -182,6 +205,192 @@ export function unimportFile(importFileId: number | string) {
   return { ok: true, importFileId: id };
 }
 
+export function reimportFile(importFileId: number | string) {
+  const id = Number(importFileId);
+  if (!Number.isFinite(id)) throw new Error('Invalid import file id');
+
+  const db = getDb();
+  const importFile = db.prepare('SELECT * FROM importFiles WHERE id = ?').get(id) as
+    | { id: number; status?: string | null }
+    | undefined;
+  if (!importFile) throw new Error(`Import file not found: ${id}`);
+  if (importFile.status !== 'unimported') throw new Error(`Import file is not unimported: ${id}`);
+
+  const facts = db.prepare(`
+    SELECT
+      COUNT(DISTINCT sf.id) AS sourceFileCount,
+      COUNT(DISTINCT st.id) AS transactionCount,
+      COUNT(DISTINCT sb.id) AS balanceCount,
+      SUM(CASE
+        WHEN (st.id IS NOT NULL OR sb.id IS NOT NULL) AND sa.accountId IS NULL THEN 1
+        ELSE 0
+      END) AS unresolvedFactCount
+    FROM sourceFiles sf
+    LEFT JOIN sourceAccounts sa ON sa.sourceFileId = sf.id
+    LEFT JOIN sourceTransactions st ON st.sourceAccountId = sa.id
+    LEFT JOIN sourceBalances sb ON sb.sourceAccountId = sa.id
+    WHERE sf.importFileId = ?
+  `).get(id) as {
+    sourceFileCount: number;
+    transactionCount: number;
+    balanceCount: number;
+    unresolvedFactCount: number | null;
+  };
+  if (!facts.sourceFileCount || (!facts.transactionCount && !facts.balanceCount)) {
+    throw new Error(`Import file has no saved source facts: ${id}`);
+  }
+  if (Number(facts.unresolvedFactCount || 0) > 0) {
+    throw new Error('Cannot reimport while source accounts are unresolved.');
+  }
+
+  const now = new Date().toISOString();
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE importRows
+      SET transactionId = NULL, fingerprint = NULL
+      WHERE importFileId = ?
+    `).run(id);
+    db.prepare(`
+      UPDATE sourceFiles
+      SET status = 'committed', committedAt = @committedAt
+      WHERE importFileId = @importFileId
+    `).run({
+      importFileId: id,
+      committedAt: now,
+    });
+    db.prepare(`
+      UPDATE importFiles
+      SET status = 'committed',
+          importBatchId = COALESCE(importBatchId, @importBatchId),
+          committedAt = @committedAt
+      WHERE id = @importFileId
+    `).run({
+      importFileId: id,
+      importBatchId: `reimport-${id}-${hashContent(now).slice(0, 12)}`,
+      committedAt: now,
+    });
+  })();
+
+  const materialized = materializeLedger(db, buildLedgerFromSourceFacts(db));
+  return { ok: true, importFileId: id, ...materialized };
+}
+
+function normalizeImportFileIds(importFileIds: Array<number | string> | undefined | null) {
+  return [...new Set((importFileIds || []).map(Number))].filter(Number.isFinite);
+}
+
+export function unimportFiles(importFileIds: Array<number | string> | undefined | null) {
+  const ids = normalizeImportFileIds(importFileIds);
+  if (ids.length === 0) return { ok: true, importFileIds: [], count: 0 };
+
+  const db = getDb();
+  const found = db.prepare(`
+    SELECT id
+    FROM importFiles
+    WHERE id = ?
+  `);
+  const missing = ids.filter(id => !found.get(id));
+  if (missing.length > 0) throw new Error(`Import file not found: ${missing[0]}`);
+
+  db.transaction(() => {
+    for (const id of ids) {
+      db.prepare(`
+        UPDATE importRows
+        SET transactionId = NULL, fingerprint = NULL
+        WHERE importFileId = ?
+      `).run(id);
+      db.prepare(`
+        UPDATE sourceFiles
+        SET status = 'unimported', committedAt = NULL
+        WHERE importFileId = ?
+      `).run(id);
+      db.prepare(`
+        UPDATE importFiles
+        SET status = 'unimported', importBatchId = NULL, committedAt = NULL
+        WHERE id = ?
+      `).run(id);
+    }
+  })();
+
+  materializeLedger(db, buildLedgerFromSourceFacts(db));
+  return { ok: true, importFileIds: ids, count: ids.length };
+}
+
+export function reimportFiles(importFileIds: Array<number | string> | undefined | null) {
+  const ids = normalizeImportFileIds(importFileIds);
+  if (ids.length === 0) return { ok: true, importFileIds: [], count: 0, transactionCount: 0, balanceCount: 0 };
+
+  const db = getDb();
+  const importFileStatement = db.prepare('SELECT * FROM importFiles WHERE id = ?');
+  const factStatement = db.prepare(`
+    SELECT
+      COUNT(DISTINCT sf.id) AS sourceFileCount,
+      COUNT(DISTINCT st.id) AS transactionCount,
+      COUNT(DISTINCT sb.id) AS balanceCount,
+      SUM(CASE
+        WHEN (st.id IS NOT NULL OR sb.id IS NOT NULL) AND sa.accountId IS NULL THEN 1
+        ELSE 0
+      END) AS unresolvedFactCount
+    FROM sourceFiles sf
+    LEFT JOIN sourceAccounts sa ON sa.sourceFileId = sf.id
+    LEFT JOIN sourceTransactions st ON st.sourceAccountId = sa.id
+    LEFT JOIN sourceBalances sb ON sb.sourceAccountId = sa.id
+    WHERE sf.importFileId = ?
+  `);
+
+  for (const id of ids) {
+    const importFile = importFileStatement.get(id) as { id: number; status?: string | null } | undefined;
+    if (!importFile) throw new Error(`Import file not found: ${id}`);
+    if (importFile.status !== 'unimported') throw new Error(`Import file is not unimported: ${id}`);
+
+    const facts = factStatement.get(id) as {
+      sourceFileCount: number;
+      transactionCount: number;
+      balanceCount: number;
+      unresolvedFactCount: number | null;
+    };
+    if (!facts.sourceFileCount || (!facts.transactionCount && !facts.balanceCount)) {
+      throw new Error(`Import file has no saved source facts: ${id}`);
+    }
+    if (Number(facts.unresolvedFactCount || 0) > 0) {
+      throw new Error(`Cannot reimport while source accounts are unresolved: ${id}`);
+    }
+  }
+
+  const now = new Date().toISOString();
+  db.transaction(() => {
+    for (const id of ids) {
+      db.prepare(`
+        UPDATE importRows
+        SET transactionId = NULL, fingerprint = NULL
+        WHERE importFileId = ?
+      `).run(id);
+      db.prepare(`
+        UPDATE sourceFiles
+        SET status = 'committed', committedAt = @committedAt
+        WHERE importFileId = @importFileId
+      `).run({
+        importFileId: id,
+        committedAt: now,
+      });
+      db.prepare(`
+        UPDATE importFiles
+        SET status = 'committed',
+            importBatchId = COALESCE(importBatchId, @importBatchId),
+            committedAt = @committedAt
+        WHERE id = @importFileId
+      `).run({
+        importFileId: id,
+        importBatchId: `reimport-${id}-${hashContent(`${now}|${ids.join(',')}`).slice(0, 12)}`,
+        committedAt: now,
+      });
+    }
+  })();
+
+  const materialized = materializeLedger(db, buildLedgerFromSourceFacts(db));
+  return { ok: true, importFileIds: ids, count: ids.length, ...materialized };
+}
+
 function getStableSourceTransactionId(importFileId: number, transaction: ParsedImportTransaction) {
   return `src_txn_${hashContent([
     importFileId,
@@ -202,9 +411,49 @@ function inferAccountType(name: string | null, fallbackType?: string | null) {
   const normalized = normalizeText(name || '');
   if (/\b(credit|card|visa|mastercard|amex|discover)\b/.test(normalized)) return 'credit';
   if (/\b(savings|save)\b/.test(normalized)) return 'savings';
-  if (/\b(ira|roth|brokerage|investment|merrill|vanguard|retirement|annuity)\b/.test(normalized)) return 'investment';
+  if (/\b(ira|roth|brokerage|investment|merrill|robinhood|vanguard|retirement|annuity)\b/.test(normalized)) return 'investment';
   if (/\b(checking|chk)\b/.test(normalized)) return 'checking';
   return 'other';
+}
+
+function normalizeAccountStatus(status: string | null | undefined) {
+  return status || 'active';
+}
+
+function normalizeAccountCreateInput(mapping: Extract<AccountMappingDecision, { mode: 'create' }>, sourceAccount: {
+  institution: string | null;
+  sourceAccountName: string | null;
+}) {
+  const input = mapping.account || {};
+  const sourceName = sourceAccount.sourceAccountName && sourceAccount.sourceAccountName !== 'Selected account'
+    ? sourceAccount.sourceAccountName
+    : null;
+  const name = String(input.name || sourceName || '').trim();
+  if (!name) throw new Error('Account name is required for import-created accounts.');
+  const institution = input.institution === null || input.institution === undefined
+    ? sourceAccount.institution || null
+    : String(input.institution).trim() || null;
+  const type = String(input.type || inferAccountType(name)).trim();
+  const currency = String(input.currency || 'USD').trim().toUpperCase();
+  if (!type) throw new Error('Account type is required for import-created accounts.');
+  if (!currency) throw new Error('Account currency is required for import-created accounts.');
+  return { name, institution, type, currency };
+}
+
+function createAccountForSourceMapping(mapping: Extract<AccountMappingDecision, { mode: 'create' }>, sourceAccount: {
+  institution: string | null;
+  sourceAccountName: string | null;
+}) {
+  const now = new Date().toISOString();
+  const account = normalizeAccountCreateInput(mapping, sourceAccount);
+  return Number(insertRow('accounts', {
+    ...account,
+    currentBalance: 0,
+    status: 'active',
+    archivedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  }));
 }
 
 function upsertAccountAlias(sourceAccount: {
@@ -226,11 +475,16 @@ function upsertAccountAlias(sourceAccount: {
   `).run(institution, alias, accountId, now, now);
 }
 
-function linkSourceAccount(sourceAccountId: number, accountId: number | null) {
+function linkSourceAccount(sourceAccountId: number, accountId: number | null, options: { allowArchived?: boolean } = {}) {
   const db = getDb();
   if (accountId !== null) {
-    const account = db.prepare('SELECT id FROM accounts WHERE id = ?').get(accountId) as { id: number } | undefined;
+    const account = db.prepare('SELECT id, status FROM accounts WHERE id = ?').get(accountId) as
+      | { id: number; status: string | null }
+      | undefined;
     if (!account) throw new Error(`Account not found: ${accountId}`);
+    if (!options.allowArchived && normalizeAccountStatus(account.status) === 'archived') {
+      throw new Error(`Account is archived: ${accountId}`);
+    }
   }
 
   const sourceAccount = db.prepare(`
@@ -246,13 +500,68 @@ function linkSourceAccount(sourceAccountId: number, accountId: number | null) {
   if (accountId !== null) upsertAccountAlias(sourceAccount, accountId);
 }
 
-function applyAccountMappingOverrides(accountMappings: Array<{ sourceAccountId: number; accountId: number | null }> | null | undefined) {
+function getSourceAccount(sourceAccountId: number) {
+  const sourceAccount = getDb().prepare(`
+    SELECT id, accountId, institution, sourceAccountName
+    FROM sourceAccounts
+    WHERE id = ?
+  `).get(sourceAccountId) as
+    | { id: number; accountId: number | null; institution: string | null; sourceAccountName: string | null }
+    | undefined;
+  if (!sourceAccount) throw new Error(`Source account not found: ${sourceAccountId}`);
+  return sourceAccount;
+}
+
+function unarchiveAccountForImport(accountId: number) {
+  const db = getDb();
+  const account = db.prepare('SELECT id FROM accounts WHERE id = ?').get(accountId) as { id: number } | undefined;
+  if (!account) throw new Error(`Account not found: ${accountId}`);
+  db.prepare(`
+    UPDATE accounts
+    SET status = 'active',
+        archivedAt = NULL,
+        updatedAt = @updatedAt
+    WHERE id = @id
+  `).run({ id: accountId, updatedAt: new Date().toISOString() });
+}
+
+function applyAccountMappingOverrides(accountMappings: AccountMappingDecision[] | null | undefined) {
   if (!accountMappings?.length) return;
   for (const mapping of accountMappings) {
     if (!Number.isFinite(Number(mapping.sourceAccountId))) continue;
+    const sourceAccountId = Number(mapping.sourceAccountId);
+
+    if (mapping.mode === 'auto') {
+      const sourceAccount = getSourceAccount(sourceAccountId);
+      const resolution = getImportAccountResolution(sourceAccount);
+      if (!resolution.resolvedAccountId || resolution.resolvedAccountStatus === 'archived') {
+        throw new Error('Import account mapping requires an explicit account choice.');
+      }
+      linkSourceAccount(sourceAccountId, resolution.resolvedAccountId);
+      continue;
+    }
+
+    if (mapping.mode === 'create') {
+      const sourceAccount = getSourceAccount(sourceAccountId);
+      const accountId = createAccountForSourceMapping(mapping, sourceAccount);
+      linkSourceAccount(sourceAccountId, accountId);
+      continue;
+    }
+
+    if (mapping.mode === 'unarchive') {
+      const accountId = Number(mapping.accountId);
+      if (!Number.isFinite(accountId)) throw new Error('Account id is required to unarchive an import mapping.');
+      unarchiveAccountForImport(accountId);
+      linkSourceAccount(sourceAccountId, accountId);
+      continue;
+    }
+
+    if (mapping.mode && mapping.mode !== 'existing') {
+      throw new Error(`Unsupported account mapping mode: ${mapping.mode}`);
+    }
     const accountId = mapping.accountId === null || mapping.accountId === undefined ? null : Number(mapping.accountId);
     if (accountId !== null && !Number.isFinite(accountId)) continue;
-    linkSourceAccount(Number(mapping.sourceAccountId), accountId);
+    linkSourceAccount(sourceAccountId, accountId);
   }
 }
 
@@ -261,32 +570,55 @@ function getImportAccountResolution(sourceAccount: {
   accountId: number | null;
   institution: string | null;
   sourceAccountName: string | null;
-}): Pick<ImportAccountMapping, 'resolvedAccountId' | 'resolution'> {
+}): Pick<ImportAccountMapping, 'resolvedAccountId' | 'resolvedAccountStatus' | 'resolution'> {
   if (sourceAccount.accountId) {
-    return { resolvedAccountId: sourceAccount.accountId, resolution: 'linked' };
+    const linked = getDb().prepare('SELECT status FROM accounts WHERE id = ?').get(sourceAccount.accountId) as
+      | { status: string | null }
+      | undefined;
+    const status = normalizeAccountStatus(linked?.status);
+    return {
+      resolvedAccountId: sourceAccount.accountId,
+      resolvedAccountStatus: status,
+      resolution: status === 'archived' ? 'archived-match' : 'linked',
+    };
   }
 
   const alias = (sourceAccount.sourceAccountName || '').trim();
   const institution = (sourceAccount.institution || 'Unknown Institution').trim();
   if (!alias || alias === 'Selected account') {
-    return { resolvedAccountId: null, resolution: 'selected-fallback' };
+    return { resolvedAccountId: null, resolvedAccountStatus: null, resolution: 'selected-fallback' };
   }
 
   const aliased = getDb().prepare(`
-    SELECT accountId
-    FROM accountAliases
-    WHERE institution = ? AND alias = ?
-  `).get(institution, alias) as { accountId: number } | undefined;
-  if (aliased) return { resolvedAccountId: aliased.accountId, resolution: 'alias' };
+    SELECT aa.accountId, a.status
+    FROM accountAliases aa
+    JOIN accounts a ON a.id = aa.accountId
+    WHERE aa.institution = ? AND aa.alias = ?
+  `).get(institution, alias) as { accountId: number; status: string | null } | undefined;
+  if (aliased) {
+    const status = normalizeAccountStatus(aliased.status);
+    return {
+      resolvedAccountId: aliased.accountId,
+      resolvedAccountStatus: status,
+      resolution: status === 'archived' ? 'archived-match' : 'alias',
+    };
+  }
 
   const exact = getDb().prepare(`
-    SELECT id
+    SELECT id, status
     FROM accounts
     WHERE institution IS ? AND name = ?
-  `).get(institution, alias) as { id: number } | undefined;
-  if (exact) return { resolvedAccountId: exact.id, resolution: 'exact' };
+  `).get(institution, alias) as { id: number; status: string | null } | undefined;
+  if (exact) {
+    const status = normalizeAccountStatus(exact.status);
+    return {
+      resolvedAccountId: exact.id,
+      resolvedAccountStatus: status,
+      resolution: status === 'archived' ? 'archived-match' : 'exact',
+    };
+  }
 
-  return { resolvedAccountId: null, resolution: 'auto-create' };
+  return { resolvedAccountId: null, resolvedAccountStatus: null, resolution: 'auto-create' };
 }
 
 function getImportAccountMappings(importFileId: number): ImportAccountMapping[] {
@@ -348,7 +680,15 @@ function resolveImportedAccount(sourceAccountId: number | null | undefined, fall
     if (!fallbackAccountId) throw new Error(`Source account not found: ${sourceAccountId}`);
     return fallbackAccountId;
   }
-  if (sourceAccount.accountId) return sourceAccount.accountId;
+  if (sourceAccount.accountId) {
+    const account = db.prepare('SELECT status FROM accounts WHERE id = ?').get(sourceAccount.accountId) as
+      | { status: string | null }
+      | undefined;
+    if (normalizeAccountStatus(account?.status) === 'archived') {
+      throw new Error('Import account mapping matched an archived account. Choose unarchive, another account, or create a new account.');
+    }
+    return sourceAccount.accountId;
+  }
 
   const alias = (sourceAccount.sourceAccountName || '').trim();
   const institution = (sourceAccount.institution || 'Unknown Institution').trim();
@@ -359,20 +699,27 @@ function resolveImportedAccount(sourceAccountId: number | null | undefined, fall
   }
 
   const aliased = db.prepare(`
-    SELECT accountId
-    FROM accountAliases
-    WHERE institution = ? AND alias = ?
-  `).get(institution, alias) as { accountId: number } | undefined;
+    SELECT aa.accountId, a.status
+    FROM accountAliases aa
+    JOIN accounts a ON a.id = aa.accountId
+    WHERE aa.institution = ? AND aa.alias = ?
+  `).get(institution, alias) as { accountId: number; status: string | null } | undefined;
   if (aliased) {
+    if (normalizeAccountStatus(aliased.status) === 'archived') {
+      throw new Error('Import account mapping matched an archived account. Choose unarchive, another account, or create a new account.');
+    }
     db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(aliased.accountId, sourceAccount.id);
     return aliased.accountId;
   }
 
   const exact = db.prepare(`
-    SELECT id
+    SELECT id, status
     FROM accounts
     WHERE institution IS ? AND name = ?
-  `).get(institution, alias) as { id: number } | undefined;
+  `).get(institution, alias) as { id: number; status: string | null } | undefined;
+  if (exact && normalizeAccountStatus(exact.status) === 'archived') {
+    throw new Error('Import account mapping matched an archived account. Choose unarchive, another account, or create a new account.');
+  }
   const now = new Date().toISOString();
   const accountId = exact?.id ?? Number(insertRow('accounts', {
     name: alias,
@@ -380,6 +727,8 @@ function resolveImportedAccount(sourceAccountId: number | null | undefined, fall
     type: inferAccountType(alias),
     currentBalance: 0,
     currency: 'USD',
+    status: 'active',
+    archivedAt: null,
     createdAt: now,
     updatedAt: now,
   }));
@@ -419,6 +768,19 @@ async function withTempImportFile<T>(fileName: string, bytes: Uint8Array | undef
     return await fn(filePath);
   } finally {
     await fs.rm(path.dirname(filePath), { recursive: true, force: true });
+  }
+}
+
+async function getParserSample(fileName: string, text: string, fileBytes?: Uint8Array) {
+  if (!/\.pdf$/i.test(fileName) || !fileBytes) return text.slice(0, 4096);
+
+  try {
+    const { getDocumentProxy, extractText } = await import('unpdf');
+    const pdf = await getDocumentProxy(new Uint8Array(fileBytes));
+    const extracted = await extractText(pdf);
+    return extracted.text.join('\n').slice(0, 4096);
+  } catch {
+    return text.slice(0, 4096);
   }
 }
 
@@ -669,6 +1031,7 @@ export async function previewImport({ fileName, text, fileBytes, customProfile =
   const headers = parsed?.meta.fields || Object.keys(rows[0] || {});
   if (parsed && !rows.length) throw new Error('No data found in CSV');
 
+  const parserSample = await getParserSample(fileName, text, fileBytes);
   const appParser = customProfile
     ? {
         id: CUSTOM_CSV_PARSER_ID,
@@ -678,7 +1041,7 @@ export async function previewImport({ fileName, text, fileBytes, customProfile =
         priority: 0,
         parse: (input: Parameters<typeof parseCustomCsv>[0]) => parseCustomCsv(input, customProfile),
       }
-    : resolveImportParser({ fileName, headers, sample: text.slice(0, 4096) });
+    : resolveImportParser({ fileName, headers, sample: parserSample });
 
   if (appParser) {
     const parsedResult = await withTempImportFile(fileName, fileBytes, filePath => Promise.resolve(appParser.parse({
@@ -786,14 +1149,17 @@ export function materializeImportTransactions({
   const transactionsToCommit = stagedImportFileId ? stagedTransactions : transactions;
 
   const db = getDb();
-  const accountById = new Map<number, { id: number; type?: string | null; currentBalance?: number | null }>();
+  const accountById = new Map<number, { id: number; type?: string | null; currentBalance?: number | null; status?: string | null }>();
   const getAccount = (id: number) => {
     const existing = accountById.get(id);
     if (existing) return existing;
     const account = db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as
-      | { id: number; type?: string | null; currentBalance?: number | null }
+      | { id: number; type?: string | null; currentBalance?: number | null; status?: string | null }
       | undefined;
     if (!account) throw new Error(`Account not found: ${id}`);
+    if (normalizeAccountStatus(account.status) === 'archived') {
+      throw new Error(`Account is archived: ${id}`);
+    }
     accountById.set(id, account);
     return account;
   };

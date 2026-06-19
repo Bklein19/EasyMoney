@@ -4,6 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { resolveImportParser } from './index.ts';
 import { createMoneyParserAdapter } from './moneyAdapter.ts';
+import { parseRobinhoodStatementText } from '../../../money/parsers/robinhood-statement-pdf.ts';
+import { parseNetBenefitsStatementText } from '../../../money/parsers/fidelity-netbenefits-statement-pdf.ts';
+import { parseFidelityPortfolioStatementText } from '../../../money/parsers/fidelity-portfolio-statement-pdf.ts';
 
 test('money parser adapter translates money activity output to app import output', async () => {
   const parser = createMoneyParserAdapter({
@@ -263,11 +266,16 @@ test.each([
   ['Morgan Stanley statement', 'morgan-stanley-pdf', 'morgan-stanley-0854-2024-02-29-consolidated-statement.pdf', 'statement', 50],
   ['Morgan Stanley activity export', 'morgan-stanley-activity-pdf', 'AllActivity.pdf', 'activity-export', 100],
   ['Fidelity 401(k)', 'fidelity-401k-html', 'fidelity-401k-examplepayroll-2026-03.html', 'statement', 50],
+  ['Fidelity NetBenefits statement', 'fidelity-netbenefits-statement-pdf', '2024-04-April-ExampleCo-401k-Fidelity-NetBenefits-Statement.pdf', 'statement', 50],
+  ['Fidelity portfolio statement', 'fidelity-portfolio-statement-pdf', '2023-01-Health-Savings-Account-111222333-Jan-Fidelity-Statement.pdf', 'statement', 50],
   ['Fidelity investment report', 'fidelity-investment-report-pdf', 'fidelity-Z19335125-2026-03-31.pdf', 'statement', 50],
   ['Marcus savings statement', 'marcus-statement-pdf', 'marcus-online-savings-7453-2026-04-01-statement.pdf', 'statement', 50],
   ['Merrill CMA statement', 'merrill-cma-statement-pdf', 'merrill-statement-2024-STMT_08302024_XXXXX092_CMAEdge.pdf', 'statement', 50],
   ['Sequoia Fund statement', 'sequoia-fund-pdf', 'sequoia-fund-2026-03-31.pdf', 'statement', 50],
   ['TIAA statement', 'tiaa-statement-pdf', 'tiaa-2024-04-01-retirement-q1-2024-1505352356.pdf', 'statement', 50],
+  ['Robinhood statement', 'robinhood-statement-pdf', '3c3d0cdf-23cf-323b-a8c6-099c1a530672.pdf', 'statement', 50],
+  ['Robinhood downloaded individual statement', 'robinhood-statement-pdf', 'April 2019 – Individual Investing Account Statement-.pdf', 'statement', 50],
+  ['Robinhood downloaded retirement statement', 'robinhood-statement-pdf', 'April 2024 – Consolidated IRA Statement-.pdf', 'statement', 50],
 ] as const)('import parser registry resolves %s', (_name, expectedId, fileName, sourceType, priority) => {
   const parser = resolveImportParser({
     fileName,
@@ -306,6 +314,391 @@ test.each([
   expect(parser?.id).toBe(expectedId);
   expect(parser?.sourceType).toBe('activity-export');
   expect(parser?.priority).toBe(10);
+});
+
+test('Robinhood statement parser extracts account activity and closing portfolio balance', () => {
+  const result = parseRobinhoodStatementText([
+    '05/01/2026 to 05/31/2026',
+    'Individual Account #:111112222',
+    'Account Summary Opening Balance Closing Balance',
+    'Portfolio Value $262,553.73 $406,184.35',
+    'Account Activity',
+    'Description Symbol Acct Type Transaction Date Qty Price Debit Credit',
+    'AAPL 01/21/2028 Call $200.00 AAPL Margin BTO 05/05/2026 1 $104.00000 $10,400.04',
+    'AMD 01/15/2027 Call $115.00 AMD Margin STC 05/05/2026 1 $242.00000 $24,199.45',
+    'iShares 0-3 Month Treasury Bond',
+    'CUSIP: 46436E718 SGOV Margin Buy 05/05/2026 81.214836 $100.42500 $8,156.00',
+    'ACH Deposit Margin ACH 05/13/2026 $9,000.00',
+    'Interest Payment Sweep INT 05/29/2026 $1.19',
+    'Total Funds Paid and Received $10,400.04 $33,200.64',
+  ].join('\n'));
+
+  expect(result.covered_from).toBe('2026-05-01');
+  expect(result.covered_to).toBe('2026-05-31');
+  expect(result.balances).toEqual([{
+    date: '2026-05-31',
+    account: 'Robinhood Individual - 9769',
+    institution: 'Robinhood',
+    balance_cents: 40618435,
+  }]);
+  expect(result.transactions.map(transaction => ({
+    date: transaction.date,
+    amount_cents: transaction.amount_cents,
+    description: transaction.description,
+    account: transaction.account,
+    action: transaction.raw.action,
+    symbol: transaction.raw.symbol,
+  }))).toEqual([
+    {
+      date: '2026-05-05',
+      amount_cents: -1040004,
+      description: 'BTO AAPL 01/21/2028 Call $200.00',
+      account: 'Robinhood Individual - 9769',
+      action: 'BTO',
+      symbol: 'AAPL',
+    },
+    {
+      date: '2026-05-05',
+      amount_cents: 2419945,
+      description: 'STC AMD 01/15/2027 Call $115.00',
+      account: 'Robinhood Individual - 9769',
+      action: 'STC',
+      symbol: 'AMD',
+    },
+    {
+      date: '2026-05-05',
+      amount_cents: -815600,
+      description: 'Buy iShares 0-3 Month Treasury Bond',
+      account: 'Robinhood Individual - 9769',
+      action: 'Buy',
+      symbol: 'SGOV',
+    },
+    {
+      date: '2026-05-13',
+      amount_cents: 900000,
+      description: 'ACH ACH Deposit',
+      account: 'Robinhood Individual - 9769',
+      action: 'ACH',
+      symbol: null,
+    },
+    {
+      date: '2026-05-29',
+      amount_cents: 119,
+      description: 'INT Interest Payment',
+      account: 'Robinhood Individual - 9769',
+      action: 'INT',
+      symbol: null,
+    },
+  ]);
+});
+
+test('Robinhood statement parser preserves separate retirement accounts in consolidated PDFs', () => {
+  const result = parseRobinhoodStatementText([
+    '05/01/2026 to 05/31/2026',
+    'Traditional IRA Account #:333334444',
+    'Account Summary Opening Balance Closing Balance',
+    'Portfolio Value $87,687.67 $94,596.54',
+    'Account Activity',
+    'Description Symbol Acct Type Transaction Date Qty Price Debit Credit',
+    'SPY Cash Buy 05/01/2026 0.161739 $723.88000 $117.08',
+    'GOOGL 01/15/2027 Call $215.00 GOOGL Cash STC 05/04/2026 1 $175.50000 $17,549.58',
+    'Roth IRA Account #:555556666',
+    'Account Summary Opening Balance Closing Balance',
+    'Portfolio Value $99,953.48 $216,740.08',
+    'Account Activity',
+    'Description Symbol Acct Type Transaction Date Qty Price Debit Credit',
+    'SNOW Margin Sell 04/30/2026 2.078241 $137.17000 $285.07',
+    'SPY Margin Buy 05/04/2026 12 $718.00800 $8,616.10',
+  ].join('\n'));
+
+  expect(result.balances).toEqual([{
+    date: '2026-05-31',
+    account: 'Robinhood Traditional IRA - 3407',
+    institution: 'Robinhood',
+    balance_cents: 9459654,
+  }, {
+    date: '2026-05-31',
+    account: 'Robinhood Roth IRA - 8978',
+    institution: 'Robinhood',
+    balance_cents: 21674008,
+  }]);
+  expect(result.transactions.map(transaction => ({
+    amount_cents: transaction.amount_cents,
+    account: transaction.account,
+    action: transaction.raw.action,
+    symbol: transaction.raw.symbol,
+  }))).toEqual([{
+    amount_cents: -11708,
+    account: 'Robinhood Traditional IRA - 3407',
+    action: 'Buy',
+    symbol: 'SPY',
+  }, {
+    amount_cents: 1754958,
+    account: 'Robinhood Traditional IRA - 3407',
+    action: 'STC',
+    symbol: 'GOOGL',
+  }, {
+    amount_cents: 28507,
+    account: 'Robinhood Roth IRA - 8978',
+    action: 'Sell',
+    symbol: 'SNOW',
+  }, {
+    amount_cents: -861610,
+    account: 'Robinhood Roth IRA - 8978',
+    action: 'Buy',
+    symbol: 'SPY',
+  }]);
+});
+
+test('Robinhood statement parser normalizes personal account holder headings to individual accounts', () => {
+  const result = parseRobinhoodStatementText([
+    '01/01/2025 to 01/31/2025',
+    'Alex Example Account #:111112222',
+    'Account Summary Opening Balance Closing Balance',
+    'Portfolio Value $50,037.95 $53,860.28',
+    'Account Activity',
+    'Description Symbol Acct Type Transaction Date Qty Price Debit Credit',
+    'INTC 02/07/2025 Put $20.00 INTC Margin STO 01/03/2025 1 $2.50000 $249.92',
+  ].join('\n'));
+
+  expect(result.balances[0]?.account).toBe('Robinhood Individual - 9769');
+  expect(result.transactions[0]?.account).toBe('Robinhood Individual - 9769');
+});
+
+test('Fidelity NetBenefits statement parser extracts contributions and balance', () => {
+  const result = parseNetBenefitsStatementText([
+    'Statement Details',
+    'ExampleCo 401(k) Plan Retirement Savings Statement',
+    'Your Account Summary',
+    'Statement Period: 04/01/2024 to 04/30/2024',
+    'Beginning Balance $0.00',
+    'Your Contributions $983.35',
+    'Employer Contributions $196.67',
+    'Change in Market Value $0.38',
+    'Ending Balance $1,180.40',
+  ].join('\n'));
+
+  expect(result.covered_from).toBe('2024-04-01');
+  expect(result.covered_to).toBe('2024-04-30');
+  expect(result.balances).toEqual([{
+    date: '2024-04-30',
+    account: 'ExampleCo 401(k)',
+    institution: 'Fidelity',
+    balance_cents: 118040,
+  }]);
+  expect(result.transactions.map(transaction => ({
+    date: transaction.date,
+    amountCents: transaction.amount_cents,
+    description: transaction.description,
+    account: transaction.account,
+    institution: transaction.institution,
+    rawType: transaction.raw.type,
+  }))).toEqual([
+    {
+      date: '2024-04-30',
+      amountCents: 98335,
+      description: '401(k) contributions (employee)',
+      account: 'ExampleCo 401(k)',
+      institution: 'Fidelity',
+      rawType: 'employee-contributions',
+    },
+    {
+      date: '2024-04-30',
+      amountCents: 19667,
+      description: '401(k) contributions (employer)',
+      account: 'ExampleCo 401(k)',
+      institution: 'Fidelity',
+      rawType: 'employer-contributions',
+    },
+  ]);
+});
+
+test('Fidelity portfolio statement parser extracts account contributions and balance', () => {
+  const result = parseFidelityPortfolioStatementText([
+    'INVESTMENT REPORT',
+    'January 1, 2023 - January 31, 2023',
+    'FIDELITY HEALTH SAVINGS ACCOUNT ALEX EXAMPLE HEALTH',
+    'SAVINGS ACCOUNT FIDELITY PERSONAL TRUST CO - CUSTODIAN',
+    'Account Number: 111-222333',
+    'Your Account Value: $3,500.81',
+    'Account Summary',
+    'ALEX EXAMPLE - HEALTH SAVINGS ACCOUNT',
+    'Contributions',
+    'Date Reference Description Amount',
+    '01/25 Employer Cur Yr $62.50',
+    '01/25 Participant Cur Yr 129.17',
+    '01/26 Transfer Of Assets Check Received Wexhealthinc 3,272.01',
+    'Total Contributions $3,463.68',
+  ].join('\n'));
+
+  expect(result.covered_from).toBe('2023-01-01');
+  expect(result.covered_to).toBe('2023-01-31');
+  expect(result.balances).toEqual([{
+    date: '2023-01-31',
+    account: 'Health Savings Account 111222333',
+    institution: 'Fidelity',
+    balance_cents: 350081,
+  }]);
+  expect(result.transactions.map(transaction => ({
+    date: transaction.date,
+    amountCents: transaction.amount_cents,
+    description: transaction.description,
+    account: transaction.account,
+  }))).toEqual([
+    {
+      date: '2023-01-25',
+      amountCents: 6250,
+      description: 'Fidelity contribution: Employer Cur Yr',
+      account: 'Health Savings Account 111222333',
+    },
+    {
+      date: '2023-01-25',
+      amountCents: 12917,
+      description: 'Fidelity contribution: Participant Cur Yr',
+      account: 'Health Savings Account 111222333',
+    },
+    {
+      date: '2023-01-26',
+      amountCents: 327201,
+      description: 'Fidelity contribution: Transfer Of Assets Check Received Wexhealthinc',
+      account: 'Health Savings Account 111222333',
+    },
+  ]);
+});
+
+test('Fidelity portfolio statement parser extracts transfer-out flows', () => {
+  const result = parseFidelityPortfolioStatementText([
+    'INVESTMENT REPORT',
+    'April 1, 2024 - April 30, 2024',
+    'FIDELITY ROTH IRA ALEX EXAMPLE',
+    'Account Number: 444-555666',
+    'Your Account Value: $520.74',
+    'Account Summary',
+    'ALEX EXAMPLE - ROTH IRA',
+    'Beginning Account Value $37,601.35',
+    'Subtractions -36,266.85 -36,266.85',
+    'Distributions -21.22 -21.22',
+    'Securities Transferred Out -36,245.63 -36,245.63',
+    'Change in Investment Value * -813.76',
+    'Ending Account Value $520.74',
+    'Distributions',
+    'Date Reference Description Amount',
+    '04/22 Transfer Of Assets ACAT DELIVER -$21.22',
+    'Total Distributions -$21.22',
+    'Securities Transferred Out',
+    '04/22 ALPHABET INC CAP STK CL A Transfer Of Assets -32.000 $156.28000 -',
+    'ACAT DELIVER VALUE OF TRANSACTION $5,000.96',
+    'Total Securities Transferred Out -',
+  ].join('\n'));
+
+  expect(result.covered_from).toBe('2024-04-01');
+  expect(result.covered_to).toBe('2024-04-30');
+  expect(result.balances).toEqual([{
+    date: '2024-04-30',
+    account: 'Roth Ira 444555666',
+    institution: 'Fidelity',
+    balance_cents: 52074,
+  }]);
+  expect(result.transactions.map(transaction => ({
+    date: transaction.date,
+    amountCents: transaction.amount_cents,
+    description: transaction.description,
+    account: transaction.account,
+    rawType: transaction.raw.type,
+  }))).toEqual([{
+    date: '2024-04-22',
+    amountCents: -2122,
+    description: 'Fidelity transfer out: Transfer Of Assets ACAT DELIVER',
+    account: 'Roth Ira 444555666',
+    rawType: 'distribution',
+  }, {
+    date: '2024-04-22',
+    amountCents: -3624563,
+    description: 'Fidelity transfer out: securities transferred out',
+    account: 'Roth Ira 444555666',
+    rawType: 'securities-transferred-out',
+  }]);
+});
+
+test('import parser registry resolves Robinhood statement first-page samples', () => {
+  const parser = resolveImportParser({
+    fileName: 'statement.pdf',
+    headers: [],
+    sample: [
+      'Robinhood',
+      '04/01/2019 to 04/30/2019',
+      'Alex Example Account #:111112222',
+      'Account Summary OPENING BALANCE CLOSING BALANCE',
+      'Portfolio Value $705.82 $728.20',
+    ].join('\n'),
+  });
+
+  expect(parser?.id).toBe('robinhood-statement-pdf');
+});
+
+test('Robinhood statement parser handles older Roth IRA statement layouts', () => {
+  const result = parseRobinhoodStatementText([
+    '2024-04-01 to 2024-04-30',
+    'ALEX EXAMPLE Account #:555556666',
+    'Roth IRA',
+    'Account Summary Opening',
+    'Balance',
+    'Closing',
+    'Balance',
+    'Portfolio Value $0.00 $35,653.05',
+    'Account Activity',
+    'Description Symbol Acct Type Trans Type Record Date Qty Price Debit Credit',
+    'ACAT IN control_num = 20241070049362, firm_id = 0226, acct_num = 444555666 Cash ACATI 4/22/2024 $21.22',
+    'Interest on Contribution (IRA Match) Cash MTCH 4/22/2024 $1,082.71',
+    'SPDR S&P 500 ETF',
+    'CUSIP: 78462F103',
+    'SPY Cash Buy 4/22/2024 2.22387 $496.40 $1,103.93',
+    'SPDR S&P 500 ETF',
+    'CUSIP: 78462F103',
+    'Cash ACATI 4/22/2024 11',
+  ].join('\n'));
+
+  expect(result.covered_from).toBe('2024-04-01');
+  expect(result.covered_to).toBe('2024-04-30');
+  expect(result.balances).toEqual([{
+    date: '2024-04-30',
+    account: 'Robinhood Roth IRA - 8978',
+    institution: 'Robinhood',
+    balance_cents: 3565305,
+  }]);
+  expect(result.transactions.map(transaction => ({
+    date: transaction.date,
+    amount_cents: transaction.amount_cents,
+    description: transaction.description,
+    account: transaction.account,
+    action: transaction.raw.action,
+    symbol: transaction.raw.symbol,
+    accountType: transaction.raw.accountType,
+  }))).toEqual([{
+    date: '2024-04-22',
+    amount_cents: 2122,
+    description: 'ACATI ACAT IN control_num = 20241070049362, firm_id = 0226, acct_num = 444555666',
+    account: 'Robinhood Roth IRA - 8978',
+    action: 'ACATI',
+    symbol: null,
+    accountType: 'Cash',
+  }, {
+    date: '2024-04-22',
+    amount_cents: 108271,
+    description: 'MTCH Interest on Contribution (IRA Match)',
+    account: 'Robinhood Roth IRA - 8978',
+    action: 'MTCH',
+    symbol: null,
+    accountType: 'Cash',
+  }, {
+    date: '2024-04-22',
+    amount_cents: -110393,
+    description: 'Buy SPDR S&P 500 ETF',
+    account: 'Robinhood Roth IRA - 8978',
+    action: 'Buy',
+    symbol: 'SPY',
+    accountType: 'Cash',
+  }]);
 });
 
 test('import parser registry resolves Robinhood banking UUID exports', async () => {

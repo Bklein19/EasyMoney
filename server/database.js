@@ -87,7 +87,7 @@ const db = {
 };
 
 const TABLES = {
-  accounts: ['id', 'name', 'institution', 'type', 'currentBalance', 'currency', 'createdAt', 'updatedAt'],
+  accounts: ['id', 'name', 'institution', 'type', 'currentBalance', 'currency', 'status', 'archivedAt', 'createdAt', 'updatedAt'],
   accountAliases: ['id', 'institution', 'alias', 'accountId', 'createdAt', 'updatedAt'],
   transactions: [
     'id', 'accountId', 'categoryId', 'date', 'amount', 'importBatchId', 'description', 'merchant',
@@ -160,6 +160,8 @@ export function initDatabase() {
       type TEXT NOT NULL,
       currentBalance REAL DEFAULT 0,
       currency TEXT DEFAULT 'USD',
+      status TEXT DEFAULT 'active',
+      archivedAt TEXT,
       createdAt TEXT,
       updatedAt TEXT
     );
@@ -472,6 +474,15 @@ export function initDatabase() {
   if (!importRowColumns.includes('rowType')) {
     db.prepare("ALTER TABLE importRows ADD COLUMN rowType TEXT DEFAULT 'transaction'").run();
   }
+
+  const accountColumns = db.prepare('PRAGMA table_info(accounts)').all().map(column => column.name);
+  if (!accountColumns.includes('status')) {
+    db.prepare("ALTER TABLE accounts ADD COLUMN status TEXT DEFAULT 'active'").run();
+  }
+  if (!accountColumns.includes('archivedAt')) {
+    db.prepare('ALTER TABLE accounts ADD COLUMN archivedAt TEXT').run();
+  }
+  db.prepare("UPDATE accounts SET status = 'active' WHERE status IS NULL OR status = ''").run();
 
   const sourceAccountColumns = db.prepare('PRAGMA table_info(sourceAccounts)').all().map(column => column.name);
   if (!sourceAccountColumns.includes('accountId')) {

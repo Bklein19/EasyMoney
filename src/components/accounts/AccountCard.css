@@ -29,6 +29,10 @@
   opacity: 1;
 }
 
+.account-card.is-archived {
+  opacity: 0.72;
+}
+
 .account-header {
   display: flex;
   justify-content: space-between;
@@ -146,6 +150,17 @@
   border-radius: 999px;
   background: var(--bg-subtle-hover);
   color: var(--text-secondary);
+}
+
+.account-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.account-type-badge.archived {
+  background: color-mix(in srgb, var(--text-secondary) 16%, transparent);
+  color: var(--text-primary);
 }
 
 .account-balance {

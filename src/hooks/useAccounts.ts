@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { add, update } from '../db/api';
+import { apiAction } from '../db/api';
 import { queryClient, trpc } from '../api/trpc';
 import { subscribeToDataChanges } from '../db/api';
 import type { AccountSummary } from '../../server/app/types.ts';
@@ -12,8 +12,9 @@ type AccountMetadataChanges = {
   currency?: unknown;
 };
 
-export function useAccounts() {
-  const accountsQuery = useQuery(trpc.accounts.list.queryOptions(undefined, {
+export function useAccounts(options: { includeArchived?: boolean } = {}) {
+  const includeArchived = Boolean(options.includeArchived);
+  const accountsQuery = useQuery(trpc.accounts.list.queryOptions({ includeArchived }, {
     select: data => data.accounts.map(fromAppAccount),
   }));
 
@@ -26,15 +27,6 @@ export function useAccounts() {
     };
   }, []);
 
-  async function addAccount(account: Record<string, unknown>) {
-    return add('accounts', {
-      ...account,
-      currentBalance: 0,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-  }
-
   async function updateAccount(id: number | string, changes: AccountMetadataChanges) {
     const allowed = new Set(['name', 'institution', 'type', 'currency']);
     const unsupported = Object.keys(changes).filter(field => !allowed.has(field));
@@ -42,16 +34,25 @@ export function useAccounts() {
       throw new Error(`Accounts only support metadata updates: ${unsupported.join(', ')}`);
     }
 
-    return update('accounts', id, {
-      ...changes,
-      updatedAt: new Date().toISOString(),
+    return apiAction(`/app/accounts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(changes),
     });
+  }
+
+  async function archiveAccount(id: number | string) {
+    return apiAction(`/app/accounts/${id}/archive`, { method: 'POST' });
+  }
+
+  async function unarchiveAccount(id: number | string) {
+    return apiAction(`/app/accounts/${id}/unarchive`, { method: 'POST' });
   }
 
   return {
     accounts: accountsQuery.data ?? [],
-    addAccount,
     updateAccount,
+    archiveAccount,
+    unarchiveAccount,
     isLoading: accountsQuery.isLoading,
     isFetching: accountsQuery.isFetching,
     error: accountsQuery.error,
@@ -66,6 +67,8 @@ function fromAppAccount(account: AccountSummary) {
     type: account.type,
     currentBalance: account.balance,
     currency: account.currency,
+    status: account.status,
+    archivedAt: account.archivedAt,
     updatedAt: account.updatedAt,
   };
 }

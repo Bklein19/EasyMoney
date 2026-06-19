@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Building2, Check, CreditCard, Edit3, Landmark, PiggyBank, X } from 'lucide-react';
+import { Archive, Building2, Check, CreditCard, Edit3, Landmark, PiggyBank, RotateCcw, X } from 'lucide-react';
 import { useAccounts } from '../../hooks/useAccounts';
 import { getAccountTypeLabel } from '../../utils/formatters';
 import './AccountCard.css';
@@ -15,11 +15,13 @@ const getAccountIcon = (type) => {
 };
 
 export default function AccountCard({ account }) {
-  const { updateAccount } = useAccounts();
+  const { updateAccount, archiveAccount, unarchiveAccount } = useAccounts();
   const [isEditing, setIsEditing] = useState(false);
   const [draftName, setDraftName] = useState(account.name || '');
   const [isSaving, setIsSaving] = useState(false);
+  const [isArchiving, setIsArchiving] = useState(false);
   const [error, setError] = useState('');
+  const isArchived = account.status === 'archived';
 
   const handleStartEdit = () => {
     setDraftName(account.name || '');
@@ -60,10 +62,31 @@ export default function AccountCard({ account }) {
     }
   };
 
+  const handleArchiveToggle = async () => {
+    const confirmed = window.confirm(isArchived
+      ? `Unarchive ${account.name}? It will be available for imports and reports again.`
+      : `Archive ${account.name}? Source facts and annotations will be preserved.`);
+    if (!confirmed) return;
+
+    setIsArchiving(true);
+    setError('');
+    try {
+      if (isArchived) {
+        await unarchiveAccount(account.id);
+      } else {
+        await archiveAccount(account.id);
+      }
+    } catch (archiveError) {
+      setError(archiveError?.message || 'Could not update account archive status.');
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
   const isNegative = account.currentBalance < 0;
 
   return (
-    <div className="account-card glass-card">
+    <div className={`account-card glass-card ${isArchived ? 'is-archived' : ''}`}>
       <div className="account-header">
         <div className="account-icon-wrapper">
           {getAccountIcon(account.type)}
@@ -71,6 +94,14 @@ export default function AccountCard({ account }) {
         <div className="account-actions">
           <button className="icon-btn" onClick={handleStartEdit} title="Edit account name" disabled={isEditing}>
             <Edit3 size={16} />
+          </button>
+          <button
+            className="icon-btn"
+            onClick={handleArchiveToggle}
+            title={isArchived ? 'Unarchive account' : 'Archive account'}
+            disabled={isEditing || isArchiving}
+          >
+            {isArchived ? <RotateCcw size={16} /> : <Archive size={16} />}
           </button>
         </div>
       </div>
@@ -104,7 +135,10 @@ export default function AccountCard({ account }) {
           <h3 className="account-name">{account.name}</h3>
         )}
         <p className="account-institution">{account.institution || 'No Institution'}</p>
-        <span className="account-type-badge">{getAccountTypeLabel(account.type)}</span>
+        <div className="account-badges">
+          <span className="account-type-badge">{getAccountTypeLabel(account.type)}</span>
+          {isArchived && <span className="account-type-badge archived">Archived</span>}
+        </div>
       </div>
 
       <div className="account-balance">
