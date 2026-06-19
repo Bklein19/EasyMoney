@@ -16,7 +16,7 @@ export const meta: ParserMeta = {
       /(Portfolio Value|Net Account Balance|Account #:)/i.test(sample)),
 };
 
-const ACTIVITY_ACTIONS = new Set(["ACATI", "ACH", "BTO", "INT", "MTCH", "STC", "STO", "XENT_CC", "Buy", "Sell"]);
+const ACTIVITY_ACTIONS = new Set(["ACATI", "ACH", "BTO", "DRFRO", "INT", "MTCH", "STC", "STO", "XENT_CC", "Buy", "Sell"]);
 const DEBIT_ACTIONS = new Set(["BTO", "Buy"]);
 const SKIP_LINES = [
   /^Page of\d+ \d+$/,

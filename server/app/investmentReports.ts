@@ -1,6 +1,7 @@
 import { getDb, syncLedgerReadModelFromLegacyTables } from '../database.js';
 import { classifyFlow } from './flowClassification.ts';
 import { summarizeReturns, type ReturnSummary } from './returns.ts';
+import { deriveTransferLinks, type TransferLink } from '../../money/src/transferLinks.ts';
 
 export interface InvestmentAccountSummary {
   id: number;
@@ -25,10 +26,7 @@ export interface InvestmentMonthlyRow {
 export interface InvestmentNetWorthReport {
   accounts: InvestmentAccountSummary[];
   rows: InvestmentMonthlyRow[];
-  transfer_links: Array<{
-    source_transaction_ids: string[];
-    destination_transaction_ids: string[];
-  }>;
+  transfer_links: TransferLink[];
   returns: ReturnSummary[];
 }
 
@@ -270,6 +268,8 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
     gainsByMonth: Map<string, number>;
     contribAdjust: Map<string, number>;
     gainsAdjust: Map<string, number>;
+    firstMonth: string | null;
+    startingAmount: number;
   }>();
 
   for (const account of accounts) {
@@ -326,6 +326,9 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
       }
       const startingAmount = firstBalance - flowsThrough;
       if (startingAmount !== 0) contribAdjust.set(firstMonth, startingAmount);
+      perAccount.set(account.id, { gainsByMonth, contribAdjust, gainsAdjust, firstMonth, startingAmount });
+    } else {
+      perAccount.set(account.id, { gainsByMonth, contribAdjust, gainsAdjust, firstMonth, startingAmount: 0 });
     }
 
     if (account.flow_treatment === 'contributions' || isCashLikeAccount(account)) {
@@ -334,8 +337,37 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
         gainsByMonth.set(month, 0);
       }
     }
+  }
 
-    perAccount.set(account.id, { gainsByMonth, contribAdjust, gainsAdjust });
+  const transferFacts = deriveTransferLinks({
+    accounts,
+    sortedMonths,
+    flows,
+    balances: latestBalanceByMonthAccount,
+    seeds: new Map(
+      [...perAccount].map(([account_id, state]) => [
+        account_id,
+        {
+          account_id,
+          firstMonth: state.firstMonth,
+          startingAmount: state.startingAmount,
+          contributionAdjustments: state.contribAdjust,
+        },
+      ])
+    ),
+    transactions: txs,
+  });
+  for (const adjustment of transferFacts.adjustments) {
+    const accountState = perAccount.get(adjustment.account_id);
+    if (!accountState) continue;
+    accountState.contribAdjust.set(
+      adjustment.month,
+      (accountState.contribAdjust.get(adjustment.month) ?? 0) + adjustment.contributions_cents
+    );
+    accountState.gainsAdjust.set(
+      adjustment.month,
+      (accountState.gainsAdjust.get(adjustment.month) ?? 0) + adjustment.gains_cents
+    );
   }
 
   const returns: ReturnSummary[] = [];
@@ -384,7 +416,7 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
     }
   }
 
-  return { accounts, rows, transfer_links: [], returns };
+  return { accounts, rows, transfer_links: transferFacts.links, returns };
 }
 
 export function getSavingsRateReport(): SavingsRateReport {

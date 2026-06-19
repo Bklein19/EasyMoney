@@ -872,6 +872,114 @@ test('investment report endpoints expose money-style ledger reports', async () =
   }));
 });
 
+test('investment report carries basis and gains across Roth IRA transfers', async () => {
+  const fidelityRothId = Number(insertRow('accounts', {
+    name: 'Roth Individual',
+    institution: 'Fidelity',
+    type: 'investment',
+    currentBalance: 0,
+  }));
+  const robinhoodRothId = Number(insertRow('accounts', {
+    name: 'Robinhood Roth IRA - 8978',
+    institution: 'Robinhood',
+    type: 'investment',
+    currentBalance: 0,
+  }));
+  const now = new Date().toISOString();
+
+  for (const row of [
+    { accountId: fidelityRothId, month: '2023-01', balanceCents: 943634, capturedAt: '2023-01-31T00:00:00.000Z' },
+    { accountId: fidelityRothId, month: '2024-03', balanceCents: 3760135, capturedAt: '2024-03-31T00:00:00.000Z' },
+    { accountId: fidelityRothId, month: '2024-04', balanceCents: 52074, capturedAt: '2024-04-30T00:00:00.000Z' },
+    { accountId: robinhoodRothId, month: '2024-04', balanceCents: 3565305, capturedAt: '2024-04-30T00:00:00.000Z' },
+  ]) {
+    insertRow('ledgerBalances', {
+      ...row,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  for (const row of [
+    {
+      ledgerTransactionId: 'fidelity-roth-acat-out',
+      accountId: fidelityRothId,
+      date: '2024-04-22',
+      amountCents: -3626685,
+      description: 'Fidelity transfer out: securities transferred out',
+    },
+    {
+      ledgerTransactionId: 'robinhood-roth-acat-cash-in',
+      accountId: robinhoodRothId,
+      date: '2024-04-22',
+      amountCents: 2122,
+      description: 'ACATI ACAT IN control_num = 20241070049362',
+    },
+    {
+      ledgerTransactionId: 'robinhood-roth-match',
+      accountId: robinhoodRothId,
+      date: '2024-04-22',
+      amountCents: 108271,
+      description: 'MTCH Interest on Contribution (IRA Match)',
+    },
+    {
+      ledgerTransactionId: 'robinhood-roth-spy-buy',
+      accountId: robinhoodRothId,
+      date: '2024-04-22',
+      amountCents: -110393,
+      description: 'Buy SPDR S&P 500 ETF',
+    },
+  ]) {
+    insertRow('ledgerTransactions', {
+      ...row,
+      sourceRole: 'activity',
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  const netWorth = await getJson('/api/networth') as {
+    rows: Array<{
+      month: string;
+      account_id: number;
+      contributions_cents: number;
+      interest_cents: number;
+      gains_cents: number | null;
+      end_balance_cents: number | null;
+    }>;
+    transfer_links: Array<{
+      source_account_id: number;
+      destination_account_id: number;
+      amount_cents: number;
+      basis_cents: number;
+      gains_cents: number;
+    }>;
+  };
+
+  expect(netWorth.transfer_links).toContainEqual(expect.objectContaining({
+    source_account_id: fidelityRothId,
+    destination_account_id: robinhoodRothId,
+    amount_cents: 3457034,
+    basis_cents: 943634,
+    gains_cents: 2513400,
+  }));
+  expect(netWorth.rows).toContainEqual(expect.objectContaining({
+    month: '2024-04',
+    account_id: robinhoodRothId,
+    contributions_cents: 943634,
+    interest_cents: 108271,
+    gains_cents: 2513400,
+    end_balance_cents: 3565305,
+  }));
+  expect(netWorth.rows).toContainEqual(expect.objectContaining({
+    month: '2024-04',
+    account_id: fidelityRothId,
+    contributions_cents: -943634,
+    gains_cents: -2764427,
+    end_balance_cents: 52074,
+  }));
+});
+
 test('init database backfills ledger read model from legacy app tables', () => {
   const accountId = Number(insertRow('accounts', {
     name: 'Checking',

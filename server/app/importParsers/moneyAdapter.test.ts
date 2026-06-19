@@ -701,6 +701,37 @@ test('Robinhood statement parser handles older Roth IRA statement layouts', () =
   }]);
 });
 
+test('Robinhood statement parser extracts direct rollover contribution rows', () => {
+  const result = parseRobinhoodStatementText([
+    '2024-05-01 to 2024-05-31',
+    'ALEX EXAMPLE Account #:555556666',
+    'Roth IRA',
+    'Account Summary Opening Balance Closing Balance',
+    'Portfolio Value $35,653.05 $60,096.67',
+    'Account Activity',
+    'Description Symbol Acct Type Trans Type Record Date Qty Price Debit Credit',
+    'Direct Rollover Check Received as of 2024-05-22 Cash DRFRO 5/23/2024 $21,685.84',
+  ].join('\n'));
+
+  expect(result.transactions.map(transaction => ({
+    date: transaction.date,
+    amount_cents: transaction.amount_cents,
+    description: transaction.description,
+    account: transaction.account,
+    action: transaction.raw.action,
+    symbol: transaction.raw.symbol,
+    accountType: transaction.raw.accountType,
+  }))).toEqual([{
+    date: '2024-05-23',
+    amount_cents: 2168584,
+    description: 'DRFRO Direct Rollover Check Received as of 2024-05-22',
+    account: 'Robinhood Roth IRA - 8978',
+    action: 'DRFRO',
+    symbol: null,
+    accountType: 'Cash',
+  }]);
+});
+
 test('import parser registry resolves Robinhood banking UUID exports', async () => {
   const parser = resolveImportParser({
     fileName: '26611d63-2108-411a-8e6d-faa71d80999c.csv',
