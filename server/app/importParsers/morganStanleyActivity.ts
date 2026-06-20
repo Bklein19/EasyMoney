@@ -1,4 +1,4 @@
-import { meta, default as parse } from '../../../money/parsers/morgan-stanley-activity-pdf.ts';
+import { meta, default as parse } from './moneyParsers/morgan-stanley-activity-pdf.ts';
 import { createMoneyParserAdapter } from './moneyAdapter.ts';
 
 export const morganStanleyActivityParser = createMoneyParserAdapter({

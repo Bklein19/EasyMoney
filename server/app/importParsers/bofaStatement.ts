@@ -1,4 +1,4 @@
-import { meta, default as parse } from '../../../money/parsers/bofa-statement-pdf.ts';
+import { meta, default as parse } from './moneyParsers/bofa-statement-pdf.ts';
 import { createMoneyParserAdapter } from './moneyAdapter.ts';
 
 export const bofaStatementParser = createMoneyParserAdapter({

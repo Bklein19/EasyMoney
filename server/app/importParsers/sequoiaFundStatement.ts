@@ -1,4 +1,4 @@
-import { meta, default as parse } from '../../../money/parsers/sequoia-fund-pdf.ts';
+import { meta, default as parse } from './moneyParsers/sequoia-fund-pdf.ts';
 import { createMoneyParserAdapter } from './moneyAdapter.ts';
 
 export const sequoiaFundStatementParser = createMoneyParserAdapter({

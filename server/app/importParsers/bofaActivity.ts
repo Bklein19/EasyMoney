@@ -1,4 +1,4 @@
-import { meta, default as parse } from '../../../money/parsers/bofa-activity-csv.ts';
+import { meta, default as parse } from './moneyParsers/bofa-activity-csv.ts';
 import { createMoneyParserAdapter } from './moneyAdapter.ts';
 
 export const bofaActivityParser = createMoneyParserAdapter({

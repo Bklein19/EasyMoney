@@ -15,6 +15,7 @@
 
 EasyMoney is moving from legacy table CRUD toward a source-fact ledger model.
 
+- `money/` is reference material only. Do not import from it, run it as a workspace, or modify it as part of EasyMoney changes unless the user explicitly asks.
 - Raw imports and parsed facts are the durable source of truth.
 - Ledger/materialized tables are read models rebuilt from committed source facts.
 - New product behavior should go through the typed application layer, not direct table-shaped CRUD.

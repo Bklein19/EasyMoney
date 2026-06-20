@@ -1,4 +1,4 @@
-import { meta, default as parse } from '../../../money/parsers/fidelity-netbenefits-statement-pdf.ts';
+import { meta, default as parse } from './moneyParsers/fidelity-netbenefits-statement-pdf.ts';
 import { createMoneyParserAdapter } from './moneyAdapter.ts';
 
 export const fidelityNetBenefitsStatementParser = createMoneyParserAdapter({

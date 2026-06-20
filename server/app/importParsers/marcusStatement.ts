@@ -1,4 +1,4 @@
-import { meta, default as parse } from '../../../money/parsers/marcus-statement-pdf.ts';
+import { meta, default as parse } from './moneyParsers/marcus-statement-pdf.ts';
 import { createMoneyParserAdapter } from './moneyAdapter.ts';
 
 export const marcusStatementParser = createMoneyParserAdapter({

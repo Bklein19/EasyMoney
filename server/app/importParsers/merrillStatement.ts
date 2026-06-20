@@ -1,4 +1,4 @@
-import { meta, default as parse } from '../../../money/parsers/merrill-cma-statement-pdf.ts';
+import { meta, default as parse } from './moneyParsers/merrill-cma-statement-pdf.ts';
 import { createMoneyParserAdapter } from './moneyAdapter.ts';
 
 export const merrillStatementParser = createMoneyParserAdapter({

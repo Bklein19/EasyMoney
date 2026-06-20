@@ -4,9 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { resolveImportParser } from './index.ts';
 import { createMoneyParserAdapter } from './moneyAdapter.ts';
-import { parseRobinhoodStatementText } from '../../../money/parsers/robinhood-statement-pdf.ts';
-import { parseNetBenefitsStatementText } from '../../../money/parsers/fidelity-netbenefits-statement-pdf.ts';
-import { parseFidelityPortfolioStatementText } from '../../../money/parsers/fidelity-portfolio-statement-pdf.ts';
+import { parseRobinhoodStatementText } from './moneyParsers/robinhood-statement-pdf.ts';
+import { parseNetBenefitsStatementText } from './moneyParsers/fidelity-netbenefits-statement-pdf.ts';
+import { parseFidelityPortfolioStatementText } from './moneyParsers/fidelity-portfolio-statement-pdf.ts';
 
 test('money parser adapter translates money activity output to app import output', async () => {
   const parser = createMoneyParserAdapter({

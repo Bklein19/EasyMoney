@@ -1,9 +1,6 @@
 {
   "name": "easymoney",
   "private": true,
-  "workspaces": [
-    "money"
-  ],
   "version": "0.0.0",
   "type": "module",
   "scripts": {
@@ -15,6 +12,7 @@
     "build:client": "bun scripts/build-client.js",
     "start": "bun server/index.ts",
     "lint": "eslint .",
+    "test": "bun test",
     "preview": "bun run build && bun run start",
     "typecheck": "bunx tsc --noEmit"
   },
@@ -32,6 +30,7 @@
     "react-dom": "^19.2.6",
     "react-router": "^7.15.1",
     "recharts": "^3.8.1",
+    "unpdf": "^1.6.2",
     "ws": "^8.21.0",
     "zod": "^4.4.3"
   },

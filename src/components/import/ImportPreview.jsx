@@ -82,7 +82,19 @@ function selectedExistingAccountId(decision, mapping) {
   return null;
 }
 
-export default function ImportPreview({ transactions, importMeta, isBatchImport = false, autoImportAll = false, onStartAutoImportAll, onAutoImportBlocked, onComplete, onCancel }) {
+function previewStateKey(importMeta) {
+  const mappings = importMeta?.accountMappings || [];
+  return [
+    importMeta?.importFileId || 'no-file',
+    mappings.map(mapping => [
+      mapping.sourceAccountId,
+      mapping.resolution,
+      mapping.resolvedAccountId || '',
+    ].join(':')).join('|'),
+  ].join(':');
+}
+
+function ImportPreviewContent({ transactions, importMeta, isBatchImport = false, autoImportAll = false, onStartAutoImportAll, onAutoImportBlocked, onComplete, onCancel }) {
   const { accounts } = useAccounts({ includeArchived: true });
   const accountMappings = useMemo(() => importMeta?.accountMappings || [], [importMeta?.accountMappings]);
   const activeAccounts = accounts.filter(account => account.status !== 'archived');
@@ -93,17 +105,6 @@ export default function ImportPreview({ transactions, importMeta, isBatchImport 
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
   const [duplicateModalSeenKey, setDuplicateModalSeenKey] = useState('');
   const [isImporting, setIsImporting] = useState(false);
-  const importFileId = importMeta?.importFileId;
-
-  useEffect(() => {
-    setMappingDecisions(Object.fromEntries(
-      accountMappings.map(mapping => [String(mapping.sourceAccountId), initialDecision(mapping)])
-    ));
-    setForceImportRowIds(new Set());
-    setIsDuplicateModalOpen(false);
-    setDuplicateModalSeenKey('');
-    setIsImporting(false);
-  }, [importFileId, accountMappings]);
 
   const validTransactions = transactions.filter(t => t && t.date && typeof t.amount === 'number');
   const balanceCount = importMeta?.balanceRowIds?.length || 0;
@@ -584,4 +585,8 @@ export default function ImportPreview({ transactions, importMeta, isBatchImport 
       )}
     </div>
   );
+}
+
+export default function ImportPreview(props) {
+  return <ImportPreviewContent key={previewStateKey(props.importMeta)} {...props} />;
 }

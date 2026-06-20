@@ -1,5 +1,5 @@
 import type { AppImportParseInput, AppImportParseResult, AppImportParser } from '../importTypes.ts';
-import type { ParseResult, ParserMeta } from '../../../money/src/types.ts';
+import type { ParseResult, ParserMeta } from './moneyParsers/types.ts';
 
 type MoneyParse = (filePath: string) => Promise<ParseResult>;
 

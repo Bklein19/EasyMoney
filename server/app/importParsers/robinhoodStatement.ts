@@ -1,5 +1,5 @@
 import type { AppImportParseInput, AppImportParseResult, AppImportParser } from '../importTypes.ts';
-import { meta, default as parse } from '../../../money/parsers/robinhood-statement-pdf.ts';
+import { meta, default as parse } from './moneyParsers/robinhood-statement-pdf.ts';
 import { createMoneyParserAdapter } from './moneyAdapter.ts';
 
 const adapted = createMoneyParserAdapter({
