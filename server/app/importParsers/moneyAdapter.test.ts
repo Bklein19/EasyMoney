@@ -7,6 +7,7 @@ import { createMoneyParserAdapter } from './moneyAdapter.ts';
 import { parseRobinhoodStatementText } from './moneyParsers/robinhood-statement-pdf.ts';
 import { parseNetBenefitsStatementText } from './moneyParsers/fidelity-netbenefits-statement-pdf.ts';
 import { parseFidelityPortfolioStatementText } from './moneyParsers/fidelity-portfolio-statement-pdf.ts';
+import { parseWellsFargoStatementText } from './moneyParsers/wells-fargo-statement-pdf.ts';
 
 test('money parser adapter translates money activity output to app import output', async () => {
   const parser = createMoneyParserAdapter({
@@ -296,6 +297,64 @@ test('import parser registry resolves raw files with stored content-hash prefixe
   });
 
   expect(parser?.id).toBe('morgan-stanley-pdf');
+});
+
+test('import parser registry resolves Wells Fargo statements imported from folders', () => {
+  const parser = resolveImportParser({
+    fileName: 'wells-fargo-statements/checking-8858/wells-fargo-checking-8858-2019-01-28.pdf',
+    headers: [],
+    sample: 'Wells Fargo Everyday Checking Ending balance on 1/28 $2,564.53',
+  });
+
+  expect(parser?.id).toBe('wells-fargo-statement-pdf');
+});
+
+test('Wells Fargo checking statement parser infers signs from running balances', () => {
+  const result = parseWellsFargoStatementText([
+    'Wells Fargo Everyday Checking',
+    'Account number: 000000008858',
+    'Beginning balance on 10/26 $13,830.50',
+    'Transaction history',
+    '10/27 Mineraltree, Inc Quickbooks 191027 xxxxx2885 Example, Alex C 1,500.00',
+    '10/28 Robinhood Debits xxxxx9769 Alex Example 420.00 13,410.50',
+    '11/1 Venmo Cashout 211101 2222222222 Alex Example 572.20',
+    '11/1 Barclaycard US Creditcard xxxxx7805 Alex Example 763.44 13,047.87',
+    '11/10 National Grid NE Utilitypay Nov 21 04424212798 Alex Example 8.62 13,039.25',
+    'Totals',
+    'Ending balance on 11/24 $13,039.25',
+  ].join('\n'), 'wells-fargo-statements/checking-8858/wells-fargo-checking-8858-2021-11-24.pdf');
+
+  expect(result.transactions.map(transaction => ({
+    date: transaction.date,
+    amount_cents: transaction.amount_cents,
+    description: transaction.description,
+  }))).toEqual([{
+    date: '2021-10-27',
+    amount_cents: 150000,
+    description: 'Mineraltree, Inc Quickbooks 191027 xxxxx2885 Example, Alex C',
+  }, {
+    date: '2021-10-28',
+    amount_cents: -42000,
+    description: 'Robinhood Debits xxxxx9769 Alex Example',
+  }, {
+    date: '2021-11-01',
+    amount_cents: 57220,
+    description: 'Venmo Cashout 211101 2222222222 Alex Example',
+  }, {
+    date: '2021-11-01',
+    amount_cents: -76344,
+    description: 'Barclaycard US Creditcard xxxxx7805 Alex Example',
+  }, {
+    date: '2021-11-10',
+    amount_cents: -862,
+    description: 'National Grid NE Utilitypay Nov 21 04424212798 Alex Example',
+  }]);
+  expect(result.balances).toEqual([{
+    date: '2021-11-24',
+    account: 'Checking - 8858',
+    institution: 'Wells Fargo',
+    balance_cents: 1303925,
+  }]);
 });
 
 test.each([

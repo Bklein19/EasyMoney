@@ -522,6 +522,51 @@ test('app transactions endpoint supports infinite-scroll paging metadata', async
   expect(secondPage.nextOffset).toBeNull();
 });
 
+test('app transactions endpoint filters uncategorized transactions by missing or explicit uncategorized category', async () => {
+  const accountId = insertRow('accounts', {
+    name: 'Checking',
+    institution: 'Local Bank',
+    type: 'checking',
+  });
+  const uncategorizedId = insertRow('categories', { name: 'Uncategorized', type: 'expense' });
+  const foodId = insertRow('categories', { name: 'Food', type: 'expense' });
+
+  const missingCategoryId = insertRow('transactions', {
+    accountId,
+    date: '2026-06-14',
+    amount: -10,
+    description: 'Missing category',
+    type: 'expense',
+  });
+  const explicitUncategorizedId = insertRow('transactions', {
+    accountId,
+    date: '2026-06-15',
+    amount: -20,
+    description: 'Explicit uncategorized',
+    type: 'expense',
+  });
+  await putJson(`/api/transactions/${explicitUncategorizedId}`, { categoryId: uncategorizedId });
+  const categorizedId = insertRow('transactions', {
+    accountId,
+    date: '2026-06-16',
+    amount: -30,
+    description: 'Categorized',
+    type: 'expense',
+  });
+  await putJson(`/api/transactions/${categorizedId}`, { categoryId: foodId });
+
+  const body = await getJson('/api/app/transactions?categoryId=uncategorized');
+
+  expect(body.transactions.map((transaction: { description: string }) => transaction.description)).toEqual([
+    'Explicit uncategorized',
+    'Missing category',
+  ]);
+  expect(body.transactions.map((transaction: { id: number }) => transaction.id)).toEqual([
+    explicitUncategorizedId,
+    missingCategoryId,
+  ]);
+});
+
 test('app transactions search includes notes', async () => {
   const accountId = insertRow('accounts', {
     name: 'Checking',
@@ -977,6 +1022,90 @@ test('investment report carries basis and gains across Roth IRA transfers', asyn
     contributions_cents: -943634,
     gains_cents: -2764427,
     end_balance_cents: 52074,
+  }));
+});
+
+test('net worth uses balance snapshots rather than transaction activity for cash accounts', async () => {
+  const checkingWithoutBalancesId = Number(insertRow('accounts', {
+    name: 'CSV-only Checking',
+    institution: 'Wells Fargo',
+    type: 'checking',
+    currentBalance: 0,
+  }));
+  const checkingWithBalancesId = Number(insertRow('accounts', {
+    name: 'Statement Checking',
+    institution: 'Wells Fargo',
+    type: 'checking',
+    currentBalance: 0,
+  }));
+  const now = new Date().toISOString();
+
+  for (const row of [
+    {
+      ledgerTransactionId: 'csv-only-checking-spend',
+      accountId: checkingWithoutBalancesId,
+      date: '2026-01-10',
+      amountCents: -2500,
+      description: 'Coffee shop',
+    },
+    {
+      ledgerTransactionId: 'statement-checking-payroll',
+      accountId: checkingWithBalancesId,
+      date: '2026-01-15',
+      amountCents: 100000,
+      description: 'Payroll deposit',
+    },
+    {
+      ledgerTransactionId: 'statement-checking-rent',
+      accountId: checkingWithBalancesId,
+      date: '2026-02-01',
+      amountCents: -180000,
+      description: 'Rent payment',
+    },
+  ]) {
+    insertRow('ledgerTransactions', {
+      ...row,
+      sourceRole: 'activity',
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  for (const row of [
+    { accountId: checkingWithBalancesId, month: '2026-01', balanceCents: 500000, capturedAt: '2026-01-31T00:00:00.000Z' },
+    { accountId: checkingWithBalancesId, month: '2026-02', balanceCents: 425000, capturedAt: '2026-02-28T00:00:00.000Z' },
+  ]) {
+    insertRow('ledgerBalances', {
+      ...row,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  const netWorth = await getJson('/api/networth') as {
+    rows: Array<{
+      month: string;
+      account_id: number;
+      contributions_cents: number;
+      gains_cents: number | null;
+      end_balance_cents: number | null;
+    }>;
+  };
+
+  expect(netWorth.rows.some(row => row.account_id === checkingWithoutBalancesId)).toBe(false);
+  expect(netWorth.rows).toContainEqual(expect.objectContaining({
+    month: '2026-01',
+    account_id: checkingWithBalancesId,
+    contributions_cents: 500000,
+    gains_cents: 0,
+    end_balance_cents: 500000,
+  }));
+  expect(netWorth.rows).toContainEqual(expect.objectContaining({
+    month: '2026-02',
+    account_id: checkingWithBalancesId,
+    contributions_cents: -75000,
+    gains_cents: 0,
+    end_balance_cents: 425000,
   }));
 });
 

@@ -45,6 +45,10 @@ function optionalString(value: string | number | null | undefined): string | nul
   return String(value);
 }
 
+function isUncategorizedFilter(value: string | number | null | undefined): boolean {
+  return typeof value === 'string' && value.toLowerCase() === 'uncategorized';
+}
+
 function clampLimit(value: number | null): number | null {
   if (value === null) return null;
   return Math.max(1, Math.min(value, 250));
@@ -147,7 +151,9 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
   }
 
   const categoryId = optionalNumber(options.categoryId);
-  if (categoryId !== null) {
+  if (isUncategorizedFilter(options.categoryId)) {
+    clauses.push("(ta.categoryId IS NULL OR lower(c.name) = 'uncategorized')");
+  } else if (categoryId !== null) {
     clauses.push('ta.categoryId = $categoryId');
     params.categoryId = categoryId;
   }

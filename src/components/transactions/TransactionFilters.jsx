@@ -80,9 +80,12 @@ export default function TransactionFilters({ filters, setFilters }) {
         onChange={handleChange}
       >
         <option value="">All Categories</option>
-        {categories.map(c => (
-          <option key={c.id} value={c.id}>{c.name}</option>
-        ))}
+        <option value="uncategorized">Uncategorized</option>
+        {categories
+          .filter(c => c.name.toLowerCase() !== 'uncategorized')
+          .map(c => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
       </select>
 
       <select 

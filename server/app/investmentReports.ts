@@ -1,7 +1,7 @@
 import { getDb, syncLedgerReadModelFromLegacyTables } from '../database.js';
 import { classifyFlow } from './flowClassification.ts';
 import { summarizeReturns, type ReturnSummary } from './returns.ts';
-import { deriveTransferLinks, type TransferLink } from '../../money/src/transferLinks.ts';
+import { deriveTransferLinks, type TransferLink } from './transferLinks.ts';
 
 export interface InvestmentAccountSummary {
   id: number;
@@ -242,6 +242,7 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
   const balanceSnapshots = getLedgerBalances();
 
   const latestBalanceByMonthAccount = new Map<string, number>();
+  const accountsWithBalanceSnapshots = new Set<number>();
   const months = new Set<string>();
   const flowKey = (month: string, accountId: number) => `${month}|${accountId}`;
 
@@ -249,6 +250,7 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
   for (const balance of balanceSnapshots) {
     months.add(balance.month);
     latestBalanceByMonthAccount.set(flowKey(balance.month, balance.account_id), balance.balance_cents);
+    accountsWithBalanceSnapshots.add(balance.account_id);
   }
 
   const flows = new Map<string, { contributions: number; dividends: number; interest: number }>();
@@ -387,6 +389,29 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
 
   for (const account of accounts) {
     const accountState = perAccount.get(account.id)!;
+    if (isCashLikeAccount(account)) {
+      if (!accountsWithBalanceSnapshots.has(account.id)) continue;
+
+      let previousBalance: number | null = null;
+      for (const month of sortedMonths) {
+        const endBalance = latestBalanceByMonthAccount.get(flowKey(month, account.id)) ?? null;
+        if (endBalance === null) continue;
+        const contributions = previousBalance === null ? endBalance : endBalance - previousBalance;
+        previousBalance = endBalance;
+
+        rows.push({
+          month,
+          account_id: account.id,
+          contributions_cents: contributions,
+          dividends_cents: 0,
+          interest_cents: 0,
+          gains_cents: 0,
+          end_balance_cents: endBalance,
+        });
+      }
+      continue;
+    }
+
     for (const month of sortedMonths) {
       const flow = flows.get(flowKey(month, account.id)) ?? { contributions: 0, dividends: 0, interest: 0 };
       const contributionAdjustment = accountState.contribAdjust.get(month) ?? 0;

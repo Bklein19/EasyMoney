@@ -1,8 +1,6 @@
 import type { ParseResult, ParserMeta } from "./types.ts";
-import { makeTx } from "./_helpers";
+import { makeTx, pdfToText } from "./_helpers";
 import { getDocumentProxy, extractText } from "unpdf";
-import { execSync } from "node:child_process";
-import { writeFileSync, unlinkSync } from "node:fs";
 
 export const meta: ParserMeta = {
   id: "fidelity-investment-report-pdf",
@@ -16,20 +14,8 @@ function parseMoneyToCents(s: string): number {
   return Math.round(parseFloat(s.replace(/[$,]/g, "").trim()) * 100);
 }
 
-// Local because unpdf detaches the original ArrayBuffer; we need a separate copy.
-function pdfToLayoutText(buf: Buffer): string {
-  const tmp = `/tmp/fid-parse-${Date.now()}-${Math.random().toString(36).slice(2)}.pdf`;
-  writeFileSync(tmp, buf);
-  try {
-    return execSync(`pdftotext -layout "${tmp}" - 2>/dev/null`, { maxBuffer: 32 * 1024 * 1024 }).toString();
-  } finally {
-    try { unlinkSync(tmp); } catch {}
-  }
-}
-
 export default async function parse(filePath: string): Promise<ParseResult> {
   const buf = await Bun.file(filePath).arrayBuffer();
-  const bufCopy = Buffer.from(new Uint8Array(buf)); // unpdf detaches the original
   const pdf = await getDocumentProxy(new Uint8Array(buf));
   const { text: pageTexts } = await extractText(pdf);
   const fullText = pageTexts.join("\n");
@@ -59,7 +45,7 @@ export default async function parse(filePath: string): Promise<ParseResult> {
   // Dated activity: RSU vests, ESPP purchases, tax journals, EFT transfers — external
   // flows (compensation in, taxes/cash out). Regular buys/sells are internal, skipped.
   const transactions: ParseResult["transactions"] = [];
-  const layoutText = pdfToLayoutText(bufCopy);
+  const layoutText = await pdfToText(filePath, true);
 
   const fromYear = parseInt(covered_from.slice(0, 4));
   const toYear = parseInt(covered_to.slice(0, 4));

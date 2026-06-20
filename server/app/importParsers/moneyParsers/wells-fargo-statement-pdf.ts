@@ -21,7 +21,7 @@ function cleanDescription(value: string): string {
 
 function filenameAccount(filePath: string): { slug?: string; last4?: string; date?: string } {
   const filename = basename(filePath).replace(/^[0-9a-f]{64}-/, "");
-  const m = filename.match(/^wells-fargo-(checking|autograph-visa|platinum-card)-(\d{4})-(\d{4}-\d{2}-\d{2})\.pdf$/i);
+  const m = filename.match(/wells-fargo-(checking|autograph-visa|platinum-card)-(\d{4})-(\d{4}-\d{2}-\d{2})\.pdf$/i);
   return { slug: m?.[1]?.toLowerCase(), last4: m?.[2], date: m?.[3] };
 }
 
@@ -86,12 +86,39 @@ function parseCardPeriod(text: string): { covered_from: string; covered_to: stri
   };
 }
 
-function parseDepositTransactions(text: string, account: string, coveredTo: string): ParseResult["transactions"] {
+function inferDepositSign(description: string): 1 | -1 {
+  const normalized = description.toLowerCase();
+  if (
+    /\b(cashout|deposit|payroll|rewards|fee refund|interest payment)\b/.test(normalized) ||
+    /\bmineraltree\b.*\bquickbooks\b/.test(normalized) ||
+    /\bmineraltree cdnother mineraltree\b/.test(normalized) ||
+    /\bzelle from\b/.test(normalized) ||
+    /\btransfer from\b/.test(normalized)
+  ) {
+    return 1;
+  }
+  if (
+    /\b(payment|debits?|creditcard|utilitypay|ach pmt|purchase|withdrawal|rent)\b/.test(normalized) ||
+    /\bzelle to\b/.test(normalized) ||
+    /\btransfer .* to\b/.test(normalized)
+  ) {
+    return -1;
+  }
+  return -1;
+}
+
+function parseDepositTransactions(
+  text: string,
+  account: string,
+  coveredTo: string
+): ParseResult["transactions"] {
   const lines = text.split(/\n/);
   const header = lines.find((line) => /Deposits\/\s+Withdrawals\/\s+Ending daily/i.test(line));
   const depositCol = header?.indexOf("Deposits/") ?? 105;
   const withdrawalCol = header?.indexOf("Withdrawals/") ?? 124;
   const endingCol = header?.indexOf("Ending daily") ?? 145;
+  const beginning = text.match(/Beginning balance on\s+\d{1,2}\/\d{1,2}\s+\$?([\d,]+\.\d{2})/);
+  let runningBalance = beginning ? cents(beginning[1]!) : null;
 
   const transactions: ParseResult["transactions"] = [];
   let current:
@@ -143,13 +170,30 @@ function parseDepositTransactions(text: string, account: string, coveredTo: stri
       }
 
       const firstMoney = moneyMatches[0]!;
+      const lastMoney = moneyMatches[moneyMatches.length - 1]!;
       const firstMoneyCol = restStart + firstMoney.index!;
-      const isEndingBalanceOnly = firstMoneyCol >= endingCol - 4 && moneyMatches.length === 1;
+      const isEndingBalanceOnly =
+        firstMoneyCol >= endingCol - 4 &&
+        moneyMatches.length === 1 &&
+        current === undefined;
       if (isEndingBalanceOnly) continue;
 
       const amount = cents(firstMoney[0]);
-      const signed = firstMoneyCol >= withdrawalCol - 4 ? -Math.abs(amount) : Math.abs(amount);
+      const endingBalance = moneyMatches.length >= 2 ? cents(lastMoney[0]) : null;
       const description = cleanDescription(rest.slice(0, firstMoney.index).trim());
+      let signed: number;
+
+      if (endingBalance !== null && runningBalance !== null) {
+        const delta = endingBalance - runningBalance;
+        signed = Math.abs(Math.abs(delta) - amount) <= 1
+          ? delta
+          : inferDepositSign(description) * Math.abs(amount);
+        runningBalance = endingBalance;
+      } else {
+        signed = inferDepositSign(description) * Math.abs(amount);
+        if (runningBalance !== null) runningBalance += signed;
+      }
+
       flush();
       current = {
         date: isoStatementMonthDate(row[1]!, row[2]!, coveredTo),
@@ -288,8 +332,12 @@ function parseCreditCard(text: string, filePath: string): ParseResult {
   };
 }
 
-export default async function parse(filePath: string): Promise<ParseResult> {
-  const text = await pdfToText(filePath, true);
+export function parseWellsFargoStatementText(text: string, filePath: string): ParseResult {
   if (/Wells Fargo Everyday Checking/i.test(text)) return parseDeposit(text, filePath);
   return parseCreditCard(text, filePath);
+}
+
+export default async function parse(filePath: string): Promise<ParseResult> {
+  const text = await pdfToText(filePath, true);
+  return parseWellsFargoStatementText(text, filePath);
 }
