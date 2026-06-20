@@ -8,9 +8,7 @@ import {
   Activity,
   LineChart,
   Wallet,
-  PiggyBank,
-  ChevronLeft,
-  ChevronRight
+  PiggyBank
 } from 'lucide-react';
 import { AccountPicker } from '../investments/AccountPicker';
 import './Sidebar.css';
@@ -19,6 +17,7 @@ const REPORT_ROUTES = new Set(['/net-worth', '/performance', '/savings-rate']);
 const SIDEBAR_WIDTH_KEY = 'easymoney:sidebar-width';
 const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 520;
+const SIDEBAR_COLLAPSE_THRESHOLD = 150;
 
 const Sidebar = ({
   isMobileOpen,
@@ -57,7 +56,7 @@ const Sidebar = ({
   }, []);
 
   const startSidebarResize = (event) => {
-    if (!sidebarRef.current || isCollapsed) return;
+    if (!sidebarRef.current) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
     document.body.classList.add('sidebar-resizing');
@@ -65,7 +64,14 @@ const Sidebar = ({
 
     const setWidth = (clientX) => {
       if (!sidebarRef.current) return null;
-      const width = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, clientX - left));
+      const rawWidth = clientX - left;
+      if (rawWidth < SIDEBAR_COLLAPSE_THRESHOLD) {
+        onCollapsedChange?.(true);
+        return null;
+      }
+
+      onCollapsedChange?.(false);
+      const width = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, rawWidth));
       document.documentElement.style.setProperty('--sidebar-width', `${width}px`);
       sidebarRef.current.style.setProperty('--sidebar-width', `${width}px`);
       return width;
@@ -110,15 +116,6 @@ const Sidebar = ({
             </div>
             <span className="sidebar-brand-text">EasyMoney</span>
           </NavLink>
-          <button
-            className="sidebar-toggle"
-            type="button"
-            onClick={() => onCollapsedChange?.(!isCollapsed)}
-            aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-          </button>
         </div>
 
         <nav className="sidebar-nav">
@@ -153,7 +150,7 @@ const Sidebar = ({
           )}
         </nav>
 
-        {!isCollapsed && <div className="sidebar-resize-handle" onPointerDown={startSidebarResize} />}
+        <div className="sidebar-resize-handle" onPointerDown={startSidebarResize} />
       </div>
     </>
   );
