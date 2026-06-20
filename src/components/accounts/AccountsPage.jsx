@@ -15,6 +15,7 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }) {
     institution: account.institution || '',
     type: account.type || 'other',
     currency: account.currency || 'USD',
+    accountHolder: account.accountHolder || '',
   });
 
   const isArchived = account.status === 'archived';
@@ -22,7 +23,8 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }) {
     draft.name.trim() !== (account.name || '') ||
     draft.institution.trim() !== (account.institution || '') ||
     draft.type !== (account.type || 'other') ||
-    draft.currency !== (account.currency || 'USD');
+    draft.currency !== (account.currency || 'USD') ||
+    draft.accountHolder.trim() !== (account.accountHolder || '');
 
   const updateDraft = (field, value) => {
     setDraft(current => ({ ...current, [field]: value }));
@@ -35,6 +37,7 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }) {
       institution: draft.institution.trim() || null,
       type: draft.type,
       currency: draft.currency,
+      accountHolder: draft.accountHolder.trim() || null,
     });
   };
 
@@ -47,6 +50,17 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }) {
             id={`account-name-${account.id}`}
             value={draft.name}
             onChange={(event) => updateDraft('name', event.target.value)}
+            disabled={isSaving}
+          />
+        </div>
+
+        <div className="account-field account-field--wide">
+          <label htmlFor={`account-holder-${account.id}`}>Owner</label>
+          <input
+            id={`account-holder-${account.id}`}
+            value={draft.accountHolder}
+            placeholder="No owner"
+            onChange={(event) => updateDraft('accountHolder', event.target.value)}
             disabled={isSaving}
           />
         </div>
@@ -236,6 +250,7 @@ export default function AccountsPage() {
                       <td>
                         <div className="account-row__name" title={account.name}>
                           <span>{account.name}</span>
+                          {account.accountHolder && <span className="account-owner-badge">{account.accountHolder}</span>}
                           {account.isClosed && <span className="account-closed-badge">Closed</span>}
                         </div>
                         <div className="account-row__institution">{account.institution || 'No institution'}</div>

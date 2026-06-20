@@ -182,7 +182,7 @@ function getAccounts(): InvestmentAccountSummary[] {
         WHEN type IN ('checking', 'savings', 'cash', 'credit', 'credit_card', 'credit-card') THEN 'contributions'
         ELSE 'investment'
       END AS flow_treatment,
-      NULL AS account_holder
+      accountHolder AS account_holder
     FROM accounts
     ORDER BY institution, name
   `).all() as InvestmentAccountSummary[];

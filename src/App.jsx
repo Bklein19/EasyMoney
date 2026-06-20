@@ -8,6 +8,7 @@ import AnalyticsPage from './components/analytics/AnalyticsPage';
 import BudgetingPage from './components/budgeting/BudgetingPage';
 import { NetWorthPage } from './components/investments/NetWorthPage';
 import { SavingsRatePage } from './components/investments/SavingsRatePage';
+import { subscribeToDataChanges } from './db/api';
 import './App.css';
 
 const getInitialSidebarCollapsed = () => {
@@ -30,20 +31,25 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch('/api/networth')
-      .then(response => {
-        if (!response.ok) throw new Error(`Account picker request failed: ${response.status}`);
-        return response.json();
-      })
-      .then(data => {
-        if (!cancelled) setReportAccounts(data.accounts || []);
-      })
-      .catch(() => {
-        if (!cancelled) setReportAccounts([]);
-      });
+    const loadReportAccounts = () => {
+      fetch('/api/networth')
+        .then(response => {
+          if (!response.ok) throw new Error(`Account picker request failed: ${response.status}`);
+          return response.json();
+        })
+        .then(data => {
+          if (!cancelled) setReportAccounts(data.accounts || []);
+        })
+        .catch(() => {
+          if (!cancelled) setReportAccounts([]);
+        });
+    };
+    loadReportAccounts();
+    const unsubscribe = subscribeToDataChanges(loadReportAccounts);
 
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, []);
 

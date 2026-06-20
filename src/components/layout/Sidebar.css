@@ -236,7 +236,8 @@ body.sidebar-resizing {
 }
 
 .account-chip-name,
-.account-chip-meta {
+.account-chip-meta,
+.account-chip-holder {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -255,7 +256,15 @@ body.sidebar-resizing {
   font-weight: 600;
 }
 
-.account-chip.active .account-chip-meta {
+.account-chip-holder {
+  color: var(--accent-blue);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.account-chip.active .account-chip-meta,
+.account-chip.active .account-chip-holder {
   color: color-mix(in srgb, var(--accent-blue) 72%, var(--text-secondary));
 }
 

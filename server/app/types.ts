@@ -12,6 +12,7 @@ export interface AccountSummary {
   latestBalanceMonth: string | null;
   isClosed: boolean;
   currency: string;
+  accountHolder: string | null;
   status: 'active' | 'archived' | string;
   archivedAt: string | null;
   updatedAt: string | null;

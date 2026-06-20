@@ -9,6 +9,7 @@ interface AccountRow {
   balanceCents: number | null;
   latestBalanceMonth: string | null;
   currency: string | null;
+  accountHolder: string | null;
   status: string | null;
   archivedAt: string | null;
   updatedAt: string | null;
@@ -36,6 +37,7 @@ function toAccountSummary(row: AccountRow, aliases: AccountAliasSummary[]): Acco
     latestBalanceMonth: row.latestBalanceMonth,
     isClosed: status !== 'archived' && row.balanceCents === 0 && row.latestBalanceMonth !== null,
     currency: row.currency ?? 'USD',
+    accountHolder: row.accountHolder,
     status,
     archivedAt: row.archivedAt,
     updatedAt: row.updatedAt,
@@ -44,7 +46,7 @@ function toAccountSummary(row: AccountRow, aliases: AccountAliasSummary[]): Acco
 }
 
 function normalizeAccountMetadata(changes: Record<string, unknown>) {
-  const allowed = new Set(['name', 'institution', 'type', 'currency']);
+  const allowed = new Set(['name', 'institution', 'type', 'currency', 'accountHolder']);
   const unsupported = Object.keys(changes).filter(field => !allowed.has(field));
   if (unsupported.length) {
     throw new Error(`Accounts only support metadata updates: ${unsupported.join(', ')}`);
@@ -72,6 +74,12 @@ function normalizeAccountMetadata(changes: Record<string, unknown>) {
     if (!currency) throw new Error('Account currency is required.');
     normalized.currency = currency;
   }
+  if ('accountHolder' in changes) {
+    const accountHolder = changes.accountHolder === null || changes.accountHolder === undefined
+      ? null
+      : String(changes.accountHolder).trim() || null;
+    normalized.accountHolder = accountHolder;
+  }
 
   return normalized;
 }
@@ -90,6 +98,7 @@ export function listAccounts(options: ListAccountsOptions = {}): AccountListResp
          a.name,
          a.institution,
          a.type,
+         a.accountHolder,
          (
            SELECT lb.balanceCents
            FROM ledgerBalances lb

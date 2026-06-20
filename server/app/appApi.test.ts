@@ -144,6 +144,16 @@ beforeEach(() => {
   resetAppTables();
 });
 
+test('init database records account owner schema migration', () => {
+  const migration = getDb().prepare(
+    "SELECT name FROM schemaMigrations WHERE name = '2026-06-20-account-owner'"
+  ).get() as { name: string } | undefined;
+  const accountColumns = getDb().prepare('PRAGMA table_info(accounts)').all() as Array<{ name: string }>;
+
+  expect(migration).toEqual({ name: '2026-06-20-account-owner' });
+  expect(accountColumns.map(column => column.name)).toContain('accountHolder');
+});
+
 test('app accounts endpoint returns domain-shaped accounts', async () => {
   const accountId = Number(insertRow('accounts', {
     name: 'Checking',
@@ -151,6 +161,7 @@ test('app accounts endpoint returns domain-shaped accounts', async () => {
     type: 'checking',
     currentBalance: 1234.56,
     currency: 'USD',
+    accountHolder: 'Alex',
     updatedAt: '2026-06-14T12:00:00.000Z',
   }));
   insertRow('ledgerBalances', {
@@ -180,6 +191,7 @@ test('app accounts endpoint returns domain-shaped accounts', async () => {
         latestBalanceMonth: '2026-06',
         isClosed: false,
         currency: 'USD',
+        accountHolder: 'Alex',
         status: 'active',
         archivedAt: null,
         updatedAt: '2026-06-14T12:00:00.000Z',
@@ -224,6 +236,31 @@ test('app accounts endpoint derives closed accounts from zero ledger balances', 
       status: 'active',
     }),
   ]);
+});
+
+test('app accounts endpoint updates account owner metadata', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Joint Brokerage',
+    institution: 'Vanguard',
+    type: 'investment',
+    currentBalance: 0,
+  }));
+
+  await patchJson(`/api/app/accounts/${accountId}`, { accountHolder: 'Example Owner' });
+  expect(await getJson('/api/app/accounts')).toMatchObject({
+    accounts: [expect.objectContaining({
+      id: accountId,
+      accountHolder: 'Example Owner',
+    })],
+  });
+
+  await patchJson(`/api/app/accounts/${accountId}`, { accountHolder: '' });
+  expect(await getJson('/api/app/accounts')).toMatchObject({
+    accounts: [expect.objectContaining({
+      id: accountId,
+      accountHolder: null,
+    })],
+  });
 });
 
 test('app account archive hides defaults without deleting source links or annotations', async () => {
@@ -734,6 +771,7 @@ test('investment report endpoints expose money-style ledger reports', async () =
     name: 'Brokerage',
     institution: 'Vanguard',
     type: 'investment',
+    accountHolder: 'Alex',
     currentBalance: 0,
   }));
   insertRow('ledgerTransactions', {
@@ -774,7 +812,7 @@ test('investment report endpoints expose money-style ledger reports', async () =
   });
 
   const netWorth = await getJson('/api/networth') as {
-    accounts: Array<{ id: number; name: string; institution: string; type: string }>;
+    accounts: Array<{ id: number; name: string; institution: string; type: string; account_holder: string | null }>;
     rows: Array<{
       month: string;
       account_id: number;
@@ -790,6 +828,7 @@ test('investment report endpoints expose money-style ledger reports', async () =
     name: 'Brokerage',
     institution: 'Vanguard',
     type: 'investment',
+    account_holder: 'Alex',
   }));
   expect(netWorth.rows).toContainEqual(expect.objectContaining({
     month: '2026-01',

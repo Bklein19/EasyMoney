@@ -86,8 +86,29 @@ const db = {
   transaction: (fn) => sqlite.transaction(fn),
 };
 
+function tableColumnNames(tableName) {
+  return db.prepare(`PRAGMA table_info(${tableName})`).all().map(column => column.name);
+}
+
+function runSchemaMigration(name, migrate) {
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS schemaMigrations (
+      name TEXT PRIMARY KEY,
+      appliedAt TEXT NOT NULL
+    )
+  `).run();
+
+  const existing = db.prepare('SELECT name FROM schemaMigrations WHERE name = ?').get(name);
+  if (existing) return;
+
+  db.transaction(() => {
+    migrate();
+    db.prepare('INSERT INTO schemaMigrations (name, appliedAt) VALUES (?, ?)').run(name, new Date().toISOString());
+  })();
+}
+
 const TABLES = {
-  accounts: ['id', 'name', 'institution', 'type', 'currentBalance', 'currency', 'status', 'archivedAt', 'createdAt', 'updatedAt'],
+  accounts: ['id', 'name', 'institution', 'type', 'currentBalance', 'currency', 'accountHolder', 'status', 'archivedAt', 'createdAt', 'updatedAt'],
   accountAliases: ['id', 'institution', 'alias', 'accountId', 'createdAt', 'updatedAt'],
   transactions: [
     'id', 'accountId', 'categoryId', 'date', 'amount', 'importBatchId', 'description', 'merchant',
@@ -160,6 +181,7 @@ export function initDatabase() {
       type TEXT NOT NULL,
       currentBalance REAL DEFAULT 0,
       currency TEXT DEFAULT 'USD',
+      accountHolder TEXT,
       status TEXT DEFAULT 'active',
       archivedAt TEXT,
       createdAt TEXT,
@@ -393,7 +415,13 @@ export function initDatabase() {
 
   `);
 
-  const transactionColumns = db.prepare('PRAGMA table_info(transactions)').all().map(column => column.name);
+  runSchemaMigration('2026-06-20-account-owner', () => {
+    if (!tableColumnNames('accounts').includes('accountHolder')) {
+      db.prepare('ALTER TABLE accounts ADD COLUMN accountHolder TEXT').run();
+    }
+  });
+
+  const transactionColumns = tableColumnNames('transactions');
   if (!transactionColumns.includes('fingerprint')) {
     db.prepare('ALTER TABLE transactions ADD COLUMN fingerprint TEXT').run();
   }
@@ -459,7 +487,7 @@ export function initDatabase() {
       AND (categoryId IS NOT NULL OR COALESCE(notes, '') != '')
   `).run();
 
-  const importFileColumns = db.prepare('PRAGMA table_info(importFiles)').all().map(column => column.name);
+  const importFileColumns = tableColumnNames('importFiles');
   for (const [column, definition] of [
     ['sourceType', 'TEXT'],
     ['parserPriority', 'INTEGER'],
@@ -470,12 +498,12 @@ export function initDatabase() {
     }
   }
 
-  const importRowColumns = db.prepare('PRAGMA table_info(importRows)').all().map(column => column.name);
+  const importRowColumns = tableColumnNames('importRows');
   if (!importRowColumns.includes('rowType')) {
     db.prepare("ALTER TABLE importRows ADD COLUMN rowType TEXT DEFAULT 'transaction'").run();
   }
 
-  const accountColumns = db.prepare('PRAGMA table_info(accounts)').all().map(column => column.name);
+  const accountColumns = tableColumnNames('accounts');
   if (!accountColumns.includes('status')) {
     db.prepare("ALTER TABLE accounts ADD COLUMN status TEXT DEFAULT 'active'").run();
   }
@@ -484,7 +512,7 @@ export function initDatabase() {
   }
   db.prepare("UPDATE accounts SET status = 'active' WHERE status IS NULL OR status = ''").run();
 
-  const sourceAccountColumns = db.prepare('PRAGMA table_info(sourceAccounts)').all().map(column => column.name);
+  const sourceAccountColumns = tableColumnNames('sourceAccounts');
   if (!sourceAccountColumns.includes('accountId')) {
     db.prepare('ALTER TABLE sourceAccounts ADD COLUMN accountId INTEGER').run();
   }
