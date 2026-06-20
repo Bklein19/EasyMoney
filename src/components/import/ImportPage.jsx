@@ -629,7 +629,7 @@ function ImportHistory({
   const hasSearch = normalizedSearch.length > 0;
 
   return (
-    <div className="import-history glass-card">
+    <section className="import-history">
       <div className="import-history__header">
         <div>
           <h3>Import History</h3>
@@ -676,59 +676,77 @@ function ImportHistory({
       ) : filteredImports.length === 0 ? (
         <div className="import-history__empty">No imports match {searchTerm}.</div>
       ) : (
-        <div className="import-history__list">
+        <div className="import-history__table-wrap">
           {hasSearch && (
             <div className="import-history__result-count">
               Showing {filteredImports.length} of {imports.length} imports
             </div>
           )}
-          {filteredImports.map(item => {
-            const committed = item.status === 'committed';
-            const unimported = item.status === 'unimported';
-            const date = item.committedAt || item.createdAt;
-            return (
-              <div className="import-history__row" key={item.id}>
-                <div className="import-history__main">
-                  <strong>{item.fileName}</strong>
-                  <span>
-                    {item.institution || item.parserName || 'Unknown format'}
-                    {date && ` | ${new Date(date).toLocaleString()}`}
-                  </span>
-                </div>
-                <div className="import-history__meta">
-                  <span className={`import-history__status ${committed ? 'committed' : ''}`}>
-                    {item.status || 'previewed'}
-                  </span>
-                  <span>{item.transactionCount || 0} tx</span>
-                  {item.balanceCount > 0 && <span>{item.balanceCount} bal</span>}
-                </div>
-                {committed && (
-                  <button
-                    type="button"
-                    className="icon-btn delete-btn"
-                    title="Unimport file"
-                    onClick={() => onUnimport(item)}
-                    disabled={bulkAction !== null || unimportingId === item.id}
-                  >
-                    <Trash2 size={16} />
-                  </button>
-                )}
-                {unimported && (
-                  <button
-                    type="button"
-                    className="icon-btn"
-                    title={item.unresolvedSourceAccountCount > 0 ? 'Resolve source accounts before reimporting' : 'Reimport file'}
-                    onClick={() => onReimport(item)}
-                    disabled={bulkAction !== null || reimportingId === item.id || item.unresolvedSourceAccountCount > 0}
-                  >
-                    <RotateCcw size={16} />
-                  </button>
-                )}
-              </div>
-            );
-          })}
+          <table className="import-history__table">
+            <thead>
+              <tr>
+                <th>File</th>
+                <th>Source</th>
+                <th>Status</th>
+                <th className="num">Transactions</th>
+                <th className="num">Balances</th>
+                <th>Imported</th>
+                <th aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {filteredImports.map(item => {
+                const committed = item.status === 'committed';
+                const unimported = item.status === 'unimported';
+                const date = item.committedAt || item.createdAt;
+                return (
+                  <tr className="import-history__row" key={item.id}>
+                    <td className="import-history__file">
+                      <strong title={item.fileName}>{item.fileName}</strong>
+                    </td>
+                    <td className="import-history__source">
+                      <span>{item.institution || item.parserName || 'Unknown format'}</span>
+                      {item.sourceType && <small>{item.sourceType}</small>}
+                    </td>
+                    <td>
+                      <span className={`import-history__status ${committed ? 'committed' : ''}`}>
+                        {item.status || 'previewed'}
+                      </span>
+                    </td>
+                    <td className="num">{item.transactionCount || 0}</td>
+                    <td className="num">{item.balanceCount || 0}</td>
+                    <td className="import-history__date">{date ? new Date(date).toLocaleString() : '—'}</td>
+                    <td className="import-history__actions">
+                      {committed && (
+                        <button
+                          type="button"
+                          className="icon-btn delete-btn"
+                          title="Unimport file"
+                          onClick={() => onUnimport(item)}
+                          disabled={bulkAction !== null || unimportingId === item.id}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                      {unimported && (
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          title={item.unresolvedSourceAccountCount > 0 ? 'Resolve source accounts before reimporting' : 'Reimport file'}
+                          onClick={() => onReimport(item)}
+                          disabled={bulkAction !== null || reimportingId === item.id || item.unresolvedSourceAccountCount > 0}
+                        >
+                          <RotateCcw size={16} />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
-    </div>
+    </section>
   );
 }

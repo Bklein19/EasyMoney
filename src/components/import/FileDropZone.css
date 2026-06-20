@@ -1,15 +1,16 @@
 .file-drop-zone {
-  border: 2px dashed var(--glass-border);
-  border-radius: 1rem;
-  padding: 4rem 2rem;
-  text-align: center;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0;
   transition: all 0.2s ease;
   position: relative;
 }
 
 .file-drop-zone.dragging {
-  border-color: var(--accent-blue);
-  background: var(--color-info-bg);
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 4px;
 }
 
 .file-drop-zone.parsing {
@@ -22,43 +23,37 @@
 }
 
 .drop-zone-content {
-  display: flex;
-  flex-direction: column;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 1rem;
+  gap: 0.5rem;
+  min-height: 42px;
+  padding: 0 var(--space-4);
+  border: 1px dashed var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 700;
   cursor: pointer;
-  height: 100%;
-  width: 100%;
+  transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
 }
 
 .drop-icon {
   color: var(--accent-blue);
-  opacity: 0.8;
-  transition: transform 0.2s ease;
+  opacity: 0.9;
 }
 
-.file-drop-zone:hover .drop-icon {
-  transform: translateY(-4px);
-  opacity: 1;
-}
-
-.drop-zone-content h3 {
-  margin: 0;
-  font-size: 1.25rem;
-  color: var(--text-primary);
-}
-
-.drop-zone-content p {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.95rem;
+.drop-zone-content:hover,
+.file-drop-zone.dragging .drop-zone-content {
+  border-color: var(--accent-blue);
+  background: var(--bg-hover);
 }
 
 .drop-zone-actions {
   display: flex;
   justify-content: center;
-  margin-top: 1.25rem;
+  margin-top: 0;
 }
 
 .drop-zone-folder {

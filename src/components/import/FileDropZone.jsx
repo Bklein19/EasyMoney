@@ -65,7 +65,7 @@ export default function FileDropZone({ onFileSelected, onFilesSelected, isParsin
 
   return (
     <div
-      className={`file-drop-zone glass-card ${isDragging ? 'dragging' : ''} ${isParsing ? 'parsing' : ''}`}
+      className={`file-drop-zone ${isDragging ? 'dragging' : ''} ${isParsing ? 'parsing' : ''}`}
       onDragEnter={handleDragIn}
       onDragLeave={handleDragOut}
       onDragOver={handleDrag}
@@ -92,15 +92,8 @@ export default function FileDropZone({ onFileSelected, onFilesSelected, isParsin
         disabled={isParsing}
       />
       <label htmlFor="fileInput" className="drop-zone-content">
-        <UploadCloud size={48} className="drop-icon" />
-        {isParsing ? (
-          <h3>Parsing files...</h3>
-        ) : (
-          <>
-            <h3>Drag & drop import files here</h3>
-            <p>or click to browse files</p>
-          </>
-        )}
+        <UploadCloud size={16} className="drop-icon" />
+        <span>{isParsing ? 'Parsing files...' : 'Drop files or browse'}</span>
       </label>
       {!isParsing && (
         <div className="drop-zone-actions">
