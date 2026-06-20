@@ -9,10 +9,19 @@ export interface AccountSummary {
   institution: string | null;
   type: AccountType;
   balance: number;
+  latestBalanceMonth: string | null;
+  isClosed: boolean;
   currency: string;
   status: 'active' | 'archived' | string;
   archivedAt: string | null;
   updatedAt: string | null;
+  aliases: AccountAliasSummary[];
+}
+
+export interface AccountAliasSummary {
+  id: number;
+  institution: string;
+  alias: string;
 }
 
 export interface CategorySummary {

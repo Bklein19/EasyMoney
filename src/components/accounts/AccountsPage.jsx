@@ -112,6 +112,19 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }) {
 
         {error && <div className="account-details-error">{error}</div>}
       </form>
+      {account.aliases?.length > 0 && (
+        <div className="account-aliases">
+          <div className="account-aliases__title">Aliases</div>
+          <div className="account-aliases__chips">
+            {account.aliases.map(alias => (
+              <span className="account-alias-chip" key={alias.id} title={`${alias.institution}: ${alias.alias}`}>
+                <span>{alias.institution}</span>
+                {alias.alias}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -212,28 +225,31 @@ export default function AccountsPage() {
                 const isExpanded = expandedAccountId === account.id;
                 const isArchived = account.status === 'archived';
                 const isSaving = savingAccountId === account.id;
-                const updatedDate = account.updatedAt ? formatDate(account.updatedAt, 'iso') : '—';
+                const latestBalanceDate = account.latestBalanceMonth || (account.updatedAt ? formatDate(account.updatedAt, 'iso') : '—');
 
                 return (
                   <Fragment key={account.id}>
                     <tr
-                      className={`account-row ${isExpanded ? 'is-expanded' : ''} ${isArchived ? 'is-archived' : ''}`}
+                      className={`account-row ${isExpanded ? 'is-expanded' : ''} ${isArchived ? 'is-archived' : ''} ${account.isClosed ? 'is-closed' : ''}`}
                       onClick={() => setExpandedAccountId(isExpanded ? null : account.id)}
                     >
                       <td>
-                        <div className="account-row__name" title={account.name}>{account.name}</div>
+                        <div className="account-row__name" title={account.name}>
+                          <span>{account.name}</span>
+                          {account.isClosed && <span className="account-closed-badge">Closed</span>}
+                        </div>
                         <div className="account-row__institution">{account.institution || 'No institution'}</div>
                       </td>
                       <td><span className="account-chip">{displayType(account.type)}</span></td>
                       <td>
                         <span className={`account-status-chip ${isArchived ? 'is-archived' : ''}`}>
-                          {isArchived ? 'Archived' : 'Active'}
+                          {isArchived ? 'Archived' : account.isClosed ? 'Closed' : 'Active'}
                         </span>
                       </td>
                       <td className={`account-row__balance ${account.currentBalance < 0 ? 'is-negative' : ''}`}>
                         {formatCurrency(account.currentBalance || 0)}
                       </td>
-                      <td className="account-row__updated">{updatedDate}</td>
+                      <td className="account-row__updated">{latestBalanceDate}</td>
                       <td className="account-row__disclosure">
                         <button
                           className="icon-btn account-expand-btn"

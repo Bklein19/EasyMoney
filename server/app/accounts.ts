@@ -1,5 +1,5 @@
 import { getDb } from '../database.js';
-import type { AccountListResponse, AccountSummary } from './types';
+import type { AccountAliasSummary, AccountListResponse, AccountSummary } from './types';
 
 interface AccountRow {
   id: number;
@@ -7,27 +7,39 @@ interface AccountRow {
   institution: string | null;
   type: string;
   balanceCents: number | null;
+  latestBalanceMonth: string | null;
   currency: string | null;
   status: string | null;
   archivedAt: string | null;
   updatedAt: string | null;
 }
 
+interface AccountAliasRow {
+  id: number;
+  institution: string;
+  alias: string;
+  accountId: number;
+}
+
 export interface ListAccountsOptions {
   includeArchived?: boolean;
 }
 
-function toAccountSummary(row: AccountRow): AccountSummary {
+function toAccountSummary(row: AccountRow, aliases: AccountAliasSummary[]): AccountSummary {
+  const status = row.status ?? 'active';
   return {
     id: row.id,
     name: row.name,
     institution: row.institution,
     type: row.type,
     balance: row.balanceCents === null ? 0 : row.balanceCents / 100,
+    latestBalanceMonth: row.latestBalanceMonth,
+    isClosed: status !== 'archived' && row.balanceCents === 0 && row.latestBalanceMonth !== null,
     currency: row.currency ?? 'USD',
-    status: row.status ?? 'active',
+    status,
     archivedAt: row.archivedAt,
     updatedAt: row.updatedAt,
+    aliases,
   };
 }
 
@@ -85,6 +97,13 @@ export function listAccounts(options: ListAccountsOptions = {}): AccountListResp
            ORDER BY lb.month DESC, lb.id DESC
            LIMIT 1
          ) AS balanceCents,
+         (
+           SELECT lb.month
+           FROM ledgerBalances lb
+           WHERE lb.accountId = a.id
+           ORDER BY lb.month DESC, lb.id DESC
+           LIMIT 1
+         ) AS latestBalanceMonth,
          a.currency,
          COALESCE(a.status, 'active') AS status,
          a.archivedAt,
@@ -95,7 +114,27 @@ export function listAccounts(options: ListAccountsOptions = {}): AccountListResp
     )
     .all() as AccountRow[];
 
-  return { accounts: rows.map(toAccountSummary) };
+  const aliasesByAccountId = new Map<number, AccountAliasSummary[]>();
+  if (rows.length) {
+    const aliases = getDb().prepare(`
+      SELECT id, institution, alias, accountId
+      FROM accountAliases
+      WHERE accountId IN (${rows.map(() => '?').join(', ')})
+      ORDER BY institution ASC, alias ASC, id ASC
+    `).all(...rows.map(row => row.id)) as AccountAliasRow[];
+
+    for (const alias of aliases) {
+      const accountAliases = aliasesByAccountId.get(alias.accountId) ?? [];
+      accountAliases.push({
+        id: alias.id,
+        institution: alias.institution,
+        alias: alias.alias,
+      });
+      aliasesByAccountId.set(alias.accountId, accountAliases);
+    }
+  }
+
+  return { accounts: rows.map(row => toAccountSummary(row, aliasesByAccountId.get(row.id) ?? [])) };
 }
 
 export function updateAccountMetadata(id: number | string, changes: Record<string, unknown>) {

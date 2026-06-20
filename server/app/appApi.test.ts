@@ -159,6 +159,13 @@ test('app accounts endpoint returns domain-shaped accounts', async () => {
     balanceCents: 234567,
     capturedAt: '2026-06-30T00:00:00.000Z',
   });
+  insertRow('accountAliases', {
+    institution: 'Local Bank',
+    alias: 'Everyday Checking - 1234',
+    accountId,
+    createdAt: '2026-06-14T12:00:00.000Z',
+    updatedAt: '2026-06-14T12:00:00.000Z',
+  });
 
   const body = await getJson('/api/app/accounts');
 
@@ -170,13 +177,53 @@ test('app accounts endpoint returns domain-shaped accounts', async () => {
         institution: 'Local Bank',
         type: 'checking',
         balance: 2345.67,
+        latestBalanceMonth: '2026-06',
+        isClosed: false,
         currency: 'USD',
         status: 'active',
         archivedAt: null,
         updatedAt: '2026-06-14T12:00:00.000Z',
+        aliases: [
+          {
+            id: 1,
+            institution: 'Local Bank',
+            alias: 'Everyday Checking - 1234',
+          },
+        ],
       },
     ],
   });
+});
+
+test('app accounts endpoint derives closed accounts from zero ledger balances', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Closed Card',
+    institution: 'Local Bank',
+    type: 'credit-card',
+    currentBalance: 12.34,
+    currency: 'USD',
+    updatedAt: '2026-06-14T12:00:00.000Z',
+  }));
+  insertRow('ledgerBalances', {
+    accountId,
+    month: '2026-06',
+    balanceCents: 0,
+    capturedAt: '2026-06-30T00:00:00.000Z',
+  });
+
+  const body = await getJson('/api/app/accounts') as {
+    accounts: Array<{ id: number; balance: number; latestBalanceMonth: string | null; isClosed: boolean; status: string }>;
+  };
+
+  expect(body.accounts).toEqual([
+    expect.objectContaining({
+      id: accountId,
+      balance: 0,
+      latestBalanceMonth: '2026-06',
+      isClosed: true,
+      status: 'active',
+    }),
+  ]);
 });
 
 test('app account archive hides defaults without deleting source links or annotations', async () => {

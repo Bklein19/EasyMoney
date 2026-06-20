@@ -66,9 +66,12 @@ function fromAppAccount(account: AccountSummary) {
     institution: account.institution,
     type: account.type,
     currentBalance: account.balance,
+    latestBalanceMonth: account.latestBalanceMonth,
+    isClosed: account.isClosed,
     currency: account.currency,
     status: account.status,
     archivedAt: account.archivedAt,
     updatedAt: account.updatedAt,
+    aliases: account.aliases,
   };
 }
