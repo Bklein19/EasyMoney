@@ -393,10 +393,19 @@ export default function ImportPage() {
   };
 
   return (
-    <div className="import-page">
-      <header className="page-header">
-        <h1 className="page-title">Import Transactions</h1>
-        <p className="page-subtitle">Upload a bank export or statement to add transactions and balances</p>
+    <div className="page import-page">
+      <header className="page__header import-page__header">
+        <div>
+          <h1 className="page__title">Import Data</h1>
+          <p className="page__subtitle">Upload exports or statements to import transactions, balances, and accounts.</p>
+        </div>
+        {stage === 'upload' && (
+          <FileDropZone
+            onFileSelected={handleFileSelected}
+            onFilesSelected={handleFilesSelected}
+            isParsing={isParsing}
+          />
+        )}
       </header>
 
       {error && (
@@ -407,11 +416,6 @@ export default function ImportPage() {
 
       {stage === 'upload' && (
         <div className="upload-container">
-          <FileDropZone 
-            onFileSelected={handleFileSelected} 
-            onFilesSelected={handleFilesSelected}
-            isParsing={isParsing} 
-          />
           <ImportHistory
             imports={importHistory}
             error={historyError}

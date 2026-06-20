@@ -27,13 +27,13 @@
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  min-height: 42px;
-  padding: 0 var(--space-4);
+  min-height: 46px;
+  padding: 0 var(--space-5);
   border: 1px dashed var(--glass-border);
   border-radius: var(--radius-md);
   background: var(--bg-elevated);
   color: var(--text-primary);
-  font-size: var(--text-sm);
+  font-size: var(--text-base);
   font-weight: 700;
   cursor: pointer;
   transition: border-color var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
@@ -48,17 +48,4 @@
 .file-drop-zone.dragging .drop-zone-content {
   border-color: var(--accent-blue);
   background: var(--bg-hover);
-}
-
-.drop-zone-actions {
-  display: flex;
-  justify-content: center;
-  margin-top: 0;
-}
-
-.drop-zone-folder {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
 }

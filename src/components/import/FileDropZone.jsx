@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { FolderOpen, UploadCloud } from 'lucide-react';
+import { UploadCloud } from 'lucide-react';
 import './FileDropZone.css';
 
 export default function FileDropZone({ onFileSelected, onFilesSelected, isParsing }) {
@@ -80,29 +80,10 @@ export default function FileDropZone({ onFileSelected, onFilesSelected, isParsin
         onChange={handleFileChange}
         disabled={isParsing}
       />
-      <input
-        type="file"
-        id="folderInput"
-        accept=".csv,.txt,.pdf,.html,.htm,text/csv,text/html,application/pdf"
-        multiple
-        webkitdirectory=""
-        directory=""
-        className="file-input-hidden"
-        onChange={handleFileChange}
-        disabled={isParsing}
-      />
       <label htmlFor="fileInput" className="drop-zone-content">
         <UploadCloud size={16} className="drop-icon" />
         <span>{isParsing ? 'Parsing files...' : 'Drop files or browse'}</span>
       </label>
-      {!isParsing && (
-        <div className="drop-zone-actions">
-          <label htmlFor="folderInput" className="btn btn-secondary drop-zone-folder">
-            <FolderOpen size={16} />
-            Select Folder
-          </label>
-        </div>
-      )}
     </div>
   );
 }

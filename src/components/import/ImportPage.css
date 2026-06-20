@@ -1,8 +1,18 @@
 .import-page {
   animation: fadeIn 0.3s ease;
-  width: min(100%, 1240px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: none;
   min-height: calc(100vh - 120px);
-  margin: 0 auto;
+}
+
+.import-page__header {
+  align-items: flex-start;
+}
+
+.import-page__header .file-drop-zone {
+  margin-left: auto;
 }
 
 .error-banner {
@@ -17,9 +27,8 @@
 .upload-container {
   display: flex;
   flex-direction: column;
-  gap: 2rem;
+  gap: var(--space-6);
   max-width: none;
-  margin: 0 auto;
 }
 
 .import-options {
@@ -432,6 +441,11 @@
 }
 
 @media (max-width: 720px) {
+  .import-page__header .file-drop-zone {
+    width: 100%;
+    margin-left: 0;
+  }
+
   .import-queue {
     flex-direction: column;
   }
