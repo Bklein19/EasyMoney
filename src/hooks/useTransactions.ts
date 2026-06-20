@@ -1,8 +1,8 @@
 import { useEffect, useMemo } from 'react';
 import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query';
-import { appRequest, subscribeToDataChanges } from '../db/api';
-import { queryClient, trpc } from '../api/trpc';
-import type { TransactionListItem, TransactionListResponse } from '../../server/app/types.ts';
+import { subscribeToDataChanges } from '../db/api';
+import { queryClient, trpc, trpcClient } from '../api/trpc';
+import type { TransactionListItem } from '../../server/app/types.ts';
 
 interface TransactionFilters {
   accountId?: string | number | null;
@@ -53,11 +53,11 @@ export function useTransactions(filters: TransactionFilters = {}) {
     queryKey: ['app', 'transactions', 'infinite', query, pageSize],
     enabled: isInfinite,
     initialPageParam: 0,
-    queryFn: async ({ pageParam }) => appRequest('/transactions', {
+    queryFn: ({ pageParam }) => trpcClient.transactions.list.query({
       ...query,
       limit: pageSize,
       offset: pageParam,
-    }) as Promise<TransactionListResponse>,
+    }),
     getNextPageParam: (lastPage) => lastPage.nextOffset ?? undefined,
     select: data => ({
       ...data,

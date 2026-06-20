@@ -50,6 +50,17 @@ export default function TransactionsPage() {
     return map;
   }, [deferredCategories]);
   const visibleTransactions = deferredTransactions;
+  const transactionCountLabel = useMemo(() => {
+    if (totalCount > visibleTransactions.length) {
+      return `${visibleTransactions.length} of ${totalCount}`;
+    }
+
+    if (hasNextPage) {
+      return `${visibleTransactions.length} loaded`;
+    }
+
+    return String(visibleTransactions.length);
+  }, [hasNextPage, totalCount, visibleTransactions.length]);
 
   useEffect(() => {
     if (!loadMoreRef.current || !hasNextPage) return undefined;
@@ -176,7 +187,7 @@ export default function TransactionsPage() {
         <div className="transactions-container">
           <div className="transactions-header">
             <h3 className="dashboard-card-title">
-              All Transactions ({totalCount > visibleTransactions.length ? `${visibleTransactions.length} of ${totalCount}` : visibleTransactions.length})
+              All Transactions ({transactionCountLabel})
             </h3>
             <div className="bulk-category-action transactions-bulk-actions">
               <div>

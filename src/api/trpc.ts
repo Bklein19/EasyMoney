@@ -5,7 +5,7 @@ import type { AppRouter } from '../../server/app/router.ts';
 
 export const queryClient = new QueryClient();
 
-const trpcClient = createTRPCClient<AppRouter>({
+export const trpcClient = createTRPCClient<AppRouter>({
   links: [
     httpBatchLink({
       url: '/api/trpc',

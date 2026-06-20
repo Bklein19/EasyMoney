@@ -636,6 +636,9 @@ test('trpc transactions procedures read and categorize transactions', async () =
 
   const before = await trpcClient.transactions.list.query({ search: 'TRPC Cafe', limit: 1 });
   expect(before.transactions).toHaveLength(1);
+  expect(before.totalCount).toBe(1);
+  expect(before.hasMore).toBe(false);
+  expect(before.nextOffset).toBeNull();
   expect(before.transactions[0].category).toBeNull();
 
   await trpcClient.transactions.categorize.mutate({
