@@ -50,8 +50,8 @@
 }
 
 .account-icon.checking { color: var(--color-success); }
-.account-icon.savings { color: #60a5fa; }
-.account-icon.credit { color: #f472b6; }
+.account-icon.savings { color: var(--accent-blue); }
+.account-icon.credit { color: var(--cat-shopping); }
 .account-icon.investment { color: var(--color-warning); }
 .account-icon.default { color: var(--text-secondary); }
 

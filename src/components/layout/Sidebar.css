@@ -34,7 +34,7 @@
 
 .sidebar-resize-handle:hover,
 body.sidebar-resizing .sidebar-resize-handle {
-  background: color-mix(in srgb, var(--accent-blue) 18%, transparent);
+  background: color-mix(in srgb, var(--accent-blue) 12%, transparent);
 }
 
 body.sidebar-resizing {
@@ -156,7 +156,7 @@ body.sidebar-resizing {
 
 .sidebar-link.active {
   background: var(--color-info-bg);
-  color: var(--accent-blue);
+  color: var(--text-primary);
 }
 
 .sidebar-link-icon {
