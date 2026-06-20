@@ -63,17 +63,30 @@ export default function TransactionsPage() {
   }, [hasNextPage, totalCount, visibleTransactions.length]);
 
   useEffect(() => {
-    if (!loadMoreRef.current || !hasNextPage) return undefined;
+    const sentinel = loadMoreRef.current;
+    if (!sentinel || !hasNextPage || isFetchingNextPage) return undefined;
+
+    let requested = false;
+    const loadNextPage = () => {
+      if (requested) return;
+      requested = true;
+      fetchNextPage();
+    };
 
     const observer = new IntersectionObserver((entries) => {
       if (entries.some(entry => entry.isIntersecting)) {
-        fetchNextPage();
+        loadNextPage();
       }
     }, { rootMargin: '600px 0px' });
 
-    observer.observe(loadMoreRef.current);
+    observer.observe(sentinel);
+    const rect = sentinel.getBoundingClientRect();
+    if (rect.top <= window.innerHeight + 600 && rect.bottom >= -600) {
+      queueMicrotask(loadNextPage);
+    }
+
     return () => observer.disconnect();
-  }, [fetchNextPage, hasNextPage]);
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage, visibleTransactions.length]);
 
   const filteredCategoryValue = useMemo(() => {
     if (visibleTransactions.length === 0) return '';
