@@ -1,4 +1,5 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { useTransactions } from '../../hooks/useTransactions';
 import TransactionRow from './TransactionRow';
 import TransactionFilters from './TransactionFilters';
@@ -16,7 +17,8 @@ export default function TransactionsPage() {
   const [isCreatingBulkCategory, setIsCreatingBulkCategory] = useState(false);
   const [newBulkCategoryName, setNewBulkCategoryName] = useState('');
   const [pendingBulkCategoryValue, setPendingBulkCategoryValue] = useState(null);
-  const loadMoreRef = useRef(null);
+  const [transactionsListOffsetTop, setTransactionsListOffsetTop] = useState(0);
+  const transactionsListRef = useRef(null);
   const deferredFilters = useDeferredValue(filters);
   const {
     transactions,
@@ -61,32 +63,31 @@ export default function TransactionsPage() {
 
     return String(visibleTransactions.length);
   }, [hasNextPage, totalCount, visibleTransactions.length]);
+  const virtualRowCount = hasNextPage ? visibleTransactions.length + 1 : visibleTransactions.length;
+  const rowVirtualizer = useWindowVirtualizer({
+    count: virtualRowCount,
+    estimateSize: () => 64,
+    getItemKey: (index) => visibleTransactions[index]?.id ?? `loader-${index}`,
+    overscan: 8,
+    scrollMargin: transactionsListOffsetTop,
+  });
+  const virtualRows = rowVirtualizer.getVirtualItems();
 
   useEffect(() => {
-    const sentinel = loadMoreRef.current;
-    if (!sentinel || !hasNextPage || isFetchingNextPage) return undefined;
+    setTransactionsListOffsetTop(transactionsListRef.current?.offsetTop ?? 0);
+  }, [visibleTransactions.length]);
 
-    let requested = false;
-    const loadNextPage = () => {
-      if (requested) return;
-      requested = true;
+  useEffect(() => {
+    const lastVirtualRow = virtualRows[virtualRows.length - 1];
+    if (
+      lastVirtualRow &&
+      lastVirtualRow.index >= visibleTransactions.length - 1 &&
+      hasNextPage &&
+      !isFetchingNextPage
+    ) {
       fetchNextPage();
-    };
-
-    const observer = new IntersectionObserver((entries) => {
-      if (entries.some(entry => entry.isIntersecting)) {
-        loadNextPage();
-      }
-    }, { rootMargin: '600px 0px' });
-
-    observer.observe(sentinel);
-    const rect = sentinel.getBoundingClientRect();
-    if (rect.top <= window.innerHeight + 600 && rect.bottom >= -600) {
-      queueMicrotask(loadNextPage);
     }
-
-    return () => observer.disconnect();
-  }, [fetchNextPage, hasNextPage, isFetchingNextPage, visibleTransactions.length]);
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage, virtualRows, visibleTransactions.length]);
 
   const filteredCategoryValue = useMemo(() => {
     if (visibleTransactions.length === 0) return '';
@@ -288,26 +289,47 @@ export default function TransactionsPage() {
             </div>
           </div>
           
-          <div className="transactions-list">
+          <div
+            ref={transactionsListRef}
+            className="transactions-list transactions-list--virtual"
+            style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+          >
             {visibleTransactions.length > 0 ? (
               <>
-                {visibleTransactions.map(tx => (
-                  <TransactionRow
-                    key={tx.id}
-                    transaction={tx}
-                    onUpdate={updateTransaction}
-                    account={accountMap[tx.accountId]}
-                    categories={categories}
-                    addCategory={addCategory}
-                  />
-                ))}
-                <div ref={loadMoreRef} className="transactions-load-more" aria-live="polite">
-                  {isFetchingNextPage
-                    ? 'Loading more transactions...'
-                    : hasNextPage
-                      ? 'Scroll to load more'
-                      : 'All matching transactions loaded'}
-                </div>
+                {virtualRows.map(virtualRow => {
+                  const tx = visibleTransactions[virtualRow.index];
+                  const isLoaderRow = !tx;
+
+                  return (
+                    <div
+                      key={virtualRow.key}
+                      ref={rowVirtualizer.measureElement}
+                      className="transactions-virtual-row"
+                      data-index={virtualRow.index}
+                      style={{
+                        transform: `translateY(${virtualRow.start - rowVirtualizer.options.scrollMargin}px)`,
+                      }}
+                    >
+                      {isLoaderRow ? (
+                        <div className="transactions-load-more" aria-live="polite">
+                          {isFetchingNextPage
+                            ? 'Loading more transactions...'
+                            : hasNextPage
+                              ? 'Loading more transactions...'
+                              : 'All matching transactions loaded'}
+                        </div>
+                      ) : (
+                        <TransactionRow
+                          transaction={tx}
+                          onUpdate={updateTransaction}
+                          account={accountMap[tx.accountId]}
+                          categories={categories}
+                          addCategory={addCategory}
+                        />
+                      )}
+                    </div>
+                  );
+                })}
               </>
             ) : (
               <div className="empty-state-simple" style={{ height: 200 }}>

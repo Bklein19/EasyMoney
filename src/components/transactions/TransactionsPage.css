@@ -107,6 +107,19 @@
   flex-direction: column;
 }
 
+.transactions-list--virtual {
+  position: relative;
+  display: block;
+  width: 100%;
+}
+
+.transactions-virtual-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+
 .transaction-row {
   display: grid;
   grid-template-columns: 100px 1fr 200px 150px 120px;
