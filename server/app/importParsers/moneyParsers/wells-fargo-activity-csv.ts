@@ -1,4 +1,4 @@
-import { basename } from "path";
+import { basename } from "node:path";
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { cents, makeTx } from "./_helpers";
 

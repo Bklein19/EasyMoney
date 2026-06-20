@@ -1,8 +1,8 @@
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { makeTx } from "./_helpers";
 import { getDocumentProxy, extractText } from "unpdf";
-import { execSync } from "child_process";
-import { writeFileSync, unlinkSync } from "fs";
+import { execSync } from "node:child_process";
+import { writeFileSync, unlinkSync } from "node:fs";
 
 export const meta: ParserMeta = {
   id: "fidelity-investment-report-pdf",

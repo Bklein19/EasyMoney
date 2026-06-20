@@ -32,7 +32,7 @@ fs.mkdirSync(path.resolve(import.meta.dir, '..', 'data'), { recursive: true });
 initDatabase();
 seedDatabase();
 
-const defaultPort = Number(process.env.PORT || process.env.VAULTVIEW_API_PORT || 4177);
+const defaultPort = Number(process.env.PORT || 4177);
 
 function json(data: unknown, status = 200) {
   return Response.json(data, { status });
