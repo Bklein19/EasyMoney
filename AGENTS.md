@@ -4,7 +4,8 @@
 
 - Stay on `main` unless the user asks for a branch.
 - Use simple kebab-case branch names when a branch is needed.
-- Commit each logical set of changes after running the relevant checks.
+- Commit early and often: commit each logical set of changes after running the relevant checks.
+- Collaboration is direct-to-main: multiple people may push to `main`. If `git push origin main` is rejected because remote has new work, run `git pull --rebase origin main`, resolve any conflicts without dropping other people's changes, rerun the relevant checks, then push again.
 - Prefer Bun commands for this repo:
   - `bun run typecheck`
   - `bun test`
