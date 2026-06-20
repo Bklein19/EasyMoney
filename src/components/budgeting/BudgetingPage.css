@@ -334,11 +334,11 @@
 }
 
 .budgeting-overflow-bar__income {
-  background: linear-gradient(90deg, var(--color-success), var(--accent-cyan));
+  background: var(--color-success);
 }
 
 .budgeting-overflow-bar__over {
-  background: linear-gradient(90deg, var(--color-warning), var(--color-danger));
+  background: var(--color-warning);
 }
 
 .budgeting-table {
@@ -507,7 +507,7 @@
   display: block;
   height: 100%;
   border-radius: inherit;
-  background: linear-gradient(90deg, var(--color-success), var(--accent-cyan));
+  background: var(--color-success);
 }
 
 .budgeting-insight-list {

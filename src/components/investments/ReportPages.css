@@ -60,10 +60,8 @@
 }
 
 .total-card-highlight {
-  border-color: color-mix(in srgb, var(--accent-blue) 34%, var(--glass-border));
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--accent-blue) 12%, transparent), transparent),
-    var(--bg-elevated);
+  border-color: var(--glass-border-hover);
+  background: var(--bg-elevated);
 }
 
 .total-label,

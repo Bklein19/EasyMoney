@@ -20,7 +20,7 @@
   left: 0;
   width: 100%;
   height: 4px;
-  background: linear-gradient(90deg, var(--accent-blue) 0%, var(--accent-violet) 100%);
+  background: var(--accent-fill);
   opacity: 0.5;
   transition: opacity 0.2s ease;
 }

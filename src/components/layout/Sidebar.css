@@ -70,7 +70,7 @@ body.sidebar-resizing {
 .sidebar-brand-icon {
   width: 28px;
   height: 28px;
-  background: var(--accent-gradient);
+  background: var(--accent-fill);
   border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
