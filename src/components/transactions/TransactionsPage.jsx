@@ -1,12 +1,14 @@
-import { useCallback, useDeferredValue, useMemo, useState, useTransition } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useTransactions } from '../../hooks/useTransactions';
 import TransactionRow from './TransactionRow';
 import TransactionFilters from './TransactionFilters';
 import { formatCurrency, getAmountClass } from '../../utils/formatters';
 import { useAccounts } from '../../hooks/useAccounts';
 import { useCategories } from '../../hooks/useCategories';
-import { buildAccountMap, getTransactionFlow, isCreditAccount, isExcludedFromCashFlow, isExpense, isIncome, isInvestmentMovement } from '../../utils/transactionSemantics';
+import { buildAccountMap, isExcludedFromCashFlow, isExpense, isIncome, isInvestmentMovement } from '../../utils/transactionSemantics';
 import './TransactionsPage.css';
+
+const TRANSACTION_PAGE_SIZE = 100;
 
 export default function TransactionsPage() {
   const [filters, setFilters] = useState({});
@@ -14,8 +16,22 @@ export default function TransactionsPage() {
   const [isCreatingBulkCategory, setIsCreatingBulkCategory] = useState(false);
   const [newBulkCategoryName, setNewBulkCategoryName] = useState('');
   const [pendingBulkCategoryValue, setPendingBulkCategoryValue] = useState(null);
+  const loadMoreRef = useRef(null);
   const deferredFilters = useDeferredValue(filters);
-  const { transactions, updateTransaction, categorizeTransactions } = useTransactions(deferredFilters);
+  const {
+    transactions,
+    updateTransaction,
+    categorizeTransactions,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    totalCount,
+    totals: serverTotals,
+  } = useTransactions({
+    ...deferredFilters,
+    infinite: true,
+    limit: TRANSACTION_PAGE_SIZE,
+  });
   const { accounts } = useAccounts();
   const { categories, addCategory } = useCategories();
   const deferredTransactions = useDeferredValue(transactions);
@@ -33,33 +49,20 @@ export default function TransactionsPage() {
     deferredCategories.forEach(c => { map[c.id] = c; });
     return map;
   }, [deferredCategories]);
-  const visibleTransactions = useMemo(() => {
-    const filtered = deferredTransactions.filter(tx => {
-      const account = accountMap[tx.accountId];
-      if (deferredFilters.accountKind === 'bank' && isCreditAccount(account)) return false;
-      if (deferredFilters.accountKind === 'credit' && !isCreditAccount(account)) return false;
-      if (deferredFilters.flowType && getTransactionFlow(tx, accountMap, categoryMap) !== deferredFilters.flowType) return false;
-      return true;
-    });
+  const visibleTransactions = deferredTransactions;
 
-    return [...filtered].sort((a, b) => {
-      switch (deferredFilters.sortBy || 'date_desc') {
-        case 'date_asc':
-          return a.date.localeCompare(b.date);
-        case 'amount_desc':
-          return b.amount - a.amount;
-        case 'amount_asc':
-          return a.amount - b.amount;
-        case 'absolute_desc':
-          return Math.abs(b.amount) - Math.abs(a.amount);
-        case 'absolute_asc':
-          return Math.abs(a.amount) - Math.abs(b.amount);
-        case 'date_desc':
-        default:
-          return b.date.localeCompare(a.date);
+  useEffect(() => {
+    if (!loadMoreRef.current || !hasNextPage) return undefined;
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some(entry => entry.isIntersecting)) {
+        fetchNextPage();
       }
-    });
-  }, [deferredTransactions, deferredFilters, accountMap, categoryMap]);
+    }, { rootMargin: '600px 0px' });
+
+    observer.observe(loadMoreRef.current);
+    return () => observer.disconnect();
+  }, [fetchNextPage, hasNextPage]);
 
   const filteredCategoryValue = useMemo(() => {
     if (visibleTransactions.length === 0) return '';
@@ -137,7 +140,7 @@ export default function TransactionsPage() {
     });
   }, []);
 
-  const totals = useMemo(() => {
+  const loadedTotals = useMemo(() => {
     return visibleTransactions.reduce((summary, tx) => {
       if (isIncome(tx, accountMap, categoryMap)) summary.income += tx.amount;
       if (isExpense(tx, accountMap, categoryMap)) summary.expenses += Math.abs(tx.amount);
@@ -147,6 +150,7 @@ export default function TransactionsPage() {
       return summary;
     }, { income: 0, expenses: 0, internalMovement: 0, investments: 0, net: 0 });
   }, [visibleTransactions, accountMap, categoryMap]);
+  const totals = serverTotals ?? loadedTotals;
 
   return (
     <div className="page">
@@ -171,11 +175,13 @@ export default function TransactionsPage() {
 
         <div className="transactions-container">
           <div className="transactions-header">
-            <h3 className="dashboard-card-title">All Transactions ({visibleTransactions.length})</h3>
+            <h3 className="dashboard-card-title">
+              All Transactions ({totalCount > visibleTransactions.length ? `${visibleTransactions.length} of ${totalCount}` : visibleTransactions.length})
+            </h3>
             <div className="bulk-category-action transactions-bulk-actions">
               <div>
                 <label htmlFor="bulkTransactionCategory">Bulk category edit</label>
-                <p>Applies to all {visibleTransactions.length} visible transactions after filters.</p>
+                <p>Applies to the {visibleTransactions.length} loaded matching transactions.</p>
               </div>
               <select
                 id="bulkTransactionCategory"
@@ -260,16 +266,25 @@ export default function TransactionsPage() {
           
           <div className="transactions-list">
             {visibleTransactions.length > 0 ? (
-              visibleTransactions.map(tx => (
-                <TransactionRow 
-                  key={tx.id} 
-                  transaction={tx} 
-                  onUpdate={updateTransaction} 
-                  account={accountMap[tx.accountId]}
-                  categories={categories}
-                  addCategory={addCategory}
-                />
-              ))
+              <>
+                {visibleTransactions.map(tx => (
+                  <TransactionRow
+                    key={tx.id}
+                    transaction={tx}
+                    onUpdate={updateTransaction}
+                    account={accountMap[tx.accountId]}
+                    categories={categories}
+                    addCategory={addCategory}
+                  />
+                ))}
+                <div ref={loadMoreRef} className="transactions-load-more" aria-live="polite">
+                  {isFetchingNextPage
+                    ? 'Loading more transactions...'
+                    : hasNextPage
+                      ? 'Scroll to load more'
+                      : 'All matching transactions loaded'}
+                </div>
+              </>
             ) : (
               <div className="empty-state-simple" style={{ height: 200 }}>
                 No transactions found for the selected filters.

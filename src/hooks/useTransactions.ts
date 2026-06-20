@@ -1,8 +1,8 @@
 import { useEffect, useMemo } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { subscribeToDataChanges } from '../db/api';
+import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query';
+import { appRequest, subscribeToDataChanges } from '../db/api';
 import { queryClient, trpc } from '../api/trpc';
-import type { TransactionListItem } from '../../server/app/types.ts';
+import type { TransactionListItem, TransactionListResponse } from '../../server/app/types.ts';
 
 interface TransactionFilters {
   accountId?: string | number | null;
@@ -11,6 +11,11 @@ interface TransactionFilters {
   endDate?: string | null;
   searchQuery?: string | null;
   type?: string | null;
+  accountKind?: string | null;
+  flowType?: string | null;
+  sortBy?: string | null;
+  limit?: number;
+  infinite?: boolean;
 }
 
 type TransactionRow = ReturnType<typeof fromAppTransaction>;
@@ -30,22 +35,50 @@ export function useTransactions(filters: TransactionFilters = {}) {
   const query = useMemo(() => ({
     accountId,
     categoryId,
+    accountKind: filters.accountKind,
     startDate: filters.startDate,
     endDate: filters.endDate,
     search: filters.searchQuery,
-  }), [accountId, categoryId, filters.startDate, filters.endDate, filters.searchQuery]);
+    flowType: filters.flowType,
+    sortBy: filters.sortBy,
+  }), [accountId, categoryId, filters.accountKind, filters.startDate, filters.endDate, filters.searchQuery, filters.flowType, filters.sortBy]);
 
+  const pageSize = filters.limit ?? 100;
+  const isInfinite = filters.infinite === true;
   const transactionsQuery = useQuery(trpc.transactions.list.queryOptions(query, {
+    enabled: !isInfinite,
     select: data => data.transactions.map(fromAppTransaction),
   }));
+  const infiniteTransactionsQuery = useInfiniteQuery({
+    queryKey: ['app', 'transactions', 'infinite', query, pageSize],
+    enabled: isInfinite,
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => appRequest('/transactions', {
+      ...query,
+      limit: pageSize,
+      offset: pageParam,
+    }) as Promise<TransactionListResponse>,
+    getNextPageParam: (lastPage) => lastPage.nextOffset ?? undefined,
+    select: data => ({
+      ...data,
+      pages: data.pages.map(page => ({
+        ...page,
+        transactions: page.transactions.map(fromAppTransaction),
+      })),
+    }),
+  });
 
   const categorize = useMutation(trpc.transactions.categorize.mutationOptions({
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() });
+      queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] });
+    },
   }));
 
   useEffect(() => {
     const unsubscribe = subscribeToDataChanges(() => {
       queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() });
+      queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] });
     });
     return () => {
       unsubscribe();
@@ -53,16 +86,20 @@ export function useTransactions(filters: TransactionFilters = {}) {
   }, []);
 
   const transactions = useMemo(() => {
-    let result = transactionsQuery.data ?? [];
+    let result = isInfinite
+      ? infiniteTransactionsQuery.data?.pages.flatMap(page => page.transactions) ?? []
+      : transactionsQuery.data ?? [];
 
-    if (filters.type === 'income') {
+    if (!isInfinite && filters.type === 'income') {
       result = result.filter(t => t.amount > 0);
-    } else if (filters.type === 'expense') {
+    } else if (!isInfinite && filters.type === 'expense') {
       result = result.filter(t => t.amount < 0);
     }
 
     return result;
-  }, [transactionsQuery.data, filters.type]);
+  }, [isInfinite, infiniteTransactionsQuery.data, transactionsQuery.data, filters.type]);
+
+  const firstInfinitePage = infiniteTransactionsQuery.data?.pages[0];
 
   async function updateTransaction(id: number | string, changes: TransactionAnnotationChanges) {
     const fields = Object.keys(changes);
@@ -93,9 +130,14 @@ export function useTransactions(filters: TransactionFilters = {}) {
     transactions,
     updateTransaction,
     categorizeTransactions,
-    isLoading: transactionsQuery.isLoading,
-    isFetching: transactionsQuery.isFetching,
-    error: transactionsQuery.error,
+    isLoading: isInfinite ? infiniteTransactionsQuery.isLoading : transactionsQuery.isLoading,
+    isFetching: isInfinite ? infiniteTransactionsQuery.isFetching : transactionsQuery.isFetching,
+    isFetchingNextPage: infiniteTransactionsQuery.isFetchingNextPage,
+    fetchNextPage: infiniteTransactionsQuery.fetchNextPage,
+    hasNextPage: Boolean(infiniteTransactionsQuery.hasNextPage),
+    totalCount: isInfinite ? firstInfinitePage?.totalCount ?? 0 : transactions.length,
+    totals: firstInfinitePage?.totals,
+    error: isInfinite ? infiniteTransactionsQuery.error : transactionsQuery.error,
   };
 }
 

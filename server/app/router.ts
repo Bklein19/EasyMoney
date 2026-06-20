@@ -27,11 +27,15 @@ export const appRouter = t.router({
       .input(z.object({
         accountId: optionalId,
         categoryId: optionalId,
+        accountKind: z.string().nullish(),
         startDate: z.string().nullish(),
         endDate: z.string().nullish(),
         search: z.string().nullish(),
         type: z.string().nullish(),
+        flowType: z.string().nullish(),
+        sortBy: z.string().nullish(),
         limit: optionalId,
+        offset: optionalId,
         includeArchived: z.boolean().nullish(),
       }).optional())
       .query(({ input }) => listTransactions(input ?? {})),

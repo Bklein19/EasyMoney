@@ -45,6 +45,53 @@ function optionalString(value: string | number | null | undefined): string | nul
   return String(value);
 }
 
+function clampLimit(value: number | null): number | null {
+  if (value === null) return null;
+  return Math.max(1, Math.min(value, 250));
+}
+
+function clampOffset(value: number | null): number {
+  if (value === null) return 0;
+  return Math.max(0, value);
+}
+
+const flowSql = `CASE
+  WHEN c.type = 'investment' OR lower(COALESCE(c.name, '')) IN ('investment', 'investments') THEN 'investment'
+  WHEN c.type = 'internal_transfer' THEN 'internal_transfer'
+  WHEN c.type = 'transfer' THEN 'transfer'
+  WHEN t.transactionKind = 'card_payment' THEN 'card_payment'
+  WHEN t.transactionKind = 'internal_transfer' THEN 'internal_transfer'
+  WHEN t.transactionKind = 'investment' THEN 'investment'
+  WHEN t.transactionKind = 'refund' THEN 'refund'
+  WHEN a.type IN ('credit', 'credit_card', 'credit-card') AND t.amountCents > 0 THEN 'card_payment'
+  WHEN t.amountCents > 0 THEN 'income'
+  WHEN t.amountCents < 0 THEN 'expense'
+  ELSE 'neutral'
+END`;
+
+function orderByFor(sortBy: string | null): string {
+  switch (sortBy) {
+    case 'date_asc':
+      return 't.date ASC, t.id ASC';
+    case 'amount_desc':
+      return 't.amountCents DESC, t.date DESC, t.id DESC';
+    case 'amount_asc':
+      return 't.amountCents ASC, t.date DESC, t.id DESC';
+    case 'absolute_desc':
+      return 'ABS(t.amountCents) DESC, t.date DESC, t.id DESC';
+    case 'absolute_asc':
+      return 'ABS(t.amountCents) ASC, t.date DESC, t.id DESC';
+    case 'date_desc':
+    default:
+      return 't.date DESC, t.id DESC';
+  }
+}
+
+const fromAndJoins = `FROM ledgerTransactions t
+LEFT JOIN accounts a ON a.id = t.accountId
+LEFT JOIN transactionAnnotations ta ON ta.ledgerTransactionId = t.ledgerTransactionId
+LEFT JOIN categories c ON c.id = ta.categoryId`;
+
 function toTransactionListItem(row: LedgerTransactionRow): TransactionListItem {
   return {
     id: row.id,
@@ -92,6 +139,13 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
     clauses.push("COALESCE(a.status, 'active') != 'archived'");
   }
 
+  const accountKind = optionalString(options.accountKind);
+  if (accountKind === 'bank') {
+    clauses.push("(a.type IS NULL OR a.type NOT IN ('credit', 'credit_card', 'credit-card'))");
+  } else if (accountKind === 'credit') {
+    clauses.push("a.type IN ('credit', 'credit_card', 'credit-card')");
+  }
+
   const categoryId = optionalNumber(options.categoryId);
   if (categoryId !== null) {
     clauses.push('ta.categoryId = $categoryId');
@@ -116,6 +170,12 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
     params.type = type;
   }
 
+  const flowType = optionalString(options.flowType);
+  if (flowType) {
+    clauses.push(`${flowSql} = $flowType`);
+    params.flowType = flowType;
+  }
+
   const search = optionalString(options.search);
   if (search) {
     clauses.push(`(
@@ -129,12 +189,37 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
     params.search = `%${search}%`;
   }
 
-  const limit = optionalNumber(options.limit);
-  const limitClause = limit === null ? '' : 'LIMIT $limit';
-  if (limit !== null) params.limit = Math.min(limit, 1000);
+  const limit = clampLimit(optionalNumber(options.limit));
+  const offset = clampOffset(optionalNumber(options.offset));
+  const limitClause = limit === null ? '' : 'LIMIT $limit OFFSET $offset';
+  if (limit !== null) {
+    params.limit = limit;
+    params.offset = offset;
+  }
 
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-  const rows = getDb()
+  const orderBy = orderByFor(optionalString(options.sortBy));
+  const db = getDb();
+  const totalCount = (db
+    .prepare(`SELECT COUNT(*) AS count ${fromAndJoins} ${where}`)
+    .get(params) as { count: number }).count;
+  const totalsRow = db
+    .prepare(
+      `SELECT
+        COALESCE(SUM(CASE WHEN ${flowSql} = 'income' THEN t.amountCents ELSE 0 END), 0) / 100.0 AS income,
+        ABS(COALESCE(SUM(CASE WHEN ${flowSql} = 'expense' THEN t.amountCents ELSE 0 END), 0)) / 100.0 AS expenses,
+        ABS(COALESCE(SUM(CASE WHEN ${flowSql} IN ('transfer', 'card_payment', 'internal_transfer') THEN t.amountCents ELSE 0 END), 0)) / 100.0 AS internalMovement,
+        ABS(COALESCE(SUM(CASE WHEN ${flowSql} = 'investment' THEN t.amountCents ELSE 0 END), 0)) / 100.0 AS investments
+       ${fromAndJoins}
+       ${where}`
+    )
+    .get(params) as {
+      income: number;
+      expenses: number;
+      internalMovement: number;
+      investments: number;
+    };
+  const rows = db
     .prepare(
       `SELECT
         COALESCE(t.legacyTransactionId, t.id) AS id,
@@ -162,17 +247,28 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
         t.importBatchId,
         t.fingerprint,
         t.createdAt
-       FROM ledgerTransactions t
-       LEFT JOIN accounts a ON a.id = t.accountId
-       LEFT JOIN transactionAnnotations ta ON ta.ledgerTransactionId = t.ledgerTransactionId
-       LEFT JOIN categories c ON c.id = ta.categoryId
+       ${fromAndJoins}
        ${where}
-       ORDER BY t.date DESC, t.id DESC
+       ORDER BY ${orderBy}
        ${limitClause}`
     )
     .all(params) as LedgerTransactionRow[];
 
-  return { transactions: rows.map(toTransactionListItem) };
+  const nextOffset = limit === null ? null : offset + rows.length;
+  const hasMore = nextOffset !== null && nextOffset < totalCount;
+  return {
+    transactions: rows.map(toTransactionListItem),
+    totalCount,
+    hasMore,
+    nextOffset: hasMore ? nextOffset : null,
+    totals: {
+      income: totalsRow.income,
+      expenses: totalsRow.expenses,
+      internalMovement: totalsRow.internalMovement,
+      investments: totalsRow.investments,
+      net: totalsRow.income - totalsRow.expenses,
+    },
+  };
 }
 
 export function categorizeTransactions(input: {

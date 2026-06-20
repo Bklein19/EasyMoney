@@ -384,6 +384,60 @@ test('app transactions endpoint supports domain query filters', async () => {
   expect(body.transactions.map((transaction: { description: string }) => transaction.description)).toEqual(['Cafe']);
 });
 
+test('app transactions endpoint supports infinite-scroll paging metadata', async () => {
+  const accountId = insertRow('accounts', {
+    name: 'Checking',
+    institution: 'Local Bank',
+    type: 'checking',
+  });
+
+  insertRow('transactions', {
+    accountId,
+    date: '2026-06-16',
+    amount: -30,
+    description: 'Newest',
+    type: 'expense',
+  });
+  insertRow('transactions', {
+    accountId,
+    date: '2026-06-15',
+    amount: 100,
+    description: 'Middle',
+    type: 'income',
+  });
+  insertRow('transactions', {
+    accountId,
+    date: '2026-06-14',
+    amount: -20,
+    description: 'Oldest',
+    type: 'expense',
+  });
+
+  const firstPage = await getJson('/api/app/transactions?limit=2&offset=0') as {
+    transactions: Array<{ description: string }>;
+    totalCount: number;
+    hasMore: boolean;
+    nextOffset: number | null;
+    totals: { income: number; expenses: number; net: number };
+  };
+  const secondPage = await getJson('/api/app/transactions?limit=2&offset=2') as {
+    transactions: Array<{ description: string }>;
+    totalCount: number;
+    hasMore: boolean;
+    nextOffset: number | null;
+  };
+
+  expect(firstPage.transactions.map(transaction => transaction.description)).toEqual(['Newest', 'Middle']);
+  expect(firstPage.totalCount).toBe(3);
+  expect(firstPage.hasMore).toBe(true);
+  expect(firstPage.nextOffset).toBe(2);
+  expect(firstPage.totals).toMatchObject({ income: 100, expenses: 50, net: 50 });
+  expect(secondPage.transactions.map(transaction => transaction.description)).toEqual(['Oldest']);
+  expect(secondPage.totalCount).toBe(3);
+  expect(secondPage.hasMore).toBe(false);
+  expect(secondPage.nextOffset).toBeNull();
+});
+
 test('app transactions search includes notes', async () => {
   const accountId = insertRow('accounts', {
     name: 'Checking',

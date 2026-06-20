@@ -62,16 +62,30 @@ export interface TransactionListItem {
 export interface ListTransactionsOptions {
   accountId?: string | number | null;
   categoryId?: string | number | null;
+  accountKind?: string | null;
   startDate?: string | null;
   endDate?: string | null;
   search?: string | null;
   type?: string | null;
+  flowType?: string | null;
+  sortBy?: string | null;
   limit?: string | number | null;
+  offset?: string | number | null;
   includeArchived?: boolean | string | null;
 }
 
 export interface TransactionListResponse {
   transactions: TransactionListItem[];
+  totalCount: number;
+  hasMore: boolean;
+  nextOffset: number | null;
+  totals: {
+    income: number;
+    expenses: number;
+    internalMovement: number;
+    investments: number;
+    net: number;
+  };
 }
 
 export interface AccountListResponse {

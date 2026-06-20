@@ -289,6 +289,13 @@ select.filter-input {
   margin-top: var(--space-1);
 }
 
+.transactions-load-more {
+  padding: var(--space-4);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
 @media (max-width: 768px) {
   .transactions-header {
     align-items: stretch;
