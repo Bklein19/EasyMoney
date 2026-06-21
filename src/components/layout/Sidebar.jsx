@@ -8,12 +8,13 @@ import {
   Activity,
   LineChart,
   Wallet,
-  PiggyBank
+  PiggyBank,
+  Landmark
 } from 'lucide-react';
 import { AccountPicker } from '../investments/AccountPicker';
 import './Sidebar.css';
 
-const REPORT_ROUTES = new Set(['/net-worth', '/performance', '/savings-rate']);
+const REPORT_ROUTES = new Set(['/net-worth', '/performance', '/savings-rate', '/retirement']);
 const SIDEBAR_WIDTH_KEY = 'easymoney:sidebar-width';
 const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 520;
@@ -39,6 +40,7 @@ const Sidebar = ({
     { path: '/net-worth', label: 'Net Worth', icon: Wallet },
     { path: '/performance', label: 'Performance', icon: LineChart },
     { path: '/savings-rate', label: 'Savings Rate', icon: Activity },
+    { path: '/retirement', label: 'Retirement', icon: Landmark },
   ];
   const showAccountPicker = (
     !isCollapsed &&

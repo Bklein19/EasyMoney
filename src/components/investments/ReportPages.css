@@ -1,5 +1,6 @@
 .page-networth,
-.page-savings-rate {
+.page-savings-rate,
+.page-retirement {
   --chart-axis: var(--text-muted);
   --chart-grid: var(--hairline);
   --chart-zero: var(--glass-border-hover);
@@ -12,6 +13,10 @@
   --series-negative: #c978a1;
   --series-retained: #789bd0;
   --series-poof: #cf6f6f;
+  --series-retirement-band: #6f96d6;
+  --series-retirement-high: #8fb0e3;
+  --series-retirement-median: #69b37a;
+  --series-retirement-low: #c79b55;
   --account-series-0: #789bd0;
   --account-series-1: #b89962;
   --account-series-2: #9886d0;
@@ -33,7 +38,8 @@
 .networth-dashboard,
 .networth-dashboard-main,
 .performance-page,
-.page-savings-rate .savings-grid section {
+.page-savings-rate .savings-grid section,
+.retirement-panel {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
@@ -90,7 +96,8 @@
 }
 
 .page-networth .chart-container,
-.page-savings-rate .chart-container {
+.page-savings-rate .chart-container,
+.page-retirement .chart-container {
   min-width: 0;
   min-height: auto;
   padding: var(--space-4);
@@ -268,19 +275,162 @@
   min-width: 520px;
 }
 
+.retirement-summary-row {
+  grid-template-columns: repeat(4, minmax(170px, 1fr));
+}
+
+.retirement-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.42fr) minmax(0, 1fr);
+  gap: var(--space-5);
+  align-items: stretch;
+}
+
+.retirement-panel {
+  padding: var(--space-4);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+.retirement-panel__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.retirement-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.retirement-form-grid .form-group + .form-group {
+  margin-top: 0;
+}
+
+.retirement-inference {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--hairline);
+}
+
+.retirement-inference div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.retirement-inference strong {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.retirement-chart {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.retirement-chart .recharts-wrapper {
+  cursor: crosshair;
+  user-select: none;
+}
+
+.retirement-info {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.retirement-info__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-full);
+  background: var(--bg-base);
+  color: var(--text-muted);
+  cursor: help;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.retirement-info__button:hover,
+.retirement-info__button:focus-visible {
+  border-color: var(--glass-border-hover);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.retirement-info__bubble {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(360px, calc(100vw - 48px));
+  padding: var(--space-3);
+  border: 1px solid var(--glass-border-hover);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+}
+
+.retirement-info:hover .retirement-info__bubble,
+.retirement-info:focus-within .retirement-info__bubble {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.retirement-table {
+  min-width: 920px;
+}
+
+.retirement-table__group {
+  border-left: 1px solid var(--hairline);
+  text-align: center !important;
+}
+
+.retirement-table thead tr:nth-child(2) th:first-child {
+  border-left: 1px solid var(--hairline);
+}
+
 @media (max-width: 1240px) {
-  .savings-summary-row {
+  .savings-summary-row,
+  .retirement-summary-row {
     grid-template-columns: repeat(3, minmax(170px, 1fr));
   }
 
-  .savings-grid {
+  .savings-grid,
+  .retirement-grid {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 860px) {
   .totals-row,
-  .savings-summary-row {
+  .savings-summary-row,
+  .retirement-summary-row {
     grid-template-columns: 1fr;
   }
 
@@ -298,5 +448,9 @@
   .segmented-control button {
     flex: 1;
     min-width: 0;
+  }
+
+  .retirement-form-grid {
+    grid-template-columns: 1fr;
   }
 }
