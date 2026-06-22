@@ -322,9 +322,10 @@ export default function TransactionsPage() {
       configured: true,
       model: null,
       scanned: 0,
+      groupCount: 0,
       suggestions: [],
       questions: [],
-      message: `Scanning up to ${AI_CATEGORIZATION_LIMIT} uncategorized transactions...`,
+      message: `Grouping up to ${AI_CATEGORIZATION_LIMIT} uncategorized transactions by merchant...`,
     });
     try {
       const result = await withTimeout(
@@ -634,7 +635,7 @@ export default function TransactionsPage() {
                   disabled={isApplyingAiCategories}
                   onClick={handleApplyAiCategorization}
                 >
-                  {isApplyingAiCategories ? 'Applying...' : `Apply ${selectedAiSuggestions.length} AI suggestions`}
+                  {isApplyingAiCategories ? 'Applying...' : `Apply ${selectedAiSuggestions.length} merchant suggestions`}
                 </button>
               </div>
             )}
@@ -644,7 +645,7 @@ export default function TransactionsPage() {
                   <div className="ai-category-action__progress" role="status" aria-live="polite">
                     <div className="ai-category-action__progress-bar" aria-hidden="true" />
                     <span>
-                      Calling OpenAI in batches. {aiReviewElapsedSeconds}s elapsed.
+                      Reviewing merchant groups with OpenAI. {aiReviewElapsedSeconds}s elapsed.
                     </span>
                   </div>
                 )}
@@ -675,7 +676,7 @@ export default function TransactionsPage() {
               )}
               {aiCategorization?.configured && (
                 <div className="ai-category-action__summary">
-                  <span>{aiCategorization.scanned} scanned</span>
+                  <span>{aiCategorization.scanned} transactions scanned</span>
                   {typeof aiCategorization.groupCount === 'number' && (
                     <span>{aiCategorization.groupCount} merchant groups</span>
                   )}
@@ -700,7 +701,7 @@ export default function TransactionsPage() {
               {aiSuggestions.length > 0 && (
                 <section>
                   <div className="ai-category-review__section-header">
-                    <h4>AI suggestions</h4>
+                    <h4>Merchant suggestions</h4>
                     <div className="ai-category-review__actions">
                       <button type="button" className="btn btn--ghost btn--sm" onClick={selectAllAiSuggestions}>
                         Select all
