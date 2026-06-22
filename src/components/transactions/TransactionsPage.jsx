@@ -514,98 +514,84 @@ export default function TransactionsPage() {
                   <span>Net {formatCurrency(totals.net, true)}</span>
                 </div>
               </div>
-              <details className="transactions-tools">
-                <summary>Tools</summary>
-                <div className="transactions-tools__panel">
-                  <section className="transactions-tool-group">
-                    <div className="transactions-tool-group__header">
-                      <span>Bulk category edit</span>
-                      <em>{formatTransactionCount(totalCount)}</em>
-                    </div>
-                    <div className="transactions-tool-row">
-                      <select
-                        id="bulkTransactionCategory"
-                        className="filter-input"
-                        value={bulkCategorySelectValue}
-                        disabled={totalCount === 0}
-                        onChange={(event) => {
-                          if (event.target.value === '__add_custom__') {
-                            setIsCreatingBulkCategory(true);
-                            return;
-                          }
-                          resetBulkCategoryCreate();
-                          setPendingBulkCategoryValue(event.target.value);
-                        }}
-                      >
-                        <option value={BULK_CATEGORY_UNSET} disabled>Choose category</option>
-                        <option value={BULK_CATEGORY_UNCATEGORIZED}>Uncategorized</option>
-                        {categories.map(category => (
-                          <option key={category.id} value={category.id}>{category.name}</option>
-                        ))}
-                        <option value="__add_custom__">+ Add custom category</option>
-                      </select>
-                      <button
-                        className="btn btn--secondary btn--sm bulk-category-action__apply"
-                        type="button"
-                        disabled={
-                          totalCount === 0 ||
-                          bulkCategorySelectValue === BULK_CATEGORY_UNSET
-                        }
-                        onClick={() => handleApplyBulkCategory()}
-                      >
-                        Apply
-                      </button>
-                    </div>
-                    {isCreatingBulkCategory && (
-                      <form className="inline-create transactions-inline-create" onSubmit={handleCreateBulkCategory}>
-                        <input
-                          className="input input--sm inline-create__input"
-                          value={newBulkCategoryName}
-                          onChange={(event) => setNewBulkCategoryName(event.target.value)}
-                          placeholder="New category name"
-                          autoFocus
-                        />
-                        <div className="inline-create__actions">
-                          <button className="btn btn--primary btn--sm" type="submit" disabled={!newBulkCategoryName.trim()}>
-                            Add
-                          </button>
-                          <button className="btn btn--ghost btn--sm" type="button" onClick={resetBulkCategoryCreate}>
-                            Cancel
-                          </button>
-                        </div>
-                      </form>
-                    )}
-                  </section>
-                  <section className="transactions-tool-group">
-                    <div className="transactions-tool-group__header">
-                      <span>AI categorization</span>
-                      <em>Uncategorized only</em>
-                    </div>
-                    <div className="transactions-tool-row">
-                      <button
-                        className="btn btn--secondary btn--sm"
-                        type="button"
-                        disabled={isAiCategorizing || isApplyingAiCategories}
-                        onClick={handlePreviewAiCategorization}
-                        title="Review uncategorized transactions with your server-side OpenAI key"
-                      >
-                        {isAiCategorizing ? 'Reviewing...' : 'Review'}
-                      </button>
-                      {selectedAiSuggestions.length > 0 && (
-                        <button
-                          className="btn btn--primary btn--sm"
-                          type="button"
-                          disabled={isApplyingAiCategories}
-                          onClick={handleApplyAiCategorization}
-                        >
-                          {isApplyingAiCategories ? 'Applying...' : `Apply ${selectedAiSuggestions.length}`}
-                        </button>
-                      )}
-                    </div>
-                  </section>
+              <div className="transactions-header-actions">
+                <div className="transactions-bulk-category" aria-label="Bulk categorization">
+                  <select
+                    id="bulkTransactionCategory"
+                    className="filter-input"
+                    value={bulkCategorySelectValue}
+                    disabled={totalCount === 0}
+                    aria-label="Bulk category"
+                    onChange={(event) => {
+                      if (event.target.value === '__add_custom__') {
+                        setIsCreatingBulkCategory(true);
+                        return;
+                      }
+                      resetBulkCategoryCreate();
+                      setPendingBulkCategoryValue(event.target.value);
+                    }}
+                  >
+                    <option value={BULK_CATEGORY_UNSET} disabled>Choose category</option>
+                    <option value={BULK_CATEGORY_UNCATEGORIZED}>Uncategorized</option>
+                    {categories.map(category => (
+                      <option key={category.id} value={category.id}>{category.name}</option>
+                    ))}
+                    <option value="__add_custom__">+ Add custom category</option>
+                  </select>
+                  <button
+                    className="btn btn--secondary btn--sm bulk-category-action__apply"
+                    type="button"
+                    disabled={
+                      totalCount === 0 ||
+                      bulkCategorySelectValue === BULK_CATEGORY_UNSET
+                    }
+                    onClick={() => handleApplyBulkCategory()}
+                  >
+                    Apply
+                  </button>
                 </div>
-              </details>
+                <button
+                  className="btn btn--secondary btn--sm"
+                  type="button"
+                  disabled={isAiCategorizing || isApplyingAiCategories}
+                  onClick={handlePreviewAiCategorization}
+                  title="Review uncategorized transactions with your server-side OpenAI key"
+                >
+                  {isAiCategorizing ? 'Reviewing...' : 'Review uncategorized'}
+                </button>
+              </div>
             </div>
+            {isCreatingBulkCategory && (
+              <form className="inline-create transactions-inline-create" onSubmit={handleCreateBulkCategory}>
+                <input
+                  className="input input--sm inline-create__input"
+                  value={newBulkCategoryName}
+                  onChange={(event) => setNewBulkCategoryName(event.target.value)}
+                  placeholder="New category name"
+                  autoFocus
+                />
+                <div className="inline-create__actions">
+                  <button className="btn btn--primary btn--sm" type="submit" disabled={!newBulkCategoryName.trim()}>
+                    Add
+                  </button>
+                  <button className="btn btn--ghost btn--sm" type="button" onClick={resetBulkCategoryCreate}>
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+            {selectedAiSuggestions.length > 0 && (
+              <div className="transactions-ai-apply">
+                <button
+                  className="btn btn--primary btn--sm"
+                  type="button"
+                  disabled={isApplyingAiCategories}
+                  onClick={handleApplyAiCategorization}
+                >
+                  {isApplyingAiCategories ? 'Applying...' : `Apply ${selectedAiSuggestions.length} AI suggestions`}
+                </button>
+              </div>
+            )}
             {(isAiCategorizing || aiCategorization || aiCategorizationError) && (
               <div className="ai-category-status">
                 {isAiCategorizing && (
