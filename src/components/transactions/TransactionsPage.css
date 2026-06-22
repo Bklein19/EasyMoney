@@ -43,6 +43,16 @@
   border-bottom: 1px solid var(--glass-border);
 }
 
+.page__header.transactions-page__header {
+  align-items: flex-start;
+}
+
+.page__header.transactions-page__header .filters-container {
+  justify-content: flex-end;
+  margin-bottom: 0;
+  max-width: min(100%, 960px);
+}
+
 .transactions-header {
   padding: var(--space-3) 0;
   border-bottom: 1px solid var(--glass-border);
@@ -52,7 +62,7 @@
 
 .transactions-header__top {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
   min-width: 0;
@@ -745,6 +755,15 @@ select.filter-input {
 }
 
 @media (max-width: 768px) {
+  .page__header.transactions-page__header {
+    align-items: stretch;
+  }
+
+  .page__header.transactions-page__header .filters-container {
+    justify-content: stretch;
+    max-width: none;
+  }
+
   .transactions-header__top {
     align-items: stretch;
     flex-direction: column;

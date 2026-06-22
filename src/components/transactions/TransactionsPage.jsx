@@ -477,11 +477,14 @@ export default function TransactionsPage() {
 
   return (
     <div className="page">
-      <div className="page__header stagger-in">
+      <div className="page__header transactions-page__header stagger-in">
         <div>
           <h1 className="page__title">Transactions</h1>
-          <p className="page__subtitle">View and categorize your transactions.</p>
         </div>
+        <TransactionFilters
+          filters={filters}
+          setFilters={handleFilterChange}
+        />
         {isTransactionsWorking && (
           <div className="transactions-working" role="status" aria-live="polite">
             <span className="transactions-working__spinner" aria-hidden="true" />
@@ -491,16 +494,10 @@ export default function TransactionsPage() {
       </div>
 
       <div className="stagger-in">
-        <TransactionFilters
-          filters={filters}
-          setFilters={handleFilterChange}
-        />
-
         <div className="transactions-container">
           <div className="transactions-header">
             <div className="transactions-header__top">
               <div className="transactions-heading">
-                <h2 className="transactions-title">All Transactions</h2>
                 <div className="transactions-meta">
                   <span>{transactionCountLabel}</span>
                   <span>Income {formatCurrency(totals.income)}</span>
