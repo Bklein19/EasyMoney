@@ -1,6 +1,6 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { createPortal } from 'react-dom';
-import { useWindowVirtualizer } from '@tanstack/react-virtual';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useTransactions } from '../../hooks/useTransactions';
 import TransactionRow from './TransactionRow';
 import TransactionFilters from './TransactionFilters';
@@ -42,6 +42,7 @@ export default function TransactionsPage() {
   const [aiReviewElapsedSeconds, setAiReviewElapsedSeconds] = useState(0);
   const [isApplyingAiCategories, setIsApplyingAiCategories] = useState(false);
   const [isSavingOpenAiKey, setIsSavingOpenAiKey] = useState(false);
+  const [transactionsScrollElement, setTransactionsScrollElement] = useState(null);
   const [transactionsListOffsetTop, setTransactionsListOffsetTop] = useState(0);
   const transactionsListRef = useRef(null);
   const deferredFilters = useDeferredValue(filters);
@@ -89,18 +90,54 @@ export default function TransactionsPage() {
     return String(visibleTransactions.length);
   }, [hasNextPage, totalCount, visibleTransactions.length]);
   const virtualRowCount = hasNextPage ? visibleTransactions.length + 1 : visibleTransactions.length;
-  const rowVirtualizer = useWindowVirtualizer({
+  // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual is the intended virtual scroller for this dense list.
+  const rowVirtualizer = useVirtualizer({
     count: virtualRowCount,
-    estimateSize: () => 64,
+    estimateSize: () => 44,
+    getScrollElement: () => transactionsScrollElement,
     getItemKey: (index) => visibleTransactions[index]?.id ?? `loader-${index}`,
     overscan: 8,
     scrollMargin: transactionsListOffsetTop,
   });
   const virtualRows = rowVirtualizer.getVirtualItems();
 
-  useEffect(() => {
-    setTransactionsListOffsetTop(transactionsListRef.current?.offsetTop ?? 0);
-  }, [visibleTransactions.length]);
+  useLayoutEffect(() => {
+    setTransactionsScrollElement(document.querySelector('.app-main'));
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!transactionsScrollElement || !transactionsListRef.current) return undefined;
+
+    const updateOffset = () => {
+      if (!transactionsListRef.current) return;
+      const listRect = transactionsListRef.current.getBoundingClientRect();
+      const scrollRect = transactionsScrollElement.getBoundingClientRect();
+      setTransactionsListOffsetTop(
+        listRect.top - scrollRect.top + transactionsScrollElement.scrollTop
+      );
+      rowVirtualizer.measure();
+    };
+
+    updateOffset();
+
+    const resizeObserver = new ResizeObserver(updateOffset);
+    resizeObserver.observe(transactionsScrollElement);
+    resizeObserver.observe(transactionsListRef.current);
+    window.addEventListener('resize', updateOffset);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateOffset);
+    };
+  }, [
+    aiCategorization,
+    aiCategorizationError,
+    isAiCategorizing,
+    isCreatingBulkCategory,
+    rowVirtualizer,
+    transactionsScrollElement,
+    visibleTransactions.length,
+  ]);
 
   useEffect(() => {
     const lastVirtualRow = virtualRows[virtualRows.length - 1];

@@ -476,11 +476,12 @@
 
 .transaction-row {
   display: grid;
-  grid-template-columns: 100px 1fr 200px 150px 120px;
+  grid-template-columns: 86px minmax(220px, 1fr) 170px 136px 112px;
   align-items: center;
-  padding: var(--space-3) 0;
+  min-height: 44px;
+  padding: 6px 0;
   border-bottom: 1px solid var(--glass-border);
-  gap: var(--space-4);
+  gap: var(--space-3);
   transition: background-color var(--transition-fast);
 }
 
@@ -494,23 +495,27 @@
 
 .tx-date {
   color: var(--text-muted);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
+  line-height: 1.25;
 }
 
 .tx-desc {
   font-weight: 500;
+  font-size: var(--text-sm);
+  line-height: 1.25;
   display: flex;
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis
+  text-overflow: ellipsis;
 }
 
 .tx-notes {
   font-size: var(--text-xs);
   color: var(--text-muted);
   font-weight: 400;
-  margin-top: 2px;
+  line-height: 1.2;
+  margin-top: 1px;
 }
 
 .tx-category {
@@ -518,17 +523,21 @@
 }
 
 .tx-account {
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
+  line-height: 1.25;
   color: var(--text-secondary);
 }
 
 .tx-amount {
   text-align: right;
-  font-weight: 600;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  line-height: 1.25;
   font-variant-numeric: tabular-nums;
 }
 
 .filters-container {
+  --transaction-filter-height: 40px;
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
@@ -537,19 +546,29 @@
 }
 
 .filter-input {
+  box-sizing: border-box;
+  height: var(--transaction-filter-height, 40px);
   background: var(--bg-surface);
   border: 1px solid var(--glass-border);
   color: var(--text-primary);
   border-radius: var(--radius-md);
-  padding: 7px var(--space-3);
+  padding: 0 var(--space-3);
   font-size: var(--text-sm);
+  line-height: calc(var(--transaction-filter-height, 40px) - 2px);
   outline: none;
   transition: border-color var(--transition-fast);
   min-width: 150px;
 }
 
 select.filter-input {
+  appearance: none;
+  min-width: 210px;
+  padding-right: 36px;
   background-color: var(--bg-surface);
+  background-image: url("data:image/svg+xml,%3Csvg width='16' height='16' viewBox='0 0 16 16' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 6l4 4 4-4' stroke='%238b93a3' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-position: right 12px center;
+  background-repeat: no-repeat;
+  background-size: 16px 16px;
   color: var(--text-primary);
 }
 
@@ -569,6 +588,8 @@ select.filter-input {
 }
 
 .transaction-search-control .filter-input {
+  width: min(360px, 100%);
+  min-width: 280px;
   padding-right: 34px;
 }
 
@@ -591,14 +612,16 @@ select.filter-input {
 .transaction-filter-more summary {
   display: inline-flex;
   align-items: center;
-  min-height: 36px;
-  padding: 7px var(--space-3);
+  box-sizing: border-box;
+  height: var(--transaction-filter-height, 40px);
+  min-height: var(--transaction-filter-height, 40px);
+  padding: 0 var(--space-3);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-md);
   background: var(--bg-surface);
   color: var(--text-primary);
   font-size: var(--text-sm);
-  line-height: 1.2;
+  line-height: calc(var(--transaction-filter-height, 40px) - 2px);
   cursor: pointer;
   list-style: none;
 }
@@ -649,14 +672,21 @@ select.filter-input {
   background: var(--bg-surface);
   border: 1px solid var(--glass-border);
   color: var(--text-primary);
-  border-radius: var(--radius-full);
-  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  min-height: 24px;
+  max-width: 100%;
+  padding: 2px 8px;
   font-size: var(--text-xs);
   display: flex;
   align-items: center;
   gap: 4px;
   cursor: pointer;
+  line-height: 1.2;
   transition: all var(--transition-fast);
+}
+
+.category-picker-btn svg {
+  flex: 0 0 auto;
 }
 
 .category-picker-btn:hover {
