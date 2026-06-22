@@ -25,7 +25,6 @@ const Sidebar = ({
   onClose,
   isCollapsed = false,
   isPeekOpen = false,
-  onPeekOpen,
   onPeekClose,
   onCollapsedChange,
   reportAccounts = [],
@@ -136,7 +135,6 @@ const Sidebar = ({
       <div
         ref={sidebarRef}
         className={`sidebar ${isMobileOpen ? 'mobile-open' : ''} ${isCollapsed ? 'sidebar--collapsed' : ''} ${isPeekOpen ? 'sidebar--peek' : ''}`}
-        onMouseEnter={isCollapsed && !isPeekOpen ? onPeekOpen : undefined}
         onMouseLeave={isPeekOpen ? onPeekClose : undefined}
       >
         <div className="sidebar-header">

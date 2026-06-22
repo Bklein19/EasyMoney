@@ -6,7 +6,7 @@
 }
 
 .app-shell--sidebar-collapsed {
-  --active-sidebar-width: var(--sidebar-collapsed-width);
+  --active-sidebar-width: 0px;
 }
 
 .app-content {

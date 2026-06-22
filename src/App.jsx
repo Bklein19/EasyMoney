@@ -71,7 +71,6 @@ function App() {
           onClose={() => setIsMobileSidebarOpen(false)}
           isCollapsed={isSidebarCollapsed}
           isPeekOpen={isSidebarPeekOpen}
-          onPeekOpen={() => setIsSidebarPeekOpen(true)}
           onPeekClose={() => setIsSidebarPeekOpen(false)}
           onCollapsedChange={handleSidebarCollapsedChange}
           reportAccounts={reportAccounts}
