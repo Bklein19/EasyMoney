@@ -325,6 +325,10 @@ body.sidebar-resizing {
     display: block;
   }
 
+  .sidebar-resize-handle {
+    display: none;
+  }
+
   .sidebar {
     width: min(280px, calc(100vw - 48px));
     min-width: 0;
