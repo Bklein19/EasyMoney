@@ -204,6 +204,7 @@
 }
 
 html {
+  height: 100%;
   font-size: 16px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -216,8 +217,8 @@ body {
   line-height: 1.6;
   color: var(--text-primary);
   background: var(--bg-deepest);
-  overflow-x: hidden;
-  min-height: 100vh;
+  height: 100%;
+  overflow: hidden;
 }
 
 body::before {
@@ -235,7 +236,8 @@ body::before {
 #root {
   position: relative;
   z-index: 1;
-  min-height: 100vh;
+  height: 100%;
+  overflow: hidden;
 }
 
 a {
