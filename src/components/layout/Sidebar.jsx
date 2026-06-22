@@ -16,9 +16,9 @@ import './Sidebar.css';
 
 const REPORT_ROUTES = new Set(['/net-worth', '/performance', '/savings-rate', '/retirement']);
 const SIDEBAR_WIDTH_KEY = 'easymoney:sidebar-width';
-const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_MIN_WIDTH = 168;
 const SIDEBAR_MAX_WIDTH = 520;
-const SIDEBAR_COLLAPSE_THRESHOLD = 150;
+const SIDEBAR_COLLAPSE_THRESHOLD = 112;
 
 const Sidebar = ({
   isMobileOpen,

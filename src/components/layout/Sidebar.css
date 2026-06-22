@@ -2,7 +2,7 @@
 
 .sidebar {
   width: var(--sidebar-width);
-  min-width: 220px;
+  min-width: 168px;
   max-width: 520px;
   height: 100vh;
   position: fixed;
