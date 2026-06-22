@@ -51,7 +51,7 @@
 
 .page__header.transactions-page__header .filters-container {
   flex: 1 1 auto;
-  justify-content: flex-start;
+  justify-content: flex-end;
   margin-bottom: 0;
   max-width: none;
 }
