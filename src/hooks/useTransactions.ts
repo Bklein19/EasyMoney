@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query';
 import { subscribeToDataChanges } from '../db/api';
 import { queryClient, trpc, trpcClient } from '../api/trpc';
 import type { TransactionListItem } from '../../server/app/types.ts';
@@ -47,6 +47,7 @@ export function useTransactions(filters: TransactionFilters = {}) {
   const isInfinite = filters.infinite === true;
   const transactionsQuery = useQuery(trpc.transactions.list.queryOptions(query, {
     enabled: !isInfinite,
+    placeholderData: keepPreviousData,
     select: data => data.transactions.map(fromAppTransaction),
   }));
   const infiniteTransactionsQuery = useInfiniteQuery({
@@ -59,6 +60,7 @@ export function useTransactions(filters: TransactionFilters = {}) {
       offset: pageParam,
     }),
     getNextPageParam: (lastPage) => lastPage.nextOffset ?? undefined,
+    placeholderData: keepPreviousData,
     select: data => ({
       ...data,
       pages: data.pages.map(page => ({
