@@ -109,6 +109,20 @@ export default function TransactionsPage() {
     return () => window.clearTimeout(timeoutId);
   }, [isTransactionsWorking]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    trpcClient.transactions.latestCategoryUndo.query()
+      .then((undoOperation) => {
+        if (!cancelled && undoOperation) setBulkCategoryUndo(undoOperation);
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useLayoutEffect(() => {
     setTransactionsScrollElement(document.querySelector('.app-main'));
   }, []);
@@ -255,32 +269,22 @@ export default function TransactionsPage() {
   const handleApplyBulkCategory = async (categoryValue = bulkCategorySelectValue) => {
     if (categoryValue === BULK_CATEGORY_UNSET || totalCount === 0) return;
 
-    const categoryName = categoryValue === BULK_CATEGORY_UNCATEGORIZED
-      ? 'Uncategorized'
-      : categoryValue
-      ? categories.find(category => String(category.id) === String(categoryValue))?.name || 'selected category'
-      : 'Uncategorized';
-
     setIsApplyingBulkCategory(true);
     try {
       const result = await handleBulkCategoryChange(categoryValue);
-      setBulkCategoryUndo({
-        categoryName,
-        count: result.count ?? totalCount,
-        previousCategories: result.previousCategories ?? [],
-      });
+      setBulkCategoryUndo(result.undoOperation ?? null);
     } finally {
       setIsApplyingBulkCategory(false);
     }
   };
 
   const handleUndoBulkCategory = async () => {
-    if (!bulkCategoryUndo?.previousCategories?.length) return;
+    if (!bulkCategoryUndo?.id) return;
 
     setIsRestoringBulkCategory(true);
     try {
       await trpcClient.transactions.restoreCategories.mutate({
-        changes: bulkCategoryUndo.previousCategories,
+        undoOperationId: bulkCategoryUndo.id,
       });
       setBulkCategoryUndo(null);
       await Promise.all([
@@ -483,11 +487,7 @@ export default function TransactionsPage() {
     });
 
     const result = await handleBulkCategoryChange(categoryId);
-    setBulkCategoryUndo({
-      categoryName: name,
-      count: result.count ?? totalCount,
-      previousCategories: result.previousCategories ?? [],
-    });
+    setBulkCategoryUndo(result.undoOperation ?? null);
     resetBulkCategoryCreate();
   };
 

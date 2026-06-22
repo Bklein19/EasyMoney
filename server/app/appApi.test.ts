@@ -33,6 +33,7 @@ function resetAppTables() {
       'importFiles',
       'ledgerTransactions',
       'ledgerBalances',
+      'transactionCategoryUndoOperations',
       'transactionAnnotations',
       'transactions',
       'balanceSnapshots',
@@ -818,8 +819,14 @@ test('trpc transactions categorize matching applies to the full filtered result 
   });
   expect(result.ok).toBe(true);
   expect(result.count).toBe(2);
-  expect(result.previousCategories).toHaveLength(2);
-  expect(result.previousCategories.every(change => change.categoryId === null)).toBe(true);
+  expect(result.undoOperation).toMatchObject({
+    categoryName: 'Coffee',
+    count: 2,
+  });
+  expect(typeof result.undoOperation?.id).toBe('number');
+
+  const pendingUndo = await trpcClient.transactions.latestCategoryUndo.query();
+  expect(pendingUndo).toEqual(result.undoOperation);
 
   const matching = await trpcClient.transactions.list.query({ search: 'Bulk Coffee' });
   expect(matching.transactions).toHaveLength(2);
@@ -830,9 +837,10 @@ test('trpc transactions categorize matching applies to the full filtered result 
   expect(unmatched.transactions[0].category).toBeNull();
 
   const undo = await trpcClient.transactions.restoreCategories.mutate({
-    changes: result.previousCategories,
+    undoOperationId: result.undoOperation?.id ?? 0,
   });
   expect(undo).toEqual({ ok: true, count: 2 });
+  expect(await trpcClient.transactions.latestCategoryUndo.query()).toBeNull();
 
   const restored = await trpcClient.transactions.list.query({ search: 'Bulk Coffee' });
   expect(restored.transactions).toHaveLength(2);

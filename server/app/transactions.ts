@@ -34,6 +34,23 @@ interface LedgerTransactionRow {
   createdAt: string | null;
 }
 
+interface CategoryUndoChange {
+  transactionId: string;
+  categoryId: number | string | null;
+}
+
+interface CategoryUndoOperation {
+  id: number;
+  categoryName: string;
+  count: number;
+}
+
+interface CategoryUndoResult {
+  ok: true;
+  count: number;
+  undoOperation: CategoryUndoOperation | null;
+}
+
 function optionalNumber(value: string | number | null | undefined): number | null {
   if (value === null || value === undefined || value === '') return null;
   const parsed = Number(value);
@@ -202,6 +219,84 @@ function toTransactionListItem(row: LedgerTransactionRow): TransactionListItem {
   };
 }
 
+function getCategoryName(categoryId: string | number | null | undefined): string {
+  const id = optionalNumber(categoryId);
+  if (id === null) return 'Uncategorized';
+
+  const row = getDb()
+    .prepare('SELECT name FROM categories WHERE id = ?')
+    .get(id) as { name: string } | undefined;
+  return row?.name ?? 'selected category';
+}
+
+function createCategoryUndoOperation(input: {
+  categoryName: string;
+  previousCategories: CategoryUndoChange[];
+}): CategoryUndoOperation {
+  const now = new Date().toISOString();
+  const result = getDb()
+    .prepare(`
+      INSERT INTO transactionCategoryUndoOperations
+        (categoryName, transactionCount, payloadJson, status, createdAt)
+      VALUES (?, ?, ?, 'pending', ?)
+    `)
+    .run(
+      input.categoryName,
+      input.previousCategories.length,
+      JSON.stringify(input.previousCategories),
+      now
+    );
+
+  return {
+    id: Number(result.lastInsertRowid),
+    categoryName: input.categoryName,
+    count: input.previousCategories.length,
+  };
+}
+
+export function getLatestTransactionCategoryUndoOperation(): CategoryUndoOperation | null {
+  const row = getDb()
+    .prepare(`
+      SELECT id, categoryName, transactionCount
+      FROM transactionCategoryUndoOperations
+      WHERE status = 'pending'
+      ORDER BY id DESC
+      LIMIT 1
+    `)
+    .get() as { id: number; categoryName: string; transactionCount: number } | undefined;
+
+  if (!row) return null;
+  return {
+    id: row.id,
+    categoryName: row.categoryName,
+    count: row.transactionCount,
+  };
+}
+
+function getTransactionCategoryUndoChanges(undoOperationId: string | number): CategoryUndoChange[] {
+  const row = getDb()
+    .prepare(`
+      SELECT payloadJson
+      FROM transactionCategoryUndoOperations
+      WHERE id = ? AND status = 'pending'
+    `)
+    .get(undoOperationId) as { payloadJson: string } | undefined;
+
+  if (!row) return [];
+
+  const parsed = JSON.parse(row.payloadJson) as Array<{
+    transactionId?: string | number;
+    categoryId?: string | number | null;
+  }>;
+
+  return parsed
+    .map(change => ({
+      transactionId: String(change.transactionId || ''),
+      categoryId: change.categoryId ?? null,
+    }))
+    .filter(change => change.transactionId);
+}
+
 export function listTransactions(options: ListTransactionsOptions = {}): TransactionListResponse {
   syncLedgerReadModelFromLegacyTables();
   const { where, params } = buildTransactionFilter(options);
@@ -320,7 +415,7 @@ export function categorizeTransactions(input: {
 export function categorizeTransactionsByQuery(input: {
   query?: ListTransactionsOptions;
   categoryId?: number | string | null;
-}) {
+}): CategoryUndoResult {
   syncLedgerReadModelFromLegacyTables();
   const { where, params } = buildTransactionFilter(input.query ?? {});
   const db = getDb();
@@ -333,7 +428,7 @@ export function categorizeTransactionsByQuery(input: {
     .map(row => row.ledgerTransactionId)
     .filter((id): id is string => Boolean(id)))];
 
-  if (!ledgerTransactionIds.length) return { ok: true, count: 0, previousCategories: [] };
+  if (!ledgerTransactionIds.length) return { ok: true, count: 0, undoOperation: null };
 
   const previousRows = ledgerTransactionIds.length
     ? db.prepare(`
@@ -347,33 +442,36 @@ export function categorizeTransactionsByQuery(input: {
     transactionId: id,
     categoryId: previousCategoryById.get(id) ?? null,
   }));
+  const categoryName = getCategoryName(input.categoryId);
+  let undoOperation: CategoryUndoOperation | null = null;
 
   const apply = db.transaction(() => {
+    undoOperation = createCategoryUndoOperation({ categoryName, previousCategories });
     for (const id of ledgerTransactionIds) {
       upsertTransactionAnnotation(id, { categoryId: input.categoryId ?? null });
     }
   });
   apply();
 
-  return { ok: true, count: ledgerTransactionIds.length, previousCategories };
+  return { ok: true, count: ledgerTransactionIds.length, undoOperation };
 }
 
 export function restoreTransactionCategories(input: {
-  changes: Array<{ transactionId: number | string; categoryId?: number | string | null }>;
+  undoOperationId: number | string;
 }) {
-  const changes = input.changes
-    .map(change => ({
-      transactionId: String(change.transactionId || ''),
-      categoryId: change.categoryId ?? null,
-    }))
-    .filter(change => change.transactionId);
-
+  const changes = getTransactionCategoryUndoChanges(input.undoOperationId);
   if (!changes.length) return { ok: true, count: 0 };
 
-  const apply = getDb().transaction(() => {
+  const db = getDb();
+  const apply = db.transaction(() => {
     for (const change of changes) {
       upsertTransactionAnnotation(change.transactionId, { categoryId: change.categoryId });
     }
+    db.prepare(`
+      UPDATE transactionCategoryUndoOperations
+      SET status = 'consumed', consumedAt = ?
+      WHERE id = ? AND status = 'pending'
+    `).run(new Date().toISOString(), input.undoOperationId);
   });
   apply();
 

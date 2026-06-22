@@ -122,6 +122,7 @@ const TABLES = {
     'importFileId', 'importRowId', 'sourceTransactionId', 'createdAt', 'updatedAt'
   ],
   transactionAnnotations: ['ledgerTransactionId', 'categoryId', 'notes', 'createdAt', 'updatedAt'],
+  transactionCategoryUndoOperations: ['id', 'categoryName', 'transactionCount', 'payloadJson', 'status', 'createdAt', 'consumedAt'],
   categories: ['id', 'name', 'parentId', 'type', 'color', 'icon'],
   budgets: ['id', 'categoryId', 'month', 'amount'],
   balanceSnapshots: ['id', 'accountId', 'month', 'balance', 'capturedAt'],
@@ -158,6 +159,7 @@ const ORDER_BY = {
   transactions: 'date DESC, id DESC',
   ledgerTransactions: 'date DESC, id DESC',
   transactionAnnotations: 'updatedAt DESC, ledgerTransactionId ASC',
+  transactionCategoryUndoOperations: 'createdAt DESC, id DESC',
   categories: 'id ASC',
   budgets: 'month DESC, id DESC',
   balanceSnapshots: 'month ASC, id ASC',
@@ -256,6 +258,16 @@ export function initDatabase() {
       notes TEXT,
       createdAt TEXT,
       updatedAt TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS transactionCategoryUndoOperations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      categoryName TEXT NOT NULL,
+      transactionCount INTEGER NOT NULL,
+      payloadJson TEXT NOT NULL,
+      status TEXT DEFAULT 'pending',
+      createdAt TEXT NOT NULL,
+      consumedAt TEXT
     );
 
     CREATE TABLE IF NOT EXISTS categories (
