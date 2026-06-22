@@ -67,7 +67,7 @@ const Sidebar = ({
     let pendingClientX = event.clientX;
     let nextCollapsed = isCollapsed;
 
-    const setWidth = (clientX) => {
+    const setWidth = (clientX, { commit = false } = {}) => {
       if (!sidebarRef.current) return null;
       const rawWidth = clientX - left;
       if (rawWidth < SIDEBAR_COLLAPSE_THRESHOLD) {
@@ -83,8 +83,10 @@ const Sidebar = ({
         onCollapsedChange?.(false);
       }
       const width = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, rawWidth));
-      document.documentElement.style.setProperty('--sidebar-width', `${width}px`);
       sidebarRef.current.style.setProperty('--sidebar-width', `${width}px`);
+      if (commit) {
+        document.documentElement.style.setProperty('--sidebar-width', `${width}px`);
+      }
       return width;
     };
 
@@ -101,12 +103,14 @@ const Sidebar = ({
         window.cancelAnimationFrame(frameId);
         frameId = 0;
       }
-      const width = setWidth(upEvent.clientX);
+      const width = setWidth(upEvent.clientX, { commit: true });
       if (width) window.localStorage.setItem(SIDEBAR_WIDTH_KEY, String(Math.round(width)));
-      document.body.classList.remove('sidebar-resizing');
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
       window.removeEventListener('pointercancel', handlePointerUp);
+      window.requestAnimationFrame(() => {
+        document.body.classList.remove('sidebar-resizing');
+      });
     };
 
     window.addEventListener('pointermove', handlePointerMove);
