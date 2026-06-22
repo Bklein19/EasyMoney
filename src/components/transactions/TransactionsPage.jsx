@@ -14,6 +14,7 @@ import './TransactionsPage.css';
 const TRANSACTION_PAGE_SIZE = 100;
 const AI_CATEGORIZATION_LIMIT = 100;
 const AI_CATEGORIZATION_TIMEOUT_MS = 90_000;
+const TRANSACTIONS_WORKING_INDICATOR_DELAY_MS = 500;
 const BULK_CATEGORY_UNSET = '__bulk_category_unset__';
 const BULK_CATEGORY_UNCATEGORIZED = '__bulk_category_uncategorized__';
 
@@ -44,6 +45,7 @@ export default function TransactionsPage() {
   const [aiReviewElapsedSeconds, setAiReviewElapsedSeconds] = useState(0);
   const [isApplyingAiCategories, setIsApplyingAiCategories] = useState(false);
   const [isSavingOpenAiKey, setIsSavingOpenAiKey] = useState(false);
+  const [showTransactionsWorking, setShowTransactionsWorking] = useState(false);
   const [transactionsScrollElement, setTransactionsScrollElement] = useState(null);
   const [transactionsListOffsetTop, setTransactionsListOffsetTop] = useState(0);
   const transactionsListRef = useRef(null);
@@ -91,6 +93,19 @@ export default function TransactionsPage() {
     scrollMargin: transactionsListOffsetTop,
   });
   const virtualRows = rowVirtualizer.getVirtualItems();
+
+  useEffect(() => {
+    if (!isTransactionsWorking) {
+      setShowTransactionsWorking(false);
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setShowTransactionsWorking(true);
+    }, TRANSACTIONS_WORKING_INDICATOR_DELAY_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [isTransactionsWorking]);
 
   useLayoutEffect(() => {
     setTransactionsScrollElement(document.querySelector('.app-main'));
@@ -473,7 +488,7 @@ export default function TransactionsPage() {
           filters={filters}
           setFilters={handleFilterChange}
         />
-        {isTransactionsWorking && (
+        {showTransactionsWorking && (
           <div className="transactions-working" role="status" aria-live="polite">
             <span className="transactions-working__spinner" aria-hidden="true" />
             <span>Updating transactions...</span>
