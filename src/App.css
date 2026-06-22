@@ -18,6 +18,10 @@
   transition: margin-left var(--transition-base);
 }
 
+body.sidebar-resizing .app-content {
+  transition: none;
+}
+
 .app-main {
   flex: 1;
   overflow-y: auto;
