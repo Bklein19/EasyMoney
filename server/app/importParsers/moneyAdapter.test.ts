@@ -357,6 +357,101 @@ test('Wells Fargo checking statement parser infers signs from running balances',
   }]);
 });
 
+test('Wells Fargo checking statement parser keeps wrapped payroll rows with amount on following line', () => {
+  const result = parseWellsFargoStatementText([
+    'Wells Fargo Everyday Checking',
+    'Account number: 000000008858',
+    'Beginning balance on 11/27 $5,000.00',
+    'Transaction history',
+    'Date',
+    'Check',
+    'Number Description',
+    'Deposits/',
+    'Additions',
+    'Withdrawals/',
+    'Subtractions',
+    'Ending daily',
+    'balance',
+    '11/29 Wells Fargo Rewards 95.81',
+    '11/29 ExampleCo, I-Osv 4444444444 241129 EXAMPLE001 Alex',
+    'Example',
+    '3,693.20',
+    '11/29 Online Transfer Ref #Ib0Qdy9W9V to Wells Fargo Active Cash',
+    'VISA Card Xxxxxxxxxxxx4793 on 11/27/24',
+    '7.99',
+    '11/29 Applecard Gsbank Payment 112824 62110504 Alex Example 19.24 8,761.78',
+    'Totals',
+    'Ending balance on 12/24 $8,761.78',
+  ].join('\n'), 'wells-fargo-statements/checking-8858/wells-fargo-checking-8858-2024-12-24.pdf');
+
+  expect(result.transactions.map(transaction => ({
+    date: transaction.date,
+    amount_cents: transaction.amount_cents,
+    description: transaction.description,
+  }))).toEqual([{
+    date: '2024-11-29',
+    amount_cents: 9581,
+    description: 'Wells Fargo Rewards',
+  }, {
+    date: '2024-11-29',
+    amount_cents: 369320,
+    description: 'ExampleCo, I-Osv 4444444444 241129 EXAMPLE001 Alex Example',
+  }, {
+    date: '2024-11-29',
+    amount_cents: -799,
+    description: 'Online Transfer Ref #Ib0Qdy9W9V to Wells Fargo Active Cash VISA Card Xxxxxxxxxxxx4793 on 11/27/24',
+  }, {
+    date: '2024-11-29',
+    amount_cents: -1924,
+    description: 'Applecard Gsbank Payment 112824 62110504 Alex Example',
+  }]);
+});
+
+test('Wells Fargo checking statement parser reconciles wrapped deposits before the next ending balance', () => {
+  const result = parseWellsFargoStatementText([
+    'Wells Fargo Everyday Checking',
+    'Account number: 000000008858',
+    'Beginning balance on 4/24 $5,614.75',
+    'Transaction history',
+    'Date',
+    'Check',
+    'Number Description',
+    'Deposits/',
+    'Additions',
+    'Withdrawals/',
+    'Subtractions',
+    'Ending daily',
+    'balance',
+    '5/26 Money Transfer authorized on 05/25 From Withjoy.Com',
+    'Registry Payout CA S346145301728387 Card 1736',
+    '450.00',
+    '5/26 eDeposit IN Branch 05/26/26 05:03:12 PM 1234 Example',
+    'Village Dr Example City CA 1736',
+    '4,939.94',
+    '5/26 Robinhood Card 3333333333 260526 Alex Example 574.28 10,430.41',
+    'Totals',
+    'Ending balance on 5/26 $10,430.41',
+  ].join('\n'), 'wells-fargo-statements/checking-8858/wells-fargo-checking-8858-2026-05-26.pdf');
+
+  expect(result.transactions.map(transaction => ({
+    date: transaction.date,
+    amount_cents: transaction.amount_cents,
+    description: transaction.description,
+  }))).toEqual([{
+    date: '2026-05-26',
+    amount_cents: 45000,
+    description: 'Money Transfer authorized on 05/25 From Withjoy.Com Registry Payout CA S346145301728387 Card 1736',
+  }, {
+    date: '2026-05-26',
+    amount_cents: 493994,
+    description: 'eDeposit IN Branch 05/26/26 05:03:12 PM 1234 Example Village Dr Example City CA 1736',
+  }, {
+    date: '2026-05-26',
+    amount_cents: -57428,
+    description: 'Robinhood Card 3333333333 260526 Alex Example',
+  }]);
+});
+
 test.each([
   ['American Express Credit Card', 'american-express-credit-card-csv', 'american express activity.csv', ['Date', 'Description', 'Amount']],
   ['Apple Card', 'apple-card-csv', 'apple-card.csv', ['Transaction Date', 'Clearing Date', 'Description', 'Merchant', 'Category', 'Type', 'Amount (USD)', 'Purchased By']],

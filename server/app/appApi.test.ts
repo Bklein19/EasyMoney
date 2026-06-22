@@ -780,6 +780,80 @@ test('trpc transactions procedures read and categorize transactions', async () =
   expect(after.transactions[0].category?.id).toBe(categoryId);
 });
 
+
+test('ai categorization apply writes transaction annotations by ledger id', async () => {
+  const categoryId = Number(insertRow('categories', { name: 'Dining', type: 'expense' }));
+  const accountId = Number(insertRow('accounts', {
+    name: 'AI Test Checking',
+    type: 'checking',
+    currentBalance: 0,
+  }));
+  insertRow('ledgerTransactions', {
+    ledgerTransactionId: 'txn_ai_apply',
+    accountId,
+    date: '2026-06-01',
+    amountCents: -1800,
+    description: 'Cafe Test',
+    merchant: 'Cafe Test',
+    type: 'expense',
+    transactionKind: 'activity',
+    createdAt: new Date().toISOString(),
+  });
+
+  const result = await trpcClient.transactions.applyAiCategorization.mutate({
+    suggestions: [{ transactionId: 'txn_ai_apply', categoryId }],
+  });
+
+  expect(result).toMatchObject({
+    count: 1,
+    requested: 1,
+    appliedTransactionIds: ['txn_ai_apply'],
+    skipped: [],
+  });
+  expect(
+    getDb().prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId = ?').get('txn_ai_apply')
+  ).toMatchObject({ categoryId });
+});
+
+test('ai categorization apply reports skipped already categorized transactions', async () => {
+  const oldCategoryId = Number(insertRow('categories', { name: 'Old Category', type: 'expense' }));
+  const newCategoryId = Number(insertRow('categories', { name: 'New Category', type: 'expense' }));
+  const accountId = Number(insertRow('accounts', {
+    name: 'AI Test Checking',
+    type: 'checking',
+    currentBalance: 0,
+  }));
+  insertRow('ledgerTransactions', {
+    ledgerTransactionId: 'txn_ai_skip',
+    accountId,
+    date: '2026-06-01',
+    amountCents: -1800,
+    description: 'Already Done',
+    merchant: 'Already Done',
+    type: 'expense',
+    transactionKind: 'activity',
+    createdAt: new Date().toISOString(),
+  });
+  insertRow('transactionAnnotations', {
+    ledgerTransactionId: 'txn_ai_skip',
+    categoryId: oldCategoryId,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  const result = await trpcClient.transactions.applyAiCategorization.mutate({
+    suggestions: [{ transactionId: 'txn_ai_skip', categoryId: newCategoryId }],
+  });
+
+  expect(result).toMatchObject({
+    count: 0,
+    requested: 1,
+    skipped: [{ transactionId: 'txn_ai_skip', reason: 'Already categorized' }],
+  });
+  expect(
+    getDb().prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId = ?').get('txn_ai_skip')
+  ).toMatchObject({ categoryId: oldCategoryId });
+});
 test('trpc net worth report is backend-owned and reads ledger balances', async () => {
   const checkingId = insertRow('accounts', {
     name: 'Checking',

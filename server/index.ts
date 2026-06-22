@@ -16,6 +16,7 @@ import { archiveAccount, listAccounts, unarchiveAccount, updateAccountMetadata }
 import { listCategories } from './app/categories.ts';
 import { commitImport, listImportHistory, previewImport, reimportFile, reimportFiles, unimportFile, unimportFiles } from './app/imports.ts';
 import { getInvestmentNetWorthReport, getSavingsRateReport } from './app/investmentReports.ts';
+import { loadLocalEnv } from './app/localEnv.ts';
 import { appRouter } from './app/router.ts';
 import { splitTransactionAnnotationChanges, upsertTransactionAnnotation } from './app/transactionAnnotations.ts';
 import { listTransactions } from './app/transactions.ts';
@@ -29,6 +30,7 @@ type RouteMap = Record<string, RouteValue>;
 
 fs.mkdirSync(path.resolve(import.meta.dir, '..', 'data'), { recursive: true });
 
+loadLocalEnv();
 initDatabase();
 seedDatabase();
 

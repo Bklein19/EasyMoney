@@ -89,9 +89,10 @@ function parseCardPeriod(text: string): { covered_from: string; covered_to: stri
 function inferDepositSign(description: string): 1 | -1 {
   const normalized = description.toLowerCase();
   if (
-    /\b(cashout|deposit|payroll|rewards|fee refund|interest payment)\b/.test(normalized) ||
+    /\b(cashout|edeposit|deposit|payroll|rewards|fee refund|interest payment)\b/.test(normalized) ||
     /\bmineraltree\b.*\bquickbooks\b/.test(normalized) ||
     /\bmineraltree cdnother mineraltree\b/.test(normalized) ||
+    /\bsalesloft\b/.test(normalized) ||
     /\bzelle from\b/.test(normalized) ||
     /\btransfer from\b/.test(normalized)
   ) {
@@ -121,17 +122,17 @@ function parseDepositTransactions(
   let runningBalance = beginning ? cents(beginning[1]!) : null;
 
   const transactions: ParseResult["transactions"] = [];
-  let current:
-    | {
-        date: string;
-        description: string;
-        amount_cents: number;
-      }
-    | undefined;
   let inHistory = false;
 
-  const flush = () => {
-    if (!current) return;
+  type UnsignedTransaction = {
+    date: string;
+    description: string;
+    amount_cents: number;
+  };
+
+  const unresolved: UnsignedTransaction[] = [];
+
+  const addTransaction = (current: UnsignedTransaction) => {
     transactions.push(
       makeTx({
         date: current.date,
@@ -142,7 +143,96 @@ function parseDepositTransactions(
         raw: { source: "wells-fargo-statement", type: "checking-activity" },
       })
     );
-    current = undefined;
+  };
+
+  const inferredTransaction = (transaction: UnsignedTransaction): UnsignedTransaction => ({
+    ...transaction,
+    amount_cents: inferDepositSign(transaction.description) * Math.abs(transaction.amount_cents),
+  });
+
+  const resolveUnbalancedRows = (endingBalance: number, current: UnsignedTransaction) => {
+    if (runningBalance === null) {
+      for (const transaction of unresolved.splice(0)) addTransaction(inferredTransaction(transaction));
+      addTransaction(inferredTransaction(current));
+      runningBalance = endingBalance;
+      return;
+    }
+
+    const candidates = [...unresolved, current];
+    const targetDelta = endingBalance - runningBalance;
+    const totalCombinations = 2 ** candidates.length;
+    let bestSigns: number[] | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (let mask = 0; mask < totalCombinations; mask += 1) {
+      const signs = candidates.map((_, index) => (mask & (1 << index)) ? 1 : -1);
+      const sum = candidates.reduce((total, transaction, index) => (
+        total + signs[index]! * Math.abs(transaction.amount_cents)
+      ), 0);
+      const distance = Math.abs(sum - targetDelta);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        bestSigns = signs;
+      }
+      if (distance <= 1) break;
+    }
+
+    if (bestSigns && bestDistance <= 1) {
+      for (const [index, transaction] of candidates.entries()) {
+        addTransaction({
+          ...transaction,
+          amount_cents: bestSigns[index]! * Math.abs(transaction.amount_cents),
+        });
+      }
+    } else {
+      for (const transaction of candidates) addTransaction(inferredTransaction(transaction));
+    }
+
+    unresolved.length = 0;
+    runningBalance = endingBalance;
+  };
+
+  const parseLogicalRow = (dateMonth: string, dateDay: string, parts: string[]) => {
+    const rest = cleanDescription(parts.join(" "));
+    const moneyMatches = [...rest.matchAll(/\$?[\d,]+\.\d{2}/g)];
+    if (moneyMatches.length === 0) return;
+
+    const firstMoney = moneyMatches[0]!;
+    const lastMoney = moneyMatches[moneyMatches.length - 1]!;
+    const firstMoneyCol = firstMoney.index ?? 0;
+    const isEndingBalanceOnly =
+      firstMoneyCol >= endingCol - 4 &&
+      moneyMatches.length === 1;
+    if (isEndingBalanceOnly) return;
+
+    const amount = cents(firstMoney[0]);
+    const endingBalance = moneyMatches.length >= 2 ? cents(lastMoney[0]) : null;
+    const description = cleanDescription(rest.slice(0, firstMoney.index).trim());
+    const transaction = {
+      date: isoStatementMonthDate(dateMonth, dateDay, coveredTo),
+      description,
+      amount_cents: amount,
+    };
+
+    if (endingBalance !== null) {
+      resolveUnbalancedRows(endingBalance, transaction);
+    } else {
+      unresolved.push(transaction);
+    }
+  };
+
+  let pending:
+    | {
+        month: string;
+        day: string;
+        parts: string[];
+      }
+    | undefined;
+
+  const flushPending = () => {
+    if (!pending) return;
+    parseLogicalRow(pending.month, pending.day, pending.parts);
+    pending = undefined;
   };
 
   for (const rawLine of lines) {
@@ -154,64 +244,31 @@ function parseDepositTransactions(
     }
     if (!inHistory) continue;
     if (/^Totals\b/i.test(trimmed) || /^Monthly service fee summary$/i.test(trimmed)) {
-      flush();
+      flushPending();
       break;
     }
 
     const row = line.match(/^\s*(\d{1,2})\/(\d{1,2})\s+(.*)$/);
     if (row) {
-      const restStart = row[0].indexOf(row[3]!);
-      const rest = row[3]!;
-      const moneyMatches = [...rest.matchAll(/\$?[\d,]+\.\d{2}/g)];
-      if (moneyMatches.length === 0) {
-        flush();
-        current = undefined;
-        continue;
-      }
-
-      const firstMoney = moneyMatches[0]!;
-      const lastMoney = moneyMatches[moneyMatches.length - 1]!;
-      const firstMoneyCol = restStart + firstMoney.index!;
-      const isEndingBalanceOnly =
-        firstMoneyCol >= endingCol - 4 &&
-        moneyMatches.length === 1 &&
-        current === undefined;
-      if (isEndingBalanceOnly) continue;
-
-      const amount = cents(firstMoney[0]);
-      const endingBalance = moneyMatches.length >= 2 ? cents(lastMoney[0]) : null;
-      const description = cleanDescription(rest.slice(0, firstMoney.index).trim());
-      let signed: number;
-
-      if (endingBalance !== null && runningBalance !== null) {
-        const delta = endingBalance - runningBalance;
-        signed = Math.abs(Math.abs(delta) - amount) <= 1
-          ? delta
-          : inferDepositSign(description) * Math.abs(amount);
-        runningBalance = endingBalance;
-      } else {
-        signed = inferDepositSign(description) * Math.abs(amount);
-        if (runningBalance !== null) runningBalance += signed;
-      }
-
-      flush();
-      current = {
-        date: isoStatementMonthDate(row[1]!, row[2]!, coveredTo),
-        description,
-        amount_cents: signed,
+      flushPending();
+      pending = {
+        month: row[1]!,
+        day: row[2]!,
+        parts: [row[3]!],
       };
       continue;
     }
 
-    if (current && /^\s{8,}\S/.test(line) && !/^Page \d+/.test(trimmed)) {
+    if (pending && trimmed && !/^Page \d+/.test(trimmed)) {
       const cutAt = Math.min(
         ...[depositCol, withdrawalCol, endingCol].filter((n) => n > 0 && n < line.length)
       );
-      current.description += ` ${line.slice(0, cutAt).trim()}`;
+      pending.parts.push(line.slice(0, cutAt).trim());
     }
   }
 
-  flush();
+  flushPending();
+  for (const transaction of unresolved.splice(0)) addTransaction(inferredTransaction(transaction));
   return transactions;
 }
 

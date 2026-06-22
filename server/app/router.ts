@@ -1,7 +1,9 @@
 import { initTRPC } from '@trpc/server';
 import { z } from 'zod';
 import { listAccounts } from './accounts.ts';
+import { applyAiCategorizationSuggestions, getAiCategorizationTransactionDetails, previewAiCategorization } from './aiCategorization.ts';
 import { listCategories } from './categories.ts';
+import { saveLocalEnvValue } from './localEnv.ts';
 import { getNetWorthReport } from './netWorth.ts';
 import { categorizeTransactions, listTransactions } from './transactions.ts';
 
@@ -46,6 +48,40 @@ export const appRouter = t.router({
         categoryId: optionalId,
       }))
       .mutation(({ input }) => categorizeTransactions(input)),
+
+    aiCategorizationPreview: t.procedure
+      .input(z.object({
+        limit: z.number().optional(),
+      }).optional())
+      .mutation(({ input }) => previewAiCategorization(input ?? {})),
+
+    applyAiCategorization: t.procedure
+      .input(z.object({
+        suggestions: z.array(z.object({
+          transactionId: z.string().min(1),
+          categoryId: z.union([z.string(), z.number()]),
+        })),
+      }))
+      .mutation(({ input }) => applyAiCategorizationSuggestions(input)),
+
+    aiCategorizationTransactionDetails: t.procedure
+      .input(z.object({
+        transactionIds: z.array(z.string()).min(1),
+      }))
+      .query(({ input }) => getAiCategorizationTransactionDetails(input)),
+
+    saveOpenAiCategorizationSettings: t.procedure
+      .input(z.object({
+        apiKey: z.string().min(1),
+        model: z.string().optional(),
+      }))
+      .mutation(({ input }) => {
+        saveLocalEnvValue('OPENAI_API_KEY', input.apiKey.trim());
+        if (input.model?.trim()) {
+          saveLocalEnvValue('OPENAI_CATEGORIZATION_MODEL', input.model.trim());
+        }
+        return { ok: true };
+      }),
   }),
 
   netWorth: t.router({

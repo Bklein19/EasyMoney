@@ -56,6 +56,20 @@ Set `PORT` to use a different local port:
 PORT=80 bun run dev
 ```
 
+Optional AI categorization:
+
+```bash
+OPENAI_API_KEY=sk-... bun run dev
+```
+
+You can also create an untracked `.env.local` file:
+
+```bash
+OPENAI_API_KEY=sk-...
+```
+
+The Transactions page can save the key to `.env.local` from the local UI if the server starts without one. The app loads `.env.local` on startup and also updates the running local server when you save the key in the UI. It only applies suggestions after you confirm them. Set `OPENAI_CATEGORIZATION_MODEL` to override the default model.
+
 ## Checks
 
 Run the normal acceptance gate before committing:
