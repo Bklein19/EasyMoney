@@ -101,7 +101,8 @@ body.sidebar-resizing {
 }
 
 .sidebar--collapsed .sidebar-nav {
-  padding: var(--space-6) var(--space-3);
+  align-items: center;
+  padding: var(--space-2) 0;
 }
 
 .sidebar-link {
@@ -113,7 +114,7 @@ body.sidebar-resizing {
   color: var(--text-secondary);
   font-weight: 500;
   font-size: var(--text-sm);
-  transition: all var(--transition-fast);
+  transition: none;
   text-decoration: none;
   min-height: 34px;
   min-width: 0;
@@ -283,8 +284,10 @@ body.sidebar-resizing {
 }
 
 .sidebar--collapsed .sidebar-link {
+  width: 44px;
+  height: 44px;
   justify-content: center;
-  padding: var(--space-3);
+  padding: 0;
 }
 
 @media (max-width: 768px) {

@@ -812,18 +812,6 @@ select option:hover {
 .page {
   padding: var(--space-6) var(--space-8);
   max-width: 1400px;
-  animation: page-in 400ms ease-out;
-}
-
-@keyframes page-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 .page__header {
@@ -885,29 +873,9 @@ select option:hover {
   }
 }
 
-/* ─── Staggered Entry Animations ────────────────────────────────── */
+/* Kept as a layout hook; route changes should be instant. */
 .stagger-in > * {
-  animation: stagger-fade-in 400ms ease-out both;
-}
-
-.stagger-in > *:nth-child(1) { animation-delay: 0ms; }
-.stagger-in > *:nth-child(2) { animation-delay: 60ms; }
-.stagger-in > *:nth-child(3) { animation-delay: 120ms; }
-.stagger-in > *:nth-child(4) { animation-delay: 180ms; }
-.stagger-in > *:nth-child(5) { animation-delay: 240ms; }
-.stagger-in > *:nth-child(6) { animation-delay: 300ms; }
-.stagger-in > *:nth-child(7) { animation-delay: 360ms; }
-.stagger-in > *:nth-child(8) { animation-delay: 420ms; }
-
-@keyframes stagger-fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  animation: none;
 }
 
 /* ─── Tooltip ───────────────────────────────────────────────────── */
