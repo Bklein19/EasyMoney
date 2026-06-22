@@ -32,7 +32,6 @@ const Sidebar = ({
   const location = useLocation();
   const sidebarRef = useRef(null);
   const navItems = [
-    { path: '/import', label: 'Import', icon: Upload },
     { path: '/', label: 'Analytics', icon: PieChart },
     { path: '/transactions', label: 'Transactions', icon: ArrowLeftRight },
     { path: '/accounts', label: 'Accounts', icon: WalletCards },
@@ -41,6 +40,7 @@ const Sidebar = ({
     { path: '/performance', label: 'Performance', icon: LineChart },
     { path: '/savings-rate', label: 'Savings Rate', icon: Activity },
     { path: '/retirement', label: 'Retirement', icon: Landmark },
+    { path: '/import', label: 'Import', icon: Upload },
   ];
   const showAccountPicker = (
     !isCollapsed &&

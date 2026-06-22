@@ -37,17 +37,14 @@
 .transactions-container {
   display: flex;
   flex-direction: column;
-  background: var(--bg-elevated);
-  border-radius: var(--radius-xl);
-  border: 1px solid var(--glass-border);
-  overflow: hidden;
-  box-shadow: var(--shadow-md);
   width: 100%;
   min-width: 0;
+  border-top: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--glass-border);
 }
 
 .transactions-header {
-  padding: var(--space-4) var(--space-6);
+  padding: var(--space-4) 0;
   border-bottom: 1px solid var(--glass-border);
   display: grid;
   gap: var(--space-4);
@@ -73,7 +70,7 @@
 .transactions-totals {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
+  gap: 0;
   flex-wrap: wrap;
 }
 
@@ -198,7 +195,7 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-4);
-  padding: var(--space-4) var(--space-6);
+  padding: var(--space-4) 0;
   border-bottom: 1px solid var(--glass-border);
   background: var(--bg-base);
 }
@@ -373,11 +370,13 @@
 }
 
 .transactions-total {
-  min-width: 112px;
-  padding: var(--space-2) var(--space-3);
-  background: var(--bg-surface);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-md);
+  min-width: 0;
+  padding: 0 var(--space-4) 0 0;
+}
+
+.transactions-total + .transactions-total {
+  padding-left: var(--space-4);
+  border-left: 1px solid var(--hairline);
 }
 
 .transactions-total span {
@@ -389,7 +388,9 @@
 
 .transactions-total strong {
   display: block;
+  color: var(--text-primary);
   font-size: var(--text-sm);
+  font-weight: 650;
   margin-top: 2px;
 }
 
@@ -415,7 +416,7 @@
   display: grid;
   grid-template-columns: 100px 1fr 200px 150px 120px;
   align-items: center;
-  padding: var(--space-3) var(--space-6);
+  padding: var(--space-3) 0;
   border-bottom: 1px solid var(--glass-border);
   gap: var(--space-4);
   transition: background-color var(--transition-fast);

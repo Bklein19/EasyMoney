@@ -2,7 +2,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
-  max-width: 1120px;
+  width: 100%;
+  max-width: none;
 }
 
 .accounts-page__header {
@@ -19,10 +20,8 @@
 .accounts-table-wrap {
   width: 100%;
   overflow-x: auto;
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-lg);
-  background: var(--bg-elevated);
-  box-shadow: var(--shadow-sm);
+  border-top: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--glass-border);
 }
 
 .accounts-table {
@@ -53,7 +52,7 @@
   padding-top: 8px;
   padding-bottom: 8px;
   color: var(--text-muted);
-  background: var(--bg-surface);
+  background: var(--bg-deepest);
   font-size: var(--text-xs);
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -320,10 +319,6 @@
 }
 
 @media (max-width: 768px) {
-  .accounts-page {
-    max-width: none;
-  }
-
   .accounts-table {
     min-width: 760px;
   }
