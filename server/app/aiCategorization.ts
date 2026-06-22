@@ -1,8 +1,9 @@
+import { Agent, OpenAIProvider, Runner } from '@openai/agents';
+import { z } from 'zod';
 import { getDb } from '../database.js';
 import { upsertTransactionAnnotation } from './transactionAnnotations.ts';
 import type { CategorySummary } from './types.ts';
 
-const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
 const DEFAULT_MODEL = 'gpt-5.4-mini';
 const MAX_TRANSACTIONS = 500;
 const BATCH_SIZE = 40;
@@ -127,51 +128,6 @@ function chunk<T>(items: T[], size: number) {
   return chunks;
 }
 
-function buildResponseSchema(categoryNames: string[]) {
-  return {
-    type: 'object',
-    additionalProperties: false,
-    required: ['assignments', 'questions'],
-    properties: {
-      assignments: {
-        type: 'array',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['transactionId', 'categoryName', 'confidence', 'reason'],
-          properties: {
-            transactionId: { type: 'string' },
-            categoryName: {
-              anyOf: [
-                { type: 'string', enum: categoryNames },
-                { type: 'null' },
-              ],
-            },
-            confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
-            reason: { type: 'string' },
-          },
-        },
-      },
-      questions: {
-        type: 'array',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['pattern', 'transactionIds', 'reason'],
-          properties: {
-            pattern: { type: 'string' },
-            transactionIds: {
-              type: 'array',
-              items: { type: 'string' },
-            },
-            reason: { type: 'string' },
-          },
-        },
-      },
-    },
-  };
-}
-
 function compactTransaction(row: UncategorizedTransactionRow) {
   return {
     id: row.ledgerTransactionId,
@@ -228,16 +184,22 @@ export function getAiCategorizationTransactionDetails(input: { transactionIds: s
   return { transactions: rows.map(transactionSummary) };
 }
 
-function parseModelJson(responseBody: any): ModelResponse {
-  const text = typeof responseBody.output_text === 'string'
-    ? responseBody.output_text
-    : responseBody.output
-      ?.flatMap((item: any) => item.content ?? [])
-      ?.map((content: any) => content.text ?? '')
-      ?.join('');
+function buildCategorizationOutputSchema(categoryNames: [string, ...string[]]) {
+  const categoryName = z.union([z.enum(categoryNames), z.null()]);
 
-  if (!text) throw new Error('OpenAI response did not include structured output text.');
-  return JSON.parse(text) as ModelResponse;
+  return z.strictObject({
+    assignments: z.array(z.strictObject({
+      transactionId: z.string(),
+      categoryName,
+      confidence: z.enum(['high', 'medium', 'low']),
+      reason: z.string(),
+    })),
+    questions: z.array(z.strictObject({
+      pattern: z.string(),
+      transactionIds: z.array(z.string()),
+      reason: z.string(),
+    })),
+  });
 }
 
 async function categorizeBatchWithOpenAi(input: {
@@ -246,46 +208,42 @@ async function categorizeBatchWithOpenAi(input: {
   categories: CategorySummary[];
   transactions: UncategorizedTransactionRow[];
 }) {
-  const categoryNames = input.categories.map(category => category.name);
-  const response = await fetch(OPENAI_RESPONSES_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${input.apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: input.model,
-      instructions: [
-        'You categorize personal finance transactions into the provided existing categories.',
-        'Only use an exact category name from the category list.',
-        'Return null categoryName when you are not confident. Do not guess.',
-        'If several transactions share a clear pattern but the category is ambiguous, add a question describing the pattern and transaction IDs.',
-        'Prefer high confidence only for obvious merchant/category matches.',
-      ].join('\n'),
-      input: JSON.stringify({
-        categories: input.categories.map(category => ({
-          name: category.name,
-          type: category.type,
-        })),
-        transactions: input.transactions.map(compactTransaction),
-      }),
-      text: {
-        format: {
-          type: 'json_schema',
-          name: 'transaction_categorization',
-          strict: true,
-          schema: buildResponseSchema(categoryNames),
-        },
-      },
-    }),
+  const categoryNames = input.categories.map(category => category.name) as [string, ...string[]];
+  const agent = new Agent({
+    name: 'Transaction categorization',
+    model: input.model,
+    instructions: [
+      'You categorize personal finance transactions into the provided existing categories.',
+      'Only use an exact category name from the category list.',
+      'Return null categoryName when you are not confident. Do not guess.',
+      'If several transactions share a clear pattern but the category is ambiguous, add a question describing the pattern and transaction IDs.',
+      'Prefer high confidence only for obvious merchant/category matches.',
+    ].join('\n'),
+    outputType: buildCategorizationOutputSchema(categoryNames),
   });
 
-  if (!response.ok) {
-    const detail = await response.text();
-    throw new Error(`OpenAI categorization request failed (${response.status}): ${detail.slice(0, 500)}`);
+  const runner = new Runner({
+    modelProvider: new OpenAIProvider({ apiKey: input.apiKey }),
+    traceIncludeSensitiveData: false,
+    workflowName: 'EasyMoney AI categorization',
+  });
+  const result = await runner.run(
+    agent,
+    JSON.stringify({
+      categories: input.categories.map(category => ({
+        name: category.name,
+        type: category.type,
+      })),
+      transactions: input.transactions.map(compactTransaction),
+    }),
+    { maxTurns: 1 }
+  );
+
+  if (!result.finalOutput) {
+    throw new Error('OpenAI categorization request did not return structured output.');
   }
 
-  return parseModelJson(await response.json());
+  return result.finalOutput as ModelResponse;
 }
 
 export async function previewAiCategorization(options: { limit?: unknown } = {}) {
