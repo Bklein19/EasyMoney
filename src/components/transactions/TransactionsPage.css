@@ -121,10 +121,7 @@
 }
 
 .transactions-bulk-category {
-  display: grid;
-  grid-template-columns: minmax(160px, 220px) auto;
-  align-items: center;
-  gap: var(--space-2);
+  display: block;
   min-width: 0;
 }
 
@@ -139,6 +136,17 @@
 .transactions-bulk-category .btn,
 .transactions-header-actions > .btn {
   min-height: 32px;
+}
+
+.transactions-bulk-undo {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.35;
 }
 
 .transactions-inline-create {

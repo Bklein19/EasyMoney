@@ -32,7 +32,9 @@ export default function TransactionsPage() {
   const [isFilterPending, startFilterTransition] = useTransition();
   const [isCreatingBulkCategory, setIsCreatingBulkCategory] = useState(false);
   const [newBulkCategoryName, setNewBulkCategoryName] = useState('');
-  const [pendingBulkCategoryValue, setPendingBulkCategoryValue] = useState(null);
+  const [bulkCategoryUndo, setBulkCategoryUndo] = useState(null);
+  const [isApplyingBulkCategory, setIsApplyingBulkCategory] = useState(false);
+  const [isRestoringBulkCategory, setIsRestoringBulkCategory] = useState(false);
   const [aiCategorization, setAiCategorization] = useState(null);
   const [aiCategorizationError, setAiCategorizationError] = useState('');
   const [openAiApiKeyDraft, setOpenAiApiKeyDraft] = useState('');
@@ -167,7 +169,7 @@ export default function TransactionsPage() {
     return () => window.clearInterval(intervalId);
   }, [isAiCategorizing, aiReviewStartedAt]);
 
-  const bulkCategorySelectValue = pendingBulkCategoryValue ?? BULK_CATEGORY_UNSET;
+  const bulkCategorySelectValue = BULK_CATEGORY_UNSET;
   const aiSuggestions = aiCategorization?.suggestions ?? [];
   const aiQuestions = aiCategorization?.questions ?? [];
   const activeAiQuestions = aiQuestions
@@ -241,7 +243,7 @@ export default function TransactionsPage() {
   const confirmLargeBulkChange = (count, categoryName) => {
     if (count <= 50) return true;
     return window.confirm(
-      `This will set the category for ${formatTransactionCount(count)} to "${categoryName}". This is a bulk edit and cannot be automatically undone.\n\nContinue?`
+      `This will set the category for ${formatTransactionCount(count)} to "${categoryName}".\n\nContinue?`
     );
   };
 
@@ -259,9 +261,35 @@ export default function TransactionsPage() {
       ? categories.find(category => String(category.id) === String(categoryValue))?.name || 'selected category'
       : 'Uncategorized';
 
-    if (!confirmLargeBulkChange(totalCount, categoryName)) return;
-    await handleBulkCategoryChange(categoryValue);
-    setPendingBulkCategoryValue(null);
+    setIsApplyingBulkCategory(true);
+    try {
+      const result = await handleBulkCategoryChange(categoryValue);
+      setBulkCategoryUndo({
+        categoryName,
+        count: result.count ?? totalCount,
+        previousCategories: result.previousCategories ?? [],
+      });
+    } finally {
+      setIsApplyingBulkCategory(false);
+    }
+  };
+
+  const handleUndoBulkCategory = async () => {
+    if (!bulkCategoryUndo?.previousCategories?.length) return;
+
+    setIsRestoringBulkCategory(true);
+    try {
+      await trpcClient.transactions.restoreCategories.mutate({
+        changes: bulkCategoryUndo.previousCategories,
+      });
+      setBulkCategoryUndo(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() }),
+        queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] }),
+      ]);
+    } finally {
+      setIsRestoringBulkCategory(false);
+    }
   };
 
   const inferBulkCategoryType = () => {
@@ -454,14 +482,18 @@ export default function TransactionsPage() {
       icon: 'tag'
     });
 
-    await handleBulkCategoryChange(categoryId);
-    setPendingBulkCategoryValue(null);
+    const result = await handleBulkCategoryChange(categoryId);
+    setBulkCategoryUndo({
+      categoryName: name,
+      count: result.count ?? totalCount,
+      previousCategories: result.previousCategories ?? [],
+    });
     resetBulkCategoryCreate();
   };
 
   const handleFilterChange = useCallback((nextFilters) => {
     startFilterTransition(() => {
-      setPendingBulkCategoryValue(null);
+      setBulkCategoryUndo(null);
       setFilters(nextFilters);
     });
   }, []);
@@ -520,7 +552,7 @@ export default function TransactionsPage() {
                     id="bulkTransactionCategory"
                     className="filter-input"
                     value={bulkCategorySelectValue}
-                    disabled={totalCount === 0}
+                    disabled={totalCount === 0 || isApplyingBulkCategory || isRestoringBulkCategory}
                     aria-label="Bulk category"
                     onChange={(event) => {
                       if (event.target.value === '__add_custom__') {
@@ -528,27 +560,18 @@ export default function TransactionsPage() {
                         return;
                       }
                       resetBulkCategoryCreate();
-                      setPendingBulkCategoryValue(event.target.value);
+                      handleApplyBulkCategory(event.target.value);
                     }}
                   >
-                    <option value={BULK_CATEGORY_UNSET} disabled>Choose category</option>
+                    <option value={BULK_CATEGORY_UNSET} disabled>
+                      {isApplyingBulkCategory ? 'Categorizing...' : 'Categorize as...'}
+                    </option>
                     <option value={BULK_CATEGORY_UNCATEGORIZED}>Uncategorized</option>
                     {categories.map(category => (
                       <option key={category.id} value={category.id}>{category.name}</option>
                     ))}
                     <option value="__add_custom__">+ Add custom category</option>
                   </select>
-                  <button
-                    className="btn btn--secondary btn--sm bulk-category-action__apply"
-                    type="button"
-                    disabled={
-                      totalCount === 0 ||
-                      bulkCategorySelectValue === BULK_CATEGORY_UNSET
-                    }
-                    onClick={() => handleApplyBulkCategory()}
-                  >
-                    Apply
-                  </button>
                 </div>
                 <button
                   className="btn btn--secondary btn--sm"
@@ -579,6 +602,21 @@ export default function TransactionsPage() {
                   </button>
                 </div>
               </form>
+            )}
+            {bulkCategoryUndo && (
+              <div className="transactions-bulk-undo" role="status" aria-live="polite">
+                <span>
+                  Categorized {formatTransactionCount(bulkCategoryUndo.count)} as {bulkCategoryUndo.categoryName}.
+                </span>
+                <button
+                  className="btn btn--ghost btn--sm"
+                  type="button"
+                  disabled={isRestoringBulkCategory}
+                  onClick={handleUndoBulkCategory}
+                >
+                  {isRestoringBulkCategory ? 'Undoing...' : 'Undo'}
+                </button>
+              </div>
             )}
             {selectedAiSuggestions.length > 0 && (
               <div className="transactions-ai-apply">

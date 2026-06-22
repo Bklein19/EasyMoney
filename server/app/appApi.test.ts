@@ -816,7 +816,10 @@ test('trpc transactions categorize matching applies to the full filtered result 
     query: { search: 'Bulk Coffee' },
     categoryId,
   });
-  expect(result).toEqual({ ok: true, count: 2 });
+  expect(result.ok).toBe(true);
+  expect(result.count).toBe(2);
+  expect(result.previousCategories).toHaveLength(2);
+  expect(result.previousCategories.every(change => change.categoryId === null)).toBe(true);
 
   const matching = await trpcClient.transactions.list.query({ search: 'Bulk Coffee' });
   expect(matching.transactions).toHaveLength(2);
@@ -825,6 +828,15 @@ test('trpc transactions categorize matching applies to the full filtered result 
   const unmatched = await trpcClient.transactions.list.query({ search: 'Unmatched Lunch' });
   expect(unmatched.transactions).toHaveLength(1);
   expect(unmatched.transactions[0].category).toBeNull();
+
+  const undo = await trpcClient.transactions.restoreCategories.mutate({
+    changes: result.previousCategories,
+  });
+  expect(undo).toEqual({ ok: true, count: 2 });
+
+  const restored = await trpcClient.transactions.list.query({ search: 'Bulk Coffee' });
+  expect(restored.transactions).toHaveLength(2);
+  expect(restored.transactions.every(transaction => transaction.category === null)).toBe(true);
 });
 
 

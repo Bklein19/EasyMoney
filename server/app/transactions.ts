@@ -1,5 +1,5 @@
 import { getDb, syncLedgerReadModelFromLegacyTables } from '../database.js';
-import { upsertTransactionAnnotation } from './transactionAnnotations.ts';
+import { ensureLedgerTransactionId, upsertTransactionAnnotation } from './transactionAnnotations.ts';
 import type {
   ListTransactionsOptions,
   TransactionListItem,
@@ -291,7 +291,21 @@ export function categorizeTransactions(input: {
   categoryId?: number | string | null;
 }) {
   const uniqueIds = [...new Set(input.transactionIds.map(id => String(id)).filter(Boolean))];
-  if (!uniqueIds.length) return { ok: true, count: 0 };
+  if (!uniqueIds.length) return { ok: true, count: 0, previousCategories: [] };
+
+  const db = getDb();
+  const previousCategories = uniqueIds.map(id => {
+    const ledgerTransactionId = ensureLedgerTransactionId(id);
+    const row = db.prepare(`
+      SELECT categoryId
+      FROM transactionAnnotations
+      WHERE ledgerTransactionId = ?
+    `).get(ledgerTransactionId) as { categoryId: number | string | null } | undefined;
+    return {
+      transactionId: ledgerTransactionId,
+      categoryId: row?.categoryId ?? null,
+    };
+  });
 
   const apply = getDb().transaction(() => {
     for (const id of uniqueIds) {
@@ -300,7 +314,7 @@ export function categorizeTransactions(input: {
   });
   apply();
 
-  return { ok: true, count: uniqueIds.length };
+  return { ok: true, count: uniqueIds.length, previousCategories };
 }
 
 export function categorizeTransactionsByQuery(input: {
@@ -319,7 +333,20 @@ export function categorizeTransactionsByQuery(input: {
     .map(row => row.ledgerTransactionId)
     .filter((id): id is string => Boolean(id)))];
 
-  if (!ledgerTransactionIds.length) return { ok: true, count: 0 };
+  if (!ledgerTransactionIds.length) return { ok: true, count: 0, previousCategories: [] };
+
+  const previousRows = ledgerTransactionIds.length
+    ? db.prepare(`
+      SELECT ledgerTransactionId, categoryId
+      FROM transactionAnnotations
+      WHERE ledgerTransactionId IN (${ledgerTransactionIds.map(() => '?').join(',')})
+    `).all(...ledgerTransactionIds) as Array<{ ledgerTransactionId: string; categoryId: number | string | null }>
+    : [];
+  const previousCategoryById = new Map(previousRows.map(row => [row.ledgerTransactionId, row.categoryId]));
+  const previousCategories = ledgerTransactionIds.map(id => ({
+    transactionId: id,
+    categoryId: previousCategoryById.get(id) ?? null,
+  }));
 
   const apply = db.transaction(() => {
     for (const id of ledgerTransactionIds) {
@@ -328,5 +355,27 @@ export function categorizeTransactionsByQuery(input: {
   });
   apply();
 
-  return { ok: true, count: ledgerTransactionIds.length };
+  return { ok: true, count: ledgerTransactionIds.length, previousCategories };
+}
+
+export function restoreTransactionCategories(input: {
+  changes: Array<{ transactionId: number | string; categoryId?: number | string | null }>;
+}) {
+  const changes = input.changes
+    .map(change => ({
+      transactionId: String(change.transactionId || ''),
+      categoryId: change.categoryId ?? null,
+    }))
+    .filter(change => change.transactionId);
+
+  if (!changes.length) return { ok: true, count: 0 };
+
+  const apply = getDb().transaction(() => {
+    for (const change of changes) {
+      upsertTransactionAnnotation(change.transactionId, { categoryId: change.categoryId });
+    }
+  });
+  apply();
+
+  return { ok: true, count: changes.length };
 }
