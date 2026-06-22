@@ -78,13 +78,14 @@ const Sidebar = ({
         return null;
       }
 
+      const wasCollapsed = nextCollapsed;
       if (nextCollapsed) {
         nextCollapsed = false;
         onCollapsedChange?.(false);
       }
       const width = Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, rawWidth));
       sidebarRef.current.style.setProperty('--sidebar-width', `${width}px`);
-      if (commit) {
+      if (commit || wasCollapsed) {
         document.documentElement.style.setProperty('--sidebar-width', `${width}px`);
       }
       return width;
