@@ -24,15 +24,15 @@ interface UncategorizedTransactionRow {
 }
 
 interface ModelAssignment {
-  transactionId: string;
+  groupId: string;
   categoryName: string | null;
   confidence: 'high' | 'medium' | 'low';
   reason: string;
 }
 
 interface ModelQuestion {
+  groupId: string;
   pattern: string;
-  transactionIds: string[];
   reason: string;
 }
 
@@ -42,17 +42,27 @@ interface ModelResponse {
 }
 
 export interface AiCategorySuggestion {
-  transactionId: string;
+  id: string;
+  groupId: string;
+  merchantName: string;
+  aliases: string[];
+  transactionIds: string[];
+  transactionCount: number;
+  totalAmount: number;
   categoryId: number;
   categoryName: string;
   confidence: 'high' | 'medium' | 'low';
   reason: string;
-  transaction: AiCategorizationTransaction;
+  transactions: AiCategorizationTransaction[];
 }
 
 export interface AiCategoryQuestion {
+  groupId: string;
   pattern: string;
   transactionIds: string[];
+  aliases: string[];
+  transactionCount: number;
+  totalAmount: number;
   reason: string;
   transactions: AiCategorizationTransaction[];
 }
@@ -64,6 +74,18 @@ export interface AiCategorizationTransaction {
   description: string | null;
   merchant: string | null;
   account: string | null;
+}
+
+interface MerchantCategorizationGroup {
+  id: string;
+  merchantName: string;
+  normalizedMerchant: string;
+  aliases: string[];
+  transactions: UncategorizedTransactionRow[];
+  transactionIds: string[];
+  transactionCount: number;
+  totalAmount: number;
+  absoluteAmount: number;
 }
 
 function getOpenAiKey() {
@@ -143,6 +165,98 @@ function compactTransaction(row: UncategorizedTransactionRow) {
   };
 }
 
+function normalizeMerchantText(value: string | null | undefined) {
+  const original = (value || 'Unknown').trim() || 'Unknown';
+  let cleaned = original
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/g, ' ')
+    .replace(/\b(?:card|visa|mastercard|debit)\s*[-*#]?\s*\d{3,}\b/g, ' ')
+    .replace(/\b(?:auth|authorization|ref|trace|id)\s*[-#: ]*\s*[a-z0-9]{4,}\b/g, ' ')
+    .replace(/\b[a-z0-9]*\d[a-z0-9]*[a-z][a-z0-9]*\b/g, ' ')
+    .replace(/\s+#?\d{3,}\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned) cleaned = original.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() || 'unknown';
+
+  return {
+    key: cleaned.toUpperCase(),
+    displayName: cleaned
+      .split(' ')
+      .filter(Boolean)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' '),
+    originalName: original,
+  };
+}
+
+function transactionMerchantText(row: UncategorizedTransactionRow) {
+  return row.merchant || row.description || row.originalDescription || 'Unknown';
+}
+
+export function groupTransactionsForAiCategorization(rows: UncategorizedTransactionRow[]): MerchantCategorizationGroup[] {
+  const groupsByKey = new Map<string, MerchantCategorizationGroup>();
+
+  for (const row of rows) {
+    const normalized = normalizeMerchantText(transactionMerchantText(row));
+    const groupId = `merchant:${normalized.key}`;
+    const existing = groupsByKey.get(groupId);
+    const amount = row.amountCents / 100;
+    const group = existing ?? {
+      id: groupId,
+      merchantName: normalized.displayName,
+      normalizedMerchant: normalized.key,
+      aliases: [],
+      transactions: [],
+      transactionIds: [],
+      transactionCount: 0,
+      totalAmount: 0,
+      absoluteAmount: 0,
+    };
+
+    group.transactions.push(row);
+    group.transactionIds.push(row.ledgerTransactionId);
+    group.transactionCount += 1;
+    group.totalAmount += amount;
+    group.absoluteAmount += Math.abs(amount);
+    if (!group.aliases.includes(normalized.originalName)) {
+      group.aliases.push(normalized.originalName);
+    }
+    groupsByKey.set(groupId, group);
+  }
+
+  return [...groupsByKey.values()]
+    .map(group => {
+      const transactions = group.transactions.sort((a, b) => b.date.localeCompare(a.date));
+      return {
+        ...group,
+        aliases: group.aliases.sort((a, b) => a.localeCompare(b)),
+        transactions,
+        transactionIds: transactions.map(transaction => transaction.ledgerTransactionId),
+      };
+    })
+    .sort((a, b) =>
+      b.transactionCount - a.transactionCount ||
+      b.absoluteAmount - a.absoluteAmount ||
+      a.merchantName.localeCompare(b.merchantName)
+    );
+}
+
+function compactMerchantGroup(group: MerchantCategorizationGroup) {
+  return {
+    groupId: group.id,
+    merchantName: group.merchantName,
+    aliases: group.aliases.slice(0, 8),
+    transactionCount: group.transactionCount,
+    totalAmount: Math.round(group.totalAmount * 100) / 100,
+    absoluteAmount: Math.round(group.absoluteAmount * 100) / 100,
+    sampleTransactions: group.transactions.slice(0, 6).map(compactTransaction),
+  };
+}
+
 function transactionSummary(row: UncategorizedTransactionRow): AiCategorizationTransaction {
   return {
     transactionId: row.ledgerTransactionId,
@@ -189,14 +303,14 @@ function buildCategorizationOutputSchema(categoryNames: [string, ...string[]]) {
 
   return z.strictObject({
     assignments: z.array(z.strictObject({
-      transactionId: z.string(),
+      groupId: z.string(),
       categoryName,
       confidence: z.enum(['high', 'medium', 'low']),
       reason: z.string(),
     })),
     questions: z.array(z.strictObject({
+      groupId: z.string(),
       pattern: z.string(),
-      transactionIds: z.array(z.string()),
       reason: z.string(),
     })),
   });
@@ -206,18 +320,19 @@ async function categorizeBatchWithOpenAi(input: {
   apiKey: string;
   model: string;
   categories: CategorySummary[];
-  transactions: UncategorizedTransactionRow[];
+  groups: MerchantCategorizationGroup[];
 }) {
   const categoryNames = input.categories.map(category => category.name) as [string, ...string[]];
   const agent = new Agent({
     name: 'Transaction categorization',
     model: input.model,
     instructions: [
-      'You categorize personal finance transactions into the provided existing categories.',
+      'You categorize personal finance merchant/payee groups into the provided existing categories.',
       'Only use an exact category name from the category list.',
       'Return null categoryName when you are not confident. Do not guess.',
-      'If several transactions share a clear pattern but the category is ambiguous, add a question describing the pattern and transaction IDs.',
-      'Prefer high confidence only for obvious merchant/category matches.',
+      'Treat the whole merchant/payee group as one decision.',
+      'If a group is probably variable, such as Venmo, Zelle, PayPal, checks, cash app, or a generic bank transfer, add a question instead of an assignment.',
+      'Prefer high confidence only for obvious merchant/category matches that should apply to the whole group.',
     ].join('\n'),
     outputType: buildCategorizationOutputSchema(categoryNames),
   });
@@ -234,7 +349,7 @@ async function categorizeBatchWithOpenAi(input: {
         name: category.name,
         type: category.type,
       })),
-      transactions: input.transactions.map(compactTransaction),
+      merchantGroups: input.groups.map(compactMerchantGroup),
     }),
     { maxTurns: 1 }
   );
@@ -252,12 +367,14 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
   const limit = clampLimit(options.limit);
   const categories = listCategorizationCategories();
   const transactions = listUncategorizedTransactions(limit);
+  const groups = groupTransactionsForAiCategorization(transactions);
 
   if (!apiKey) {
     return {
       configured: false,
       model,
       scanned: transactions.length,
+      groupCount: groups.length,
       suggestions: [] as AiCategorySuggestion[],
       questions: [] as AiCategoryQuestion[],
       message: 'Set OPENAI_API_KEY on the server to enable AI categorization.',
@@ -269,52 +386,59 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
       configured: true,
       model,
       scanned: transactions.length,
+      groupCount: groups.length,
       suggestions: [] as AiCategorySuggestion[],
       questions: [] as AiCategoryQuestion[],
     };
   }
 
   const categoryByName = new Map(categories.map(category => [category.name, category]));
-  const transactionIds = new Set(transactions.map(transaction => transaction.ledgerTransactionId));
-  const transactionById = new Map(transactions.map(transaction => [transaction.ledgerTransactionId, transaction]));
+  const groupById = new Map(groups.map(group => [group.id, group]));
   const suggestions: AiCategorySuggestion[] = [];
   const questions: AiCategoryQuestion[] = [];
 
-  for (const batch of chunk(transactions, BATCH_SIZE)) {
+  for (const batch of chunk(groups, BATCH_SIZE)) {
     const result = await categorizeBatchWithOpenAi({
       apiKey,
       model,
       categories,
-      transactions: batch,
+      groups: batch,
     });
 
     for (const assignment of result.assignments ?? []) {
       if (assignment.confidence !== 'high') continue;
       if (!assignment.categoryName) continue;
       const category = categoryByName.get(assignment.categoryName);
-      const transaction = transactionById.get(assignment.transactionId);
-      if (!category || !transaction) continue;
+      const group = groupById.get(assignment.groupId);
+      if (!category || !group) continue;
       suggestions.push({
-        transactionId: assignment.transactionId,
+        id: group.id,
+        groupId: group.id,
+        merchantName: group.merchantName,
+        aliases: group.aliases,
+        transactionIds: group.transactionIds,
+        transactionCount: group.transactionCount,
+        totalAmount: Math.round(group.totalAmount * 100) / 100,
         categoryId: category.id,
         categoryName: category.name,
         confidence: assignment.confidence,
         reason: assignment.reason,
-        transaction: transactionSummary(transaction),
+        transactions: group.transactions.slice(0, 6).map(transactionSummary),
       });
     }
 
     for (const question of result.questions ?? []) {
-      const ids = [...new Set(question.transactionIds.filter(id => transactionIds.has(id)))];
-      if (!ids.length) continue;
+      const group = groupById.get(question.groupId);
+      if (!group) continue;
       questions.push({
+        groupId: group.id,
         pattern: question.pattern,
-        transactionIds: ids,
+        transactionIds: group.transactionIds,
+        aliases: group.aliases,
+        transactionCount: group.transactionCount,
+        totalAmount: Math.round(group.totalAmount * 100) / 100,
         reason: question.reason,
-        transactions: ids
-          .map(id => transactionById.get(id))
-          .filter((transaction): transaction is UncategorizedTransactionRow => Boolean(transaction))
-          .map(transactionSummary),
+        transactions: group.transactions.slice(0, 8).map(transactionSummary),
       });
     }
   }
@@ -323,6 +447,7 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
     configured: true,
     model,
     scanned: transactions.length,
+    groupCount: groups.length,
     suggestions,
     questions,
   };

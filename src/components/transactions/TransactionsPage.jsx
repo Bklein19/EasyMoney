@@ -189,7 +189,9 @@ export default function TransactionsPage() {
   const activeAiQuestions = aiQuestions
     .map((question, index) => ({ ...question, key: `${question.pattern}-${index}` }))
     .filter(question => !ignoredAiQuestionKeys.has(question.key));
-  const selectedAiSuggestions = aiSuggestions.filter(suggestion => selectedAiSuggestionIds.has(suggestion.transactionId));
+  const suggestionSelectionId = (suggestion) => suggestion.id ?? suggestion.transactionId;
+  const suggestionTransactionIds = (suggestion) => suggestion.transactionIds ?? [suggestion.transactionId].filter(Boolean);
+  const selectedAiSuggestions = aiSuggestions.filter(suggestion => selectedAiSuggestionIds.has(suggestionSelectionId(suggestion)));
   const loadedTransactionByLedgerId = useMemo(() => {
     const map = {};
     for (const transaction of visibleTransactions) {
@@ -208,7 +210,7 @@ export default function TransactionsPage() {
       : [accountMap[transaction.accountId]?.institution, accountMap[transaction.accountId]?.name].filter(Boolean).join(' ') || null,
   }) : null;
   const getSuggestionTransaction = (suggestion) =>
-    suggestion.transaction || toAiTransactionDisplay(loadedTransactionByLedgerId[suggestion.transactionId]);
+    suggestion.transactions?.[0] || suggestion.transaction || toAiTransactionDisplay(loadedTransactionByLedgerId[suggestion.transactionId]);
   const getQuestionTransactions = (question) => {
     const embedded = question.transactions ?? [];
     const embeddedIds = new Set(embedded.map(transaction => transaction.transactionId));
@@ -331,7 +333,7 @@ export default function TransactionsPage() {
         `AI categorization took longer than ${Math.round(AI_CATEGORIZATION_TIMEOUT_MS / 1000)} seconds. Try again with fewer uncategorized transactions or check the server logs.`
       );
       setAiCategorization(result);
-      setSelectedAiSuggestionIds(new Set((result.suggestions ?? []).map(suggestion => suggestion.transactionId)));
+      setSelectedAiSuggestionIds(new Set((result.suggestions ?? []).map(suggestionSelectionId)));
       setAiQuestionCategoryByKey({});
       setIgnoredAiQuestionKeys(new Set());
     } catch (error) {
@@ -352,15 +354,17 @@ export default function TransactionsPage() {
     setAiCategorizationError('');
     try {
       const result = await trpcClient.transactions.applyAiCategorization.mutate({
-        suggestions: suggestions.map(suggestion => ({
-          transactionId: suggestion.transactionId,
-          categoryId: suggestion.categoryId,
-        })),
+        suggestions: suggestions.flatMap(suggestion =>
+          suggestionTransactionIds(suggestion).map(transactionId => ({
+            transactionId,
+            categoryId: suggestion.categoryId,
+          }))
+        ),
       });
       const appliedIds = new Set(result.appliedTransactionIds ?? []);
       setAiCategorization(previous => previous ? {
         ...previous,
-        suggestions: previous.suggestions.map(suggestion => appliedIds.has(suggestion.transactionId)
+        suggestions: previous.suggestions.map(suggestion => suggestionTransactionIds(suggestion).some(transactionId => appliedIds.has(transactionId))
           ? { ...suggestion, applied: true }
           : suggestion),
         appliedCount: result.count,
@@ -368,7 +372,11 @@ export default function TransactionsPage() {
       } : previous);
       setSelectedAiSuggestionIds(previous => {
         const next = new Set(previous);
-        for (const id of appliedIds) next.delete(id);
+        for (const suggestion of suggestions) {
+          if (suggestionTransactionIds(suggestion).some(transactionId => appliedIds.has(transactionId))) {
+            next.delete(suggestionSelectionId(suggestion));
+          }
+        }
         return next;
       });
       await Promise.all([
@@ -382,17 +390,17 @@ export default function TransactionsPage() {
     }
   };
 
-  const toggleAiSuggestion = (transactionId) => {
+  const toggleAiSuggestion = (suggestionId) => {
     setSelectedAiSuggestionIds(previous => {
       const next = new Set(previous);
-      if (next.has(transactionId)) next.delete(transactionId);
-      else next.add(transactionId);
+      if (next.has(suggestionId)) next.delete(suggestionId);
+      else next.add(suggestionId);
       return next;
     });
   };
 
   const selectAllAiSuggestions = () => {
-    setSelectedAiSuggestionIds(new Set(aiSuggestions.filter(suggestion => !suggestion.applied).map(suggestion => suggestion.transactionId)));
+    setSelectedAiSuggestionIds(new Set(aiSuggestions.filter(suggestion => !suggestion.applied).map(suggestionSelectionId)));
   };
 
   const clearAiSuggestionSelection = () => {
@@ -668,6 +676,9 @@ export default function TransactionsPage() {
               {aiCategorization?.configured && (
                 <div className="ai-category-action__summary">
                   <span>{aiCategorization.scanned} scanned</span>
+                  {typeof aiCategorization.groupCount === 'number' && (
+                    <span>{aiCategorization.groupCount} merchant groups</span>
+                  )}
                   <span>{aiSuggestions.filter(suggestion => !suggestion.applied).length} suggestions</span>
                   <span>{activeAiQuestions.length} questions</span>
                 </div>
@@ -703,32 +714,40 @@ export default function TransactionsPage() {
                     {aiSuggestions.slice(0, 50).map(suggestion => (
                       <label
                         className={`ai-category-review__item ai-category-review__item--selectable ${suggestion.applied ? 'ai-category-review__item--applied' : ''}`}
-                        key={suggestion.transactionId}
+                        key={suggestionSelectionId(suggestion)}
                       >
                         <input
                           type="checkbox"
-                          checked={selectedAiSuggestionIds.has(suggestion.transactionId)}
+                          checked={selectedAiSuggestionIds.has(suggestionSelectionId(suggestion))}
                           disabled={suggestion.applied}
-                          onChange={() => toggleAiSuggestion(suggestion.transactionId)}
+                          onChange={() => toggleAiSuggestion(suggestionSelectionId(suggestion))}
                         />
                         <span>
-                          <strong>{suggestion.categoryName}</strong>
+                          <strong>
+                            {suggestion.merchantName || getAiTransactionTitle(getSuggestionTransaction(suggestion))}
+                            {' -> '}
+                            {suggestion.categoryName}
+                          </strong>
                           <span>{suggestion.reason}</span>
-                          <em>{getAiTransactionSummary(getSuggestionTransaction(suggestion))}</em>
+                          <em>
+                            {suggestion.transactionCount
+                              ? `${formatTransactionCount(suggestion.transactionCount)} · ${formatCurrency(suggestion.totalAmount, true)}`
+                              : getAiTransactionSummary(getSuggestionTransaction(suggestion))}
+                          </em>
                           <button
                             type="button"
                             className="ai-category-link-button"
                             onClick={(event) => {
                               event.preventDefault();
                               openAiTransactionModal({
-                                title: suggestion.categoryName,
+                                title: suggestion.merchantName || suggestion.categoryName,
                                 subtitle: suggestion.reason,
-                                transactionIds: [suggestion.transactionId],
-                                transactions: getSuggestionTransaction(suggestion) ? [getSuggestionTransaction(suggestion)] : [],
+                                transactionIds: suggestionTransactionIds(suggestion),
+                                transactions: suggestion.transactions ?? (getSuggestionTransaction(suggestion) ? [getSuggestionTransaction(suggestion)] : []),
                               });
                             }}
                           >
-                            View transaction
+                            View transactions
                           </button>
                           {suggestion.applied && <em>Applied</em>}
                         </span>

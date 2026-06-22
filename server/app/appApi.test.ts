@@ -10,6 +10,7 @@ process.env.EASYMONEY_DB_PATH = path.join(os.tmpdir(), `easymoney-app-api-${proc
 const { createServer } = await import('../index.ts');
 const { getDb, initDatabase, insertRow } = await import('../database.js');
 const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
+const { groupTransactionsForAiCategorization } = await import('./aiCategorization.ts');
 const server = createServer({ port: 0 });
 const TEST_URL = `http://localhost:${server.port}`;
 const trpcClient = createTRPCClient<AppRouter>({
@@ -920,6 +921,66 @@ test('ai categorization apply reports skipped already categorized transactions',
   expect(
     getDb().prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId = ?').get('txn_ai_skip')
   ).toMatchObject({ categoryId: oldCategoryId });
+});
+
+test('ai categorization groups uncategorized transactions by merchant before model review', () => {
+  const groups = groupTransactionsForAiCategorization([
+    {
+      id: 1,
+      ledgerTransactionId: 'check_123',
+      accountName: 'Checking',
+      accountInstitution: 'Bank',
+      accountType: 'checking',
+      date: '2026-06-01',
+      amountCents: -20000,
+      description: 'Check 123',
+      merchant: 'Check 123',
+      originalDescription: 'Check 123',
+      originalCategory: null,
+      transactionKind: 'activity',
+    },
+    {
+      id: 2,
+      ledgerTransactionId: 'check_124',
+      accountName: 'Checking',
+      accountInstitution: 'Bank',
+      accountType: 'checking',
+      date: '2026-06-08',
+      amountCents: -20000,
+      description: 'Check 124',
+      merchant: 'Check 124',
+      originalDescription: 'Check 124',
+      originalCategory: null,
+      transactionKind: 'activity',
+    },
+    {
+      id: 3,
+      ledgerTransactionId: 'coffee_1',
+      accountName: 'Checking',
+      accountInstitution: 'Bank',
+      accountType: 'checking',
+      date: '2026-06-09',
+      amountCents: -575,
+      description: 'Starbucks #999',
+      merchant: 'Starbucks #999',
+      originalDescription: 'Starbucks #999',
+      originalCategory: null,
+      transactionKind: 'activity',
+    },
+  ]);
+
+  expect(groups[0]).toMatchObject({
+    merchantName: 'Check',
+    transactionIds: ['check_124', 'check_123'],
+    transactionCount: 2,
+    totalAmount: -400,
+    absoluteAmount: 400,
+  });
+  expect(groups[1]).toMatchObject({
+    merchantName: 'Starbucks',
+    transactionIds: ['coffee_1'],
+    transactionCount: 1,
+  });
 });
 test('trpc net worth report is backend-owned and reads ledger balances', async () => {
   const checkingId = insertRow('accounts', {
