@@ -58,6 +58,31 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!isSidebarCollapsed || !isSidebarPeekOpen) return undefined;
+
+    const handlePointerMove = (event) => {
+      if (document.body.classList.contains('sidebar-resizing')) return;
+      const sidebar = document.querySelector('.sidebar');
+      if (!sidebar) return;
+      const rect = sidebar.getBoundingClientRect();
+      if (event.clientX > rect.right + 16) {
+        setIsSidebarPeekOpen(false);
+      }
+    };
+
+    const handleWindowBlur = () => setIsSidebarPeekOpen(false);
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('blur', handleWindowBlur);
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, [isSidebarCollapsed, isSidebarPeekOpen]);
+
+
   const reportSelectedIds = useMemo(
     () => selectedReportAccountIds ?? new Set(reportAccounts.map(account => account.id)),
     [reportAccounts, selectedReportAccountIds]
@@ -71,7 +96,6 @@ function App() {
           onClose={() => setIsMobileSidebarOpen(false)}
           isCollapsed={isSidebarCollapsed}
           isPeekOpen={isSidebarPeekOpen}
-          onPeekClose={() => setIsSidebarPeekOpen(false)}
           onCollapsedChange={handleSidebarCollapsedChange}
           reportAccounts={reportAccounts}
           selectedReportAccountIds={reportSelectedIds}

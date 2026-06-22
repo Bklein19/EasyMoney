@@ -25,7 +25,6 @@ const Sidebar = ({
   onClose,
   isCollapsed = false,
   isPeekOpen = false,
-  onPeekClose,
   onCollapsedChange,
   reportAccounts = [],
   selectedReportAccountIds = new Set(),
@@ -135,7 +134,6 @@ const Sidebar = ({
       <div
         ref={sidebarRef}
         className={`sidebar ${isMobileOpen ? 'mobile-open' : ''} ${isCollapsed ? 'sidebar--collapsed' : ''} ${isPeekOpen ? 'sidebar--peek' : ''}`}
-        onMouseLeave={isPeekOpen ? onPeekClose : undefined}
       >
         <div className="sidebar-header">
           <NavLink to="/" className="sidebar-brand" onClick={onClose}>

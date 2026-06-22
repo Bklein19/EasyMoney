@@ -28,10 +28,6 @@
   box-shadow: var(--shadow-lg);
 }
 
-.sidebar--collapsed.sidebar--peek .sidebar-resize-handle {
-  display: none;
-}
-
 .sidebar-resize-handle {
   position: absolute;
   top: 0;
