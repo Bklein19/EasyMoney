@@ -23,12 +23,14 @@ const getInitialSidebarCollapsed = () => {
 
 function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(getInitialSidebarCollapsed);
+  const [isSidebarPeekOpen, setIsSidebarPeekOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [reportAccounts, setReportAccounts] = useState([]);
   const [selectedReportAccountIds, setSelectedReportAccountIds] = useState(null);
 
   const handleSidebarCollapsedChange = (nextValue) => {
     setIsSidebarCollapsed(nextValue);
+    setIsSidebarPeekOpen(false);
     window.localStorage.setItem('easymoney:sidebar-collapsed', String(nextValue));
   };
 
@@ -63,16 +65,27 @@ function App() {
 
   return (
     <Router>
-      <div className={`app-shell ${isSidebarCollapsed ? 'app-shell--sidebar-collapsed' : ''}`}>
+      <div className={`app-shell ${isSidebarCollapsed ? 'app-shell--sidebar-collapsed' : ''} ${isSidebarPeekOpen ? 'app-shell--sidebar-peek' : ''}`}>
         <Sidebar
           isMobileOpen={isMobileSidebarOpen}
           onClose={() => setIsMobileSidebarOpen(false)}
           isCollapsed={isSidebarCollapsed}
+          isPeekOpen={isSidebarPeekOpen}
+          onPeekOpen={() => setIsSidebarPeekOpen(true)}
+          onPeekClose={() => setIsSidebarPeekOpen(false)}
           onCollapsedChange={handleSidebarCollapsedChange}
           reportAccounts={reportAccounts}
           selectedReportAccountIds={reportSelectedIds}
           onReportAccountSelectionChange={setSelectedReportAccountIds}
         />
+        {isSidebarCollapsed && (
+          <div
+            className="sidebar-peek-zone"
+            onPointerEnter={() => setIsSidebarPeekOpen(true)}
+            onMouseEnter={() => setIsSidebarPeekOpen(true)}
+            aria-hidden="true"
+          />
+        )}
         <button
           className="mobile-sidebar-trigger"
           type="button"

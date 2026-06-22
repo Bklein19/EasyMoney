@@ -24,6 +24,9 @@ const Sidebar = ({
   isMobileOpen,
   onClose,
   isCollapsed = false,
+  isPeekOpen = false,
+  onPeekOpen,
+  onPeekClose,
   onCollapsedChange,
   reportAccounts = [],
   selectedReportAccountIds = new Set(),
@@ -43,7 +46,7 @@ const Sidebar = ({
     { path: '/import', label: 'Import', icon: Upload },
   ];
   const showAccountPicker = (
-    !isCollapsed &&
+    (!isCollapsed || isPeekOpen) &&
     REPORT_ROUTES.has(location.pathname) &&
     reportAccounts.length > 0 &&
     onReportAccountSelectionChange
@@ -132,7 +135,9 @@ const Sidebar = ({
       
       <div
         ref={sidebarRef}
-        className={`sidebar ${isMobileOpen ? 'mobile-open' : ''} ${isCollapsed ? 'sidebar--collapsed' : ''}`}
+        className={`sidebar ${isMobileOpen ? 'mobile-open' : ''} ${isCollapsed ? 'sidebar--collapsed' : ''} ${isPeekOpen ? 'sidebar--peek' : ''}`}
+        onMouseEnter={isCollapsed && !isPeekOpen ? onPeekOpen : undefined}
+        onMouseLeave={isPeekOpen ? onPeekClose : undefined}
       >
         <div className="sidebar-header">
           <NavLink to="/" className="sidebar-brand" onClick={onClose}>
@@ -153,7 +158,7 @@ const Sidebar = ({
               }
               onClick={onClose}
               aria-label={item.label}
-              title={isCollapsed ? item.label : undefined}
+              title={isCollapsed && !isPeekOpen ? item.label : undefined}
             >
               <item.icon size={20} className="sidebar-link-icon" />
               <span className="sidebar-link-label">{item.label}</span>
