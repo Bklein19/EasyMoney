@@ -97,10 +97,7 @@ export default function CategoryPicker({ categoryId, onChange, disabled, categor
   }, [isOpen]);
 
   useLayoutEffect(() => {
-    if (!isOpen) {
-      setPopoverPosition(null);
-      return undefined;
-    }
+    if (!isOpen) return undefined;
 
     updatePopoverPosition();
     window.addEventListener('scroll', updatePopoverPosition, true);
