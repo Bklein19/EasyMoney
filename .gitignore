@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Local tooling output
+.playwright-cli/
+tmp/
+
 # Local private app data
 data/
 *.sqlite
