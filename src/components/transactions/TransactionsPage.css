@@ -44,13 +44,16 @@
 }
 
 .page__header.transactions-page__header {
-  align-items: flex-start;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-4);
 }
 
 .page__header.transactions-page__header .filters-container {
-  justify-content: flex-end;
+  flex: 1 1 auto;
+  justify-content: flex-start;
   margin-bottom: 0;
-  max-width: min(100%, 960px);
+  max-width: none;
 }
 
 .transactions-header {
@@ -558,7 +561,7 @@
   --transaction-filter-height: 40px;
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-3);
+  gap: var(--space-2);
   align-items: center;
   margin-bottom: var(--space-4);
 }
@@ -580,7 +583,7 @@
 
 select.filter-input {
   appearance: none;
-  min-width: 210px;
+  min-width: 150px;
   padding-right: 36px;
   background-color: var(--bg-surface);
   background-image: url("data:image/svg+xml,%3Csvg width='16' height='16' viewBox='0 0 16 16' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M4 6l4 4 4-4' stroke='%238b93a3' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
@@ -606,8 +609,8 @@ select.filter-input {
 }
 
 .transaction-search-control .filter-input {
-  width: min(360px, 100%);
-  min-width: 280px;
+  width: 220px;
+  min-width: 180px;
   padding-right: 34px;
 }
 
@@ -765,6 +768,7 @@ select.filter-input {
 @media (max-width: 768px) {
   .page__header.transactions-page__header {
     align-items: stretch;
+    flex-direction: column;
   }
 
   .page__header.transactions-page__header .filters-container {
