@@ -96,43 +96,11 @@ LEFT JOIN accounts a ON a.id = t.accountId
 LEFT JOIN transactionAnnotations ta ON ta.ledgerTransactionId = t.ledgerTransactionId
 LEFT JOIN categories c ON c.id = ta.categoryId`;
 
-function toTransactionListItem(row: LedgerTransactionRow): TransactionListItem {
-  return {
-    id: row.id,
-    ledgerTransactionId: row.ledgerTransactionId,
-    account: row.accountId === null ? null : {
-      id: row.accountId,
-      name: row.accountName ?? 'Unknown account',
-      institution: row.accountInstitution,
-      type: row.accountType ?? 'other',
-    },
-    category: row.categoryId === null ? null : {
-      id: row.categoryId,
-      name: row.categoryName ?? 'Uncategorized',
-      type: row.categoryType,
-      color: row.categoryColor,
-      icon: row.categoryIcon,
-    },
-    date: row.date,
-    amount: row.amount,
-    description: row.description,
-    merchant: row.merchant,
-    originalDescription: row.originalDescription,
-    originalCategory: row.originalCategory,
-    type: row.type,
-    transactionKind: row.transactionKind,
-    status: row.status,
-    notes: row.notes,
-    importBatchId: row.importBatchId,
-    fingerprint: row.fingerprint,
-    createdAt: row.createdAt,
-  };
-}
+type SqlParams = Record<string, string | number>;
 
-export function listTransactions(options: ListTransactionsOptions = {}): TransactionListResponse {
-  syncLedgerReadModelFromLegacyTables();
+function buildTransactionFilter(options: ListTransactionsOptions = {}) {
   const clauses: string[] = [];
-  const params: Record<string, string | number> = {};
+  const params: SqlParams = {};
   const includeArchived = options.includeArchived === true || options.includeArchived === 'true';
 
   const accountId = optionalNumber(options.accountId);
@@ -195,6 +163,48 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
     params.search = `%${search}%`;
   }
 
+  return {
+    where: clauses.length ? `WHERE ${clauses.join(' AND ')}` : '',
+    params,
+  };
+}
+
+function toTransactionListItem(row: LedgerTransactionRow): TransactionListItem {
+  return {
+    id: row.id,
+    ledgerTransactionId: row.ledgerTransactionId,
+    account: row.accountId === null ? null : {
+      id: row.accountId,
+      name: row.accountName ?? 'Unknown account',
+      institution: row.accountInstitution,
+      type: row.accountType ?? 'other',
+    },
+    category: row.categoryId === null ? null : {
+      id: row.categoryId,
+      name: row.categoryName ?? 'Uncategorized',
+      type: row.categoryType,
+      color: row.categoryColor,
+      icon: row.categoryIcon,
+    },
+    date: row.date,
+    amount: row.amount,
+    description: row.description,
+    merchant: row.merchant,
+    originalDescription: row.originalDescription,
+    originalCategory: row.originalCategory,
+    type: row.type,
+    transactionKind: row.transactionKind,
+    status: row.status,
+    notes: row.notes,
+    importBatchId: row.importBatchId,
+    fingerprint: row.fingerprint,
+    createdAt: row.createdAt,
+  };
+}
+
+export function listTransactions(options: ListTransactionsOptions = {}): TransactionListResponse {
+  syncLedgerReadModelFromLegacyTables();
+  const { where, params } = buildTransactionFilter(options);
   const limit = clampLimit(optionalNumber(options.limit));
   const offset = clampOffset(optionalNumber(options.offset));
   const limitClause = limit === null ? '' : 'LIMIT $limit OFFSET $offset';
@@ -203,7 +213,6 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
     params.offset = offset;
   }
 
-  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const orderBy = orderByFor(optionalString(options.sortBy));
   const db = getDb();
   const totalCount = (db
@@ -292,4 +301,32 @@ export function categorizeTransactions(input: {
   apply();
 
   return { ok: true, count: uniqueIds.length };
+}
+
+export function categorizeTransactionsByQuery(input: {
+  query?: ListTransactionsOptions;
+  categoryId?: number | string | null;
+}) {
+  syncLedgerReadModelFromLegacyTables();
+  const { where, params } = buildTransactionFilter(input.query ?? {});
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT t.ledgerTransactionId
+    ${fromAndJoins}
+    ${where}
+  `).all(params) as Array<{ ledgerTransactionId: string | null }>;
+  const ledgerTransactionIds = [...new Set(rows
+    .map(row => row.ledgerTransactionId)
+    .filter((id): id is string => Boolean(id)))];
+
+  if (!ledgerTransactionIds.length) return { ok: true, count: 0 };
+
+  const apply = db.transaction(() => {
+    for (const id of ledgerTransactionIds) {
+      upsertTransactionAnnotation(id, { categoryId: input.categoryId ?? null });
+    }
+  });
+  apply();
+
+  return { ok: true, count: ledgerTransactionIds.length };
 }

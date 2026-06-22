@@ -74,6 +74,12 @@ export function useTransactions(filters: TransactionFilters = {}) {
       queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] });
     },
   }));
+  const categorizeMatching = useMutation(trpc.transactions.categorizeMatching.mutationOptions({
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() });
+      queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] });
+    },
+  }));
 
   useEffect(() => {
     const unsubscribe = subscribeToDataChanges(() => {
@@ -126,10 +132,18 @@ export function useTransactions(filters: TransactionFilters = {}) {
     });
   }
 
+  async function categorizeMatchingTransactions(categoryId: string | number | null) {
+    return categorizeMatching.mutateAsync({
+      query,
+      categoryId,
+    });
+  }
+
   return {
     transactions,
     updateTransaction,
     categorizeTransactions,
+    categorizeMatchingTransactions,
     isLoading: isInfinite ? infiniteTransactionsQuery.isLoading : transactionsQuery.isLoading,
     isFetching: isInfinite ? infiniteTransactionsQuery.isFetching : transactionsQuery.isFetching,
     isFetchingNextPage: infiniteTransactionsQuery.isFetchingNextPage,

@@ -205,13 +205,15 @@
 .transactions-tool-row .filter-input {
   width: 100%;
   min-width: 0;
-  height: 30px;
-  padding-block: 4px;
+  height: 32px;
+  padding-block: 0;
+  line-height: 30px;
 }
 
 .transactions-tool-row .btn {
   flex: 0 0 auto;
   min-width: fit-content;
+  min-height: 32px;
 }
 
 .transactions-inline-create {

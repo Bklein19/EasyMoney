@@ -5,7 +5,7 @@ import { applyAiCategorizationSuggestions, getAiCategorizationTransactionDetails
 import { listCategories } from './categories.ts';
 import { saveLocalEnvValue } from './localEnv.ts';
 import { getNetWorthReport } from './netWorth.ts';
-import { categorizeTransactions, listTransactions } from './transactions.ts';
+import { categorizeTransactions, categorizeTransactionsByQuery, listTransactions } from './transactions.ts';
 
 const t = initTRPC.create();
 
@@ -48,6 +48,24 @@ export const appRouter = t.router({
         categoryId: optionalId,
       }))
       .mutation(({ input }) => categorizeTransactions(input)),
+
+    categorizeMatching: t.procedure
+      .input(z.object({
+        query: z.object({
+          accountId: optionalId,
+          categoryId: optionalId,
+          accountKind: z.string().nullish(),
+          startDate: z.string().nullish(),
+          endDate: z.string().nullish(),
+          search: z.string().nullish(),
+          type: z.string().nullish(),
+          flowType: z.string().nullish(),
+          sortBy: z.string().nullish(),
+          includeArchived: z.boolean().nullish(),
+        }).optional(),
+        categoryId: optionalId,
+      }))
+      .mutation(({ input }) => categorizeTransactionsByQuery(input)),
 
     aiCategorizationPreview: t.procedure
       .input(z.object({

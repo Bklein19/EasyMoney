@@ -14,6 +14,8 @@ import './TransactionsPage.css';
 const TRANSACTION_PAGE_SIZE = 100;
 const AI_CATEGORIZATION_LIMIT = 100;
 const AI_CATEGORIZATION_TIMEOUT_MS = 90_000;
+const BULK_CATEGORY_UNSET = '__bulk_category_unset__';
+const BULK_CATEGORY_UNCATEGORIZED = '__bulk_category_uncategorized__';
 
 function withTimeout(promise, timeoutMs, message) {
   let timeoutId;
@@ -49,7 +51,7 @@ export default function TransactionsPage() {
   const {
     transactions,
     updateTransaction,
-    categorizeTransactions,
+    categorizeMatchingTransactions,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
@@ -78,17 +80,6 @@ export default function TransactionsPage() {
     return map;
   }, [deferredCategories]);
   const visibleTransactions = deferredTransactions;
-  const transactionCountLabel = useMemo(() => {
-    if (totalCount > visibleTransactions.length) {
-      return `${visibleTransactions.length} of ${totalCount}`;
-    }
-
-    if (hasNextPage) {
-      return `${visibleTransactions.length} loaded`;
-    }
-
-    return String(visibleTransactions.length);
-  }, [hasNextPage, totalCount, visibleTransactions.length]);
   const virtualRowCount = hasNextPage ? visibleTransactions.length + 1 : visibleTransactions.length;
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual is the intended virtual scroller for this dense list.
   const rowVirtualizer = useVirtualizer({
@@ -161,14 +152,7 @@ export default function TransactionsPage() {
     return () => window.clearInterval(intervalId);
   }, [isAiCategorizing, aiReviewStartedAt]);
 
-  const filteredCategoryValue = useMemo(() => {
-    if (visibleTransactions.length === 0) return '';
-    const firstCategory = visibleTransactions[0].categoryId || '';
-    const hasMixedCategories = visibleTransactions.some(tx => (tx.categoryId || '') !== firstCategory);
-    return hasMixedCategories ? '__mixed__' : String(firstCategory);
-  }, [visibleTransactions]);
-
-  const bulkCategorySelectValue = pendingBulkCategoryValue ?? filteredCategoryValue;
+  const bulkCategorySelectValue = pendingBulkCategoryValue ?? BULK_CATEGORY_UNSET;
   const aiSuggestions = aiCategorization?.suggestions ?? [];
   const aiQuestions = aiCategorization?.questions ?? [];
   const activeAiQuestions = aiQuestions
@@ -237,26 +221,30 @@ export default function TransactionsPage() {
     }
   };
 
+  const formatTransactionCount = (count) => `${count.toLocaleString()} matching transaction${count === 1 ? '' : 's'}`;
+
   const confirmLargeBulkChange = (count, categoryName) => {
     if (count <= 50) return true;
     return window.confirm(
-      `This will set the category for ${count} visible transactions to "${categoryName}". This is a bulk edit and cannot be automatically undone.\n\nContinue?`
+      `This will set the category for ${formatTransactionCount(count)} to "${categoryName}". This is a bulk edit and cannot be automatically undone.\n\nContinue?`
     );
   };
 
   const handleBulkCategoryChange = async (categoryId) => {
-    const nextCategoryId = categoryId ? Number(categoryId) : null;
-    await categorizeTransactions(visibleTransactions.map(transaction => transaction.id), nextCategoryId);
+    const nextCategoryId = categoryId === BULK_CATEGORY_UNCATEGORIZED ? null : Number(categoryId);
+    return categorizeMatchingTransactions(nextCategoryId);
   };
 
   const handleApplyBulkCategory = async (categoryValue = bulkCategorySelectValue) => {
-    if (categoryValue === '__mixed__' || visibleTransactions.length === 0) return;
+    if (categoryValue === BULK_CATEGORY_UNSET || totalCount === 0) return;
 
-    const categoryName = categoryValue
+    const categoryName = categoryValue === BULK_CATEGORY_UNCATEGORIZED
+      ? 'Uncategorized'
+      : categoryValue
       ? categories.find(category => String(category.id) === String(categoryValue))?.name || 'selected category'
       : 'Uncategorized';
 
-    if (!confirmLargeBulkChange(visibleTransactions.length, categoryName)) return;
+    if (!confirmLargeBulkChange(totalCount, categoryName)) return;
     await handleBulkCategoryChange(categoryValue);
     setPendingBulkCategoryValue(null);
   };
@@ -441,7 +429,7 @@ export default function TransactionsPage() {
     const name = newBulkCategoryName.trim();
     if (!name) return;
 
-    if (!confirmLargeBulkChange(visibleTransactions.length, name)) return;
+    if (!confirmLargeBulkChange(totalCount, name)) return;
 
     const existing = categories.find(category => category.name.toLowerCase() === name.toLowerCase());
     const categoryId = existing?.id || await addCategory({
@@ -499,7 +487,7 @@ export default function TransactionsPage() {
             <div className="transactions-header__top">
               <div className="transactions-heading">
                 <div className="transactions-meta">
-                  <span>{transactionCountLabel}</span>
+                  <span>{formatTransactionCount(totalCount)}</span>
                   <span>Income {formatCurrency(totals.income)}</span>
                   <span>Expenses {formatCurrency(totals.expenses)}</span>
                   {totals.internalMovement > 0 && (
@@ -517,14 +505,14 @@ export default function TransactionsPage() {
                   <section className="transactions-tool-group">
                     <div className="transactions-tool-group__header">
                       <span>Bulk category edit</span>
-                      <em>{visibleTransactions.length} loaded</em>
+                      <em>{formatTransactionCount(totalCount)}</em>
                     </div>
                     <div className="transactions-tool-row">
                       <select
                         id="bulkTransactionCategory"
                         className="filter-input"
                         value={bulkCategorySelectValue}
-                        disabled={visibleTransactions.length === 0}
+                        disabled={totalCount === 0}
                         onChange={(event) => {
                           if (event.target.value === '__add_custom__') {
                             setIsCreatingBulkCategory(true);
@@ -534,8 +522,8 @@ export default function TransactionsPage() {
                           setPendingBulkCategoryValue(event.target.value);
                         }}
                       >
-                        {filteredCategoryValue === '__mixed__' && <option value="__mixed__">Mixed categories</option>}
-                        <option value="">Uncategorized</option>
+                        <option value={BULK_CATEGORY_UNSET} disabled>Choose category</option>
+                        <option value={BULK_CATEGORY_UNCATEGORIZED}>Uncategorized</option>
                         {categories.map(category => (
                           <option key={category.id} value={category.id}>{category.name}</option>
                         ))}
@@ -545,9 +533,8 @@ export default function TransactionsPage() {
                         className="btn btn--secondary btn--sm bulk-category-action__apply"
                         type="button"
                         disabled={
-                          visibleTransactions.length === 0 ||
-                          bulkCategorySelectValue === '__mixed__' ||
-                          bulkCategorySelectValue === filteredCategoryValue
+                          totalCount === 0 ||
+                          bulkCategorySelectValue === BULK_CATEGORY_UNSET
                         }
                         onClick={() => handleApplyBulkCategory()}
                       >

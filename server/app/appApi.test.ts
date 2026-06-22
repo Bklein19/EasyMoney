@@ -780,6 +780,53 @@ test('trpc transactions procedures read and categorize transactions', async () =
   expect(after.transactions[0].category?.id).toBe(categoryId);
 });
 
+test('trpc transactions categorize matching applies to the full filtered result set', async () => {
+  const accountId = insertRow('accounts', { name: 'Checking', type: 'checking', currentBalance: 0 });
+  const categoryId = insertRow('categories', { name: 'Coffee', type: 'expense' });
+  insertRow('transactions', {
+    accountId,
+    date: '2026-06-03',
+    amount: -4.25,
+    description: 'Bulk Coffee One',
+    type: 'expense',
+    status: 'cleared',
+  });
+  insertRow('transactions', {
+    accountId,
+    date: '2026-06-04',
+    amount: -5.75,
+    description: 'Bulk Coffee Two',
+    type: 'expense',
+    status: 'cleared',
+  });
+  insertRow('transactions', {
+    accountId,
+    date: '2026-06-05',
+    amount: -18.25,
+    description: 'Unmatched Lunch',
+    type: 'expense',
+    status: 'cleared',
+  });
+
+  const previewPage = await trpcClient.transactions.list.query({ search: 'Bulk Coffee', limit: 1 });
+  expect(previewPage.transactions).toHaveLength(1);
+  expect(previewPage.totalCount).toBe(2);
+
+  const result = await trpcClient.transactions.categorizeMatching.mutate({
+    query: { search: 'Bulk Coffee' },
+    categoryId,
+  });
+  expect(result).toEqual({ ok: true, count: 2 });
+
+  const matching = await trpcClient.transactions.list.query({ search: 'Bulk Coffee' });
+  expect(matching.transactions).toHaveLength(2);
+  expect(matching.transactions.every(transaction => transaction.category?.id === categoryId)).toBe(true);
+
+  const unmatched = await trpcClient.transactions.list.query({ search: 'Unmatched Lunch' });
+  expect(unmatched.transactions).toHaveLength(1);
+  expect(unmatched.transactions[0].category).toBeNull();
+});
+
 
 test('ai categorization apply writes transaction annotations by ledger id', async () => {
   const categoryId = Number(insertRow('categories', { name: 'Dining', type: 'expense' }));
