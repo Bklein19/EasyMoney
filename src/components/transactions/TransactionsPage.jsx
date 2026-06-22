@@ -578,9 +578,9 @@ export default function TransactionsPage() {
                   type="button"
                   disabled={isAiCategorizing || isApplyingAiCategories}
                   onClick={handlePreviewAiCategorization}
-                  title="Review uncategorized transactions with your server-side OpenAI key"
+                  title="Categorize uncategorized transactions with your server-side OpenAI key"
                 >
-                  {isAiCategorizing ? 'Reviewing...' : 'Review uncategorized'}
+                  {isAiCategorizing ? 'Categorizing...' : 'Categorize with AI'}
                 </button>
               </div>
             </div>
