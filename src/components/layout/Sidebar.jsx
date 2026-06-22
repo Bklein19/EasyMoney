@@ -124,7 +124,7 @@ const Sidebar = ({
       {/* Mobile overlay */}
       {isMobileOpen && (
         <div 
-          className="fixed inset-0 bg-black/60 z-40 md:hidden" 
+          className="sidebar-mobile-overlay"
           onClick={onClose}
           aria-hidden="true"
         />

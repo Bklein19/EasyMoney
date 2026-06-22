@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router';
+import { Menu } from 'lucide-react';
 import ImportPage from './components/import/ImportPage';
 import TransactionsPage from './components/transactions/TransactionsPage';
 import AccountsPage from './components/accounts/AccountsPage';
@@ -22,6 +23,7 @@ const getInitialSidebarCollapsed = () => {
 
 function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(getInitialSidebarCollapsed);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [reportAccounts, setReportAccounts] = useState([]);
   const [selectedReportAccountIds, setSelectedReportAccountIds] = useState(null);
 
@@ -63,12 +65,22 @@ function App() {
     <Router>
       <div className={`app-shell ${isSidebarCollapsed ? 'app-shell--sidebar-collapsed' : ''}`}>
         <Sidebar
+          isMobileOpen={isMobileSidebarOpen}
+          onClose={() => setIsMobileSidebarOpen(false)}
           isCollapsed={isSidebarCollapsed}
           onCollapsedChange={handleSidebarCollapsedChange}
           reportAccounts={reportAccounts}
           selectedReportAccountIds={reportSelectedIds}
           onReportAccountSelectionChange={setSelectedReportAccountIds}
         />
+        <button
+          className="mobile-sidebar-trigger"
+          type="button"
+          aria-label="Open navigation"
+          onClick={() => setIsMobileSidebarOpen(true)}
+        >
+          <Menu size={20} />
+        </button>
         <div className="app-content">
           <main className="app-main">
             <Routes>
