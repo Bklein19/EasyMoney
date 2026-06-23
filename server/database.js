@@ -123,6 +123,7 @@ const TABLES = {
   ],
   transactionAnnotations: ['ledgerTransactionId', 'categoryId', 'notes', 'createdAt', 'updatedAt'],
   transactionCategoryUndoOperations: ['id', 'categoryName', 'transactionCount', 'payloadJson', 'status', 'createdAt', 'consumedAt'],
+  merchantGroupingRules: ['id', 'sourceMerchantKey', 'strategy', 'createdAt', 'updatedAt'],
   categories: ['id', 'name', 'parentId', 'type', 'categoryGroup', 'color', 'icon'],
   budgets: ['id', 'categoryId', 'month', 'amount'],
   balanceSnapshots: ['id', 'accountId', 'month', 'balance', 'capturedAt'],
@@ -160,6 +161,7 @@ const ORDER_BY = {
   ledgerTransactions: 'date DESC, id DESC',
   transactionAnnotations: 'updatedAt DESC, ledgerTransactionId ASC',
   transactionCategoryUndoOperations: 'createdAt DESC, id DESC',
+  merchantGroupingRules: 'sourceMerchantKey ASC, id ASC',
   categories: 'id ASC',
   budgets: 'month DESC, id DESC',
   balanceSnapshots: 'month ASC, id ASC',
@@ -268,6 +270,14 @@ export function initDatabase() {
       status TEXT DEFAULT 'pending',
       createdAt TEXT NOT NULL,
       consumedAt TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS merchantGroupingRules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sourceMerchantKey TEXT NOT NULL UNIQUE,
+      strategy TEXT NOT NULL,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS categories (

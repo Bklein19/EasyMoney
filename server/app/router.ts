@@ -1,7 +1,12 @@
 import { initTRPC } from '@trpc/server';
 import { z } from 'zod';
 import { listAccounts } from './accounts.ts';
-import { applyAiCategorizationSuggestions, getAiCategorizationTransactionDetails, previewAiCategorization } from './aiCategorization.ts';
+import {
+  applyAiCategorizationSuggestions,
+  createMerchantGroupingRule,
+  getAiCategorizationTransactionDetails,
+  previewAiCategorization,
+} from './aiCategorization.ts';
 import { listCategories } from './categories.ts';
 import { saveLocalEnvValue } from './localEnv.ts';
 import { getNetWorthReport } from './netWorth.ts';
@@ -91,6 +96,12 @@ export const appRouter = t.router({
         limit: z.number().optional(),
       }).optional())
       .mutation(({ input }) => previewAiCategorization(input ?? {})),
+
+    createMerchantGroupingRule: t.procedure
+      .input(z.object({
+        sourceMerchantKey: z.string().min(1),
+      }))
+      .mutation(({ input }) => createMerchantGroupingRule(input)),
 
     applyAiCategorization: t.procedure
       .input(z.object({

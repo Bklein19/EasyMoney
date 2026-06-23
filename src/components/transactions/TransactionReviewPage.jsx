@@ -41,6 +41,7 @@ export default function TransactionReviewPage() {
   const [aiReviewStartedAt, setAiReviewStartedAt] = useState(null);
   const [aiReviewElapsedSeconds, setAiReviewElapsedSeconds] = useState(0);
   const [isApplyingAiCategories, setIsApplyingAiCategories] = useState(false);
+  const [splittingReviewKey, setSplittingReviewKey] = useState('');
   const [isSavingOpenAiKey, setIsSavingOpenAiKey] = useState(false);
   const { categories } = useCategories();
   const categorizationCoverage = useQuery(trpc.transactions.categorizationCoverage.queryOptions());
@@ -81,6 +82,8 @@ export default function TransactionReviewPage() {
         totalAmount: suggestion.totalAmount,
         reason: suggestion.reason,
         decisionKind: suggestion.decisionKind,
+        sourceMerchantKey: suggestion.sourceMerchantKey,
+        canSplitMerchantGroup: suggestion.canSplitMerchantGroup,
         accountName: suggestion.accountNames?.length === 1 ? suggestion.accountNames[0] : '',
         suggestedCategoryId: String(suggestion.categoryId),
         categoryId: categoryByReviewKey[suggestionSelectionId(suggestion)] ?? String(suggestion.categoryId),
@@ -95,6 +98,8 @@ export default function TransactionReviewPage() {
       totalAmount: question.totalAmount,
       reason: question.reason,
       decisionKind: question.decisionKind,
+      sourceMerchantKey: question.sourceMerchantKey,
+      canSplitMerchantGroup: question.canSplitMerchantGroup,
       accountName: question.accountNames?.length === 1 ? question.accountNames[0] : '',
       suggestedCategoryId: '',
       categoryId: categoryByReviewKey[question.key] ?? '',
@@ -190,6 +195,22 @@ export default function TransactionReviewPage() {
     }));
   };
 
+  const splitMerchantGroup = async (row) => {
+    if (!row.sourceMerchantKey) return;
+    setSplittingReviewKey(row.key);
+    setAiCategorizationError('');
+    try {
+      await trpcClient.transactions.createMerchantGroupingRule.mutate({
+        sourceMerchantKey: row.sourceMerchantKey,
+      });
+      await handlePreviewAiCategorization();
+    } catch (error) {
+      setAiCategorizationError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSplittingReviewKey('');
+    }
+  };
+
   const applySelectedReviewRows = async () => {
     if (!selectedReviewRows.length) return;
     const transactionCount = selectedReviewRows.reduce((count, row) => count + row.transactionIds.length, 0);
@@ -261,9 +282,6 @@ export default function TransactionReviewPage() {
     }
   };
 
-  const progressTotal = reviewRows.length + (aiCategorization?.appliedCount ?? 0);
-  const progressDone = aiCategorization?.appliedCount ?? 0;
-  const progressPercent = progressTotal === 0 ? 0 : Math.round((progressDone / progressTotal) * 100);
   const formatPercent = (value) => value.toLocaleString('en-US', {
     style: 'percent',
     minimumFractionDigits: 0,
@@ -282,6 +300,28 @@ export default function TransactionReviewPage() {
           </h1>
         </div>
         <div className="transaction-review-page__actions">
+          {coverage && (
+            <section className="transaction-review-coverage" aria-label="Categorization coverage">
+              <div className="transaction-review-coverage__item">
+                <div className="transaction-review-coverage__label">
+                  <span>Transactions</span>
+                  <strong>{formatPercent(coverage.transactionPercent)}</strong>
+                </div>
+                <div className="transaction-review-coverage__bar" aria-hidden="true">
+                  <span style={{ width: `${Math.round(coverage.transactionPercent * 100)}%` }} />
+                </div>
+              </div>
+              <div className="transaction-review-coverage__item">
+                <div className="transaction-review-coverage__label">
+                  <span>Money</span>
+                  <strong>{formatPercent(coverage.amountPercent)}</strong>
+                </div>
+                <div className="transaction-review-coverage__bar" aria-hidden="true">
+                  <span style={{ width: `${Math.round(coverage.amountPercent * 100)}%` }} />
+                </div>
+              </div>
+            </section>
+          )}
           {!isAiCategorizing && (
             <button
               className="btn btn--secondary btn--sm"
@@ -294,29 +334,6 @@ export default function TransactionReviewPage() {
           )}
         </div>
       </div>
-
-      {coverage && (
-        <section className="transaction-review-coverage" aria-label="Categorization coverage">
-          <div className="transaction-review-coverage__item">
-            <div className="transaction-review-coverage__label">
-              <span>Transactions categorized</span>
-              <strong>{formatPercent(coverage.transactionPercent)}</strong>
-            </div>
-            <div className="transaction-review-coverage__bar" aria-hidden="true">
-              <span style={{ width: `${Math.round(coverage.transactionPercent * 100)}%` }} />
-            </div>
-          </div>
-          <div className="transaction-review-coverage__item">
-            <div className="transaction-review-coverage__label">
-              <span>Money categorized</span>
-              <strong>{formatPercent(coverage.amountPercent)}</strong>
-            </div>
-            <div className="transaction-review-coverage__bar" aria-hidden="true">
-              <span style={{ width: `${Math.round(coverage.amountPercent * 100)}%` }} />
-            </div>
-          </div>
-        </section>
-      )}
 
       <div className="transaction-review-shell stagger-in">
         {(isAiCategorizing || aiCategorization || aiCategorizationError) ? (
@@ -366,13 +383,6 @@ export default function TransactionReviewPage() {
 
             {aiCategorization?.configured && (aiSuggestions.length > 0 || aiQuestions.length > 0) && (
               <div className="transaction-review-deck">
-                <div className="transaction-review-progress" aria-label={`${progressDone} of ${progressTotal} reviewed`}>
-                  <div className="transaction-review-progress__bar" style={{ width: `${progressPercent}%` }} />
-                </div>
-                <div className="transaction-review-progress__label">
-                  {progressTotal === 0 ? 'No review items' : `${progressDone} of ${progressTotal} applied`}
-                </div>
-
                 {reviewRows.length ? (
                   <div className="merchant-review-table-wrap">
                     <div className="merchant-review-toolbar">
@@ -478,6 +488,18 @@ export default function TransactionReviewPage() {
                                 <tr className="merchant-review-details-row">
                                   <td colSpan={5}>
                                     <div className="merchant-review-details-panel">
+                                      {row.canSplitMerchantGroup && (
+                                        <div className="merchant-review-details-actions">
+                                          <button
+                                            className="btn btn--secondary btn--sm"
+                                            type="button"
+                                            disabled={splittingReviewKey === row.key || isAiCategorizing}
+                                            onClick={() => splitMerchantGroup(row)}
+                                          >
+                                            {splittingReviewKey === row.key ? 'Splitting...' : 'Split future groups'}
+                                          </button>
+                                        </div>
+                                      )}
                                       {renderTransactionPreview(row.transactions, row.transactionCount)}
                                     </div>
                                   </td>

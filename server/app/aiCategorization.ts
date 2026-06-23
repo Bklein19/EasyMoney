@@ -7,6 +7,7 @@ import type { CategorySummary } from './types.ts';
 const DEFAULT_MODEL = 'gpt-5.4-mini';
 const MAX_GROUPS = 500;
 const BATCH_SIZE = 32;
+const BANK_COUNTERPARTY_STRATEGY = 'bank_description_counterparty';
 
 interface UncategorizedTransactionRow {
   id: number;
@@ -43,6 +44,8 @@ export interface AiCategorySuggestion {
   id: string;
   groupId: string;
   merchantName: string;
+  sourceMerchantKey: string;
+  canSplitMerchantGroup: boolean;
   decisionKind: Exclude<AiCategorizationDecision['kind'], 'needs_review'>;
   aliases: string[];
   accountNames: string[];
@@ -60,6 +63,8 @@ export interface AiCategoryQuestion {
   groupId: string;
   decisionKind: Extract<AiCategorizationDecision['kind'], 'needs_review'>;
   pattern: string;
+  sourceMerchantKey: string;
+  canSplitMerchantGroup: boolean;
   transactionIds: string[];
   aliases: string[];
   accountNames: string[];
@@ -82,12 +87,20 @@ interface MerchantCategorizationGroup {
   id: string;
   merchantName: string;
   normalizedMerchant: string;
+  sourceMerchantKey: string;
+  groupingRuleId: number | null;
   aliases: string[];
   transactions: UncategorizedTransactionRow[];
   transactionIds: string[];
   transactionCount: number;
   totalAmount: number;
   absoluteAmount: number;
+}
+
+interface MerchantGroupingRule {
+  id: number;
+  sourceMerchantKey: string;
+  strategy: string;
 }
 
 function getOpenAiKey() {
@@ -141,6 +154,12 @@ function listUncategorizedTransactions() {
        ORDER BY t.date DESC, t.id DESC`
     )
     .all() as UncategorizedTransactionRow[];
+}
+
+function listMerchantGroupingRules() {
+  return getDb()
+    .prepare('SELECT id, sourceMerchantKey, strategy FROM merchantGroupingRules ORDER BY id ASC')
+    .all() as MerchantGroupingRule[];
 }
 
 function chunk<T>(items: T[], size: number) {
@@ -198,18 +217,78 @@ function transactionMerchantText(row: UncategorizedTransactionRow) {
   return row.merchant || row.description || row.originalDescription || 'Unknown';
 }
 
+function extractBankDescriptionCounterparty(row: UncategorizedTransactionRow) {
+  const candidates = [
+    row.originalDescription,
+    row.description,
+    row.merchant,
+  ];
+
+  for (const candidate of candidates) {
+    const match = candidate?.match(/\bID:([^]+?)\s+INDN:/i);
+    if (!match?.[1]) continue;
+    const cleaned = match[1]
+      .replace(/\b(?:WEB|ONLINE|MOBILE)\b/gi, ' ')
+      .replace(/\s+\d{2,}\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (cleaned) return cleaned;
+  }
+
+  return null;
+}
+
+function merchantGroupingForRow(row: UncategorizedTransactionRow, rulesBySourceKey: Map<string, MerchantGroupingRule>) {
+  const base = normalizeMerchantText(transactionMerchantText(row));
+  const rule = rulesBySourceKey.get(base.key);
+  if (!rule || rule.strategy !== BANK_COUNTERPARTY_STRATEGY) {
+    return {
+      normalized: base,
+      sourceMerchantKey: base.key,
+      groupingRuleId: null,
+    };
+  }
+
+  const counterparty = extractBankDescriptionCounterparty(row);
+  if (!counterparty) {
+    return {
+      normalized: base,
+      sourceMerchantKey: base.key,
+      groupingRuleId: rule.id,
+    };
+  }
+
+  return {
+    normalized: normalizeMerchantText(counterparty),
+    sourceMerchantKey: base.key,
+    groupingRuleId: rule.id,
+  };
+}
+
+function bankDescriptionCounterpartyCount(group: MerchantCategorizationGroup) {
+  return new Set(group.transactions
+    .map(transaction => extractBankDescriptionCounterparty(transaction))
+    .filter((value): value is string => Boolean(value))
+    .map(value => normalizeMerchantText(value).key)).size;
+}
+
 export function groupTransactionsForAiCategorization(rows: UncategorizedTransactionRow[]): MerchantCategorizationGroup[] {
   const groupsByKey = new Map<string, MerchantCategorizationGroup>();
+  const rulesBySourceKey = new Map(listMerchantGroupingRules().map(rule => [rule.sourceMerchantKey, rule]));
 
   for (const row of rows) {
-    const normalized = normalizeMerchantText(transactionMerchantText(row));
-    const groupId = `merchant:${normalized.key}`;
+    const { normalized, sourceMerchantKey, groupingRuleId } = merchantGroupingForRow(row, rulesBySourceKey);
+    const groupId = groupingRuleId === null
+      ? `merchant:${normalized.key}`
+      : `merchant:${sourceMerchantKey}:split:${normalized.key}`;
     const existing = groupsByKey.get(groupId);
     const amount = row.amountCents / 100;
     const group = existing ?? {
       id: groupId,
       merchantName: normalized.displayName,
       normalizedMerchant: normalized.key,
+      sourceMerchantKey,
+      groupingRuleId,
       aliases: [],
       transactions: [],
       transactionIds: [],
@@ -296,6 +375,8 @@ function categorySuggestion(input: {
     id: input.group.id,
     groupId: input.group.id,
     merchantName: input.group.merchantName,
+    sourceMerchantKey: input.group.sourceMerchantKey,
+    canSplitMerchantGroup: input.group.groupingRuleId === null && bankDescriptionCounterpartyCount(input.group) > 1,
     decisionKind: input.decisionKind,
     aliases: input.group.aliases,
     accountNames: merchantGroupAccountNames(input.group),
@@ -319,6 +400,8 @@ function reviewQuestion(input: {
     groupId: group.id,
     decisionKind: 'needs_review' as const,
     pattern: group.merchantName,
+    sourceMerchantKey: group.sourceMerchantKey,
+    canSplitMerchantGroup: group.groupingRuleId === null && bankDescriptionCounterpartyCount(group) > 1,
     transactionIds: group.transactionIds,
     aliases: group.aliases,
     accountNames: merchantGroupAccountNames(group),
@@ -545,6 +628,32 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
     suggestions,
     questions,
   };
+}
+
+export function createMerchantGroupingRule(input: { sourceMerchantKey: string }) {
+  const sourceMerchantKey = String(input.sourceMerchantKey || '').trim().toUpperCase();
+  if (!sourceMerchantKey) {
+    throw new Error('Merchant grouping rule requires a source merchant key.');
+  }
+
+  const now = new Date().toISOString();
+  getDb().prepare(`
+    INSERT INTO merchantGroupingRules (sourceMerchantKey, strategy, createdAt, updatedAt)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(sourceMerchantKey) DO UPDATE SET
+      strategy = excluded.strategy,
+      updatedAt = excluded.updatedAt
+  `).run(sourceMerchantKey, BANK_COUNTERPARTY_STRATEGY, now, now);
+
+  return getDb()
+    .prepare('SELECT id, sourceMerchantKey, strategy, createdAt, updatedAt FROM merchantGroupingRules WHERE sourceMerchantKey = ?')
+    .get(sourceMerchantKey) as {
+      id: number;
+      sourceMerchantKey: string;
+      strategy: string;
+      createdAt: string;
+      updatedAt: string;
+    };
 }
 
 export function applyAiCategorizationSuggestions(input: {

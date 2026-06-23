@@ -36,6 +36,7 @@ function resetAppTables() {
       'ledgerBalances',
       'transactionCategoryUndoOperations',
       'transactionAnnotations',
+      'merchantGroupingRules',
       'transactions',
       'balanceSnapshots',
       'accountAliases',
@@ -1054,6 +1055,63 @@ test('ai categorization groups uncategorized transactions by merchant before mod
     transactionIds: ['coffee_1'],
     transactionCount: 1,
   });
+});
+
+test('ai categorization persists merchant grouping rules for processor descriptions', async () => {
+  const paypalRows = [
+    {
+      id: 1,
+      ledgerTransactionId: 'paypal_uber',
+      accountName: 'BofA Checking',
+      accountInstitution: 'Bank of America',
+      accountType: 'checking',
+      date: '2026-06-01',
+      amountCents: -3993,
+      description: 'PAYPAL DES:INST XFER ID:UBER INDN:TEST USER CO ID:PAYPALTEST WEB',
+      merchant: 'PAYPAL DES:INST XFER ID:UBER INDN:TEST USER CO ID:PAYPALTEST WEB',
+      originalDescription: 'PAYPAL DES:INST XFER ID:UBER INDN:TEST USER CO ID:PAYPALTEST WEB',
+      originalCategory: null,
+      transactionKind: 'activity',
+    },
+    {
+      id: 2,
+      ledgerTransactionId: 'paypal_suit',
+      accountName: 'BofA Checking',
+      accountInstitution: 'Bank of America',
+      accountType: 'checking',
+      date: '2026-06-02',
+      amountCents: -16594,
+      description: 'PAYPAL DES:INST XFER ID:SUITSUPPLYU 041 INDN:TEST USER CO ID:PAYPALTEST WEB',
+      merchant: 'PAYPAL DES:INST XFER ID:SUITSUPPLYU 041 INDN:TEST USER CO ID:PAYPALTEST WEB',
+      originalDescription: 'PAYPAL DES:INST XFER ID:SUITSUPPLYU 041 INDN:TEST USER CO ID:PAYPALTEST WEB',
+      originalCategory: null,
+      transactionKind: 'activity',
+    },
+  ];
+
+  const [combinedGroup] = groupTransactionsForAiCategorization(paypalRows);
+  expect(combinedGroup).toMatchObject({
+    merchantName: 'Paypal Des Inst Xfer Indn Test User Co Web',
+    transactionCount: 2,
+    sourceMerchantKey: 'PAYPAL DES INST XFER INDN TEST USER CO WEB',
+  });
+
+  const rule = await trpcClient.transactions.createMerchantGroupingRule.mutate({
+    sourceMerchantKey: combinedGroup!.sourceMerchantKey,
+  });
+  expect(rule).toMatchObject({
+    sourceMerchantKey: 'PAYPAL DES INST XFER INDN TEST USER CO WEB',
+    strategy: 'bank_description_counterparty',
+  });
+
+  const splitGroups = groupTransactionsForAiCategorization(paypalRows);
+  expect(splitGroups.map(group => ({
+    merchantName: group.merchantName,
+    transactionIds: group.transactionIds,
+  }))).toEqual([
+    { merchantName: 'Suitsupplyu', transactionIds: ['paypal_suit'] },
+    { merchantName: 'Uber', transactionIds: ['paypal_uber'] },
+  ]);
 });
 
 test('ai categorization treats cash-account investment category decisions as transfers', () => {
