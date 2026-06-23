@@ -251,6 +251,7 @@ export default function TransactionReviewPage() {
         queryClient.invalidateQueries({ queryKey: trpc.transactions.categorizationCoverage.queryKey() }),
         queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] }),
       ]);
+      await handlePreviewAiCategorization();
     } catch (error) {
       setAiCategorizationError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -326,14 +327,14 @@ export default function TransactionReviewPage() {
               </div>
             </section>
           )}
-          {!isAiCategorizing && (
+          {!isAiCategorizing && (!aiCategorization || aiCategorizationError) && (
             <button
               className="btn btn--secondary btn--sm"
               type="button"
               disabled={isApplyingAiCategories}
               onClick={handlePreviewAiCategorization}
             >
-              {aiCategorization ? 'Run again' : 'Categorize with AI'}
+              {aiCategorizationError ? 'Retry' : 'Categorize with AI'}
             </button>
           )}
         </div>
@@ -518,10 +519,7 @@ export default function TransactionReviewPage() {
                 ) : (
                   <div className="transaction-review-empty">
                     <h2>Review complete</h2>
-                    <p>No remaining merchant suggestions or questions in this batch.</p>
-                    <button className="btn btn--secondary btn--sm" type="button" onClick={handlePreviewAiCategorization}>
-                      Run another batch
-                    </button>
+                    <p>No remaining merchant suggestions or questions.</p>
                   </div>
                 )}
               </div>
