@@ -66,6 +66,11 @@ export default function TransactionReviewPage() {
     if (!transaction) return 'Transaction details unavailable';
     return `${getAiTransactionTitle(transaction)} · ${formatCurrency(transaction.amount, true)}`;
   };
+  const getSuggestionEyebrow = (suggestion) => {
+    if (suggestion.decisionKind === 'transfer') return 'Suggested transfer treatment';
+    if (suggestion.decisionKind === 'investment_activity') return 'Suggested investment activity';
+    return 'Suggested category';
+  };
   const formatTransactionCount = (count) => `${count.toLocaleString()} matching transaction${count === 1 ? '' : 's'}`;
 
   const confirmLargeBulkChange = (count, categoryName) => {
@@ -351,7 +356,7 @@ export default function TransactionReviewPage() {
                     const suggestion = currentReviewItem.suggestion;
                     return (
                       <section className="transaction-review-card">
-                        <div className="transaction-review-card__eyebrow">Suggested category</div>
+                        <div className="transaction-review-card__eyebrow">{getSuggestionEyebrow(suggestion)}</div>
                         <h2>
                           {suggestion.merchantName || getAiTransactionTitle(getSuggestionTransaction(suggestion))}
                         </h2>

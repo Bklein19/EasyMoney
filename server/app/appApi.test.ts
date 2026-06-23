@@ -10,7 +10,7 @@ process.env.EASYMONEY_DB_PATH = path.join(os.tmpdir(), `easymoney-app-api-${proc
 const { createServer } = await import('../index.ts');
 const { getDb, initDatabase, insertRow } = await import('../database.js');
 const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
-const { groupTransactionsForAiCategorization, shouldReviewInvestmentAssignmentAsTransfer } = await import('./aiCategorization.ts');
+const { groupTransactionsForAiCategorization, shouldTreatInvestmentCategoryAsTransfer } = await import('./aiCategorization.ts');
 const server = createServer({ port: 0 });
 const TEST_URL = `http://localhost:${server.port}`;
 const trpcClient = createTRPCClient<AppRouter>({
@@ -983,7 +983,7 @@ test('ai categorization groups uncategorized transactions by merchant before mod
   });
 });
 
-test('ai categorization treats cash-account investment assignments as transfer review', () => {
+test('ai categorization treats cash-account investment category decisions as transfers', () => {
   const [cashTransferGroup] = groupTransactionsForAiCategorization([
     {
       id: 1,
@@ -1025,11 +1025,11 @@ test('ai categorization treats cash-account investment assignments as transfer r
     icon: 'trending-up',
   };
 
-  expect(shouldReviewInvestmentAssignmentAsTransfer({
+  expect(shouldTreatInvestmentCategoryAsTransfer({
     group: cashTransferGroup!,
     category: investmentCategory,
   })).toBe(true);
-  expect(shouldReviewInvestmentAssignmentAsTransfer({
+  expect(shouldTreatInvestmentCategoryAsTransfer({
     group: investmentAccountGroup!,
     category: investmentCategory,
   })).toBe(false);

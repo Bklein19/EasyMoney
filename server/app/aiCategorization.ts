@@ -23,28 +23,26 @@ interface UncategorizedTransactionRow {
   transactionKind: string | null;
 }
 
-interface ModelAssignment {
-  groupId: string;
-  categoryName: string | null;
-  confidence: 'high' | 'medium' | 'low';
-  reason: string;
-}
+export type AiCategorizationDecision =
+  | { kind: 'category'; categoryName: string; reason: string }
+  | { kind: 'transfer'; reason: string }
+  | { kind: 'investment_activity'; reason: string }
+  | { kind: 'needs_review'; reason: string };
 
-interface ModelQuestion {
+interface ModelGroupDecision {
   groupId: string;
-  pattern: string;
-  reason: string;
+  decision: AiCategorizationDecision;
 }
 
 interface ModelResponse {
-  assignments: ModelAssignment[];
-  questions: ModelQuestion[];
+  decisions: ModelGroupDecision[];
 }
 
 export interface AiCategorySuggestion {
   id: string;
   groupId: string;
   merchantName: string;
+  decisionKind: Exclude<AiCategorizationDecision['kind'], 'needs_review'>;
   aliases: string[];
   transactionIds: string[];
   transactionCount: number;
@@ -58,6 +56,7 @@ export interface AiCategorySuggestion {
 
 export interface AiCategoryQuestion {
   groupId: string;
+  decisionKind: Extract<AiCategorizationDecision['kind'], 'needs_review'>;
   pattern: string;
   transactionIds: string[];
   aliases: string[];
@@ -268,7 +267,7 @@ function isInvestmentAccountType(value: string | null) {
   return ['investment', 'brokerage', 'retirement', 'ira', '401k'].includes((value ?? '').toLowerCase());
 }
 
-export function shouldReviewInvestmentAssignmentAsTransfer(input: {
+export function shouldTreatInvestmentCategoryAsTransfer(input: {
   group: MerchantCategorizationGroup;
   category: CategorySummary;
 }) {
@@ -279,15 +278,48 @@ export function shouldReviewInvestmentAssignmentAsTransfer(input: {
   return hasCashAccountTransaction && !hasInvestmentAccountTransaction;
 }
 
-function investmentTransferQuestion(group: MerchantCategorizationGroup, reason: string) {
+function findTreatmentCategory(categories: CategorySummary[], treatment: 'transfer' | 'investment') {
+  return categories.find(category => category.type === treatment)
+    ?? categories.find(category => category.name.toLowerCase() === treatment);
+}
+
+function categorySuggestion(input: {
+  group: MerchantCategorizationGroup;
+  category: CategorySummary;
+  decisionKind: AiCategorySuggestion['decisionKind'];
+  reason: string;
+}) {
+  return {
+    id: input.group.id,
+    groupId: input.group.id,
+    merchantName: input.group.merchantName,
+    decisionKind: input.decisionKind,
+    aliases: input.group.aliases,
+    transactionIds: input.group.transactionIds,
+    transactionCount: input.group.transactionCount,
+    totalAmount: Math.round(input.group.totalAmount * 100) / 100,
+    categoryId: input.category.id,
+    categoryName: input.category.name,
+    confidence: 'high' as const,
+    reason: input.reason,
+    transactions: input.group.transactions.slice(0, 6).map(transactionSummary),
+  };
+}
+
+function reviewQuestion(input: {
+  group: MerchantCategorizationGroup;
+  reason: string;
+}) {
+  const group = input.group;
   return {
     groupId: group.id,
-    pattern: `${group.merchantName} transfer`,
+    decisionKind: 'needs_review' as const,
+    pattern: group.merchantName,
     transactionIds: group.transactionIds,
     aliases: group.aliases,
     transactionCount: group.transactionCount,
     totalAmount: Math.round(group.totalAmount * 100) / 100,
-    reason: `${reason} This appears to be money moving from a cash account toward an investment destination, so review it as a transfer instead of accepting Investment as a spending category.`,
+    reason: input.reason,
     transactions: group.transactions.slice(0, 8).map(transactionSummary),
   };
 }
@@ -334,19 +366,31 @@ export function getAiCategorizationTransactionDetails(input: { transactionIds: s
 }
 
 function buildCategorizationOutputSchema(categoryNames: [string, ...string[]]) {
-  const categoryName = z.union([z.enum(categoryNames), z.null()]);
+  const categoryName = z.enum(categoryNames);
+  const decision = z.discriminatedUnion('kind', [
+    z.strictObject({
+      kind: z.literal('category'),
+      categoryName,
+      reason: z.string(),
+    }),
+    z.strictObject({
+      kind: z.literal('transfer'),
+      reason: z.string(),
+    }),
+    z.strictObject({
+      kind: z.literal('investment_activity'),
+      reason: z.string(),
+    }),
+    z.strictObject({
+      kind: z.literal('needs_review'),
+      reason: z.string(),
+    }),
+  ]);
 
   return z.strictObject({
-    assignments: z.array(z.strictObject({
+    decisions: z.array(z.strictObject({
       groupId: z.string(),
-      categoryName,
-      confidence: z.enum(['high', 'medium', 'low']),
-      reason: z.string(),
-    })),
-    questions: z.array(z.strictObject({
-      groupId: z.string(),
-      pattern: z.string(),
-      reason: z.string(),
+      decision,
     })),
   });
 }
@@ -362,13 +406,16 @@ async function categorizeBatchWithOpenAi(input: {
     name: 'Transaction categorization',
     model: input.model,
     instructions: [
-      'You categorize personal finance merchant/payee groups into the provided existing categories.',
-      'Only use an exact category name from the category list.',
-      'Return null categoryName when you are not confident. Do not guess.',
+      'You review personal finance merchant/payee groups and choose one decision for each group.',
+      'Use this exact TypeScript-shaped decision model:',
+      "type AiCategorizationDecision = { kind: 'category'; categoryName: string; reason: string } | { kind: 'transfer'; reason: string } | { kind: 'investment_activity'; reason: string } | { kind: 'needs_review'; reason: string };",
+      "Use kind: 'category' only for real spending or income categories. categoryName must exactly match the category list.",
+      "Use kind: 'transfer' for money movement between accounts, including credit card payments, ACH transfers, brokerage contributions, cash moving to or from investments, and other account-to-account movement.",
+      "Use kind: 'investment_activity' for activity inside an investment account, such as buys, sells, dividend reinvestment, interest, fund exchanges, fees, or sweeps.",
+      "Use kind: 'needs_review' when the group is variable, personal-context-dependent, or ambiguous, such as Venmo, Zelle, PayPal, checks, cash app, or unclear bank text.",
       'Treat the whole merchant/payee group as one decision.',
-      'If a group is probably variable, such as Venmo, Zelle, PayPal, checks, cash app, or a generic bank transfer, add a question instead of an assignment.',
-      'Do not assign Investment to cash-account outflows that look like transfers to a brokerage, fund, or investment account. Add a question for those transfer-like groups.',
-      'Prefer high confidence only for obvious merchant/category matches that should apply to the whole group.',
+      'Do not use a category for transfers or investment-account activity just because a Transfer or Investment category exists.',
+      'Return a decision only when it should apply to the whole group.',
     ].join('\n'),
     outputType: buildCategorizationOutputSchema(categoryNames),
   });
@@ -432,6 +479,8 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
   }
 
   const categoryByName = new Map(categories.map(category => [category.name, category]));
+  const transferCategory = findTreatmentCategory(categories, 'transfer');
+  const investmentCategory = findTreatmentCategory(categories, 'investment');
   const groupById = new Map(reviewGroups.map(group => [group.id, group]));
   const suggestions: AiCategorySuggestion[] = [];
   const questions: AiCategoryQuestion[] = [];
@@ -444,45 +493,70 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
       groups: batch,
     });
 
-    for (const assignment of result.assignments ?? []) {
-      if (assignment.confidence !== 'high') continue;
-      if (!assignment.categoryName) continue;
-      const category = categoryByName.get(assignment.categoryName);
-      const group = groupById.get(assignment.groupId);
-      if (!category || !group) continue;
-      if (shouldReviewInvestmentAssignmentAsTransfer({ group, category })) {
-        questions.push(investmentTransferQuestion(group, assignment.reason));
+    for (const item of result.decisions ?? []) {
+      const group = groupById.get(item.groupId);
+      if (!group) continue;
+      const decision = item.decision;
+
+      if (decision.kind === 'category') {
+        const category = categoryByName.get(decision.categoryName);
+        if (!category) continue;
+        if (shouldTreatInvestmentCategoryAsTransfer({ group, category }) && transferCategory) {
+          suggestions.push(categorySuggestion({
+            group,
+            category: transferCategory,
+            decisionKind: 'transfer',
+            reason: `${decision.reason} This looks like account-to-account movement, so EasyMoney will treat it as a transfer.`,
+          }));
+          continue;
+        }
+        suggestions.push(categorySuggestion({
+          group,
+          category,
+          decisionKind: 'category',
+          reason: decision.reason,
+        }));
         continue;
       }
-      suggestions.push({
-        id: group.id,
-        groupId: group.id,
-        merchantName: group.merchantName,
-        aliases: group.aliases,
-        transactionIds: group.transactionIds,
-        transactionCount: group.transactionCount,
-        totalAmount: Math.round(group.totalAmount * 100) / 100,
-        categoryId: category.id,
-        categoryName: category.name,
-        confidence: assignment.confidence,
-        reason: assignment.reason,
-        transactions: group.transactions.slice(0, 6).map(transactionSummary),
-      });
-    }
 
-    for (const question of result.questions ?? []) {
-      const group = groupById.get(question.groupId);
-      if (!group) continue;
-      questions.push({
-        groupId: group.id,
-        pattern: question.pattern,
-        transactionIds: group.transactionIds,
-        aliases: group.aliases,
-        transactionCount: group.transactionCount,
-        totalAmount: Math.round(group.totalAmount * 100) / 100,
-        reason: question.reason,
-        transactions: group.transactions.slice(0, 8).map(transactionSummary),
-      });
+      if (decision.kind === 'transfer') {
+        if (!transferCategory) {
+          questions.push(reviewQuestion({
+            group,
+            reason: `${decision.reason} EasyMoney could not find a Transfer category to apply automatically.`,
+          }));
+          continue;
+        }
+        suggestions.push(categorySuggestion({
+          group,
+          category: transferCategory,
+          decisionKind: 'transfer',
+          reason: decision.reason,
+        }));
+        continue;
+      }
+
+      if (decision.kind === 'investment_activity') {
+        if (!investmentCategory) {
+          questions.push(reviewQuestion({
+            group,
+            reason: `${decision.reason} EasyMoney could not find an Investment category to apply automatically.`,
+          }));
+          continue;
+        }
+        suggestions.push(categorySuggestion({
+          group,
+          category: investmentCategory,
+          decisionKind: 'investment_activity',
+          reason: decision.reason,
+        }));
+        continue;
+      }
+
+      questions.push(reviewQuestion({
+        group,
+        reason: decision.reason,
+      }));
     }
   }
 
