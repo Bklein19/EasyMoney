@@ -1061,60 +1061,130 @@ test('ai categorization groups uncategorized transactions by merchant before mod
   });
 });
 
-test('ai categorization persists merchant grouping rules for processor descriptions', async () => {
-  const paypalRows = [
+test('ai categorization persists merchant grouping rules for generic processor descriptions', async () => {
+  const processorRows = [
     {
       id: 1,
-      ledgerTransactionId: 'paypal_uber',
+      ledgerTransactionId: 'processor_uber',
       accountName: 'BofA Checking',
       accountInstitution: 'Bank of America',
       accountType: 'checking',
       date: '2026-06-01',
       amountCents: -3993,
-      description: 'PAYPAL DES:INST XFER ID:UBER INDN:TEST USER CO ID:PAYPALTEST WEB',
-      merchant: 'PAYPAL DES:INST XFER ID:UBER INDN:TEST USER CO ID:PAYPALTEST WEB',
-      originalDescription: 'PAYPAL DES:INST XFER ID:UBER INDN:TEST USER CO ID:PAYPALTEST WEB',
+      description: 'PROCESSOR DES:INST XFER ID:UBER INDN:TEST USER CO ID:PAYPALTEST WEB',
+      merchant: 'PROCESSOR DES:INST XFER ID:UBER INDN:TEST USER CO ID:PAYPALTEST WEB',
+      originalDescription: 'PROCESSOR DES:INST XFER ID:UBER INDN:TEST USER CO ID:PAYPALTEST WEB',
       originalCategory: null,
       transactionKind: 'activity',
     },
     {
       id: 2,
-      ledgerTransactionId: 'paypal_suit',
+      ledgerTransactionId: 'processor_suit',
       accountName: 'BofA Checking',
       accountInstitution: 'Bank of America',
       accountType: 'checking',
       date: '2026-06-02',
       amountCents: -16594,
-      description: 'PAYPAL DES:INST XFER ID:SUITSUPPLYU 041 INDN:TEST USER CO ID:PAYPALTEST WEB',
-      merchant: 'PAYPAL DES:INST XFER ID:SUITSUPPLYU 041 INDN:TEST USER CO ID:PAYPALTEST WEB',
-      originalDescription: 'PAYPAL DES:INST XFER ID:SUITSUPPLYU 041 INDN:TEST USER CO ID:PAYPALTEST WEB',
+      description: 'PROCESSOR DES:INST XFER ID:SUITSUPPLYU 041 INDN:TEST USER CO ID:PAYPALTEST WEB',
+      merchant: 'PROCESSOR DES:INST XFER ID:SUITSUPPLYU 041 INDN:TEST USER CO ID:PAYPALTEST WEB',
+      originalDescription: 'PROCESSOR DES:INST XFER ID:SUITSUPPLYU 041 INDN:TEST USER CO ID:PAYPALTEST WEB',
       originalCategory: null,
       transactionKind: 'activity',
     },
   ];
 
-  const [combinedGroup] = groupTransactionsForAiCategorization(paypalRows);
+  const [combinedGroup] = groupTransactionsForAiCategorization(processorRows);
   expect(combinedGroup).toMatchObject({
-    merchantName: 'Paypal Des Inst Xfer Indn Test User Co Web',
+    merchantName: 'Processor Des Inst Xfer Indn Test User Co Web',
     transactionCount: 2,
-    sourceMerchantKey: 'PAYPAL DES INST XFER INDN TEST USER CO WEB',
+    sourceMerchantKey: 'PROCESSOR DES INST XFER INDN TEST USER CO WEB',
   });
 
   const rule = await trpcClient.transactions.createMerchantGroupingRule.mutate({
     sourceMerchantKey: combinedGroup!.sourceMerchantKey,
   });
   expect(rule).toMatchObject({
-    sourceMerchantKey: 'PAYPAL DES INST XFER INDN TEST USER CO WEB',
+    sourceMerchantKey: 'PROCESSOR DES INST XFER INDN TEST USER CO WEB',
     strategy: 'bank_description_counterparty',
   });
 
-  const splitGroups = groupTransactionsForAiCategorization(paypalRows);
+  const splitGroups = groupTransactionsForAiCategorization(processorRows);
   expect(splitGroups.map(group => ({
     merchantName: group.merchantName,
     transactionIds: group.transactionIds,
   }))).toEqual([
-    { merchantName: 'Suitsupplyu', transactionIds: ['paypal_suit'] },
+    { merchantName: 'Suitsupplyu', transactionIds: ['processor_suit'] },
+    { merchantName: 'Uber', transactionIds: ['processor_uber'] },
+  ]);
+});
+
+test('ai categorization normalizes PayPal processor descriptions to counterparties', () => {
+  const groups = groupTransactionsForAiCategorization([
+    {
+      id: 1,
+      ledgerTransactionId: 'paypal_apple_purchase',
+      accountName: 'BofA Checking',
+      accountInstitution: 'Bank of America',
+      accountType: 'checking',
+      date: '2026-05-19',
+      amountCents: -1593,
+      description: 'PAYPAL DES:PURCHASE ID:APPLE.COM BILL INDN:TEST USER CO ID:PAYPALTEST WEB',
+      merchant: 'PAYPAL DES:PURCHASE ID:APPLE.COM BILL INDN:TEST USER CO ID:PAYPALTEST WEB',
+      originalDescription: 'PAYPAL DES:PURCHASE ID:APPLE.COM BILL INDN:TEST USER CO ID:PAYPALTEST WEB',
+      originalCategory: null,
+      transactionKind: 'activity',
+    },
+    {
+      id: 2,
+      ledgerTransactionId: 'paypal_apple_inst_xfer',
+      accountName: 'BofA Checking',
+      accountInstitution: 'Bank of America',
+      accountType: 'checking',
+      date: '2026-03-19',
+      amountCents: -2867,
+      description: 'PAYPAL DES:INST XFER ID:APPLE.COM BILL INDN:TEST USER CO ID:PAYPALTEST WEB',
+      merchant: 'PAYPAL DES:INST XFER ID:APPLE.COM BILL INDN:TEST USER CO ID:PAYPALTEST WEB',
+      originalDescription: 'PAYPAL DES:INST XFER ID:APPLE.COM BILL INDN:TEST USER CO ID:PAYPALTEST WEB',
+      originalCategory: null,
+      transactionKind: 'activity',
+    },
+    {
+      id: 3,
+      ledgerTransactionId: 'paypal_uber',
+      accountName: 'BofA Checking',
+      accountInstitution: 'Bank of America',
+      accountType: 'checking',
+      date: '2026-04-17',
+      amountCents: -3293,
+      description: 'PAYPAL DES:PURCHASE ID:UBER INDN:TEST USER CO ID:PAYPALTEST WEB',
+      merchant: 'PAYPAL DES:PURCHASE ID:UBER INDN:TEST USER CO ID:PAYPALTEST WEB',
+      originalDescription: 'PAYPAL DES:PURCHASE ID:UBER INDN:TEST USER CO ID:PAYPALTEST WEB',
+      originalCategory: null,
+      transactionKind: 'activity',
+    },
+    {
+      id: 4,
+      ledgerTransactionId: 'paypal_digital_ocean',
+      accountName: 'BofA Checking',
+      accountInstitution: 'Bank of America',
+      accountType: 'checking',
+      date: '2025-12-04',
+      amountCents: -171,
+      description: 'PAYPAL *DIGITALOCEA 4029357733 NY',
+      merchant: 'PAYPAL *DIGITALOCEA 4029357733 NY',
+      originalDescription: 'PAYPAL *DIGITALOCEA 4029357733 NY',
+      originalCategory: null,
+      transactionKind: 'activity',
+    },
+  ]);
+
+  expect(groups.map(group => ({
+    merchantName: group.merchantName,
+    transactionIds: group.transactionIds,
+  }))).toEqual([
+    { merchantName: 'Apple Com Bill', transactionIds: ['paypal_apple_purchase', 'paypal_apple_inst_xfer'] },
     { merchantName: 'Uber', transactionIds: ['paypal_uber'] },
+    { merchantName: 'Digitalocea', transactionIds: ['paypal_digital_ocean'] },
   ]);
 });
 

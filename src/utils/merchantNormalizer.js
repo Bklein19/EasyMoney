@@ -28,13 +28,25 @@ function toTitleCase(value) {
     .join(' ');
 }
 
+function extractPayPalCounterparty(value) {
+  const text = String(value || '').trim();
+  const bankDescriptionMatch = text.match(/^PAYPAL\s+DES:[\s\S]+?\bID:([\s\S]+?)\s+INDN:/i);
+  if (bankDescriptionMatch?.[1]) return bankDescriptionMatch[1].trim();
+
+  const cardStatementMatch = text.match(/^PAYPAL\s+\*([^\s]+)/i);
+  if (cardStatementMatch?.[1]) return cardStatementMatch[1].trim();
+
+  return null;
+}
+
 export function normalizeMerchantName(value) {
   const original = (value || 'Unknown').trim();
   if (!original) {
     return { key: 'UNKNOWN', displayName: 'Unknown', originalName: 'Unknown' };
   }
 
-  let cleaned = original
+  const merchantText = extractPayPalCounterparty(original) || original;
+  let cleaned = merchantText
     .toLowerCase()
     .replace(/&/g, ' and ')
     .replace(/\([^)]*\)/g, ' ')
@@ -56,7 +68,7 @@ export function normalizeMerchantName(value) {
   }
 
   cleaned = tokens.join(' ').trim();
-  if (!cleaned) cleaned = original.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() || 'unknown';
+  if (!cleaned) cleaned = merchantText.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() || 'unknown';
 
   const key = cleaned.toUpperCase();
   return {

@@ -185,9 +185,21 @@ function compactTransaction(row: UncategorizedTransactionRow) {
   };
 }
 
+function extractPayPalCounterparty(value: string | null | undefined) {
+  const text = (value || '').trim();
+  const bankDescriptionMatch = text.match(/^PAYPAL\s+DES:[\s\S]+?\bID:([\s\S]+?)\s+INDN:/i);
+  if (bankDescriptionMatch?.[1]) return bankDescriptionMatch[1].trim();
+
+  const cardStatementMatch = text.match(/^PAYPAL\s+\*([^\s]+)/i);
+  if (cardStatementMatch?.[1]) return cardStatementMatch[1].trim();
+
+  return null;
+}
+
 function normalizeMerchantText(value: string | null | undefined) {
   const original = (value || 'Unknown').trim() || 'Unknown';
-  let cleaned = original
+  const merchantText = extractPayPalCounterparty(original) ?? original;
+  let cleaned = merchantText
     .toLowerCase()
     .replace(/&/g, ' and ')
     .replace(/\([^)]*\)/g, ' ')
@@ -200,7 +212,7 @@ function normalizeMerchantText(value: string | null | undefined) {
     .replace(/\s+/g, ' ')
     .trim();
 
-  if (!cleaned) cleaned = original.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() || 'unknown';
+  if (!cleaned) cleaned = merchantText.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() || 'unknown';
 
   return {
     key: cleaned.toUpperCase(),
