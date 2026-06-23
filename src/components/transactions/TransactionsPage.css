@@ -413,6 +413,137 @@
   line-height: 1.35;
 }
 
+.transaction-review-page {
+  min-height: 100%;
+}
+
+.transaction-review-page__header {
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.transaction-review-page__subtitle {
+  margin: var(--space-1) 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.35;
+}
+
+.transaction-review-page__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.transaction-review-shell {
+  display: grid;
+  gap: var(--space-4);
+  width: min(820px, 100%);
+  margin: 0 auto;
+}
+
+.transaction-review-status {
+  justify-content: center;
+  width: 100%;
+}
+
+.transaction-review-deck {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.transaction-review-progress {
+  height: 7px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--bg-surface);
+  border: 1px solid var(--glass-border);
+}
+
+.transaction-review-progress__bar {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent-blue);
+  transition: width var(--transition-fast);
+}
+
+.transaction-review-progress__label {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+.transaction-review-card,
+.transaction-review-empty {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-sm);
+}
+
+.transaction-review-card__eyebrow {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.transaction-review-card h2,
+.transaction-review-empty h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: var(--text-2xl);
+  line-height: 1.15;
+}
+
+.transaction-review-card p,
+.transaction-review-empty p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.transaction-review-card__category {
+  width: fit-content;
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-full);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.transaction-review-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.transaction-review-card__picker {
+  max-width: 380px;
+}
+
+.transaction-review-card__picker .filter-input {
+  width: 100%;
+}
+
+.transaction-review-card__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+
 .transactions-list {
   display: flex;
   flex-direction: column;

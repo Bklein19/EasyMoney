@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router';
 import { Menu } from 'lucide-react';
 import ImportPage from './components/import/ImportPage';
 import TransactionsPage from './components/transactions/TransactionsPage';
+import TransactionReviewPage from './components/transactions/TransactionReviewPage';
 import AccountsPage from './components/accounts/AccountsPage';
 import Sidebar from './components/layout/Sidebar';
 import AnalyticsPage from './components/analytics/AnalyticsPage';
@@ -122,6 +123,7 @@ function App() {
             <Routes>
               <Route path="/" element={<AnalyticsPage />} />
               <Route path="/transactions" element={<TransactionsPage />} />
+              <Route path="/transactions/review" element={<TransactionReviewPage />} />
               <Route path="/accounts" element={<AccountsPage />} />
               <Route path="/budgeting" element={<BudgetingPage />} />
               <Route path="/net-worth" element={<NetWorthPage view="networth" selectedIds={reportSelectedIds} />} />
