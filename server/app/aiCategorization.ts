@@ -30,7 +30,9 @@ export type AiCategorizationDecision =
 
 interface ModelGroupDecision {
   groupId: string;
-  decision: AiCategorizationDecision;
+  kind: AiCategorizationDecision['kind'];
+  categoryName: string;
+  reason: string;
 }
 
 interface ModelResponse {
@@ -364,28 +366,13 @@ export function getAiCategorizationTransactionDetails(input: { transactionIds: s
   return { transactions: rows.map(transactionSummary) };
 }
 
-function buildCategorizationOutputSchema(categoryNames: [string, ...string[]]) {
-  const categoryName = z.enum(categoryNames);
-  const decision = z.discriminatedUnion('kind', [
-    z.strictObject({
-      kind: z.literal('category'),
-      categoryName,
-      reason: z.string(),
-    }),
-    z.strictObject({
-      kind: z.literal('transfer'),
-      reason: z.string(),
-    }),
-    z.strictObject({
-      kind: z.literal('needs_review'),
-      reason: z.string(),
-    }),
-  ]);
-
+function buildCategorizationOutputSchema() {
   return z.strictObject({
     decisions: z.array(z.strictObject({
       groupId: z.string(),
-      decision,
+      kind: z.enum(['category', 'transfer', 'needs_review']),
+      categoryName: z.string(),
+      reason: z.string(),
     })),
   });
 }
@@ -396,22 +383,22 @@ async function categorizeBatchWithOpenAi(input: {
   categories: CategorySummary[];
   groups: MerchantCategorizationGroup[];
 }) {
-  const categoryNames = input.categories.map(category => category.name) as [string, ...string[]];
   const agent = new Agent({
     name: 'Transaction categorization',
     model: input.model,
     instructions: [
       'You review personal finance merchant/payee groups and choose one decision for each group.',
-      'Use this exact TypeScript-shaped decision model:',
-      "type AiCategorizationDecision = { kind: 'category'; categoryName: string; reason: string } | { kind: 'transfer'; reason: string } | { kind: 'needs_review'; reason: string };",
+      'Return flat decision objects with groupId, kind, categoryName, and reason.',
+      "kind must be exactly one of: 'category', 'transfer', or 'needs_review'.",
       "Use kind: 'category' only for real spending or income categories. categoryName must exactly match the category list.",
+      "For kind: 'transfer' or kind: 'needs_review', set categoryName to an empty string.",
       "Use kind: 'transfer' for money movement between accounts, including credit card payments, ACH transfers, brokerage contributions, cash moving to or from investments, and other account-to-account movement.",
       "Use kind: 'needs_review' when the group is variable, personal-context-dependent, or ambiguous, such as Venmo, Zelle, PayPal, checks, cash app, or unclear bank text.",
       'Treat the whole merchant/payee group as one decision.',
       'Do not use a category for transfers just because a Transfer category exists.',
       'Return a decision only when it should apply to the whole group.',
     ].join('\n'),
-    outputType: buildCategorizationOutputSchema(categoryNames),
+    outputType: buildCategorizationOutputSchema(),
   });
 
   const runner = new Runner({
@@ -489,17 +476,16 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
     for (const item of result.decisions ?? []) {
       const group = groupById.get(item.groupId);
       if (!group) continue;
-      const decision = item.decision;
 
-      if (decision.kind === 'category') {
-        const category = categoryByName.get(decision.categoryName);
+      if (item.kind === 'category') {
+        const category = categoryByName.get(item.categoryName);
         if (!category) continue;
         if (shouldTreatInvestmentCategoryAsTransfer({ group, category }) && transferCategory) {
           suggestions.push(categorySuggestion({
             group,
             category: transferCategory,
             decisionKind: 'transfer',
-            reason: `${decision.reason} This looks like account-to-account movement, so EasyMoney will treat it as a transfer.`,
+            reason: `${item.reason} This looks like account-to-account movement, so EasyMoney will treat it as a transfer.`,
           }));
           continue;
         }
@@ -507,16 +493,16 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
           group,
           category,
           decisionKind: 'category',
-          reason: decision.reason,
+          reason: item.reason,
         }));
         continue;
       }
 
-      if (decision.kind === 'transfer') {
+      if (item.kind === 'transfer') {
         if (!transferCategory) {
           questions.push(reviewQuestion({
             group,
-            reason: `${decision.reason} EasyMoney could not find a Transfer category to apply automatically.`,
+            reason: `${item.reason} EasyMoney could not find a Transfer category to apply automatically.`,
           }));
           continue;
         }
@@ -524,14 +510,14 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
           group,
           category: transferCategory,
           decisionKind: 'transfer',
-          reason: decision.reason,
+          reason: item.reason,
         }));
         continue;
       }
 
       questions.push(reviewQuestion({
         group,
-        reason: decision.reason,
+        reason: item.reason,
       }));
     }
   }
