@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
+import { ChevronRight } from 'lucide-react';
 import { useCategories } from '../../hooks/useCategories';
 import { formatCurrency } from '../../utils/formatters';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
@@ -23,9 +24,9 @@ export default function TransactionReviewPage() {
   const [aiCategorization, setAiCategorization] = useState(null);
   const [aiCategorizationError, setAiCategorizationError] = useState('');
   const [openAiApiKeyDraft, setOpenAiApiKeyDraft] = useState('');
-  const [aiQuestionCategoryByKey, setAiQuestionCategoryByKey] = useState({});
   const [ignoredAiQuestionKeys, setIgnoredAiQuestionKeys] = useState(new Set());
-  const [currentReviewIndex, setCurrentReviewIndex] = useState(0);
+  const [categoryByReviewKey, setCategoryByReviewKey] = useState({});
+  const [expandedReviewKey, setExpandedReviewKey] = useState(null);
   const [isAiCategorizing, setIsAiCategorizing] = useState(false);
   const [aiReviewStartedAt, setAiReviewStartedAt] = useState(null);
   const [aiReviewElapsedSeconds, setAiReviewElapsedSeconds] = useState(0);
@@ -33,21 +34,58 @@ export default function TransactionReviewPage() {
   const [isSavingOpenAiKey, setIsSavingOpenAiKey] = useState(false);
   const { categories } = useCategories();
 
+  const getSuggestionTransaction = (suggestion) => suggestion.transactions?.[0] || suggestion.transaction || null;
+  const getQuestionTransactions = (question) => question.transactions ?? [];
+  const getAiTransactionTitle = (transaction) => transaction?.merchant || transaction?.description || 'Transaction';
+  const getSuggestionLabel = (suggestion) => {
+    if (suggestion.decisionKind === 'transfer') return 'Transfer';
+    return suggestion.categoryName || 'Suggested';
+  };
+  const getReviewRowLabel = (row) => {
+    if (row.type === 'question') return 'Needs review';
+    if (row.decisionKind === 'transfer') return 'Transfer';
+    return row.suggestedCategoryName || 'Suggested';
+  };
+  const formatTransactionCount = (count) => `${count.toLocaleString()} matching transaction${count === 1 ? '' : 's'}`;
+
   const aiSuggestions = useMemo(() => aiCategorization?.suggestions ?? [], [aiCategorization?.suggestions]);
   const aiQuestions = useMemo(() => aiCategorization?.questions ?? [], [aiCategorization?.questions]);
-  const activeAiQuestions = aiQuestions
-    .map((question, index) => ({ ...question, key: `${question.pattern}-${index}` }))
-    .filter(question => !ignoredAiQuestionKeys.has(question.key));
+  const activeAiQuestions = useMemo(() => aiQuestions
+    .map((question, index) => ({ ...question, key: `${question.groupId || question.pattern}-${index}` }))
+    .filter(question => !ignoredAiQuestionKeys.has(question.key)), [aiQuestions, ignoredAiQuestionKeys]);
   const suggestionSelectionId = (suggestion) => suggestion.id ?? suggestion.transactionId;
   const suggestionTransactionIds = (suggestion) => suggestion.transactionIds ?? [suggestion.transactionId].filter(Boolean);
-  const reviewItems = useMemo(() => [
+  const reviewRows = useMemo(() => [
     ...aiSuggestions
       .filter(suggestion => !suggestion.applied)
-      .map(suggestion => ({ type: 'suggestion', id: suggestionSelectionId(suggestion), suggestion })),
-    ...activeAiQuestions.map(question => ({ type: 'question', id: question.key, question })),
-  ], [activeAiQuestions, aiSuggestions]);
-  const boundedReviewIndex = reviewItems.length ? Math.min(currentReviewIndex, reviewItems.length - 1) : 0;
-  const currentReviewItem = reviewItems[boundedReviewIndex] ?? null;
+      .map(suggestion => ({
+        type: 'suggestion',
+        key: suggestionSelectionId(suggestion),
+        merchantName: suggestion.merchantName || getAiTransactionTitle(getSuggestionTransaction(suggestion)),
+        transactionIds: suggestionTransactionIds(suggestion),
+        transactionCount: suggestion.transactionCount ?? suggestionTransactionIds(suggestion).length,
+        totalAmount: suggestion.totalAmount,
+        reason: suggestion.reason,
+        decisionKind: suggestion.decisionKind,
+        suggestedCategoryName: getSuggestionLabel(suggestion),
+        categoryId: categoryByReviewKey[suggestionSelectionId(suggestion)] ?? String(suggestion.categoryId),
+        transactions: suggestion.transactions ?? (getSuggestionTransaction(suggestion) ? [getSuggestionTransaction(suggestion)] : []),
+      })),
+    ...activeAiQuestions.map(question => ({
+      type: 'question',
+      key: question.key,
+      merchantName: question.pattern,
+      transactionIds: question.transactionIds,
+      transactionCount: question.transactionCount ?? question.transactionIds.length,
+      totalAmount: question.totalAmount,
+      reason: question.reason,
+      decisionKind: question.decisionKind,
+      suggestedCategoryName: '',
+      categoryId: categoryByReviewKey[question.key] ?? '',
+      transactions: getQuestionTransactions(question),
+    })),
+  ], [activeAiQuestions, aiSuggestions, categoryByReviewKey]);
+  const selectedReviewRows = reviewRows.filter(row => row.categoryId && row.transactionIds.length);
 
   useEffect(() => {
     if (!isAiCategorizing || !aiReviewStartedAt) return undefined;
@@ -58,19 +96,6 @@ export default function TransactionReviewPage() {
 
     return () => window.clearInterval(intervalId);
   }, [isAiCategorizing, aiReviewStartedAt]);
-
-  const getSuggestionTransaction = (suggestion) => suggestion.transactions?.[0] || suggestion.transaction || null;
-  const getQuestionTransactions = (question) => question.transactions ?? [];
-  const getAiTransactionTitle = (transaction) => transaction?.merchant || transaction?.description || 'Transaction';
-  const getAiTransactionSummary = (transaction) => {
-    if (!transaction) return 'Transaction details unavailable';
-    return `${getAiTransactionTitle(transaction)} · ${formatCurrency(transaction.amount, true)}`;
-  };
-  const getSuggestionEyebrow = (suggestion) => {
-    if (suggestion.decisionKind === 'transfer') return 'Suggested transfer treatment';
-    return 'Suggested category';
-  };
-  const formatTransactionCount = (count) => `${count.toLocaleString()} matching transaction${count === 1 ? '' : 's'}`;
 
   const confirmLargeBulkChange = (count, categoryName) => {
     if (count <= 50) return true;
@@ -124,9 +149,9 @@ export default function TransactionReviewPage() {
         `AI categorization took longer than ${Math.round(AI_CATEGORIZATION_TIMEOUT_MS / 1000)} seconds. Try again with fewer uncategorized transactions or check the server logs.`
       );
       setAiCategorization(result);
-      setAiQuestionCategoryByKey({});
+      setCategoryByReviewKey({});
       setIgnoredAiQuestionKeys(new Set());
-      setCurrentReviewIndex(0);
+      setExpandedReviewKey(null);
     } catch (error) {
       setAiCategorization(null);
       setAiCategorizationError(error instanceof Error ? error.message : String(error));
@@ -142,74 +167,44 @@ export default function TransactionReviewPage() {
     handlePreviewAiCategorization();
   }, [searchParams]);
 
-  const showNextReviewItem = () => {
-    setCurrentReviewIndex(index => Math.min(index + 1, reviewItems.length));
+  const setReviewCategory = (reviewKey, categoryId) => {
+    setCategoryByReviewKey(previous => ({
+      ...previous,
+      [reviewKey]: categoryId,
+    }));
   };
 
-  const handleApplyAiSuggestion = async (suggestion) => {
-    if (!suggestion) return;
+  const applySelectedReviewRows = async () => {
+    if (!selectedReviewRows.length) return;
+    const transactionCount = selectedReviewRows.reduce((count, row) => count + row.transactionIds.length, 0);
+    if (!confirmLargeBulkChange(transactionCount, 'the selected categories')) return;
 
     setIsApplyingAiCategories(true);
     setAiCategorizationError('');
     try {
       const result = await trpcClient.transactions.applyAiCategorization.mutate({
-        suggestions: suggestionTransactionIds(suggestion).map(transactionId => ({
+        suggestions: selectedReviewRows.flatMap(row => row.transactionIds.map(transactionId => ({
           transactionId,
-          categoryId: suggestion.categoryId,
-        })),
+          categoryId: row.categoryId,
+        }))),
       });
       const appliedIds = new Set(result.appliedTransactionIds ?? []);
+      const appliedQuestionKeys = new Set(
+        selectedReviewRows
+          .filter(row => row.type === 'question' && row.transactionIds.some(transactionId => appliedIds.has(transactionId)))
+          .map(row => row.key)
+      );
       setAiCategorization(previous => previous ? {
         ...previous,
         suggestions: previous.suggestions.map(suggestion => suggestionTransactionIds(suggestion).some(transactionId => appliedIds.has(transactionId))
           ? { ...suggestion, applied: true }
           : suggestion),
-        appliedCount: result.count,
-        skippedCount: result.skipped?.length ?? 0,
-      } : previous);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() }),
-        queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] }),
-      ]);
-    } catch (error) {
-      setAiCategorizationError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setIsApplyingAiCategories(false);
-    }
-  };
-
-  const setAiQuestionCategory = (questionKey, categoryId) => {
-    setAiQuestionCategoryByKey(previous => ({
-      ...previous,
-      [questionKey]: categoryId,
-    }));
-  };
-
-  const ignoreAiQuestion = (questionKey) => {
-    setIgnoredAiQuestionKeys(previous => new Set([...previous, questionKey]));
-  };
-
-  const applyAiQuestion = async (question) => {
-    const categoryId = aiQuestionCategoryByKey[question.key];
-    if (!categoryId || !question.transactionIds.length) return;
-    const categoryName = categories.find(category => String(category.id) === String(categoryId))?.name || 'selected category';
-    if (!confirmLargeBulkChange(question.transactionIds.length, categoryName)) return;
-
-    setIsApplyingAiCategories(true);
-    setAiCategorizationError('');
-    try {
-      const result = await trpcClient.transactions.applyAiCategorization.mutate({
-        suggestions: question.transactionIds.map(transactionId => ({
-          transactionId,
-          categoryId,
-        })),
-      });
-      setAiCategorization(previous => previous ? {
-        ...previous,
         appliedCount: (previous.appliedCount ?? 0) + result.count,
         skippedCount: (previous.skippedCount ?? 0) + (result.skipped?.length ?? 0),
       } : previous);
-      if (result.count > 0) ignoreAiQuestion(question.key);
+      if (appliedQuestionKeys.size > 0) {
+        setIgnoredAiQuestionKeys(previous => new Set([...previous, ...appliedQuestionKeys]));
+      }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() }),
         queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] }),
@@ -219,14 +214,6 @@ export default function TransactionReviewPage() {
     } finally {
       setIsApplyingAiCategories(false);
     }
-  };
-
-  const skipReviewItem = () => {
-    if (currentReviewItem?.type === 'question') {
-      ignoreAiQuestion(currentReviewItem.question.key);
-      return;
-    }
-    showNextReviewItem();
   };
 
   const handleSaveOpenAiKey = async (event) => {
@@ -257,19 +244,22 @@ export default function TransactionReviewPage() {
     }
   };
 
-  const progressTotal = reviewItems.length + (aiCategorization?.appliedCount ?? 0);
-  const progressDone = progressTotal === 0 ? 0 : Math.min(progressTotal, boundedReviewIndex + (aiCategorization?.appliedCount ?? 0));
+  const progressTotal = reviewRows.length + (aiCategorization?.appliedCount ?? 0);
+  const progressDone = aiCategorization?.appliedCount ?? 0;
   const progressPercent = progressTotal === 0 ? 0 : Math.round((progressDone / progressTotal) * 100);
 
   return (
     <div className="page transaction-review-page">
       <div className="page__header transaction-review-page__header stagger-in">
         <div>
-          <h1 className="page__title">Transaction Review</h1>
+          <h1 className="page__title transaction-review-breadcrumbs">
+            <Link to="/transactions">Transactions</Link>
+            <span aria-hidden="true">&gt;</span>
+            <span>Review</span>
+          </h1>
           <p className="transaction-review-page__subtitle">Review merchant-group suggestions before applying categories.</p>
         </div>
         <div className="transaction-review-page__actions">
-          <Link className="btn btn--ghost btn--sm" to="/transactions">Back to transactions</Link>
           <button
             className="btn btn--secondary btn--sm"
             type="button"
@@ -327,7 +317,7 @@ export default function TransactionReviewPage() {
                   )}
                   <span>{aiSuggestions.filter(suggestion => !suggestion.applied).length} suggestions</span>
                   <span>{activeAiQuestions.length} questions</span>
-                  <span>{progressDone} of {progressTotal} reviewed</span>
+                  <span>{progressDone} applied</span>
                 </div>
               )}
               {aiCategorization?.appliedCount > 0 && (
@@ -347,83 +337,102 @@ export default function TransactionReviewPage() {
                   <div className="transaction-review-progress__bar" style={{ width: `${progressPercent}%` }} />
                 </div>
                 <div className="transaction-review-progress__label">
-                  {progressTotal === 0 ? 'No review items' : `${Math.min(progressDone + 1, progressTotal)} of ${progressTotal}`}
+                  {progressTotal === 0 ? 'No review items' : `${progressDone} of ${progressTotal} applied`}
                 </div>
 
-                {currentReviewItem ? (
-                  currentReviewItem.type === 'suggestion' ? (() => {
-                    const suggestion = currentReviewItem.suggestion;
-                    return (
-                      <section className="transaction-review-card">
-                        <div className="transaction-review-card__eyebrow">{getSuggestionEyebrow(suggestion)}</div>
-                        <h2>
-                          {suggestion.merchantName || getAiTransactionTitle(getSuggestionTransaction(suggestion))}
-                        </h2>
-                        <div className="transaction-review-card__category">{suggestion.categoryName}</div>
-                        <p>{suggestion.reason}</p>
-                        <div className="transaction-review-card__meta">
-                          <span>
-                            {suggestion.transactionCount
-                              ? formatTransactionCount(suggestion.transactionCount)
-                              : getAiTransactionSummary(getSuggestionTransaction(suggestion))}
-                          </span>
-                          {suggestion.transactionCount && <span>{formatCurrency(suggestion.totalAmount, true)}</span>}
-                        </div>
-                        {renderTransactionPreview(
-                          suggestion.transactions ?? (getSuggestionTransaction(suggestion) ? [getSuggestionTransaction(suggestion)] : []),
-                          suggestion.transactionCount ?? suggestionTransactionIds(suggestion).length
-                        )}
-                        <div className="transaction-review-card__actions">
-                          <button className="btn btn--ghost" type="button" onClick={skipReviewItem}>Skip</button>
-                          <button
-                            className="btn btn--primary"
-                            type="button"
-                            disabled={isApplyingAiCategories}
-                            onClick={() => handleApplyAiSuggestion(suggestion)}
-                          >
-                            {isApplyingAiCategories ? 'Applying...' : 'Accept'}
-                          </button>
-                        </div>
-                      </section>
-                    );
-                  })() : (() => {
-                    const question = currentReviewItem.question;
-                    return (
-                      <section className="transaction-review-card">
-                        <div className="transaction-review-card__eyebrow">Needs your call</div>
-                        <h2>{question.pattern}</h2>
-                        <p>{question.reason}</p>
-                        <div className="transaction-review-card__meta">
-                          <span>{formatTransactionCount(question.transactionIds.length)}</span>
-                          {typeof question.totalAmount === 'number' && <span>{formatCurrency(question.totalAmount, true)}</span>}
-                        </div>
-                        {renderTransactionPreview(getQuestionTransactions(question), question.transactionIds.length)}
-                        <div className="transaction-review-card__picker">
-                          <select
-                            className="filter-input"
-                            value={aiQuestionCategoryByKey[question.key] ?? ''}
-                            onChange={(event) => setAiQuestionCategory(question.key, event.target.value)}
-                          >
-                            <option value="">Choose category</option>
-                            {categories.map(category => (
-                              <option key={category.id} value={category.id}>{category.name}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div className="transaction-review-card__actions">
-                          <button className="btn btn--ghost" type="button" onClick={skipReviewItem}>Skip</button>
-                          <button
-                            type="button"
-                            className="btn btn--primary"
-                            disabled={!aiQuestionCategoryByKey[question.key] || isApplyingAiCategories}
-                            onClick={() => applyAiQuestion(question)}
-                          >
-                            {isApplyingAiCategories ? 'Applying...' : 'Apply'}
-                          </button>
-                        </div>
-                      </section>
-                    );
-                  })()
+                {reviewRows.length ? (
+                  <div className="merchant-review-table-wrap">
+                    <div className="merchant-review-toolbar">
+                      <div>
+                        <strong>{reviewRows.length} merchants</strong>
+                        <span>{selectedReviewRows.length} with categories selected</span>
+                      </div>
+                      <button
+                        className="btn btn--primary btn--sm"
+                        type="button"
+                        disabled={isApplyingAiCategories || selectedReviewRows.length === 0}
+                        onClick={applySelectedReviewRows}
+                      >
+                        {isApplyingAiCategories ? 'Applying...' : 'Apply batch'}
+                      </button>
+                    </div>
+                    <table className="merchant-review-table">
+                      <colgroup>
+                        <col className="merchant-review-table__merchant" />
+                        <col className="merchant-review-table__suggestion" />
+                        <col className="merchant-review-table__volume" />
+                        <col className="merchant-review-table__amount" />
+                        <col className="merchant-review-table__category" />
+                        <col className="merchant-review-table__action" />
+                      </colgroup>
+                      <thead>
+                        <tr>
+                          <th>Merchant</th>
+                          <th>AI suggestion</th>
+                          <th className="num">Volume</th>
+                          <th className="num">Amount</th>
+                          <th>Category</th>
+                          <th aria-label="Actions" />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reviewRows.map(row => {
+                          const isExpanded = expandedReviewKey === row.key;
+                          return (
+                            <Fragment key={row.key}>
+                              <tr
+                                className={`merchant-review-row ${isExpanded ? 'is-expanded' : ''} ${!row.categoryId ? 'needs-category' : ''}`}
+                                onClick={() => setExpandedReviewKey(isExpanded ? null : row.key)}
+                              >
+                                <td>
+                                  <div className="merchant-review-row__name" title={row.merchantName}>{row.merchantName}</div>
+                                  <div className="merchant-review-row__reason">{row.reason}</div>
+                                </td>
+                                <td><span className="merchant-review-chip">{getReviewRowLabel(row)}</span></td>
+                                <td className="num">{row.transactionCount.toLocaleString()}</td>
+                                <td className="num">{typeof row.totalAmount === 'number' ? formatCurrency(row.totalAmount, true) : '—'}</td>
+                                <td onClick={(event) => event.stopPropagation()}>
+                                  <select
+                                    className="filter-input merchant-review-category-select"
+                                    value={row.categoryId}
+                                    onChange={(event) => setReviewCategory(row.key, event.target.value)}
+                                  >
+                                    <option value="">Choose category</option>
+                                    {categories.map(category => (
+                                      <option key={category.id} value={category.id}>{category.name}</option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td className="merchant-review-row__disclosure">
+                                  <button
+                                    className="icon-btn merchant-review-expand-btn"
+                                    type="button"
+                                    aria-label={isExpanded ? 'Close merchant transactions' : 'Open merchant transactions'}
+                                    aria-expanded={isExpanded}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setExpandedReviewKey(isExpanded ? null : row.key);
+                                    }}
+                                  >
+                                    <ChevronRight size={15} />
+                                  </button>
+                                </td>
+                              </tr>
+                              {isExpanded && (
+                                <tr className="merchant-review-details-row">
+                                  <td colSpan={6}>
+                                    <div className="merchant-review-details-panel">
+                                      {renderTransactionPreview(row.transactions, row.transactionCount)}
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 ) : (
                   <div className="transaction-review-empty">
                     <h2>Review complete</h2>

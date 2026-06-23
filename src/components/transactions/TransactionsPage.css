@@ -415,12 +415,36 @@
 
 .transaction-review-page {
   min-height: 100%;
+  max-width: none;
 }
 
 .transaction-review-page__header {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
+}
+
+.transaction-review-breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.transaction-review-breadcrumbs a {
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.transaction-review-breadcrumbs a:hover,
+.transaction-review-breadcrumbs a:focus-visible {
+  color: var(--text-primary);
+}
+
+.transaction-review-breadcrumbs span[aria-hidden="true"] {
+  color: var(--text-muted);
+  font-size: var(--text-lg);
+  font-weight: 500;
 }
 
 .transaction-review-page__subtitle {
@@ -440,8 +464,7 @@
 .transaction-review-shell {
   display: grid;
   gap: var(--space-4);
-  width: min(820px, 100%);
-  margin: 0 auto;
+  width: 100%;
 }
 
 .transaction-review-status {
@@ -473,6 +496,159 @@
   color: var(--text-muted);
   font-size: var(--text-xs);
   text-align: center;
+}
+
+.merchant-review-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border-top: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.merchant-review-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+}
+
+.merchant-review-toolbar > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.merchant-review-toolbar strong {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+}
+
+.merchant-review-toolbar span {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.merchant-review-table {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.merchant-review-table__merchant { width: 35%; }
+.merchant-review-table__suggestion { width: 16%; }
+.merchant-review-table__volume { width: 9%; }
+.merchant-review-table__amount { width: 12%; }
+.merchant-review-table__category { width: 22%; }
+.merchant-review-table__action { width: 6%; }
+
+.merchant-review-table th,
+.merchant-review-table td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--glass-border);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.merchant-review-table th {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  color: var(--text-muted);
+  background: var(--bg-deepest);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.merchant-review-table .num {
+  text-align: right;
+}
+
+.merchant-review-row {
+  cursor: pointer;
+}
+
+.merchant-review-row:hover td {
+  background: var(--bg-hover);
+}
+
+.merchant-review-row.is-expanded td {
+  background: var(--bg-surface);
+}
+
+.merchant-review-row.needs-category .merchant-review-row__name {
+  color: var(--text-secondary);
+}
+
+.merchant-review-row__name {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-weight: 650;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.merchant-review-row__reason {
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.merchant-review-chip {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 22px;
+  padding: 2px 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.merchant-review-category-select {
+  width: 100%;
+  min-height: 32px;
+}
+
+.merchant-review-row__disclosure {
+  text-align: right;
+}
+
+.merchant-review-expand-btn svg {
+  transition: transform var(--transition-fast);
+}
+
+.merchant-review-row.is-expanded .merchant-review-expand-btn svg {
+  transform: rotate(90deg);
+}
+
+.merchant-review-details-row td {
+  padding: 0;
+  background: var(--bg-surface);
+}
+
+.merchant-review-details-panel {
+  padding: var(--space-2);
+  background: var(--bg-surface);
 }
 
 .transaction-review-card,
