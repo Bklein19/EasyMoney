@@ -259,14 +259,16 @@ export default function TransactionReviewPage() {
           </h1>
         </div>
         <div className="transaction-review-page__actions">
-          <button
-            className="btn btn--secondary btn--sm"
-            type="button"
-            disabled={isAiCategorizing || isApplyingAiCategories}
-            onClick={handlePreviewAiCategorization}
-          >
-            {isAiCategorizing ? 'Reviewing...' : aiCategorization ? 'Run again' : 'Categorize with AI'}
-          </button>
+          {!isAiCategorizing && (
+            <button
+              className="btn btn--secondary btn--sm"
+              type="button"
+              disabled={isApplyingAiCategories}
+              onClick={handlePreviewAiCategorization}
+            >
+              {aiCategorization ? 'Run again' : 'Categorize with AI'}
+            </button>
+          )}
         </div>
       </div>
 
