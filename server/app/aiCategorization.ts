@@ -45,6 +45,7 @@ export interface AiCategorySuggestion {
   merchantName: string;
   decisionKind: Exclude<AiCategorizationDecision['kind'], 'needs_review'>;
   aliases: string[];
+  accountNames: string[];
   transactionIds: string[];
   transactionCount: number;
   totalAmount: number;
@@ -61,6 +62,7 @@ export interface AiCategoryQuestion {
   pattern: string;
   transactionIds: string[];
   aliases: string[];
+  accountNames: string[];
   transactionCount: number;
   totalAmount: number;
   reason: string;
@@ -296,6 +298,7 @@ function categorySuggestion(input: {
     merchantName: input.group.merchantName,
     decisionKind: input.decisionKind,
     aliases: input.group.aliases,
+    accountNames: merchantGroupAccountNames(input.group),
     transactionIds: input.group.transactionIds,
     transactionCount: input.group.transactionCount,
     totalAmount: Math.round(input.group.totalAmount * 100) / 100,
@@ -318,11 +321,19 @@ function reviewQuestion(input: {
     pattern: group.merchantName,
     transactionIds: group.transactionIds,
     aliases: group.aliases,
+    accountNames: merchantGroupAccountNames(group),
     transactionCount: group.transactionCount,
     totalAmount: Math.round(group.totalAmount * 100) / 100,
     reason: input.reason,
     transactions: group.transactions.slice(0, 8).map(transactionSummary),
   };
+}
+
+function merchantGroupAccountNames(group: MerchantCategorizationGroup) {
+  return [...new Set(group.transactions
+    .map(row => [row.accountInstitution, row.accountName].filter(Boolean).join(' '))
+    .filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
 }
 
 function transactionSummary(row: UncategorizedTransactionRow): AiCategorizationTransaction {
