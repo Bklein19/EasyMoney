@@ -405,6 +405,8 @@ async function categorizeBatchWithOpenAi(input: {
       "For kind: 'transfer' or kind: 'needs_review', set categoryName to an empty string.",
       "Use kind: 'transfer' for money movement between accounts, including credit card payments, ACH transfers, brokerage contributions, cash moving to or from investments, and other account-to-account movement.",
       "Use kind: 'needs_review' when the group is variable, personal-context-dependent, or ambiguous, such as Venmo, Zelle, PayPal, checks, cash app, or unclear bank text.",
+      'Investment account fees, management fees, advisory fees, account fees, and recurring service charges are real spending, not transfers or neutral account movement.',
+      'For recurring account/service fees, prefer a recurring expense category such as Subscriptions when it exists and fits; only use Investment when the transaction is actually an investment purchase or contribution.',
       'Treat the whole merchant/payee group as one decision.',
       'Do not use a category for transfers just because a Transfer category exists.',
       'Return a decision only when it should apply to the whole group.',
@@ -423,6 +425,7 @@ async function categorizeBatchWithOpenAi(input: {
       categories: input.categories.map(category => ({
         name: category.name,
         type: category.type,
+        categoryGroup: category.categoryGroup,
       })),
       merchantGroups: input.groups.map(compactMerchantGroup),
     }),
