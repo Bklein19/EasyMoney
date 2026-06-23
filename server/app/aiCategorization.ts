@@ -256,6 +256,42 @@ function compactMerchantGroup(group: MerchantCategorizationGroup) {
   };
 }
 
+function isInvestmentCategory(category: CategorySummary) {
+  return category.type === 'investment' || category.name.toLowerCase() === 'investment';
+}
+
+function isCashAccountType(value: string | null) {
+  return ['checking', 'savings', 'cash', 'bank'].includes((value ?? '').toLowerCase());
+}
+
+function isInvestmentAccountType(value: string | null) {
+  return ['investment', 'brokerage', 'retirement', 'ira', '401k'].includes((value ?? '').toLowerCase());
+}
+
+export function shouldReviewInvestmentAssignmentAsTransfer(input: {
+  group: MerchantCategorizationGroup;
+  category: CategorySummary;
+}) {
+  if (!isInvestmentCategory(input.category)) return false;
+
+  const hasCashAccountTransaction = input.group.transactions.some(transaction => isCashAccountType(transaction.accountType));
+  const hasInvestmentAccountTransaction = input.group.transactions.some(transaction => isInvestmentAccountType(transaction.accountType));
+  return hasCashAccountTransaction && !hasInvestmentAccountTransaction;
+}
+
+function investmentTransferQuestion(group: MerchantCategorizationGroup, reason: string) {
+  return {
+    groupId: group.id,
+    pattern: `${group.merchantName} transfer`,
+    transactionIds: group.transactionIds,
+    aliases: group.aliases,
+    transactionCount: group.transactionCount,
+    totalAmount: Math.round(group.totalAmount * 100) / 100,
+    reason: `${reason} This appears to be money moving from a cash account toward an investment destination, so review it as a transfer instead of accepting Investment as a spending category.`,
+    transactions: group.transactions.slice(0, 8).map(transactionSummary),
+  };
+}
+
 function transactionSummary(row: UncategorizedTransactionRow): AiCategorizationTransaction {
   return {
     transactionId: row.ledgerTransactionId,
@@ -331,6 +367,7 @@ async function categorizeBatchWithOpenAi(input: {
       'Return null categoryName when you are not confident. Do not guess.',
       'Treat the whole merchant/payee group as one decision.',
       'If a group is probably variable, such as Venmo, Zelle, PayPal, checks, cash app, or a generic bank transfer, add a question instead of an assignment.',
+      'Do not assign Investment to cash-account outflows that look like transfers to a brokerage, fund, or investment account. Add a question for those transfer-like groups.',
       'Prefer high confidence only for obvious merchant/category matches that should apply to the whole group.',
     ].join('\n'),
     outputType: buildCategorizationOutputSchema(categoryNames),
@@ -413,6 +450,10 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
       const category = categoryByName.get(assignment.categoryName);
       const group = groupById.get(assignment.groupId);
       if (!category || !group) continue;
+      if (shouldReviewInvestmentAssignmentAsTransfer({ group, category })) {
+        questions.push(investmentTransferQuestion(group, assignment.reason));
+        continue;
+      }
       suggestions.push({
         id: group.id,
         groupId: group.id,

@@ -10,7 +10,7 @@ process.env.EASYMONEY_DB_PATH = path.join(os.tmpdir(), `easymoney-app-api-${proc
 const { createServer } = await import('../index.ts');
 const { getDb, initDatabase, insertRow } = await import('../database.js');
 const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
-const { groupTransactionsForAiCategorization } = await import('./aiCategorization.ts');
+const { groupTransactionsForAiCategorization, shouldReviewInvestmentAssignmentAsTransfer } = await import('./aiCategorization.ts');
 const server = createServer({ port: 0 });
 const TEST_URL = `http://localhost:${server.port}`;
 const trpcClient = createTRPCClient<AppRouter>({
@@ -981,6 +981,58 @@ test('ai categorization groups uncategorized transactions by merchant before mod
     transactionIds: ['coffee_1'],
     transactionCount: 1,
   });
+});
+
+test('ai categorization treats cash-account investment assignments as transfer review', () => {
+  const [cashTransferGroup] = groupTransactionsForAiCategorization([
+    {
+      id: 1,
+      ledgerTransactionId: 'sequoia_transfer_1',
+      accountName: 'BofA Checking',
+      accountInstitution: 'Bank of America',
+      accountType: 'checking',
+      date: '2026-06-01',
+      amountCents: -40000,
+      description: '0051 SEQUOIA DES:INVESTMENT ID:111111 INDN:TEST USER CO WEB',
+      merchant: '0051 Sequoia Des Investment Indn Test User Co Web',
+      originalDescription: '0051 SEQUOIA DES:INVESTMENT ID:111111 INDN:TEST USER CO WEB',
+      originalCategory: null,
+      transactionKind: 'activity',
+    },
+  ]);
+  const [investmentAccountGroup] = groupTransactionsForAiCategorization([
+    {
+      id: 2,
+      ledgerTransactionId: 'vanguard_buy_1',
+      accountName: 'Brokerage',
+      accountInstitution: 'Vanguard',
+      accountType: 'investment',
+      date: '2026-06-01',
+      amountCents: -40000,
+      description: 'Buy Vanguard Total Stock Market Index Fund',
+      merchant: 'Buy Vanguard Total Stock Market Index Fund',
+      originalDescription: 'Buy Vanguard Total Stock Market Index Fund',
+      originalCategory: null,
+      transactionKind: 'activity',
+    },
+  ]);
+  const investmentCategory = {
+    id: 1,
+    name: 'Investment',
+    parentId: null,
+    type: 'investment',
+    color: '#f59e0b',
+    icon: 'trending-up',
+  };
+
+  expect(shouldReviewInvestmentAssignmentAsTransfer({
+    group: cashTransferGroup!,
+    category: investmentCategory,
+  })).toBe(true);
+  expect(shouldReviewInvestmentAssignmentAsTransfer({
+    group: investmentAccountGroup!,
+    category: investmentCategory,
+  })).toBe(false);
 });
 test('trpc net worth report is backend-owned and reads ledger balances', async () => {
   const checkingId = insertRow('accounts', {
