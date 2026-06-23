@@ -384,6 +384,50 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
   };
 }
 
+export function getTransactionCategorizationCoverage() {
+  syncLedgerReadModelFromLegacyTables();
+  const row = getDb().prepare(`
+    SELECT
+      COUNT(*) AS totalCount,
+      COALESCE(SUM(ABS(t.amountCents)), 0) AS totalAmountCents,
+      COALESCE(SUM(CASE
+        WHEN c.id IS NOT NULL AND lower(c.name) != 'uncategorized' THEN 1
+        ELSE 0
+      END), 0) AS categorizedCount,
+      COALESCE(SUM(CASE
+        WHEN c.id IS NOT NULL AND lower(c.name) != 'uncategorized' THEN ABS(t.amountCents)
+        ELSE 0
+      END), 0) AS categorizedAmountCents
+    FROM ledgerTransactions t
+    LEFT JOIN accounts a ON a.id = t.accountId
+    LEFT JOIN transactionAnnotations ta ON ta.ledgerTransactionId = t.ledgerTransactionId
+    LEFT JOIN categories c ON c.id = ta.categoryId
+    WHERE t.ledgerTransactionId IS NOT NULL
+      AND COALESCE(a.status, 'active') != 'archived'
+  `).get() as {
+    totalCount: number;
+    totalAmountCents: number;
+    categorizedCount: number;
+    categorizedAmountCents: number;
+  };
+
+  const totalCount = row.totalCount ?? 0;
+  const totalAmountCents = row.totalAmountCents ?? 0;
+  const categorizedCount = row.categorizedCount ?? 0;
+  const categorizedAmountCents = row.categorizedAmountCents ?? 0;
+
+  return {
+    totalCount,
+    categorizedCount,
+    uncategorizedCount: totalCount - categorizedCount,
+    transactionPercent: totalCount > 0 ? categorizedCount / totalCount : 0,
+    totalAmountCents,
+    categorizedAmountCents,
+    uncategorizedAmountCents: totalAmountCents - categorizedAmountCents,
+    amountPercent: totalAmountCents > 0 ? categorizedAmountCents / totalAmountCents : 0,
+  };
+}
+
 export function categorizeTransactions(input: {
   transactionIds: Array<number | string>;
   categoryId?: number | string | null;

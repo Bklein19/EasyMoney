@@ -860,6 +860,67 @@ test('trpc transactions categorize matching applies to the full filtered result 
   expect(restored.transactions.every(transaction => transaction.category === null)).toBe(true);
 });
 
+test('trpc transactions categorization coverage summarizes categorized count and money', async () => {
+  const accountId = Number(insertRow('accounts', { name: 'Checking', type: 'checking', currentBalance: 0 }));
+  const archivedAccountId = Number(insertRow('accounts', {
+    name: 'Archived Checking',
+    type: 'checking',
+    currentBalance: 0,
+    status: 'archived',
+  }));
+  const foodCategoryId = Number(insertRow('categories', { name: 'Food', type: 'expense' }));
+  const uncategorizedCategoryId = Number(insertRow('categories', { name: 'Uncategorized', type: 'expense' }));
+  const now = new Date().toISOString();
+  const insertLedger = (ledgerTransactionId: string, amountCents: number, account = accountId) => {
+    insertRow('ledgerTransactions', {
+      ledgerTransactionId,
+      accountId: account,
+      date: '2026-06-01',
+      amountCents,
+      description: ledgerTransactionId,
+      type: amountCents >= 0 ? 'income' : 'expense',
+      transactionKind: 'activity',
+      createdAt: now,
+    });
+  };
+
+  insertLedger('coverage_food', -1000);
+  insertLedger('coverage_uncategorized', -2500);
+  insertLedger('coverage_null', 3000);
+  insertLedger('coverage_archived', -5000, archivedAccountId);
+  insertRow('transactionAnnotations', {
+    ledgerTransactionId: 'coverage_food',
+    categoryId: foodCategoryId,
+    createdAt: now,
+    updatedAt: now,
+  });
+  insertRow('transactionAnnotations', {
+    ledgerTransactionId: 'coverage_uncategorized',
+    categoryId: uncategorizedCategoryId,
+    createdAt: now,
+    updatedAt: now,
+  });
+  insertRow('transactionAnnotations', {
+    ledgerTransactionId: 'coverage_archived',
+    categoryId: foodCategoryId,
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  const coverage = await trpcClient.transactions.categorizationCoverage.query();
+
+  expect(coverage).toEqual({
+    totalCount: 3,
+    categorizedCount: 1,
+    uncategorizedCount: 2,
+    transactionPercent: 1 / 3,
+    totalAmountCents: 6500,
+    categorizedAmountCents: 1000,
+    uncategorizedAmountCents: 5500,
+    amountPercent: 1000 / 6500,
+  });
+});
+
 
 test('ai categorization apply writes transaction annotations by ledger id', async () => {
   const categoryId = Number(insertRow('categories', { name: 'Dining', type: 'expense' }));

@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import { ChevronRight, Sparkles } from 'lucide-react';
 import { useCategories } from '../../hooks/useCategories';
@@ -42,6 +43,7 @@ export default function TransactionReviewPage() {
   const [isApplyingAiCategories, setIsApplyingAiCategories] = useState(false);
   const [isSavingOpenAiKey, setIsSavingOpenAiKey] = useState(false);
   const { categories } = useCategories();
+  const categorizationCoverage = useQuery(trpc.transactions.categorizationCoverage.queryOptions());
 
   const getSuggestionTransaction = (suggestion) => suggestion.transactions?.[0] || suggestion.transaction || null;
   const getQuestionTransactions = (question) => question.transactions ?? [];
@@ -221,6 +223,7 @@ export default function TransactionReviewPage() {
       }
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() }),
+        queryClient.invalidateQueries({ queryKey: trpc.transactions.categorizationCoverage.queryKey() }),
         queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] }),
       ]);
     } catch (error) {
@@ -261,6 +264,12 @@ export default function TransactionReviewPage() {
   const progressTotal = reviewRows.length + (aiCategorization?.appliedCount ?? 0);
   const progressDone = aiCategorization?.appliedCount ?? 0;
   const progressPercent = progressTotal === 0 ? 0 : Math.round((progressDone / progressTotal) * 100);
+  const formatPercent = (value) => value.toLocaleString('en-US', {
+    style: 'percent',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: value > 0 && value < 0.01 ? 1 : 0,
+  });
+  const coverage = categorizationCoverage.data;
 
   return (
     <div className="page transaction-review-page">
@@ -285,6 +294,29 @@ export default function TransactionReviewPage() {
           )}
         </div>
       </div>
+
+      {coverage && (
+        <section className="transaction-review-coverage" aria-label="Categorization coverage">
+          <div className="transaction-review-coverage__item">
+            <div className="transaction-review-coverage__label">
+              <span>Transactions categorized</span>
+              <strong>{formatPercent(coverage.transactionPercent)}</strong>
+            </div>
+            <div className="transaction-review-coverage__bar" aria-hidden="true">
+              <span style={{ width: `${Math.round(coverage.transactionPercent * 100)}%` }} />
+            </div>
+          </div>
+          <div className="transaction-review-coverage__item">
+            <div className="transaction-review-coverage__label">
+              <span>Money categorized</span>
+              <strong>{formatPercent(coverage.amountPercent)}</strong>
+            </div>
+            <div className="transaction-review-coverage__bar" aria-hidden="true">
+              <span style={{ width: `${Math.round(coverage.amountPercent * 100)}%` }} />
+            </div>
+          </div>
+        </section>
+      )}
 
       <div className="transaction-review-shell stagger-in">
         {(isAiCategorizing || aiCategorization || aiCategorizationError) ? (

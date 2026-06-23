@@ -461,6 +461,51 @@
   gap: var(--space-2);
 }
 
+.transaction-review-coverage {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: var(--space-4);
+  margin: calc(var(--space-4) * -1) 0 var(--space-5);
+  max-width: 620px;
+}
+
+.transaction-review-coverage__item {
+  display: grid;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.transaction-review-coverage__label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+
+.transaction-review-coverage__label strong {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 650;
+}
+
+.transaction-review-coverage__bar {
+  height: 5px;
+  overflow: hidden;
+  border-radius: var(--radius-full);
+  background: var(--bg-surface);
+}
+
+.transaction-review-coverage__bar span {
+  display: block;
+  height: 100%;
+  min-width: 0;
+  border-radius: inherit;
+  background: var(--accent-blue);
+}
+
 .transaction-review-shell {
   display: grid;
   gap: var(--space-4);

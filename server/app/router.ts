@@ -8,6 +8,7 @@ import { getNetWorthReport } from './netWorth.ts';
 import {
   categorizeTransactions,
   categorizeTransactionsByQuery,
+  getTransactionCategorizationCoverage,
   getLatestTransactionCategoryUndoOperation,
   listTransactions,
   restoreTransactionCategories,
@@ -81,6 +82,9 @@ export const appRouter = t.router({
 
     latestCategoryUndo: t.procedure
       .query(() => getLatestTransactionCategoryUndoOperation()),
+
+    categorizationCoverage: t.procedure
+      .query(() => getTransactionCategorizationCoverage()),
 
     aiCategorizationPreview: t.procedure
       .input(z.object({
