@@ -118,10 +118,15 @@ export default function TransactionReviewPage() {
     return () => window.clearInterval(intervalId);
   }, [isAiCategorizing, aiReviewStartedAt]);
 
-  const confirmLargeBulkChange = (count, categoryName) => {
-    if (count <= 50) return true;
+  const confirmLargeReviewBatch = (rows) => {
+    const transactionCount = rows.reduce((count, row) => count + row.transactionIds.length, 0);
+    if (transactionCount <= 50) return true;
+    const categoryCount = new Set(rows.map(row => String(row.categoryId))).size;
+    const merchantLabel = rows.length === 1 ? 'merchant group' : 'merchant groups';
+    const categoryLabel = categoryCount === 1 ? 'category' : 'categories';
+
     return window.confirm(
-      `This will set the category for ${formatTransactionCount(count)} to "${categoryName}".\n\nContinue?`
+      `This will categorize ${formatTransactionCount(transactionCount)} across ${rows.length.toLocaleString()} ${merchantLabel} using ${categoryCount.toLocaleString()} ${categoryLabel}.\n\nContinue?`
     );
   };
 
@@ -213,8 +218,7 @@ export default function TransactionReviewPage() {
 
   const applySelectedReviewRows = async () => {
     if (!selectedReviewRows.length) return;
-    const transactionCount = selectedReviewRows.reduce((count, row) => count + row.transactionIds.length, 0);
-    if (!confirmLargeBulkChange(transactionCount, 'the selected categories')) return;
+    if (!confirmLargeReviewBatch(selectedReviewRows)) return;
 
     setIsApplyingAiCategories(true);
     setAiCategorizationError('');
