@@ -257,7 +257,6 @@ export default function TransactionReviewPage() {
             <span aria-hidden="true">&gt;</span>
             <span>Review</span>
           </h1>
-          <p className="transaction-review-page__subtitle">Review merchant-group suggestions before applying categories.</p>
         </div>
         <div className="transaction-review-page__actions">
           <button
@@ -278,7 +277,7 @@ export default function TransactionReviewPage() {
               {isAiCategorizing && (
                 <div className="ai-category-action__progress" role="status" aria-live="polite">
                   <div className="ai-category-action__progress-bar" aria-hidden="true" />
-                  <span>Reviewing merchant groups with OpenAI. {aiReviewElapsedSeconds}s elapsed.</span>
+                  <span>Reviewing... {aiReviewElapsedSeconds}s</span>
                 </div>
               )}
               {aiCategorization?.configured === false && (
@@ -303,10 +302,10 @@ export default function TransactionReviewPage() {
                   </form>
                 </>
               )}
-              {aiCategorization?.message && aiCategorization.configured !== false && (
+              {!isAiCategorizing && aiCategorization?.message && aiCategorization.configured !== false && (
                 <p className="ai-category-action__message">{aiCategorization.message}</p>
               )}
-              {aiCategorization?.configured && (
+              {!isAiCategorizing && aiCategorization?.configured && (
                 <div className="ai-category-action__summary">
                   <span>{aiCategorization.scanned} transactions scanned</span>
                   {typeof aiCategorization.groupCount === 'number' && (
@@ -405,7 +404,7 @@ export default function TransactionReviewPage() {
                                 </td>
                                 <td className="merchant-review-row__disclosure">
                                   <button
-                                    className="icon-btn merchant-review-expand-btn"
+                                    className="merchant-review-expand-btn"
                                     type="button"
                                     aria-label={isExpanded ? 'Close merchant transactions' : 'Open merchant transactions'}
                                     aria-expanded={isExpanded}
