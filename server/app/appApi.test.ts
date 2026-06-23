@@ -10,7 +10,11 @@ process.env.EASYMONEY_DB_PATH = path.join(os.tmpdir(), `easymoney-app-api-${proc
 const { createServer } = await import('../index.ts');
 const { getDb, initDatabase, insertRow } = await import('../database.js');
 const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
-const { groupTransactionsForAiCategorization, shouldTreatInvestmentCategoryAsTransfer } = await import('./aiCategorization.ts');
+const {
+  groupTransactionsForAiCategorization,
+  shouldTreatInvestmentCategoryAsTransfer,
+  shouldTreatTransferDecisionAsInvestment,
+} = await import('./aiCategorization.ts');
 const server = createServer({ port: 0 });
 const TEST_URL = `http://localhost:${server.port}`;
 const trpcClient = createTRPCClient<AppRouter>({
@@ -1147,6 +1151,22 @@ test('ai categorization treats cash-account investment category decisions as tra
       transactionKind: 'activity',
     },
   ]);
+  const [retirementContributionGroup] = groupTransactionsForAiCategorization([
+    {
+      id: 3,
+      ledgerTransactionId: 'fidelity_401k_contribution_1',
+      accountName: 'Fidelity 401(k)',
+      accountInstitution: 'Fidelity',
+      accountType: '401k',
+      date: '2026-05-31',
+      amountCents: 250000,
+      description: '401(k) contributions (employee + employer)',
+      merchant: '401(k) contributions (employee + employer)',
+      originalDescription: '401(k) contributions (employee + employer)',
+      originalCategory: null,
+      transactionKind: 'activity',
+    },
+  ]);
   const investmentCategory = {
     id: 1,
     name: 'Investment',
@@ -1165,6 +1185,9 @@ test('ai categorization treats cash-account investment category decisions as tra
     group: investmentAccountGroup!,
     category: investmentCategory,
   })).toBe(false);
+  expect(shouldTreatTransferDecisionAsInvestment({
+    group: retirementContributionGroup!,
+  })).toBe(true);
 });
 test('trpc net worth report is backend-owned and reads ledger balances', async () => {
   const checkingId = insertRow('accounts', {

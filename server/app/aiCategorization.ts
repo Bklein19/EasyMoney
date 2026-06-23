@@ -360,6 +360,14 @@ export function shouldTreatInvestmentCategoryAsTransfer(input: {
   return hasCashAccountTransaction && !hasInvestmentAccountTransaction;
 }
 
+export function shouldTreatTransferDecisionAsInvestment(input: {
+  group: MerchantCategorizationGroup;
+}) {
+  const hasCashAccountTransaction = input.group.transactions.some(transaction => isCashAccountType(transaction.accountType));
+  const hasInvestmentAccountTransaction = input.group.transactions.some(transaction => isInvestmentAccountType(transaction.accountType));
+  return hasInvestmentAccountTransaction && !hasCashAccountTransaction;
+}
+
 function findTreatmentCategory(categories: CategorySummary[], treatment: 'transfer' | 'investment') {
   return categories.find(category => category.type === treatment)
     ?? categories.find(category => category.name.toLowerCase() === treatment);
@@ -486,7 +494,8 @@ async function categorizeBatchWithOpenAi(input: {
       "kind must be exactly one of: 'category', 'transfer', or 'needs_review'.",
       "Use kind: 'category' only for real spending or income categories. categoryName must exactly match the category list.",
       "For kind: 'transfer' or kind: 'needs_review', set categoryName to an empty string.",
-      "Use kind: 'transfer' for money movement between accounts, including credit card payments, ACH transfers, brokerage contributions, cash moving to or from investments, and other account-to-account movement.",
+      "Use kind: 'transfer' only for explicit account-to-account movement visible from a cash, checking, savings, or credit-card account, including credit card payments, ACH transfers, cash sent to or from investments, and other account-to-account movement.",
+      'Do not use transfer for investment-account activity that is already inside a retirement, brokerage, 401(k), IRA, or investment account. 401(k) contributions, employer match, dividend reinvestment, fund purchases, and similar in-account investment rows should be categorized as Investment when that category exists.',
       "Use kind: 'needs_review' when the group is variable, personal-context-dependent, or ambiguous, such as Venmo, Zelle, PayPal, checks, cash app, or unclear bank text.",
       'Investment account fees, management fees, advisory fees, account fees, and recurring service charges are real spending, not transfers or neutral account movement.',
       'For recurring account/service fees, prefer a recurring expense category such as Subscriptions when it exists and fits; only use Investment when the transaction is actually an investment purchase or contribution.',
@@ -558,6 +567,7 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
 
   const categoryByName = new Map(categories.map(category => [category.name, category]));
   const transferCategory = findTreatmentCategory(categories, 'transfer');
+  const investmentCategory = findTreatmentCategory(categories, 'investment');
   const groupById = new Map(reviewGroups.map(group => [group.id, group]));
   const suggestions: AiCategorySuggestion[] = [];
   const questions: AiCategoryQuestion[] = [];
@@ -596,6 +606,15 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
       }
 
       if (item.kind === 'transfer') {
+        if (investmentCategory && shouldTreatTransferDecisionAsInvestment({ group })) {
+          suggestions.push(categorySuggestion({
+            group,
+            category: investmentCategory,
+            decisionKind: 'category',
+            reason: `${item.reason} This activity is already inside an investment account, so EasyMoney will categorize it as Investment instead of Transfer.`,
+          }));
+          continue;
+        }
         if (!transferCategory) {
           questions.push(reviewQuestion({
             group,
