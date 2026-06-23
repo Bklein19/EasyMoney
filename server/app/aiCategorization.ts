@@ -26,7 +26,6 @@ interface UncategorizedTransactionRow {
 export type AiCategorizationDecision =
   | { kind: 'category'; categoryName: string; reason: string }
   | { kind: 'transfer'; reason: string }
-  | { kind: 'investment_activity'; reason: string }
   | { kind: 'needs_review'; reason: string };
 
 interface ModelGroupDecision {
@@ -378,10 +377,6 @@ function buildCategorizationOutputSchema(categoryNames: [string, ...string[]]) {
       reason: z.string(),
     }),
     z.strictObject({
-      kind: z.literal('investment_activity'),
-      reason: z.string(),
-    }),
-    z.strictObject({
       kind: z.literal('needs_review'),
       reason: z.string(),
     }),
@@ -408,13 +403,12 @@ async function categorizeBatchWithOpenAi(input: {
     instructions: [
       'You review personal finance merchant/payee groups and choose one decision for each group.',
       'Use this exact TypeScript-shaped decision model:',
-      "type AiCategorizationDecision = { kind: 'category'; categoryName: string; reason: string } | { kind: 'transfer'; reason: string } | { kind: 'investment_activity'; reason: string } | { kind: 'needs_review'; reason: string };",
+      "type AiCategorizationDecision = { kind: 'category'; categoryName: string; reason: string } | { kind: 'transfer'; reason: string } | { kind: 'needs_review'; reason: string };",
       "Use kind: 'category' only for real spending or income categories. categoryName must exactly match the category list.",
       "Use kind: 'transfer' for money movement between accounts, including credit card payments, ACH transfers, brokerage contributions, cash moving to or from investments, and other account-to-account movement.",
-      "Use kind: 'investment_activity' for activity inside an investment account, such as buys, sells, dividend reinvestment, interest, fund exchanges, fees, or sweeps.",
       "Use kind: 'needs_review' when the group is variable, personal-context-dependent, or ambiguous, such as Venmo, Zelle, PayPal, checks, cash app, or unclear bank text.",
       'Treat the whole merchant/payee group as one decision.',
-      'Do not use a category for transfers or investment-account activity just because a Transfer or Investment category exists.',
+      'Do not use a category for transfers just because a Transfer category exists.',
       'Return a decision only when it should apply to the whole group.',
     ].join('\n'),
     outputType: buildCategorizationOutputSchema(categoryNames),
@@ -480,7 +474,6 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
 
   const categoryByName = new Map(categories.map(category => [category.name, category]));
   const transferCategory = findTreatmentCategory(categories, 'transfer');
-  const investmentCategory = findTreatmentCategory(categories, 'investment');
   const groupById = new Map(reviewGroups.map(group => [group.id, group]));
   const suggestions: AiCategorySuggestion[] = [];
   const questions: AiCategoryQuestion[] = [];
@@ -531,23 +524,6 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
           group,
           category: transferCategory,
           decisionKind: 'transfer',
-          reason: decision.reason,
-        }));
-        continue;
-      }
-
-      if (decision.kind === 'investment_activity') {
-        if (!investmentCategory) {
-          questions.push(reviewQuestion({
-            group,
-            reason: `${decision.reason} EasyMoney could not find an Investment category to apply automatically.`,
-          }));
-          continue;
-        }
-        suggestions.push(categorySuggestion({
-          group,
-          category: investmentCategory,
-          decisionKind: 'investment_activity',
           reason: decision.reason,
         }));
         continue;

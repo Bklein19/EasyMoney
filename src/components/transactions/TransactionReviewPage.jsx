@@ -68,7 +68,6 @@ export default function TransactionReviewPage() {
   };
   const getSuggestionEyebrow = (suggestion) => {
     if (suggestion.decisionKind === 'transfer') return 'Suggested transfer treatment';
-    if (suggestion.decisionKind === 'investment_activity') return 'Suggested investment activity';
     return 'Suggested category';
   };
   const formatTransactionCount = (count) => `${count.toLocaleString()} matching transaction${count === 1 ? '' : 's'}`;
