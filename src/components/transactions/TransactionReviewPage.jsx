@@ -1,12 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { Link, useSearchParams } from 'react-router';
 import { useCategories } from '../../hooks/useCategories';
-import { formatCurrency, getAmountClass } from '../../utils/formatters';
+import { formatCurrency } from '../../utils/formatters';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import './TransactionsPage.css';
 
-const AI_CATEGORIZATION_LIMIT = 100;
+const AI_CATEGORIZATION_GROUP_LIMIT = 100;
 const AI_CATEGORIZATION_TIMEOUT_MS = 90_000;
 
 function withTimeout(promise, timeoutMs, message) {
@@ -27,7 +26,6 @@ export default function TransactionReviewPage() {
   const [aiQuestionCategoryByKey, setAiQuestionCategoryByKey] = useState({});
   const [ignoredAiQuestionKeys, setIgnoredAiQuestionKeys] = useState(new Set());
   const [currentReviewIndex, setCurrentReviewIndex] = useState(0);
-  const [aiTransactionModal, setAiTransactionModal] = useState(null);
   const [isAiCategorizing, setIsAiCategorizing] = useState(false);
   const [aiReviewStartedAt, setAiReviewStartedAt] = useState(null);
   const [aiReviewElapsedSeconds, setAiReviewElapsedSeconds] = useState(0);
@@ -77,33 +75,28 @@ export default function TransactionReviewPage() {
     );
   };
 
-  const openAiTransactionModal = async ({ title, subtitle, transactionIds = [], transactions = [] }) => {
-    const existing = transactions.filter(Boolean);
-    const existingIds = new Set(existing.map(transaction => transaction.transactionId));
-    const missingIds = transactionIds.filter(id => id && !existingIds.has(id));
+  const renderTransactionPreview = (transactions, totalCount) => {
+    const rows = transactions ?? [];
+    if (!rows.length) return null;
 
-    setAiTransactionModal({
-      title,
-      subtitle,
-      transactions: existing,
-      isLoading: missingIds.length > 0,
-    });
-
-    if (!missingIds.length) return;
-
-    try {
-      const details = await trpcClient.transactions.aiCategorizationTransactionDetails.query({
-        transactionIds: missingIds,
-      });
-      setAiTransactionModal(previous => previous ? {
-        ...previous,
-        transactions: [...existing, ...(details.transactions ?? [])],
-        isLoading: false,
-      } : previous);
-    } catch (error) {
-      setAiCategorizationError(error instanceof Error ? error.message : String(error));
-      setAiTransactionModal(previous => previous ? { ...previous, isLoading: false } : previous);
-    }
+    return (
+      <div className="transaction-review-card__transactions">
+        {rows.map(transaction => (
+          <div className="transaction-review-card__transaction" key={transaction.transactionId}>
+            <div>
+              <strong>{getAiTransactionTitle(transaction)}</strong>
+              <span>{transaction.account || 'Unknown account'} · {transaction.date}</span>
+            </div>
+            <span>{formatCurrency(transaction.amount, true)}</span>
+          </div>
+        ))}
+        {totalCount > rows.length && (
+          <div className="transaction-review-card__transactions-more">
+            + {totalCount - rows.length} more in this merchant group
+          </div>
+        )}
+      </div>
+    );
   };
 
   const handlePreviewAiCategorization = async () => {
@@ -118,11 +111,11 @@ export default function TransactionReviewPage() {
       groupCount: 0,
       suggestions: [],
       questions: [],
-      message: `Grouping up to ${AI_CATEGORIZATION_LIMIT} uncategorized transactions by merchant...`,
+      message: `Grouping uncategorized transactions and reviewing the top ${AI_CATEGORIZATION_GROUP_LIMIT} merchant groups...`,
     });
     try {
       const result = await withTimeout(
-        trpcClient.transactions.aiCategorizationPreview.mutate({ limit: AI_CATEGORIZATION_LIMIT }),
+        trpcClient.transactions.aiCategorizationPreview.mutate({ limit: AI_CATEGORIZATION_GROUP_LIMIT }),
         AI_CATEGORIZATION_TIMEOUT_MS,
         `AI categorization took longer than ${Math.round(AI_CATEGORIZATION_TIMEOUT_MS / 1000)} seconds. Try again with fewer uncategorized transactions or check the server logs.`
       );
@@ -325,6 +318,9 @@ export default function TransactionReviewPage() {
                   {typeof aiCategorization.groupCount === 'number' && (
                     <span>{aiCategorization.groupCount} merchant groups</span>
                   )}
+                  {typeof aiCategorization.reviewedGroupCount === 'number' && (
+                    <span>{aiCategorization.reviewedGroupCount} groups reviewed by AI</span>
+                  )}
                   <span>{aiSuggestions.filter(suggestion => !suggestion.applied).length} suggestions</span>
                   <span>{activeAiQuestions.length} questions</span>
                   <span>{progressDone} of {progressTotal} reviewed</span>
@@ -369,18 +365,10 @@ export default function TransactionReviewPage() {
                           </span>
                           {suggestion.transactionCount && <span>{formatCurrency(suggestion.totalAmount, true)}</span>}
                         </div>
-                        <button
-                          type="button"
-                          className="ai-category-link-button"
-                          onClick={() => openAiTransactionModal({
-                            title: suggestion.merchantName || suggestion.categoryName,
-                            subtitle: suggestion.reason,
-                            transactionIds: suggestionTransactionIds(suggestion),
-                            transactions: suggestion.transactions ?? (getSuggestionTransaction(suggestion) ? [getSuggestionTransaction(suggestion)] : []),
-                          })}
-                        >
-                          View transactions
-                        </button>
+                        {renderTransactionPreview(
+                          suggestion.transactions ?? (getSuggestionTransaction(suggestion) ? [getSuggestionTransaction(suggestion)] : []),
+                          suggestion.transactionCount ?? suggestionTransactionIds(suggestion).length
+                        )}
                         <div className="transaction-review-card__actions">
                           <button className="btn btn--ghost" type="button" onClick={skipReviewItem}>Skip</button>
                           <button
@@ -405,18 +393,7 @@ export default function TransactionReviewPage() {
                           <span>{formatTransactionCount(question.transactionIds.length)}</span>
                           {typeof question.totalAmount === 'number' && <span>{formatCurrency(question.totalAmount, true)}</span>}
                         </div>
-                        <button
-                          type="button"
-                          className="ai-category-link-button"
-                          onClick={() => openAiTransactionModal({
-                            title: question.pattern,
-                            subtitle: question.reason,
-                            transactionIds: question.transactionIds,
-                            transactions: getQuestionTransactions(question),
-                          })}
-                        >
-                          View matching transactions
-                        </button>
+                        {renderTransactionPreview(getQuestionTransactions(question), question.transactionIds.length)}
                         <div className="transaction-review-card__picker">
                           <select
                             className="filter-input"
@@ -466,39 +443,6 @@ export default function TransactionReviewPage() {
         )}
       </div>
 
-      {aiTransactionModal && createPortal((
-        <div className="modal-overlay ai-transaction-modal-overlay" onClick={() => setAiTransactionModal(null)}>
-          <div className="modal ai-transaction-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="modal__header">
-              <div>
-                <div className="modal__title">{aiTransactionModal.title}</div>
-                <p className="ai-transaction-modal__subtitle">{aiTransactionModal.subtitle}</p>
-              </div>
-              <button className="btn btn--ghost btn--sm" type="button" onClick={() => setAiTransactionModal(null)}>Close</button>
-            </div>
-            <div className="modal__body">
-              <div className="ai-transaction-modal__list">
-                {aiTransactionModal.transactions.map(transaction => (
-                  <div className="ai-transaction-modal__row" key={transaction.transactionId}>
-                    <div>
-                      <strong>{getAiTransactionTitle(transaction)}</strong>
-                      <span>{transaction.description || transaction.merchant || 'No description'}</span>
-                      <em>{transaction.account || 'Unknown account'} · {transaction.date}</em>
-                    </div>
-                    <div className={`amount ${getAmountClass(transaction.amount)}`}>
-                      {formatCurrency(transaction.amount, true)}
-                    </div>
-                  </div>
-                ))}
-                {aiTransactionModal.isLoading && <div className="empty-state-simple">Loading transaction details...</div>}
-                {!aiTransactionModal.isLoading && aiTransactionModal.transactions.length === 0 && (
-                  <div className="empty-state-simple">No transaction details available.</div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      ), document.body)}
     </div>
   );
 }

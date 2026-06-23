@@ -479,11 +479,7 @@
 .transaction-review-empty {
   display: grid;
   gap: var(--space-3);
-  padding: var(--space-5);
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-lg);
-  background: var(--bg-elevated);
-  box-shadow: var(--shadow-sm);
+  padding: var(--space-4) 0;
 }
 
 .transaction-review-card__eyebrow {
@@ -535,6 +531,58 @@
 
 .transaction-review-card__picker .filter-input {
   width: 100%;
+}
+
+.transaction-review-card__transactions {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-md);
+  background: var(--bg-base);
+}
+
+.transaction-review-card__transaction {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  min-width: 0;
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.transaction-review-card__transaction:last-of-type {
+  border-bottom: 0;
+}
+
+.transaction-review-card__transaction div {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.transaction-review-card__transaction strong {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.transaction-review-card__transaction span {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+
+.transaction-review-card__transactions-more {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.25;
 }
 
 .transaction-review-card__actions {

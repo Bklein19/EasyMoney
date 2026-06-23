@@ -5,7 +5,7 @@ import { upsertTransactionAnnotation } from './transactionAnnotations.ts';
 import type { CategorySummary } from './types.ts';
 
 const DEFAULT_MODEL = 'gpt-5.4-mini';
-const MAX_TRANSACTIONS = 500;
+const MAX_GROUPS = 500;
 const BATCH_SIZE = 40;
 
 interface UncategorizedTransactionRow {
@@ -96,10 +96,10 @@ function getOpenAiModel() {
   return process.env.OPENAI_CATEGORIZATION_MODEL?.trim() || DEFAULT_MODEL;
 }
 
-function clampLimit(value: unknown) {
+function clampGroupLimit(value: unknown) {
   const parsed = Number(value);
-  if (!Number.isFinite(parsed)) return 200;
-  return Math.max(1, Math.min(MAX_TRANSACTIONS, Math.trunc(parsed)));
+  if (!Number.isFinite(parsed)) return 100;
+  return Math.max(1, Math.min(MAX_GROUPS, Math.trunc(parsed)));
 }
 
 function listCategorizationCategories() {
@@ -113,7 +113,7 @@ function listCategorizationCategories() {
     .all() as CategorySummary[];
 }
 
-function listUncategorizedTransactions(limit: number) {
+function listUncategorizedTransactions() {
   return getDb()
     .prepare(
       `SELECT
@@ -136,10 +136,9 @@ function listUncategorizedTransactions(limit: number) {
        WHERE t.ledgerTransactionId IS NOT NULL
          AND (ta.categoryId IS NULL OR lower(c.name) = 'uncategorized')
          AND COALESCE(a.status, 'active') != 'archived'
-       ORDER BY t.date DESC, t.id DESC
-       LIMIT ?`
+       ORDER BY t.date DESC, t.id DESC`
     )
-    .all(limit) as UncategorizedTransactionRow[];
+    .all() as UncategorizedTransactionRow[];
 }
 
 function chunk<T>(items: T[], size: number) {
@@ -269,7 +268,7 @@ function transactionSummary(row: UncategorizedTransactionRow): AiCategorizationT
 }
 
 export function getAiCategorizationTransactionDetails(input: { transactionIds: string[] }) {
-  const ids = [...new Set((input.transactionIds ?? []).map(id => String(id)).filter(Boolean))].slice(0, MAX_TRANSACTIONS);
+  const ids = [...new Set((input.transactionIds ?? []).map(id => String(id)).filter(Boolean))].slice(0, MAX_GROUPS);
   if (!ids.length) return { transactions: [] as AiCategorizationTransaction[] };
 
   const placeholders = ids.map(() => '?').join(', ');
@@ -364,10 +363,11 @@ async function categorizeBatchWithOpenAi(input: {
 export async function previewAiCategorization(options: { limit?: unknown } = {}) {
   const apiKey = getOpenAiKey();
   const model = getOpenAiModel();
-  const limit = clampLimit(options.limit);
+  const groupLimit = clampGroupLimit(options.limit);
   const categories = listCategorizationCategories();
-  const transactions = listUncategorizedTransactions(limit);
+  const transactions = listUncategorizedTransactions();
   const groups = groupTransactionsForAiCategorization(transactions);
+  const reviewGroups = groups.slice(0, groupLimit);
 
   if (!apiKey) {
     return {
@@ -375,6 +375,7 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
       model,
       scanned: transactions.length,
       groupCount: groups.length,
+      reviewedGroupCount: reviewGroups.length,
       suggestions: [] as AiCategorySuggestion[],
       questions: [] as AiCategoryQuestion[],
       message: 'Set OPENAI_API_KEY on the server to enable AI categorization.',
@@ -387,17 +388,18 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
       model,
       scanned: transactions.length,
       groupCount: groups.length,
+      reviewedGroupCount: reviewGroups.length,
       suggestions: [] as AiCategorySuggestion[],
       questions: [] as AiCategoryQuestion[],
     };
   }
 
   const categoryByName = new Map(categories.map(category => [category.name, category]));
-  const groupById = new Map(groups.map(group => [group.id, group]));
+  const groupById = new Map(reviewGroups.map(group => [group.id, group]));
   const suggestions: AiCategorySuggestion[] = [];
   const questions: AiCategoryQuestion[] = [];
 
-  for (const batch of chunk(groups, BATCH_SIZE)) {
+  for (const batch of chunk(reviewGroups, BATCH_SIZE)) {
     const result = await categorizeBatchWithOpenAi({
       apiKey,
       model,
@@ -448,6 +450,7 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
     model,
     scanned: transactions.length,
     groupCount: groups.length,
+    reviewedGroupCount: reviewGroups.length,
     suggestions,
     questions,
   };
