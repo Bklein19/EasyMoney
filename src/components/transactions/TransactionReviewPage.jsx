@@ -321,20 +321,6 @@ export default function TransactionReviewPage() {
               {!isAiCategorizing && aiCategorization?.message && aiCategorization.configured !== false && (
                 <p className="ai-category-action__message">{aiCategorization.message}</p>
               )}
-              {!isAiCategorizing && aiCategorization?.configured && (
-                <div className="ai-category-action__summary">
-                  <span>{aiCategorization.scanned} transactions scanned</span>
-                  {typeof aiCategorization.groupCount === 'number' && (
-                    <span>{aiCategorization.groupCount} merchant groups</span>
-                  )}
-                  {typeof aiCategorization.reviewedGroupCount === 'number' && (
-                    <span>{aiCategorization.reviewedGroupCount} groups reviewed by AI</span>
-                  )}
-                  <span>{aiSuggestions.filter(suggestion => !suggestion.applied).length} suggestions</span>
-                  <span>{activeAiQuestions.length} questions</span>
-                  <span>{progressDone} applied</span>
-                </div>
-              )}
               {aiCategorization?.appliedCount > 0 && (
                 <p className="ai-category-action__message">
                   Applied {aiCategorization.appliedCount} category updates.
