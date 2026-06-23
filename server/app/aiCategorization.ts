@@ -360,7 +360,7 @@ export function shouldTreatInvestmentCategoryAsTransfer(input: {
   return hasCashAccountTransaction && !hasInvestmentAccountTransaction;
 }
 
-export function shouldTreatTransferDecisionAsInvestment(input: {
+export function shouldReviewInvestmentAccountTransferDecision(input: {
   group: MerchantCategorizationGroup;
 }) {
   const hasCashAccountTransaction = input.group.transactions.some(transaction => isCashAccountType(transaction.accountType));
@@ -567,7 +567,6 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
 
   const categoryByName = new Map(categories.map(category => [category.name, category]));
   const transferCategory = findTreatmentCategory(categories, 'transfer');
-  const investmentCategory = findTreatmentCategory(categories, 'investment');
   const groupById = new Map(reviewGroups.map(group => [group.id, group]));
   const suggestions: AiCategorySuggestion[] = [];
   const questions: AiCategoryQuestion[] = [];
@@ -606,12 +605,10 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
       }
 
       if (item.kind === 'transfer') {
-        if (investmentCategory && shouldTreatTransferDecisionAsInvestment({ group })) {
-          suggestions.push(categorySuggestion({
+        if (shouldReviewInvestmentAccountTransferDecision({ group })) {
+          questions.push(reviewQuestion({
             group,
-            category: investmentCategory,
-            decisionKind: 'category',
-            reason: `${item.reason} This activity is already inside an investment account, so EasyMoney will categorize it as Investment instead of Transfer.`,
+            reason: `${item.reason} This activity is already inside an investment account. It may be a transfer, contribution, purchase, or other investment activity, so it needs review before applying Transfer.`,
           }));
           continue;
         }

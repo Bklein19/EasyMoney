@@ -13,7 +13,7 @@ const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = awa
 const {
   groupTransactionsForAiCategorization,
   shouldTreatInvestmentCategoryAsTransfer,
-  shouldTreatTransferDecisionAsInvestment,
+  shouldReviewInvestmentAccountTransferDecision,
 } = await import('./aiCategorization.ts');
 const server = createServer({ port: 0 });
 const TEST_URL = `http://localhost:${server.port}`;
@@ -1118,7 +1118,7 @@ test('ai categorization persists merchant grouping rules for processor descripti
   ]);
 });
 
-test('ai categorization treats cash-account investment category decisions as transfers', () => {
+test('ai categorization reviews investment-account transfer decisions instead of auto-applying transfer', () => {
   const [cashTransferGroup] = groupTransactionsForAiCategorization([
     {
       id: 1,
@@ -1185,7 +1185,7 @@ test('ai categorization treats cash-account investment category decisions as tra
     group: investmentAccountGroup!,
     category: investmentCategory,
   })).toBe(false);
-  expect(shouldTreatTransferDecisionAsInvestment({
+  expect(shouldReviewInvestmentAccountTransferDecision({
     group: retirementContributionGroup!,
   })).toBe(true);
 });
