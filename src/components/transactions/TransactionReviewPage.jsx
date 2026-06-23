@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Sparkles } from 'lucide-react';
 import { useCategories } from '../../hooks/useCategories';
 import { formatCurrency } from '../../utils/formatters';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
@@ -37,14 +37,9 @@ export default function TransactionReviewPage() {
   const getSuggestionTransaction = (suggestion) => suggestion.transactions?.[0] || suggestion.transaction || null;
   const getQuestionTransactions = (question) => question.transactions ?? [];
   const getAiTransactionTitle = (transaction) => transaction?.merchant || transaction?.description || 'Transaction';
-  const getSuggestionLabel = (suggestion) => {
-    if (suggestion.decisionKind === 'transfer') return 'Transfer';
-    return suggestion.categoryName || 'Suggested';
-  };
-  const getReviewCategoryHint = (row) => {
-    if (row.type === 'question') return 'Needs review';
-    if (row.decisionKind === 'transfer') return 'AI suggested transfer';
-    return row.suggestedCategoryName ? `AI suggested ${row.suggestedCategoryName}` : '';
+  const getCategoryNameById = (categoryId) => {
+    const category = categories.find(item => String(item.id) === String(categoryId));
+    return category?.name || '';
   };
   const formatTransactionCount = (count) => `${count.toLocaleString()} matching transaction${count === 1 ? '' : 's'}`;
 
@@ -67,7 +62,7 @@ export default function TransactionReviewPage() {
         totalAmount: suggestion.totalAmount,
         reason: suggestion.reason,
         decisionKind: suggestion.decisionKind,
-        suggestedCategoryName: getSuggestionLabel(suggestion),
+        suggestedCategoryId: String(suggestion.categoryId),
         categoryId: categoryByReviewKey[suggestionSelectionId(suggestion)] ?? String(suggestion.categoryId),
         transactions: suggestion.transactions ?? (getSuggestionTransaction(suggestion) ? [getSuggestionTransaction(suggestion)] : []),
       })),
@@ -80,7 +75,7 @@ export default function TransactionReviewPage() {
       totalAmount: question.totalAmount,
       reason: question.reason,
       decisionKind: question.decisionKind,
-      suggestedCategoryName: '',
+      suggestedCategoryId: '',
       categoryId: categoryByReviewKey[question.key] ?? '',
       transactions: getQuestionTransactions(question),
     })),
@@ -377,6 +372,8 @@ export default function TransactionReviewPage() {
                       <tbody>
                         {reviewRows.map(row => {
                           const isExpanded = expandedReviewKey === row.key;
+                          const isUsingAiSuggestion = row.type === 'suggestion' && row.categoryId === row.suggestedCategoryId;
+                          const suggestedCategoryName = row.suggestedCategoryId ? getCategoryNameById(row.suggestedCategoryId) : '';
                           return (
                             <Fragment key={row.key}>
                               <tr
@@ -390,17 +387,32 @@ export default function TransactionReviewPage() {
                                 <td className="num">{row.transactionCount.toLocaleString()}</td>
                                 <td className="num">{typeof row.totalAmount === 'number' ? formatCurrency(row.totalAmount, true) : '—'}</td>
                                 <td onClick={(event) => event.stopPropagation()}>
-                                  <select
-                                    className="filter-input merchant-review-category-select"
-                                    value={row.categoryId}
-                                    onChange={(event) => setReviewCategory(row.key, event.target.value)}
-                                  >
-                                    <option value="">Choose category</option>
-                                    {categories.map(category => (
-                                      <option key={category.id} value={category.id}>{category.name}</option>
-                                    ))}
-                                  </select>
-                                  <div className="merchant-review-category-hint">{getReviewCategoryHint(row)}</div>
+                                  <div className={`merchant-review-category-control ${isUsingAiSuggestion ? 'has-ai-suggestion' : ''}`}>
+                                    {isUsingAiSuggestion && (
+                                      <span className="merchant-review-ai-icon" title="AI suggestion">
+                                        <Sparkles size={13} />
+                                      </span>
+                                    )}
+                                    <select
+                                      className="filter-input merchant-review-category-select"
+                                      value={row.categoryId}
+                                      onChange={(event) => setReviewCategory(row.key, event.target.value)}
+                                    >
+                                      <option value="" />
+                                      {suggestedCategoryName && (
+                                        <optgroup label="Suggested">
+                                          <option value={row.suggestedCategoryId}>{suggestedCategoryName}</option>
+                                        </optgroup>
+                                      )}
+                                      <optgroup label="All categories">
+                                        {categories
+                                          .filter(category => String(category.id) !== String(row.suggestedCategoryId))
+                                          .map(category => (
+                                            <option key={category.id} value={category.id}>{category.name}</option>
+                                          ))}
+                                      </optgroup>
+                                    </select>
+                                  </div>
                                 </td>
                                 <td className="merchant-review-row__disclosure">
                                   <button

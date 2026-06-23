@@ -604,19 +604,32 @@
   white-space: nowrap;
 }
 
+.merchant-review-category-control {
+  position: relative;
+}
+
 .merchant-review-category-select {
   width: 100%;
   min-height: 32px;
 }
 
-.merchant-review-category-hint {
-  overflow: hidden;
-  margin-top: 3px;
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.merchant-review-category-control.has-ai-suggestion .merchant-review-category-select {
+  padding-left: 32px;
+}
+
+.merchant-review-ai-icon {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  color: var(--accent-blue);
+  pointer-events: none;
+  transform: translateY(-50%);
 }
 
 .merchant-review-row__disclosure {
