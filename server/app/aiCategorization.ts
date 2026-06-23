@@ -6,7 +6,7 @@ import type { CategorySummary } from './types.ts';
 
 const DEFAULT_MODEL = 'gpt-5.4-mini';
 const MAX_GROUPS = 500;
-const BATCH_SIZE = 40;
+const BATCH_SIZE = 32;
 
 interface UncategorizedTransactionRow {
   id: number;

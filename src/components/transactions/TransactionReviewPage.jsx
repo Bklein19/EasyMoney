@@ -6,7 +6,7 @@ import { formatCurrency } from '../../utils/formatters';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import './TransactionsPage.css';
 
-const AI_CATEGORIZATION_GROUP_LIMIT = 100;
+const AI_CATEGORIZATION_GROUP_LIMIT = 32;
 const AI_CATEGORIZATION_TIMEOUT_MS = 90_000;
 
 function withTimeout(promise, timeoutMs, message) {
@@ -134,7 +134,7 @@ export default function TransactionReviewPage() {
       groupCount: 0,
       suggestions: [],
       questions: [],
-      message: `Grouping uncategorized transactions and reviewing the top ${AI_CATEGORIZATION_GROUP_LIMIT} merchant groups...`,
+      message: `Reviewing ${AI_CATEGORIZATION_GROUP_LIMIT} merchant groups...`,
     });
     try {
       const result = await withTimeout(
