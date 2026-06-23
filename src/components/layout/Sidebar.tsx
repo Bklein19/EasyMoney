@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ComponentType } from 'react';
 import { NavLink, useLocation } from 'react-router';
 import { 
   ArrowLeftRight, 
@@ -11,6 +11,7 @@ import {
   PiggyBank,
   Landmark
 } from 'lucide-react';
+import type { LucideProps } from 'lucide-react';
 import { AccountPicker } from '../investments/AccountPicker';
 import './Sidebar.css';
 
@@ -19,6 +20,31 @@ const SIDEBAR_WIDTH_KEY = 'easymoney:sidebar-width';
 const SIDEBAR_MIN_WIDTH = 168;
 const SIDEBAR_MAX_WIDTH = 520;
 const SIDEBAR_COLLAPSE_THRESHOLD = 112;
+
+interface SidebarAccount {
+  id: number;
+  name: string;
+  institution: string;
+  type: string;
+  account_holder?: string | null;
+}
+
+interface SidebarProps {
+  isMobileOpen: boolean;
+  onClose: () => void;
+  isCollapsed?: boolean;
+  isPeekOpen?: boolean;
+  onCollapsedChange?: (nextValue: boolean) => void;
+  reportAccounts?: SidebarAccount[];
+  selectedReportAccountIds?: Set<number>;
+  onReportAccountSelectionChange?: (next: Set<number>) => void;
+}
+
+interface NavItem {
+  path: string;
+  label: string;
+  icon: ComponentType<LucideProps>;
+}
 
 const Sidebar = ({
   isMobileOpen,
@@ -29,10 +55,10 @@ const Sidebar = ({
   reportAccounts = [],
   selectedReportAccountIds = new Set(),
   onReportAccountSelectionChange,
-}) => {
+}: SidebarProps) => {
   const location = useLocation();
-  const sidebarRef = useRef(null);
-  const navItems = [
+  const sidebarRef = useRef<HTMLDivElement | null>(null);
+  const navItems: NavItem[] = [
     { path: '/', label: 'Analytics', icon: PieChart },
     { path: '/transactions', label: 'Transactions', icon: ArrowLeftRight },
     { path: '/accounts', label: 'Accounts', icon: WalletCards },
@@ -58,7 +84,7 @@ const Sidebar = ({
     sidebarRef.current?.style.setProperty('--sidebar-width', `${width}px`);
   }, []);
 
-  const startSidebarResize = (event) => {
+  const startSidebarResize = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!sidebarRef.current) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -68,7 +94,7 @@ const Sidebar = ({
     let pendingClientX = event.clientX;
     let nextCollapsed = isCollapsed;
 
-    const setWidth = (clientX, { commit = false } = {}) => {
+    const setWidth = (clientX: number, { commit = false }: { commit?: boolean } = {}) => {
       if (!sidebarRef.current) return null;
       const rawWidth = clientX - left;
       if (rawWidth < SIDEBAR_COLLAPSE_THRESHOLD) {
@@ -92,7 +118,7 @@ const Sidebar = ({
       return width;
     };
 
-    const handlePointerMove = (moveEvent) => {
+    const handlePointerMove = (moveEvent: PointerEvent) => {
       pendingClientX = moveEvent.clientX;
       if (frameId) return;
       frameId = window.requestAnimationFrame(() => {
@@ -100,7 +126,7 @@ const Sidebar = ({
         setWidth(pendingClientX);
       });
     };
-    const handlePointerUp = (upEvent) => {
+    const handlePointerUp = (upEvent: PointerEvent) => {
       if (frameId) {
         window.cancelAnimationFrame(frameId);
         frameId = 0;

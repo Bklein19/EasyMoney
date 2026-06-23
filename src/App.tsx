@@ -1,18 +1,26 @@
 import { useEffect, useMemo, useState } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router';
 import { Menu } from 'lucide-react';
-import ImportPage from './components/import/ImportPage';
-import TransactionsPage from './components/transactions/TransactionsPage';
-import TransactionReviewPage from './components/transactions/TransactionReviewPage';
-import AccountsPage from './components/accounts/AccountsPage';
+import ImportPage from './components/import/ImportPage.jsx';
+import TransactionsPage from './components/transactions/TransactionsPage.jsx';
+import TransactionReviewPage from './components/transactions/TransactionReviewPage.jsx';
+import AccountsPage from './components/accounts/AccountsPage.jsx';
 import Sidebar from './components/layout/Sidebar';
-import AnalyticsPage from './components/analytics/AnalyticsPage';
-import BudgetingPage from './components/budgeting/BudgetingPage';
+import AnalyticsPage from './components/analytics/AnalyticsPage.jsx';
+import BudgetingPage from './components/budgeting/BudgetingPage.jsx';
 import { NetWorthPage } from './components/investments/NetWorthPage';
 import { RetirementPage } from './components/investments/RetirementPage';
 import { SavingsRatePage } from './components/investments/SavingsRatePage';
 import { subscribeToDataChanges } from './db/api';
 import './App.css';
+
+interface ReportAccount {
+  id: number;
+  name: string;
+  institution: string;
+  type: string;
+  account_holder?: string | null;
+}
 
 const getInitialSidebarCollapsed = () => {
   try {
@@ -26,10 +34,10 @@ function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(getInitialSidebarCollapsed);
   const [isSidebarPeekOpen, setIsSidebarPeekOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [reportAccounts, setReportAccounts] = useState([]);
-  const [selectedReportAccountIds, setSelectedReportAccountIds] = useState(null);
+  const [reportAccounts, setReportAccounts] = useState<ReportAccount[]>([]);
+  const [selectedReportAccountIds, setSelectedReportAccountIds] = useState<Set<number> | null>(null);
 
-  const handleSidebarCollapsedChange = (nextValue) => {
+  const handleSidebarCollapsedChange = (nextValue: boolean) => {
     setIsSidebarCollapsed(nextValue);
     setIsSidebarPeekOpen(false);
     window.localStorage.setItem('easymoney:sidebar-collapsed', String(nextValue));
@@ -41,7 +49,7 @@ function App() {
       fetch('/api/networth')
         .then(response => {
           if (!response.ok) throw new Error(`Account picker request failed: ${response.status}`);
-          return response.json();
+          return response.json() as Promise<{ accounts?: ReportAccount[] }>;
         })
         .then(data => {
           if (!cancelled) setReportAccounts(data.accounts || []);
@@ -62,7 +70,7 @@ function App() {
   useEffect(() => {
     if (!isSidebarCollapsed || !isSidebarPeekOpen) return undefined;
 
-    const handlePointerMove = (event) => {
+    const handlePointerMove = (event: PointerEvent) => {
       if (document.body.classList.contains('sidebar-resizing')) return;
       const sidebar = document.querySelector('.sidebar');
       if (!sidebar) return;
