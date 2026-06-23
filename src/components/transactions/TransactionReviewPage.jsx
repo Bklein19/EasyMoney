@@ -41,10 +41,10 @@ export default function TransactionReviewPage() {
     if (suggestion.decisionKind === 'transfer') return 'Transfer';
     return suggestion.categoryName || 'Suggested';
   };
-  const getReviewRowLabel = (row) => {
+  const getReviewCategoryHint = (row) => {
     if (row.type === 'question') return 'Needs review';
-    if (row.decisionKind === 'transfer') return 'Transfer';
-    return row.suggestedCategoryName || 'Suggested';
+    if (row.decisionKind === 'transfer') return 'AI suggested transfer';
+    return row.suggestedCategoryName ? `AI suggested ${row.suggestedCategoryName}` : '';
   };
   const formatTransactionCount = (count) => `${count.toLocaleString()} matching transaction${count === 1 ? '' : 's'}`;
 
@@ -360,7 +360,6 @@ export default function TransactionReviewPage() {
                     <table className="merchant-review-table">
                       <colgroup>
                         <col className="merchant-review-table__merchant" />
-                        <col className="merchant-review-table__suggestion" />
                         <col className="merchant-review-table__volume" />
                         <col className="merchant-review-table__amount" />
                         <col className="merchant-review-table__category" />
@@ -369,7 +368,6 @@ export default function TransactionReviewPage() {
                       <thead>
                         <tr>
                           <th>Merchant</th>
-                          <th>AI suggestion</th>
                           <th className="num">Volume</th>
                           <th className="num">Amount</th>
                           <th>Category</th>
@@ -389,7 +387,6 @@ export default function TransactionReviewPage() {
                                   <div className="merchant-review-row__name" title={row.merchantName}>{row.merchantName}</div>
                                   <div className="merchant-review-row__reason">{row.reason}</div>
                                 </td>
-                                <td><span className="merchant-review-chip">{getReviewRowLabel(row)}</span></td>
                                 <td className="num">{row.transactionCount.toLocaleString()}</td>
                                 <td className="num">{typeof row.totalAmount === 'number' ? formatCurrency(row.totalAmount, true) : '—'}</td>
                                 <td onClick={(event) => event.stopPropagation()}>
@@ -403,6 +400,7 @@ export default function TransactionReviewPage() {
                                       <option key={category.id} value={category.id}>{category.name}</option>
                                     ))}
                                   </select>
+                                  <div className="merchant-review-category-hint">{getReviewCategoryHint(row)}</div>
                                 </td>
                                 <td className="merchant-review-row__disclosure">
                                   <button
@@ -421,7 +419,7 @@ export default function TransactionReviewPage() {
                               </tr>
                               {isExpanded && (
                                 <tr className="merchant-review-details-row">
-                                  <td colSpan={6}>
+                                  <td colSpan={5}>
                                     <div className="merchant-review-details-panel">
                                       {renderTransactionPreview(row.transactions, row.transactionCount)}
                                     </div>
