@@ -16,6 +16,8 @@
 
 EasyMoney is moving from legacy table CRUD toward a source-fact ledger model.
 
+- Do not write new application code in JavaScript. New code should be TypeScript.
+- When working in an existing JavaScript file, convert the touched code to TypeScript when practical instead of expanding the JavaScript surface area.
 - The old `money/` reference app was removed from the working tree. Use git history if you need to inspect it.
 - Raw imports and parsed facts are the durable source of truth.
 - Ledger/materialized tables are read models rebuilt from committed source facts.
