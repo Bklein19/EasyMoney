@@ -1,5 +1,6 @@
 export type AccountType = 'checking' | 'savings' | 'credit-card' | 'investment' | 'cash' | 'other' | string;
 export type CategoryType = 'income' | 'expense' | 'transfer' | 'internal_transfer' | 'investment' | string;
+export type CategoryGroup = 'income' | 'transfer' | 'fixed' | 'variable' | 'discretionary' | 'savings_investment' | 'other' | string;
 export type TransactionType = 'income' | 'expense' | 'transfer' | 'investment' | string;
 export type TransactionStatus = 'cleared' | 'pending' | string;
 
@@ -30,6 +31,7 @@ export interface CategorySummary {
   name: string;
   parentId: number | null;
   type: CategoryType | null;
+  categoryGroup: CategoryGroup | null;
   color: string | null;
   icon: string | null;
 }
@@ -38,6 +40,7 @@ export interface TransactionCategory {
   id: number;
   name: string;
   type: CategoryType | null;
+  categoryGroup: CategoryGroup | null;
   color: string | null;
   icon: string | null;
 }

@@ -123,7 +123,7 @@ const TABLES = {
   ],
   transactionAnnotations: ['ledgerTransactionId', 'categoryId', 'notes', 'createdAt', 'updatedAt'],
   transactionCategoryUndoOperations: ['id', 'categoryName', 'transactionCount', 'payloadJson', 'status', 'createdAt', 'consumedAt'],
-  categories: ['id', 'name', 'parentId', 'type', 'color', 'icon'],
+  categories: ['id', 'name', 'parentId', 'type', 'categoryGroup', 'color', 'icon'],
   budgets: ['id', 'categoryId', 'month', 'amount'],
   balanceSnapshots: ['id', 'accountId', 'month', 'balance', 'capturedAt'],
   ledgerBalances: ['id', 'accountId', 'month', 'balanceCents', 'capturedAt', 'sourceBalanceId', 'createdAt', 'updatedAt'],
@@ -275,6 +275,7 @@ export function initDatabase() {
       name TEXT NOT NULL UNIQUE,
       parentId INTEGER,
       type TEXT,
+      categoryGroup TEXT,
       color TEXT,
       icon TEXT
     );
@@ -430,6 +431,12 @@ export function initDatabase() {
   runSchemaMigration('2026-06-20-account-owner', () => {
     if (!tableColumnNames('accounts').includes('accountHolder')) {
       db.prepare('ALTER TABLE accounts ADD COLUMN accountHolder TEXT').run();
+    }
+  });
+
+  runSchemaMigration('2026-06-22-category-groups', () => {
+    if (!tableColumnNames('categories').includes('categoryGroup')) {
+      db.prepare('ALTER TABLE categories ADD COLUMN categoryGroup TEXT').run();
     }
   });
 

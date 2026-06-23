@@ -156,6 +156,16 @@ test('init database records account owner schema migration', () => {
   expect(accountColumns.map(column => column.name)).toContain('accountHolder');
 });
 
+test('init database records category group schema migration', () => {
+  const migration = getDb().prepare(
+    "SELECT name FROM schemaMigrations WHERE name = '2026-06-22-category-groups'"
+  ).get() as { name: string } | undefined;
+  const categoryColumns = getDb().prepare('PRAGMA table_info(categories)').all() as Array<{ name: string }>;
+
+  expect(migration).toEqual({ name: '2026-06-22-category-groups' });
+  expect(categoryColumns.map(column => column.name)).toContain('categoryGroup');
+});
+
 test('app accounts endpoint returns domain-shaped accounts', async () => {
   const accountId = Number(insertRow('accounts', {
     name: 'Checking',
@@ -348,6 +358,7 @@ test('app categories endpoint returns domain-shaped categories', async () => {
     name: 'Groceries',
     parentId: null,
     type: 'expense',
+    categoryGroup: 'variable',
     color: '#22c55e',
     icon: 'shopping-cart',
   });
@@ -361,6 +372,7 @@ test('app categories endpoint returns domain-shaped categories', async () => {
         name: 'Groceries',
         parentId: null,
         type: 'expense',
+        categoryGroup: 'variable',
         color: '#22c55e',
         icon: 'shopping-cart',
       },
@@ -1021,6 +1033,7 @@ test('ai categorization treats cash-account investment category decisions as tra
     name: 'Investment',
     parentId: null,
     type: 'investment',
+    categoryGroup: 'savings_investment',
     color: '#f59e0b',
     icon: 'trending-up',
   };

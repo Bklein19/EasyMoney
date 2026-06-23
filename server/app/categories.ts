@@ -6,6 +6,7 @@ interface CategoryRow {
   name: string;
   parentId: number | null;
   type: string | null;
+  categoryGroup: string | null;
   color: string | null;
   icon: string | null;
 }
@@ -16,6 +17,7 @@ function toCategorySummary(row: CategoryRow): CategorySummary {
     name: row.name,
     parentId: row.parentId,
     type: row.type,
+    categoryGroup: row.categoryGroup,
     color: row.color,
     icon: row.icon,
   };
@@ -24,7 +26,7 @@ function toCategorySummary(row: CategoryRow): CategorySummary {
 export function listCategories(): CategoryListResponse {
   const rows = getDb()
     .prepare(
-      `SELECT id, name, parentId, type, color, icon
+      `SELECT id, name, parentId, type, categoryGroup, color, icon
        FROM categories
        ORDER BY name ASC, id ASC`
     )

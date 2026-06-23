@@ -8,6 +8,15 @@ import './TransactionsPage.css';
 
 const AI_CATEGORIZATION_GROUP_LIMIT = 32;
 const AI_CATEGORIZATION_TIMEOUT_MS = 90_000;
+const CATEGORY_GROUPS = [
+  { key: 'income', label: 'Income' },
+  { key: 'transfer', label: 'Transfers' },
+  { key: 'fixed', label: 'Fixed / Recurring' },
+  { key: 'variable', label: 'Variable / Necessary' },
+  { key: 'discretionary', label: 'Discretionary' },
+  { key: 'savings_investment', label: 'Savings / Investment' },
+  { key: 'other', label: 'Other' },
+];
 
 function withTimeout(promise, timeoutMs, message) {
   let timeoutId;
@@ -38,6 +47,17 @@ export default function TransactionReviewPage() {
   const getQuestionTransactions = (question) => question.transactions ?? [];
   const getAiTransactionTitle = (transaction) => transaction?.merchant || transaction?.description || 'Transaction';
   const getCategoryById = (categoryId) => categories.find(item => String(item.id) === String(categoryId)) ?? null;
+  const getCategoryGroups = (excludedCategoryId) => {
+    const availableCategories = categories.filter(category => String(category.id) !== String(excludedCategoryId));
+    const knownGroupKeys = new Set(CATEGORY_GROUPS.map(group => group.key).filter(key => key !== 'other'));
+    const grouped = CATEGORY_GROUPS.map(group => ({
+      ...group,
+      categories: group.key === 'other'
+        ? availableCategories.filter(category => !knownGroupKeys.has(category.categoryGroup))
+        : availableCategories.filter(category => category.categoryGroup === group.key),
+    }));
+    return grouped.filter(group => group.categories.length > 0);
+  };
   const formatTransactionCount = (count) => `${count.toLocaleString()} matching transaction${count === 1 ? '' : 's'}`;
 
   const aiSuggestions = useMemo(() => aiCategorization?.suggestions ?? [], [aiCategorization?.suggestions]);
@@ -402,13 +422,13 @@ export default function TransactionReviewPage() {
                                           <option value={row.suggestedCategoryId}>{suggestedCategoryName}</option>
                                         </optgroup>
                                       )}
-                                      <optgroup label="All categories">
-                                        {categories
-                                          .filter(category => String(category.id) !== String(row.suggestedCategoryId))
-                                          .map(category => (
+                                      {getCategoryGroups(row.suggestedCategoryId).map(group => (
+                                        <optgroup key={group.key} label={group.label}>
+                                          {group.categories.map(category => (
                                             <option key={category.id} value={category.id}>{category.name}</option>
                                           ))}
-                                      </optgroup>
+                                        </optgroup>
+                                      ))}
                                     </select>
                                   </div>
                                 </td>

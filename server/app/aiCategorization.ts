@@ -107,7 +107,7 @@ function clampGroupLimit(value: unknown) {
 function listCategorizationCategories() {
   return getDb()
     .prepare(
-      `SELECT id, name, parentId, type, color, icon
+      `SELECT id, name, parentId, type, categoryGroup, color, icon
        FROM categories
        WHERE lower(name) != 'uncategorized'
        ORDER BY name ASC, id ASC`
@@ -331,8 +331,8 @@ function reviewQuestion(input: {
 
 function merchantGroupAccountNames(group: MerchantCategorizationGroup) {
   return [...new Set(group.transactions
-    .map(row => [row.accountInstitution, row.accountName].filter(Boolean).join(' '))
-    .filter(Boolean))]
+    .map(row => row.accountName)
+    .filter((name): name is string => typeof name === 'string' && name.length > 0))]
     .sort((a, b) => a.localeCompare(b));
 }
 

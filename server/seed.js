@@ -1,25 +1,25 @@
 import { getDb, insertRow } from './database.js';
 
 const DEFAULT_CATEGORIES = [
-  { name: 'Food & Dining', icon: 'utensils', color: '#f97316', type: 'expense' },
-  { name: 'Groceries', icon: 'shopping-cart', color: '#22c55e', type: 'expense' },
-  { name: 'Housing', icon: 'home', color: '#6366f1', type: 'expense' },
-  { name: 'Transportation', icon: 'car', color: '#3b82f6', type: 'expense' },
-  { name: 'Shopping', icon: 'shopping-bag', color: '#ec4899', type: 'expense' },
-  { name: 'Health', icon: 'heart-pulse', color: '#ef4444', type: 'expense' },
-  { name: 'Entertainment', icon: 'film', color: '#a855f7', type: 'expense' },
-  { name: 'Utilities', icon: 'zap', color: '#eab308', type: 'expense' },
-  { name: 'Education', icon: 'graduation-cap', color: '#14b8a6', type: 'expense' },
-  { name: 'Travel', icon: 'plane', color: '#06b6d4', type: 'expense' },
-  { name: 'Personal Care', icon: 'smile', color: '#f472b6', type: 'expense' },
-  { name: 'Insurance', icon: 'shield', color: '#8b5cf6', type: 'expense' },
-  { name: 'Gifts & Donations', icon: 'gift', color: '#fb923c', type: 'expense' },
-  { name: 'Subscriptions', icon: 'repeat', color: '#7c3aed', type: 'expense' },
-  { name: 'Income', icon: 'banknote', color: '#10b981', type: 'income' },
-  { name: 'Transfer', icon: 'arrow-left-right', color: '#64748b', type: 'transfer' },
-  { name: 'Internal Transfer', icon: 'shuffle', color: '#94a3b8', type: 'internal_transfer' },
-  { name: 'Investment', icon: 'trending-up', color: '#f59e0b', type: 'investment' },
-  { name: 'Uncategorized', icon: 'help-circle', color: '#94a3b8', type: 'expense' }
+  { name: 'Food & Dining', icon: 'utensils', color: '#f97316', type: 'expense', categoryGroup: 'discretionary' },
+  { name: 'Groceries', icon: 'shopping-cart', color: '#22c55e', type: 'expense', categoryGroup: 'variable' },
+  { name: 'Housing', icon: 'home', color: '#6366f1', type: 'expense', categoryGroup: 'fixed' },
+  { name: 'Transportation', icon: 'car', color: '#3b82f6', type: 'expense', categoryGroup: 'variable' },
+  { name: 'Shopping', icon: 'shopping-bag', color: '#ec4899', type: 'expense', categoryGroup: 'discretionary' },
+  { name: 'Health', icon: 'heart-pulse', color: '#ef4444', type: 'expense', categoryGroup: 'variable' },
+  { name: 'Entertainment', icon: 'film', color: '#a855f7', type: 'expense', categoryGroup: 'discretionary' },
+  { name: 'Utilities', icon: 'zap', color: '#eab308', type: 'expense', categoryGroup: 'fixed' },
+  { name: 'Education', icon: 'graduation-cap', color: '#14b8a6', type: 'expense', categoryGroup: 'variable' },
+  { name: 'Travel', icon: 'plane', color: '#06b6d4', type: 'expense', categoryGroup: 'discretionary' },
+  { name: 'Personal Care', icon: 'smile', color: '#f472b6', type: 'expense', categoryGroup: 'variable' },
+  { name: 'Insurance', icon: 'shield', color: '#8b5cf6', type: 'expense', categoryGroup: 'fixed' },
+  { name: 'Gifts & Donations', icon: 'gift', color: '#fb923c', type: 'expense', categoryGroup: 'discretionary' },
+  { name: 'Subscriptions', icon: 'repeat', color: '#7c3aed', type: 'expense', categoryGroup: 'fixed' },
+  { name: 'Income', icon: 'banknote', color: '#10b981', type: 'income', categoryGroup: 'income' },
+  { name: 'Transfer', icon: 'arrow-left-right', color: '#64748b', type: 'transfer', categoryGroup: 'transfer' },
+  { name: 'Internal Transfer', icon: 'shuffle', color: '#94a3b8', type: 'internal_transfer', categoryGroup: 'transfer' },
+  { name: 'Investment', icon: 'trending-up', color: '#f59e0b', type: 'investment', categoryGroup: 'savings_investment' },
+  { name: 'Uncategorized', icon: 'help-circle', color: '#94a3b8', type: 'expense', categoryGroup: 'other' }
 ];
 
 const DEFAULT_RULES = [
@@ -59,6 +59,12 @@ export function seedDatabase() {
   for (const category of DEFAULT_CATEGORIES) {
     if (!categoryIds[category.name]) {
       categoryIds[category.name] = insertRow('categories', category);
+    } else {
+      db.prepare(`
+        UPDATE categories
+        SET categoryGroup = COALESCE(NULLIF(categoryGroup, ''), ?)
+        WHERE name = ?
+      `).run(category.categoryGroup, category.name);
     }
   }
 
