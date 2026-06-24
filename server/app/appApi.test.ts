@@ -171,6 +171,170 @@ test('init database records category group schema migration', () => {
   expect(categoryColumns.map(column => column.name)).toContain('categoryGroup');
 });
 
+test('init database records credit-card sign repair migration', () => {
+  const migration = getDb().prepare(
+    "SELECT name FROM schemaMigrations WHERE name = '2026-06-23-credit-card-cashflow-signs'"
+  ).get() as { name: string } | undefined;
+
+  expect(migration).toEqual({ name: '2026-06-23-credit-card-cashflow-signs' });
+});
+
+test('credit-card sign repair migration converts old money liability signs to cashflow signs', () => {
+  const db = getDb();
+  const accountId = Number(insertRow('accounts', {
+    name: 'Credit Card',
+    institution: 'Test Bank',
+    type: 'credit',
+    currency: 'USD',
+  }));
+  const importFileId = Number(insertRow('importFiles', {
+    fileName: 'test-credit-card.pdf',
+    contentHash: 'credit-card-sign-test',
+    parserName: 'Test Credit Card',
+    sourceType: 'statement',
+    status: 'committed',
+  }));
+  const sourceFileId = Number(insertRow('sourceFiles', {
+    importFileId,
+    fileName: 'test-credit-card.pdf',
+    contentHash: 'credit-card-sign-test',
+    parserName: 'Test Credit Card',
+    sourceType: 'statement',
+    status: 'committed',
+  }));
+  const sourceAccountId = Number(insertRow('sourceAccounts', {
+    sourceFileId,
+    accountId,
+    institution: 'Test Bank',
+    sourceAccountKey: 'Test Bank|Credit Card',
+    sourceAccountName: 'Credit Card',
+  }));
+  const purchaseImportRowId = Number(insertRow('importRows', {
+    importFileId,
+    rowIndex: 0,
+    rowType: 'transaction',
+    rawJson: '{}',
+    normalizedJson: JSON.stringify({
+      sourceRowIndex: 0,
+      date: '2026-06-01',
+      amountCents: 1250,
+      description: 'Coffee shop',
+      institution: 'Test Bank',
+      account: 'Credit Card',
+      sourceRole: 'activity',
+      raw: { moneyCategory: 'activity', type: 'credit-card-activity' },
+    }),
+    fingerprint: 'bad-purchase',
+  }));
+  const paymentImportRowId = Number(insertRow('importRows', {
+    importFileId,
+    rowIndex: 1,
+    rowType: 'transaction',
+    rawJson: '{}',
+    normalizedJson: JSON.stringify({
+      sourceRowIndex: 1,
+      date: '2026-06-02',
+      amountCents: -50000,
+      description: 'ONLINE PAYMENT THANK YOU',
+      institution: 'Test Bank',
+      account: 'Credit Card',
+      sourceRole: 'activity',
+      raw: { moneyCategory: 'activity', type: 'credit-card-activity' },
+    }),
+    fingerprint: 'bad-payment',
+  }));
+  const purchaseSourceTransactionId = Number(insertRow('sourceTransactions', {
+    sourceFileId,
+    sourceAccountId,
+    importRowId: purchaseImportRowId,
+    stableSourceId: 'bad-purchase-source-id',
+    date: '2026-06-01',
+    amountCents: 1250,
+    description: 'Coffee shop',
+    sourceRole: 'activity',
+    priority: 50,
+    rawJson: JSON.stringify({ moneyCategory: 'activity', type: 'credit-card-activity' }),
+  }));
+  const paymentSourceTransactionId = Number(insertRow('sourceTransactions', {
+    sourceFileId,
+    sourceAccountId,
+    importRowId: paymentImportRowId,
+    stableSourceId: 'bad-payment-source-id',
+    date: '2026-06-02',
+    amountCents: -50000,
+    description: 'ONLINE PAYMENT THANK YOU',
+    sourceRole: 'activity',
+    priority: 50,
+    rawJson: JSON.stringify({ moneyCategory: 'activity', type: 'credit-card-activity' }),
+  }));
+  const purchaseTransactionId = Number(insertRow('transactions', {
+    accountId,
+    date: '2026-06-01',
+    amount: 12.50,
+    description: 'Coffee shop',
+    type: 'credit',
+    transactionKind: 'card_payment',
+    ledgerTransactionId: 'txn_purchase_old',
+    fingerprint: 'bad-purchase',
+  }));
+  const paymentTransactionId = Number(insertRow('transactions', {
+    accountId,
+    date: '2026-06-02',
+    amount: -500,
+    description: 'ONLINE PAYMENT THANK YOU',
+    type: 'debit',
+    transactionKind: null,
+    ledgerTransactionId: 'txn_payment_old',
+    fingerprint: 'bad-payment',
+  }));
+  insertRow('ledgerTransactions', {
+    ledgerTransactionId: 'txn_purchase_old',
+    legacyTransactionId: purchaseTransactionId,
+    accountId,
+    date: '2026-06-01',
+    amountCents: 1250,
+    description: 'Coffee shop',
+    type: 'credit',
+    transactionKind: 'card_payment',
+    fingerprint: 'bad-purchase',
+    sourceRole: 'activity',
+    importFileId,
+    importRowId: purchaseImportRowId,
+    sourceTransactionId: purchaseSourceTransactionId,
+  });
+  insertRow('ledgerTransactions', {
+    ledgerTransactionId: 'txn_payment_old',
+    legacyTransactionId: paymentTransactionId,
+    accountId,
+    date: '2026-06-02',
+    amountCents: -50000,
+    description: 'ONLINE PAYMENT THANK YOU',
+    type: 'debit',
+    transactionKind: null,
+    fingerprint: 'bad-payment',
+    sourceRole: 'activity',
+    importFileId,
+    importRowId: paymentImportRowId,
+    sourceTransactionId: paymentSourceTransactionId,
+  });
+
+  db.prepare("DELETE FROM schemaMigrations WHERE name = '2026-06-23-credit-card-cashflow-signs'").run();
+  initDatabase();
+
+  expect(db.prepare('SELECT amountCents FROM sourceTransactions WHERE id = ?').get(purchaseSourceTransactionId)).toEqual({ amountCents: -1250 });
+  expect(db.prepare('SELECT amountCents FROM sourceTransactions WHERE id = ?').get(paymentSourceTransactionId)).toEqual({ amountCents: 50000 });
+  expect(db.prepare('SELECT amount, type, transactionKind FROM transactions WHERE id = ?').get(purchaseTransactionId)).toEqual({
+    amount: -12.5,
+    type: 'debit',
+    transactionKind: null,
+  });
+  expect(db.prepare('SELECT amount, type, transactionKind FROM transactions WHERE id = ?').get(paymentTransactionId)).toEqual({
+    amount: 500,
+    type: 'credit',
+    transactionKind: 'card_payment',
+  });
+});
+
 test('app accounts endpoint returns domain-shaped accounts', async () => {
   const accountId = Number(insertRow('accounts', {
     name: 'Checking',

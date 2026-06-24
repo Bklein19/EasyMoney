@@ -72,6 +72,35 @@ function ledgerTransactionIdFor(transaction, occurrenceIndex) {
   return `txn_${hashContent(`${transactionIdentityBaseKey(transaction)}|${occurrenceIndex}`).slice(0, 32)}`;
 }
 
+function isCreditAccountType(type) {
+  return type === 'credit' || type === 'credit_card' || type === 'credit-card';
+}
+
+function isLikelyCreditCardPaymentDescription(description = '') {
+  return /\b(payment|pmt|autopay|auto pay|online transfer|thank you)\b/i.test(String(description || ''));
+}
+
+function transactionFingerprintFor({ accountId, date, amount, originalDescription, description, merchant }) {
+  const text = normalizeIdentityText(originalDescription || description || merchant || '');
+  return [
+    accountId,
+    normalizeIdentityDate(date),
+    Number(amount || 0).toFixed(2),
+    text,
+  ].join('|');
+}
+
+function stableSourceTransactionIdFor({ importFileId, sourceRowIndex, date, amountCents, description, sourceRole }) {
+  return `src_txn_${hashContent([
+    importFileId,
+    sourceRowIndex,
+    date,
+    amountCents,
+    normalizeIdentityText(description),
+    sourceRole,
+  ].join('|')).slice(0, 32)}`;
+}
+
 function wrapStatement(statement) {
   return {
     all: (...params) => statement.all(...params.map(normalizeParams)),
@@ -105,6 +134,171 @@ function runSchemaMigration(name, migrate) {
     migrate();
     db.prepare('INSERT INTO schemaMigrations (name, appliedAt) VALUES (?, ?)').run(name, new Date().toISOString());
   })();
+}
+
+function repairCreditCardCashflowSigns() {
+  const sourceAccounts = db.prepare(`
+    SELECT
+      sa.id,
+      a.id AS accountId,
+      a.type AS accountType
+    FROM sourceAccounts sa
+    JOIN accounts a ON a.id = sa.accountId
+    WHERE a.type IN ('credit', 'credit_card', 'credit-card')
+  `).all();
+
+  const sourceAccountIdsToFlip = [];
+  for (const sourceAccount of sourceAccounts) {
+    if (!isCreditAccountType(sourceAccount.accountType)) continue;
+    const rows = db.prepare(`
+      SELECT amountCents, description, rawJson
+      FROM sourceTransactions
+      WHERE sourceAccountId = ?
+    `).all(sourceAccount.id);
+    const moneyRows = rows.filter(row => {
+      try {
+        const raw = JSON.parse(row.rawJson || '{}');
+        return Boolean(raw.moneyCategory);
+      } catch {
+        return false;
+      }
+    });
+    if (!moneyRows.length) continue;
+
+    const purchaseRows = moneyRows.filter(row => !isLikelyCreditCardPaymentDescription(row.description));
+    const positivePurchases = purchaseRows.filter(row => Number(row.amountCents) > 0).length;
+    const negativePurchases = purchaseRows.filter(row => Number(row.amountCents) < 0).length;
+    if (positivePurchases > negativePurchases) {
+      sourceAccountIdsToFlip.push(sourceAccount.id);
+    }
+  }
+
+  if (!sourceAccountIdsToFlip.length) return;
+
+  const sourceRowsToFlip = db.prepare(`
+    SELECT
+      st.id,
+      st.sourceFileId,
+      st.importRowId,
+      st.date,
+      st.amountCents,
+      st.description,
+      st.sourceRole,
+      ir.importFileId,
+      ir.rowIndex,
+      ir.normalizedJson
+    FROM sourceTransactions st
+    LEFT JOIN importRows ir ON ir.id = st.importRowId
+    WHERE st.sourceAccountId = ?
+  `);
+  const updateSourceTransaction = db.prepare(`
+    UPDATE sourceTransactions
+    SET amountCents = ?, stableSourceId = ?
+    WHERE id = ?
+  `);
+  const updateImportRow = db.prepare(`
+    UPDATE importRows
+    SET normalizedJson = ?
+    WHERE id = ?
+  `);
+
+  for (const sourceAccountId of sourceAccountIdsToFlip) {
+    for (const row of sourceRowsToFlip.all(sourceAccountId)) {
+      const amountCents = -Number(row.amountCents || 0);
+      const sourceRowIndex = row.normalizedJson
+        ? JSON.parse(row.normalizedJson).sourceRowIndex ?? row.rowIndex
+        : row.rowIndex;
+      const stableSourceId = stableSourceTransactionIdFor({
+        importFileId: row.importFileId,
+        sourceRowIndex,
+        date: row.date,
+        amountCents,
+        description: row.description,
+        sourceRole: row.sourceRole,
+      });
+      updateSourceTransaction.run(amountCents, stableSourceId, row.id);
+
+      if (row.importRowId && row.normalizedJson) {
+        const normalized = JSON.parse(row.normalizedJson);
+        normalized.amountCents = amountCents;
+        updateImportRow.run(JSON.stringify(normalized), row.importRowId);
+      }
+    }
+  }
+
+  const materializedRows = db.prepare(`
+    SELECT
+      lt.id AS ledgerRowId,
+      lt.legacyTransactionId,
+      lt.accountId,
+      lt.date,
+      lt.amountCents,
+      lt.description,
+      lt.merchant,
+      lt.originalDescription,
+      lt.sourceTransactionId
+    FROM ledgerTransactions lt
+    JOIN sourceTransactions st ON st.id = lt.sourceTransactionId
+    WHERE st.sourceAccountId = ?
+  `);
+  const updateLedgerTransaction = db.prepare(`
+    UPDATE ledgerTransactions
+    SET amountCents = @amountCents,
+        type = @type,
+        transactionKind = @transactionKind,
+        fingerprint = @fingerprint,
+        updatedAt = @updatedAt
+    WHERE id = @id
+  `);
+  const updateLegacyTransaction = db.prepare(`
+    UPDATE transactions
+    SET amount = @amount,
+        type = @type,
+        transactionKind = @transactionKind,
+        fingerprint = @fingerprint
+    WHERE id = @id
+  `);
+  const updateImportRowFingerprint = db.prepare(`
+    UPDATE importRows
+    SET fingerprint = ?
+    WHERE transactionId = ?
+  `);
+  const now = new Date().toISOString();
+
+  for (const sourceAccountId of sourceAccountIdsToFlip) {
+    for (const row of materializedRows.all(sourceAccountId)) {
+      const amountCents = -Number(row.amountCents || 0);
+      const amount = Math.round(amountCents) / 100;
+      const type = amountCents >= 0 ? 'credit' : 'debit';
+      const transactionKind = amountCents > 0 ? 'card_payment' : null;
+      const fingerprint = transactionFingerprintFor({
+        accountId: row.accountId,
+        date: row.date,
+        amount,
+        originalDescription: row.originalDescription,
+        description: row.description,
+        merchant: row.merchant,
+      });
+      updateLedgerTransaction.run({
+        id: row.ledgerRowId,
+        amountCents,
+        type,
+        transactionKind,
+        fingerprint,
+        updatedAt: now,
+      });
+      if (row.legacyTransactionId) {
+        updateLegacyTransaction.run({
+          id: row.legacyTransactionId,
+          amount,
+          type,
+          transactionKind,
+          fingerprint,
+        });
+        updateImportRowFingerprint.run(fingerprint, row.legacyTransactionId);
+      }
+    }
+  }
 }
 
 const TABLES = {
@@ -545,6 +739,8 @@ export function initDatabase() {
   if (!sourceAccountColumns.includes('accountId')) {
     db.prepare('ALTER TABLE sourceAccounts ADD COLUMN accountId INTEGER').run();
   }
+
+  runSchemaMigration('2026-06-23-credit-card-cashflow-signs', repairCreditCardCashflowSigns);
 
   const sourceBalanceIndexes = db.prepare('PRAGMA index_list(sourceBalances)').all();
   const hasLegacySourceBalanceUniqueIndex = sourceBalanceIndexes.some(index =>

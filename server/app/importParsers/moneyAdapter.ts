@@ -14,6 +14,13 @@ export function createMoneyParserAdapter({
   name,
   parseMoneyFile,
 }: MoneyParserAdapterOptions): AppImportParser {
+  const toAppAmountCents = (transaction: ParseResult['transactions'][number]) => {
+    if (transaction.raw?.type === 'credit-card-activity') {
+      return -transaction.amount_cents;
+    }
+    return transaction.amount_cents;
+  };
+
   return {
     id: meta.id,
     name,
@@ -31,7 +38,7 @@ export function createMoneyParserAdapter({
         transactions: result.transactions.map((transaction, index) => ({
           sourceRowIndex: index,
           date: transaction.date,
-          amountCents: transaction.amount_cents,
+          amountCents: toAppAmountCents(transaction),
           description: transaction.description,
           institution: transaction.institution,
           account: transaction.account,
