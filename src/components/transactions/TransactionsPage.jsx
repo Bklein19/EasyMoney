@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, ArrowUp, X } from 'lucide-react';
@@ -27,7 +27,6 @@ const TRANSACTION_SORT_COLUMNS = [
 export default function TransactionsPage() {
   const navigate = useNavigate();
   const [filters, setFilters] = useState({});
-  const [isFilterPending, startFilterTransition] = useTransition();
   const [isCreatingBulkCategory, setIsCreatingBulkCategory] = useState(false);
   const [newBulkCategoryName, setNewBulkCategoryName] = useState('');
   const [bulkCategoryUndo, setBulkCategoryUndo] = useState(null);
@@ -58,7 +57,6 @@ export default function TransactionsPage() {
   const deferredAccounts = useDeferredValue(accounts);
   const deferredCategories = useDeferredValue(categories);
   const isTransactionsWorking =
-    isFilterPending ||
     transactions !== deferredTransactions ||
     accounts !== deferredAccounts ||
     categories !== deferredCategories ||
@@ -255,10 +253,8 @@ export default function TransactionsPage() {
   };
 
   const handleFilterChange = useCallback((nextFilters) => {
-    startFilterTransition(() => {
-      setBulkCategoryUndo(null);
-      setFilters(nextFilters);
-    });
+    setBulkCategoryUndo(null);
+    setFilters(nextFilters);
   }, []);
 
   const loadedTotals = useMemo(() => {
