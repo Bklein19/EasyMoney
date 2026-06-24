@@ -9,6 +9,7 @@ import './TransactionsPage.css';
 
 const AI_CATEGORIZATION_GROUP_LIMIT = 32;
 const AI_CATEGORIZATION_TIMEOUT_MS = 90_000;
+const AI_REVIEW_SORT_STORAGE_KEY = 'easymoney:transaction-review-sort';
 const AI_SORT_OPTIONS = [
   { value: 'count', label: 'Count' },
   { value: 'money', label: 'Money' },
@@ -32,6 +33,15 @@ function withTimeout(promise, timeoutMs, message) {
   return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timeoutId));
 }
 
+function getInitialAiReviewSort() {
+  try {
+    const storedSort = window.localStorage.getItem(AI_REVIEW_SORT_STORAGE_KEY);
+    return storedSort === 'money' ? 'money' : 'count';
+  } catch {
+    return 'count';
+  }
+}
+
 export default function TransactionReviewPage() {
   const hasStartedReview = useRef(false);
   const [aiCategorization, setAiCategorization] = useState(null);
@@ -49,7 +59,7 @@ export default function TransactionReviewPage() {
   const [isRestoringAiCategories, setIsRestoringAiCategories] = useState(false);
   const [splitByReviewKey, setSplitByReviewKey] = useState({});
   const [isSavingOpenAiKey, setIsSavingOpenAiKey] = useState(false);
-  const [aiReviewSort, setAiReviewSort] = useState('count');
+  const [aiReviewSort, setAiReviewSort] = useState(getInitialAiReviewSort);
   const { categories } = useCategories();
   const categorizationCoverage = useQuery(trpc.transactions.categorizationCoverage.queryOptions());
 
@@ -224,6 +234,11 @@ export default function TransactionReviewPage() {
 
   const handleAiReviewSortChange = (sort) => {
     if (sort === aiReviewSort && isAiCategorizing) return;
+    try {
+      window.localStorage.setItem(AI_REVIEW_SORT_STORAGE_KEY, sort);
+    } catch {
+      // Ignore storage failures; the selected sort still applies for this session.
+    }
     setAiReviewSort(sort);
     if (isAiCategorizing || aiCategorization || aiCategorizationError) {
       void handlePreviewAiCategorization(sort);
