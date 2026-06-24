@@ -1,6 +1,7 @@
 import type { ChangeEvent, Dispatch, KeyboardEvent, SetStateAction } from 'react';
 import { useCategories } from '../../hooks/useCategories';
 import { useAccounts } from '../../hooks/useAccounts';
+import GroupedCategorySelect, { isUncategorized } from '../shared/GroupedCategorySelect';
 
 interface TransactionFilterState {
   searchQuery?: string;
@@ -31,6 +32,10 @@ export default function TransactionFilters({ filters, setFilters }: TransactionF
 
   const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
+    setFilterValue(name, value);
+  };
+
+  const setFilterValue = (name: string, value: string) => {
     setFilters(prev => ({
       ...prev,
       [name]: value === '' ? undefined : value
@@ -70,20 +75,17 @@ export default function TransactionFilters({ filters, setFilters }: TransactionF
         ))}
       </select>
 
-      <select 
-        name="categoryId" 
+      <GroupedCategorySelect
+        name="categoryId"
         className="filter-input"
         value={filters.categoryId || ''}
-        onChange={handleChange}
-      >
-        <option value="">All Categories</option>
-        <option value="uncategorized">Uncategorized</option>
-        {categories
-          .filter(c => c.name.toLowerCase() !== 'uncategorized')
-          .map(c => (
-            <option key={c.id} value={c.id}>{c.name}</option>
-          ))}
-      </select>
+        categories={categories.filter(category => !isUncategorized(category))}
+        leadingOptions={[
+          { value: '', label: 'All Categories' },
+          { value: 'uncategorized', label: 'Uncategorized' },
+        ]}
+        onChange={(value) => setFilterValue('categoryId', value)}
+      />
 
       <details className="transaction-filter-more">
         <summary>

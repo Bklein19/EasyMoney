@@ -10,6 +10,7 @@ import { useAccounts } from '../../hooks/useAccounts';
 import { useCategories } from '../../hooks/useCategories';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import { buildAccountMap, isExcludedFromCashFlow, isExpense, isIncome, isInvestmentMovement } from '../../utils/transactionSemantics';
+import GroupedCategorySelect, { isUncategorized } from '../shared/GroupedCategorySelect';
 import './TransactionsPage.css';
 
 const TRANSACTION_PAGE_SIZE = 100;
@@ -325,30 +326,31 @@ export default function TransactionsPage() {
                   </div>
                 )}
                 <div className="transactions-bulk-category" aria-label="Bulk categorization">
-                  <select
+                  <GroupedCategorySelect
                     id="bulkTransactionCategory"
                     className="filter-input"
                     value={bulkCategorySelectValue}
                     disabled={totalCount === 0 || isApplyingBulkCategory || isRestoringBulkCategory}
                     aria-label="Bulk category"
-                    onChange={(event) => {
-                      if (event.target.value === '__add_custom__') {
+                    categories={categories.filter(category => !isUncategorized(category))}
+                    leadingOptions={[
+                      {
+                        value: BULK_CATEGORY_UNSET,
+                        label: isApplyingBulkCategory ? 'Categorizing...' : 'Categorize as...',
+                        disabled: true,
+                      },
+                      { value: BULK_CATEGORY_UNCATEGORIZED, label: 'Uncategorized' },
+                    ]}
+                    trailingOptions={[{ value: '__add_custom__', label: '+ Add custom category' }]}
+                    onChange={(value) => {
+                      if (value === '__add_custom__') {
                         setIsCreatingBulkCategory(true);
                         return;
                       }
                       resetBulkCategoryCreate();
-                      handleApplyBulkCategory(event.target.value);
+                      handleApplyBulkCategory(value);
                     }}
-                  >
-                    <option value={BULK_CATEGORY_UNSET} disabled>
-                      {isApplyingBulkCategory ? 'Categorizing...' : 'Categorize as...'}
-                    </option>
-                    <option value={BULK_CATEGORY_UNCATEGORIZED}>Uncategorized</option>
-                    {categories.map(category => (
-                      <option key={category.id} value={category.id}>{category.name}</option>
-                    ))}
-                    <option value="__add_custom__">+ Add custom category</option>
-                  </select>
+                  />
                 </div>
                 <button
                   className="btn btn--secondary btn--sm"

@@ -15,6 +15,7 @@ import IncomeStreams from './IncomeStreams';
 import InvestmentTrends from './InvestmentTrends';
 import Tooltip from '../shared/Tooltip';
 import Modal from '../shared/Modal';
+import GroupedCategorySelect, { isUncategorized } from '../shared/GroupedCategorySelect';
 
 import './Analytics.css';
 
@@ -881,27 +882,28 @@ export default function AnalyticsPage() {
                 <label htmlFor="bulkCategory">Bulk category edit</label>
                 <p>Applies to all {visibleDrilldownTransactions.length} visible drilldown rows.</p>
               </div>
-              <select
+              <GroupedCategorySelect
                 id="bulkCategory"
                 className="input input--sm"
                 value={drilldownCategorySelectValue}
                 disabled={visibleDrilldownTransactions.length === 0}
-                onChange={(event) => {
-                  if (event.target.value === '__add_custom__') {
+                categories={categories.filter(category => !isUncategorized(category))}
+                leadingOptions={[
+                  ...(drilldownCategoryValue === '__mixed__'
+                    ? [{ value: '__mixed__', label: 'Mixed categories' }]
+                    : []),
+                  { value: '', label: 'Uncategorized' },
+                ]}
+                trailingOptions={[{ value: '__add_custom__', label: '+ Add custom category' }]}
+                onChange={(value) => {
+                  if (value === '__add_custom__') {
                     setIsCreatingDrilldownCategory(true);
                     return;
                   }
                   resetDrilldownCategoryCreate();
-                  setPendingDrilldownCategoryValue(event.target.value);
+                  setPendingDrilldownCategoryValue(value);
                 }}
-              >
-                {drilldownCategoryValue === '__mixed__' && <option value="__mixed__">Mixed categories</option>}
-                <option value="">Uncategorized</option>
-                {categories.map(category => (
-                  <option key={category.id} value={category.id}>{category.name}</option>
-                ))}
-                <option value="__add_custom__">+ Add custom category</option>
-              </select>
+              />
               <button
                 className="btn btn--secondary btn--sm bulk-category-action__apply"
                 type="button"

@@ -1,10 +1,11 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
-import { ChevronRight, Sparkles, X } from 'lucide-react';
+import { ChevronRight, X } from 'lucide-react';
 import { useCategories } from '../../hooks/useCategories';
 import { formatCurrency } from '../../utils/formatters';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
+import GroupedCategorySelect from '../shared/GroupedCategorySelect';
 import './TransactionsPage.css';
 
 const AI_CATEGORIZATION_GROUP_LIMIT = 32;
@@ -14,16 +15,6 @@ const AI_SORT_OPTIONS = [
   { value: 'count', label: 'Count' },
   { value: 'money', label: 'Money' },
 ];
-const CATEGORY_GROUPS = [
-  { key: 'income', label: 'Income' },
-  { key: 'transfer', label: 'Transfers' },
-  { key: 'fixed', label: 'Fixed / Recurring' },
-  { key: 'variable', label: 'Variable / Necessary' },
-  { key: 'discretionary', label: 'Discretionary' },
-  { key: 'savings_investment', label: 'Savings / Investment' },
-  { key: 'other', label: 'Other' },
-];
-
 function withTimeout(promise, timeoutMs, message) {
   let timeoutId;
   const timeout = new Promise((_, reject) => {
@@ -70,18 +61,6 @@ export default function TransactionReviewPage() {
     if (sourceRole === 'statement-summary') return 'Statement summary';
     if (sourceRole === 'statement-only') return 'Statement only';
     return '';
-  };
-  const getCategoryById = (categoryId) => categories.find(item => String(item.id) === String(categoryId)) ?? null;
-  const getCategoryGroups = (excludedCategoryId) => {
-    const availableCategories = categories.filter(category => String(category.id) !== String(excludedCategoryId));
-    const knownGroupKeys = new Set(CATEGORY_GROUPS.map(group => group.key).filter(key => key !== 'other'));
-    const grouped = CATEGORY_GROUPS.map(group => ({
-      ...group,
-      categories: group.key === 'other'
-        ? availableCategories.filter(category => !knownGroupKeys.has(category.categoryGroup))
-        : availableCategories.filter(category => category.categoryGroup === group.key),
-    }));
-    return grouped.filter(group => group.categories.length > 0);
   };
   const aiSuggestions = useMemo(() => aiCategorization?.suggestions ?? [], [aiCategorization?.suggestions]);
   const aiQuestions = useMemo(() => aiCategorization?.questions ?? [], [aiCategorization?.questions]);
@@ -559,9 +538,6 @@ export default function TransactionReviewPage() {
                         {reviewRows.map(row => {
                           const isExpanded = expandedReviewKey === row.key;
                           const isUsingAiSuggestion = row.type === 'suggestion' && row.categoryId === row.suggestedCategoryId;
-                          const selectedCategory = getCategoryById(row.categoryId);
-                          const suggestedCategory = getCategoryById(row.suggestedCategoryId);
-                          const suggestedCategoryName = suggestedCategory?.name || '';
                           return (
                             <Fragment key={row.key}>
                               <tr
@@ -569,35 +545,16 @@ export default function TransactionReviewPage() {
                                 onClick={() => setExpandedReviewKey(isExpanded ? null : row.key)}
                               >
                                 <td onClick={(event) => event.stopPropagation()}>
-                                  <div
-                                    className={`merchant-review-category-control ${isUsingAiSuggestion ? 'has-ai-suggestion' : ''} ${selectedCategory ? 'has-category' : ''}`}
-                                    style={{ '--merchant-review-category-color': selectedCategory?.color || 'transparent' }}
-                                  >
-                                    {isUsingAiSuggestion && (
-                                      <span className="merchant-review-ai-icon" title="AI suggestion">
-                                        <Sparkles size={13} />
-                                      </span>
-                                    )}
-                                    <select
-                                      className="filter-input merchant-review-category-select"
-                                      value={row.categoryId}
-                                      onChange={(event) => setReviewCategory(row.key, event.target.value)}
-                                    >
-                                      <option value="" />
-                                      {suggestedCategoryName && (
-                                        <optgroup label="Suggested">
-                                          <option value={row.suggestedCategoryId}>{suggestedCategoryName}</option>
-                                        </optgroup>
-                                      )}
-                                      {getCategoryGroups(row.suggestedCategoryId).map(group => (
-                                        <optgroup key={group.key} label={group.label}>
-                                          {group.categories.map(category => (
-                                            <option key={category.id} value={category.id}>{category.name}</option>
-                                          ))}
-                                        </optgroup>
-                                      ))}
-                                    </select>
-                                  </div>
+                                  <GroupedCategorySelect
+                                    className="filter-input merchant-review-category-select"
+                                    controlClassName="merchant-review-category-control"
+                                    value={row.categoryId}
+                                    categories={categories}
+                                    leadingOptions={[{ value: '', label: '' }]}
+                                    suggestedCategoryId={row.suggestedCategoryId}
+                                    showSuggestionIcon={isUsingAiSuggestion}
+                                    onChange={(value) => setReviewCategory(row.key, value)}
+                                  />
                                 </td>
                                 <td>
                                   <div className="merchant-review-row__name" title={row.merchantName}>

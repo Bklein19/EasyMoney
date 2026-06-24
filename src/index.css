@@ -489,6 +489,32 @@ select option:hover {
   width: 100%;
 }
 
+.grouped-category-select-control {
+  position: relative;
+  min-width: 0;
+}
+
+.grouped-category-select-control.has-category > select {
+  border-left-color: var(--grouped-category-color);
+  border-left-width: 4px;
+}
+
+.grouped-category-select-control.has-suggestion > select {
+  padding-left: 32px;
+}
+
+.grouped-category-select-control__icon {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent-blue);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
 @media (max-width: 768px) {
   .inline-create {
     flex-direction: column;

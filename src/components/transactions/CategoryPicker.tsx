@@ -1,4 +1,5 @@
-import { useState, type ChangeEvent, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
+import GroupedCategorySelect, { isUncategorized } from '../shared/GroupedCategorySelect';
 
 const ADD_CUSTOM_CATEGORY = '__add_custom_category__';
 const UNCATEGORIZED_CATEGORY = '__uncategorized_category__';
@@ -6,6 +7,8 @@ const UNCATEGORIZED_CATEGORY = '__uncategorized_category__';
 interface Category {
   id: number | string;
   name: string;
+  categoryGroup?: string | null;
+  color?: string | null;
 }
 
 interface CategoryPickerProps {
@@ -31,8 +34,7 @@ export default function CategoryPicker({
     setNewCategoryName('');
   };
 
-  const handleSelectChange = (event: ChangeEvent<HTMLSelectElement>) => {
-    const value = event.target.value;
+  const handleSelectChange = (value: string) => {
     if (value === ADD_CUSTOM_CATEGORY) {
       setIsCreating(true);
       return;
@@ -66,19 +68,16 @@ export default function CategoryPicker({
 
   return (
     <div className="category-picker-wrapper">
-      <select
+      <GroupedCategorySelect
         className="filter-input category-picker-select"
         value={categoryId === null || categoryId === undefined ? UNCATEGORIZED_CATEGORY : String(categoryId)}
         disabled={disabled}
         aria-label="Transaction category"
+        categories={categories.filter(category => !isUncategorized(category))}
+        leadingOptions={[{ value: UNCATEGORIZED_CATEGORY, label: 'Uncategorized' }]}
+        trailingOptions={[{ value: ADD_CUSTOM_CATEGORY, label: '+ Add custom category' }]}
         onChange={handleSelectChange}
-      >
-        <option value={UNCATEGORIZED_CATEGORY}>Uncategorized</option>
-        {categories.map(category => (
-          <option key={category.id} value={category.id}>{category.name}</option>
-        ))}
-        <option value={ADD_CUSTOM_CATEGORY}>+ Add custom category</option>
-      </select>
+      />
       {isCreating && (
         <form className="inline-create category-create-form" onSubmit={handleCreateCategory}>
           <input
