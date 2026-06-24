@@ -12,6 +12,7 @@ const { getDb, initDatabase, insertRow } = await import('../database.js');
 const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
 const {
   groupTransactionsForAiCategorization,
+  previewAiCategorization,
   shouldTreatInvestmentCategoryAsTransfer,
   shouldReviewInvestmentAccountTransferDecision,
 } = await import('./aiCategorization.ts');
@@ -41,6 +42,7 @@ function resetAppTables() {
       'transactionCategoryUndoOperations',
       'transactionAnnotations',
       'merchantGroupingRules',
+      'merchantCategoryRules',
       'transactions',
       'balanceSnapshots',
       'accountAliases',
@@ -1123,6 +1125,83 @@ test('ai categorization apply writes transaction annotations by ledger id', asyn
   expect(
     getDb().prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId = ?').get('txn_ai_apply')
   ).toMatchObject({ categoryId });
+});
+
+test('ai categorization apply records corrected AI suggestions as learned merchant rules', async () => {
+  const aiCategoryId = Number(insertRow('categories', { name: 'Dining', type: 'expense' }));
+  const correctedCategoryId = Number(insertRow('categories', { name: 'Subscriptions', type: 'expense' }));
+  const accountId = Number(insertRow('accounts', {
+    name: 'AI Test Checking',
+    type: 'checking',
+    currentBalance: 0,
+  }));
+  insertRow('ledgerTransactions', {
+    ledgerTransactionId: 'txn_ai_corrected',
+    accountId,
+    date: '2026-06-01',
+    amountCents: -1800,
+    description: 'Cafe Test',
+    merchant: 'Cafe Test',
+    type: 'expense',
+    transactionKind: 'activity',
+    createdAt: new Date().toISOString(),
+  });
+
+  const result = await trpcClient.transactions.applyAiCategorization.mutate({
+    suggestions: [{
+      transactionId: 'txn_ai_corrected',
+      categoryId: correctedCategoryId,
+      merchantGroupId: 'merchant:CAFE TEST',
+      sourceMerchantKey: 'CAFE TEST',
+      normalizedMerchant: 'CAFE TEST',
+      aiCategoryId,
+    }],
+  });
+
+  expect(result).toMatchObject({
+    count: 1,
+    requested: 1,
+    recordedCorrectionCount: 1,
+  });
+  expect(
+    getDb().prepare('SELECT merchantGroupId, categoryId FROM merchantCategoryRules WHERE merchantGroupId = ?').get('merchant:CAFE TEST')
+  ).toEqual({
+    merchantGroupId: 'merchant:CAFE TEST',
+    categoryId: correctedCategoryId,
+  });
+
+  insertRow('ledgerTransactions', {
+    ledgerTransactionId: 'txn_ai_corrected_next',
+    accountId,
+    date: '2026-06-02',
+    amountCents: -2500,
+    description: 'Cafe Test',
+    merchant: 'Cafe Test',
+    type: 'expense',
+    transactionKind: 'activity',
+    createdAt: new Date().toISOString(),
+  });
+
+  const previousApiKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = 'test-key';
+  try {
+    const preview = await previewAiCategorization({ limit: 32 });
+    expect(preview.suggestions).toEqual([
+      expect.objectContaining({
+        groupId: 'merchant:CAFE TEST',
+        categoryId: correctedCategoryId,
+        categoryName: 'Subscriptions',
+        reason: 'Learned from your previous review correction.',
+        transactionIds: ['txn_ai_corrected_next'],
+      }),
+    ]);
+  } finally {
+    if (previousApiKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = previousApiKey;
+    }
+  }
 });
 
 test('ai categorization apply reports skipped already categorized transactions', async () => {

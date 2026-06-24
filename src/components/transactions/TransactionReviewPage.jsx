@@ -83,6 +83,7 @@ export default function TransactionReviewPage() {
         reason: suggestion.reason,
         decisionKind: suggestion.decisionKind,
         sourceMerchantKey: suggestion.sourceMerchantKey,
+        normalizedMerchant: suggestion.normalizedMerchant,
         canSplitMerchantGroup: suggestion.canSplitMerchantGroup,
         accountName: suggestion.accountNames?.length === 1 ? suggestion.accountNames[0] : '',
         suggestedCategoryId: String(suggestion.categoryId),
@@ -99,6 +100,7 @@ export default function TransactionReviewPage() {
       reason: question.reason,
       decisionKind: question.decisionKind,
       sourceMerchantKey: question.sourceMerchantKey,
+      normalizedMerchant: question.normalizedMerchant,
       canSplitMerchantGroup: question.canSplitMerchantGroup,
       accountName: question.accountNames?.length === 1 ? question.accountNames[0] : '',
       suggestedCategoryId: '',
@@ -227,6 +229,10 @@ export default function TransactionReviewPage() {
         suggestions: selectedReviewRows.flatMap(row => row.transactionIds.map(transactionId => ({
           transactionId,
           categoryId: row.categoryId,
+          merchantGroupId: row.type === 'suggestion' ? row.key : null,
+          sourceMerchantKey: row.type === 'suggestion' ? row.sourceMerchantKey : null,
+          normalizedMerchant: row.type === 'suggestion' ? row.normalizedMerchant : null,
+          aiCategoryId: row.type === 'suggestion' ? row.suggestedCategoryId : null,
         }))),
       });
       const appliedIds = new Set(result.appliedTransactionIds ?? []);

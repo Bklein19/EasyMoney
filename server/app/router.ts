@@ -108,6 +108,10 @@ export const appRouter = t.router({
         suggestions: z.array(z.object({
           transactionId: z.string().min(1),
           categoryId: z.union([z.string(), z.number()]),
+          merchantGroupId: z.string().nullish(),
+          sourceMerchantKey: z.string().nullish(),
+          normalizedMerchant: z.string().nullish(),
+          aiCategoryId: z.union([z.string(), z.number()]).nullish(),
         })),
       }))
       .mutation(({ input }) => applyAiCategorizationSuggestions(input)),
