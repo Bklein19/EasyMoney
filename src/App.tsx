@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router';
 import { Menu } from 'lucide-react';
 import ImportPage from './components/import/ImportPage.jsx';
 import TransactionsPage from './components/transactions/TransactionsPage.jsx';
@@ -142,15 +142,6 @@ function App() {
 }
 
 function AppRoutes({ reportSelectedIds }: AppRoutesProps) {
-  const location = useLocation();
-  const shouldStartTransactionReview =
-    new URLSearchParams(location.search).get('start') === '1' &&
-    location.pathname !== '/transactions/review';
-
-  if (shouldStartTransactionReview) {
-    return <Navigate to="/transactions/review?start=1" replace />;
-  }
-
   return (
     <Routes>
       <Route path="/" element={<AnalyticsPage />} />

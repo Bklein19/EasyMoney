@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useSearchParams } from 'react-router';
+import { Link, useLocation, useNavigate } from 'react-router';
 import { ChevronRight, Sparkles, X } from 'lucide-react';
 import { useCategories } from '../../hooks/useCategories';
 import { formatCurrency } from '../../utils/formatters';
@@ -33,8 +33,9 @@ function withTimeout(promise, timeoutMs, message) {
 }
 
 export default function TransactionReviewPage() {
-  const [searchParams] = useSearchParams();
-  const hasStartedFromUrl = useRef(false);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const hasStartedFromNavigation = useRef(false);
   const [aiCategorization, setAiCategorization] = useState(null);
   const [aiCategorizationError, setAiCategorizationError] = useState('');
   const [openAiApiKeyDraft, setOpenAiApiKeyDraft] = useState('');
@@ -232,10 +233,11 @@ export default function TransactionReviewPage() {
   };
 
   useEffect(() => {
-    if (hasStartedFromUrl.current || searchParams.get('start') !== '1') return;
-    hasStartedFromUrl.current = true;
+    if (hasStartedFromNavigation.current || location.state?.autostartAiReview !== true) return;
+    hasStartedFromNavigation.current = true;
+    navigate(location.pathname, { replace: true, state: null });
     void handlePreviewAiCategorization();
-  }, [handlePreviewAiCategorization, searchParams]);
+  }, [handlePreviewAiCategorization, location.pathname, location.state, navigate]);
 
   const setReviewCategory = (reviewKey, categoryId) => {
     setCategoryByReviewKey(previous => ({

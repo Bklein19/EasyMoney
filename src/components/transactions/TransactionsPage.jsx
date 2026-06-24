@@ -353,7 +353,7 @@ export default function TransactionsPage() {
                 <button
                   className="btn btn--secondary btn--sm"
                   type="button"
-                  onClick={() => navigate('/transactions/review?start=1')}
+                  onClick={() => navigate('/transactions/review', { state: { autostartAiReview: true } })}
                   title="Review uncategorized merchants with AI"
                 >
                   Review with AI
