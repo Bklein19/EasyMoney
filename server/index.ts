@@ -268,10 +268,10 @@ export const routes = wrapRoutes({
 
       const payload = await bodyJson(request);
       const migrate = db.transaction(() => {
-        for (const table of ['sourceBalances', 'sourceTransactions', 'sourceAccounts', 'sourceFiles', 'importRows', 'importFiles', 'transactionCategoryUndoOperations', 'transactionAnnotations', 'transactions', 'accountAliases', 'accounts', 'categories', 'budgets', 'balanceSnapshots', 'categorizationRules', 'merchantCategoryRules', 'importProfiles']) {
+        for (const table of ['sourceBalances', 'sourceTransactions', 'sourceAccounts', 'sourceFiles', 'importRows', 'importFiles', 'transactionCategoryUndoOperations', 'transactionAnnotations', 'transactions', 'accountAliases', 'accounts', 'categories', 'budgets', 'balanceSnapshots', 'categorizationRules', 'importProfiles']) {
           db.prepare(`DELETE FROM ${table}`).run();
         }
-        for (const table of ['accounts', 'accountAliases', 'categories', 'budgets', 'balanceSnapshots', 'categorizationRules', 'merchantCategoryRules', 'importProfiles', 'importFiles', 'importRows', 'sourceFiles', 'sourceAccounts', 'sourceTransactions', 'sourceBalances', 'transactions', 'transactionAnnotations', 'transactionCategoryUndoOperations']) {
+        for (const table of ['accounts', 'accountAliases', 'categories', 'budgets', 'balanceSnapshots', 'categorizationRules', 'importProfiles', 'importFiles', 'importRows', 'sourceFiles', 'sourceAccounts', 'sourceTransactions', 'sourceBalances', 'transactions', 'transactionAnnotations', 'transactionCategoryUndoOperations']) {
           if (Array.isArray(payload[table]) && payload[table].length) {
             insertRows(table, payload[table], true);
           }

@@ -318,7 +318,6 @@ const TABLES = {
   transactionAnnotations: ['ledgerTransactionId', 'categoryId', 'notes', 'createdAt', 'updatedAt'],
   transactionCategoryUndoOperations: ['id', 'categoryName', 'transactionCount', 'payloadJson', 'status', 'createdAt', 'consumedAt'],
   merchantGroupingRules: ['id', 'sourceMerchantKey', 'strategy', 'createdAt', 'updatedAt'],
-  merchantCategoryRules: ['id', 'merchantGroupId', 'sourceMerchantKey', 'normalizedMerchant', 'categoryId', 'createdAt', 'updatedAt'],
   categories: ['id', 'name', 'parentId', 'type', 'categoryGroup', 'color', 'icon'],
   budgets: ['id', 'categoryId', 'month', 'amount'],
   balanceSnapshots: ['id', 'accountId', 'month', 'balance', 'capturedAt'],
@@ -357,7 +356,6 @@ const ORDER_BY = {
   transactionAnnotations: 'updatedAt DESC, ledgerTransactionId ASC',
   transactionCategoryUndoOperations: 'createdAt DESC, id DESC',
   merchantGroupingRules: 'sourceMerchantKey ASC, id ASC',
-  merchantCategoryRules: 'updatedAt DESC, id DESC',
   categories: 'id ASC',
   budgets: 'month DESC, id DESC',
   balanceSnapshots: 'month ASC, id ASC',
@@ -474,17 +472,6 @@ export function initDatabase() {
       strategy TEXT NOT NULL,
       createdAt TEXT NOT NULL,
       updatedAt TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS merchantCategoryRules (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      merchantGroupId TEXT NOT NULL UNIQUE,
-      sourceMerchantKey TEXT NOT NULL,
-      normalizedMerchant TEXT NOT NULL,
-      categoryId INTEGER NOT NULL,
-      createdAt TEXT NOT NULL,
-      updatedAt TEXT NOT NULL,
-      FOREIGN KEY(categoryId) REFERENCES categories(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS categories (

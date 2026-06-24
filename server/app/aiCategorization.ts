@@ -45,7 +45,6 @@ export interface AiCategorySuggestion {
   groupId: string;
   merchantName: string;
   sourceMerchantKey: string;
-  normalizedMerchant: string;
   canSplitMerchantGroup: boolean;
   decisionKind: Exclude<AiCategorizationDecision['kind'], 'needs_review'>;
   aliases: string[];
@@ -65,7 +64,6 @@ export interface AiCategoryQuestion {
   decisionKind: Extract<AiCategorizationDecision['kind'], 'needs_review'>;
   pattern: string;
   sourceMerchantKey: string;
-  normalizedMerchant: string;
   canSplitMerchantGroup: boolean;
   transactionIds: string[];
   aliases: string[];
@@ -103,14 +101,6 @@ interface MerchantGroupingRule {
   id: number;
   sourceMerchantKey: string;
   strategy: string;
-}
-
-interface MerchantCategoryRule {
-  id: number;
-  merchantGroupId: string;
-  sourceMerchantKey: string;
-  normalizedMerchant: string;
-  categoryId: number;
 }
 
 function getOpenAiKey() {
@@ -170,12 +160,6 @@ function listMerchantGroupingRules() {
   return getDb()
     .prepare('SELECT id, sourceMerchantKey, strategy FROM merchantGroupingRules ORDER BY id ASC')
     .all() as MerchantGroupingRule[];
-}
-
-function listMerchantCategoryRules() {
-  return getDb()
-    .prepare('SELECT id, merchantGroupId, sourceMerchantKey, normalizedMerchant, categoryId FROM merchantCategoryRules ORDER BY id ASC')
-    .all() as MerchantCategoryRule[];
 }
 
 function chunk<T>(items: T[], size: number) {
@@ -412,7 +396,6 @@ function categorySuggestion(input: {
     groupId: input.group.id,
     merchantName: input.group.merchantName,
     sourceMerchantKey: input.group.sourceMerchantKey,
-    normalizedMerchant: input.group.normalizedMerchant,
     canSplitMerchantGroup: input.group.groupingRuleId === null && bankDescriptionCounterpartyCount(input.group) > 1,
     decisionKind: input.decisionKind,
     aliases: input.group.aliases,
@@ -438,7 +421,6 @@ function reviewQuestion(input: {
     decisionKind: 'needs_review' as const,
     pattern: group.merchantName,
     sourceMerchantKey: group.sourceMerchantKey,
-    normalizedMerchant: group.normalizedMerchant,
     canSplitMerchantGroup: group.groupingRuleId === null && bankDescriptionCounterpartyCount(group) > 1,
     transactionIds: group.transactionIds,
     aliases: group.aliases,
@@ -569,8 +551,6 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
   const transactions = listUncategorizedTransactions();
   const groups = groupTransactionsForAiCategorization(transactions);
   const reviewGroups = groups.slice(0, groupLimit);
-  const categoryById = new Map(categories.map(category => [category.id, category]));
-  const learnedCategoryByGroupId = new Map(listMerchantCategoryRules().map(rule => [rule.merchantGroupId, rule.categoryId]));
 
   if (!apiKey) {
     return {
@@ -599,27 +579,11 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
 
   const categoryByName = new Map(categories.map(category => [category.name, category]));
   const transferCategory = findTreatmentCategory(categories, 'transfer');
-  const learnedSuggestions: AiCategorySuggestion[] = [];
-  const groupsForModel: MerchantCategorizationGroup[] = [];
-  for (const group of reviewGroups) {
-    const learnedCategory = categoryById.get(learnedCategoryByGroupId.get(group.id) ?? -1);
-    if (learnedCategory) {
-      learnedSuggestions.push(categorySuggestion({
-        group,
-        category: learnedCategory,
-        decisionKind: learnedCategory.type === 'transfer' ? 'transfer' : 'category',
-        reason: 'Learned from your previous review correction.',
-      }));
-    } else {
-      groupsForModel.push(group);
-    }
-  }
-
-  const groupById = new Map(groupsForModel.map(group => [group.id, group]));
+  const groupById = new Map(reviewGroups.map(group => [group.id, group]));
   const suggestions: AiCategorySuggestion[] = [];
   const questions: AiCategoryQuestion[] = [];
 
-  for (const batch of chunk(groupsForModel, BATCH_SIZE)) {
+  for (const batch of chunk(reviewGroups, BATCH_SIZE)) {
     const result = await categorizeBatchWithOpenAi({
       apiKey,
       model,
@@ -689,7 +653,7 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
     scanned: transactions.length,
     groupCount: groups.length,
     reviewedGroupCount: reviewGroups.length,
-    suggestions: [...learnedSuggestions, ...suggestions],
+    suggestions,
     questions,
   };
 }
@@ -721,26 +685,13 @@ export function createMerchantGroupingRule(input: { sourceMerchantKey: string })
 }
 
 export function applyAiCategorizationSuggestions(input: {
-  suggestions: Array<{
-    transactionId: string;
-    categoryId: number | string;
-    merchantGroupId?: string | null;
-    sourceMerchantKey?: string | null;
-    normalizedMerchant?: string | null;
-    aiCategoryId?: number | string | null;
-  }>;
+  suggestions: Array<{ transactionId: string; categoryId: number | string }>;
 }) {
   const suggestions = input.suggestions ?? [];
   const validCategories = new Set(
     (getDb().prepare('SELECT id FROM categories').all() as Array<{ id: number }>).map(row => Number(row.id))
   );
   const requested = new Map<string, number>();
-  const correctionByGroupId = new Map<string, {
-    merchantGroupId: string;
-    sourceMerchantKey: string;
-    normalizedMerchant: string;
-    categoryId: number;
-  }>();
 
   for (const suggestion of suggestions) {
     const transactionId = String(suggestion.transactionId || '');
@@ -748,25 +699,6 @@ export function applyAiCategorizationSuggestions(input: {
     if (!transactionId || !Number.isFinite(categoryId)) continue;
     if (!validCategories.has(categoryId)) continue;
     requested.set(transactionId, categoryId);
-
-    const aiCategoryId = Number(suggestion.aiCategoryId);
-    const merchantGroupId = String(suggestion.merchantGroupId || '').trim();
-    const sourceMerchantKey = String(suggestion.sourceMerchantKey || '').trim();
-    const normalizedMerchant = String(suggestion.normalizedMerchant || '').trim();
-    if (
-      merchantGroupId &&
-      sourceMerchantKey &&
-      normalizedMerchant &&
-      Number.isFinite(aiCategoryId) &&
-      aiCategoryId !== categoryId
-    ) {
-      correctionByGroupId.set(merchantGroupId, {
-        merchantGroupId,
-        sourceMerchantKey,
-        normalizedMerchant,
-        categoryId,
-      });
-    }
   }
 
   const ids = [...requested.keys()];
@@ -805,32 +737,6 @@ export function applyAiCategorizationSuggestions(input: {
       if (!categoryId) continue;
       upsertTransactionAnnotation(transactionId, { categoryId });
     }
-    const now = new Date().toISOString();
-    const upsertRule = getDb().prepare(`
-      INSERT INTO merchantCategoryRules (
-        merchantGroupId,
-        sourceMerchantKey,
-        normalizedMerchant,
-        categoryId,
-        createdAt,
-        updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(merchantGroupId) DO UPDATE SET
-        sourceMerchantKey = excluded.sourceMerchantKey,
-        normalizedMerchant = excluded.normalizedMerchant,
-        categoryId = excluded.categoryId,
-        updatedAt = excluded.updatedAt
-    `);
-    for (const correction of correctionByGroupId.values()) {
-      upsertRule.run(
-        correction.merchantGroupId,
-        correction.sourceMerchantKey,
-        correction.normalizedMerchant,
-        correction.categoryId,
-        now,
-        now
-      );
-    }
   });
   apply();
 
@@ -839,7 +745,6 @@ export function applyAiCategorizationSuggestions(input: {
     count: applyIds.length,
     requested: ids.length,
     appliedTransactionIds: applyIds,
-    recordedCorrectionCount: correctionByGroupId.size,
     skipped,
   };
 }
