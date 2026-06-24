@@ -749,6 +749,53 @@ test('app transactions endpoint supports infinite-scroll paging metadata', async
   expect(secondPage.nextOffset).toBeNull();
 });
 
+test('app transactions endpoint supports column sort keys', async () => {
+  const checkingId = insertRow('accounts', {
+    name: 'Checking',
+    institution: 'Local Bank',
+    type: 'checking',
+  });
+  const savingsId = insertRow('accounts', {
+    name: 'Savings',
+    institution: 'Local Bank',
+    type: 'savings',
+  });
+  const groceriesId = insertRow('categories', { name: 'Groceries', type: 'expense' });
+  const travelId = insertRow('categories', { name: 'Travel', type: 'expense' });
+
+  const betaId = insertRow('transactions', {
+    accountId: savingsId,
+    date: '2026-06-15',
+    amount: -20,
+    description: 'Beta merchant',
+    type: 'expense',
+  });
+  await putJson(`/api/transactions/${betaId}`, { categoryId: travelId });
+
+  const alphaId = insertRow('transactions', {
+    accountId: checkingId,
+    date: '2026-06-16',
+    amount: -10,
+    description: 'Alpha merchant',
+    type: 'expense',
+  });
+  await putJson(`/api/transactions/${alphaId}`, { categoryId: groceriesId });
+
+  const descriptionAsc = await getJson('/api/app/transactions?sortBy=description_asc') as {
+    transactions: Array<{ description: string }>;
+  };
+  const accountDesc = await getJson('/api/app/transactions?sortBy=account_desc') as {
+    transactions: Array<{ account: { name: string } }>;
+  };
+  const categoryDesc = await getJson('/api/app/transactions?sortBy=category_desc') as {
+    transactions: Array<{ category: { name: string } }>;
+  };
+
+  expect(descriptionAsc.transactions.map(transaction => transaction.description)).toEqual(['Alpha merchant', 'Beta merchant']);
+  expect(accountDesc.transactions.map(transaction => transaction.account.name)).toEqual(['Savings', 'Checking']);
+  expect(categoryDesc.transactions.map(transaction => transaction.category.name)).toEqual(['Travel', 'Groceries']);
+});
+
 test('app transactions endpoint filters uncategorized transactions by missing or explicit uncategorized category', async () => {
   const accountId = insertRow('accounts', {
     name: 'Checking',

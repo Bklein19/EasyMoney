@@ -1,7 +1,7 @@
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useNavigate } from 'react-router';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { X } from 'lucide-react';
+import { ArrowDown, ArrowUp, X } from 'lucide-react';
 import { useTransactions } from '../../hooks/useTransactions';
 import TransactionRow from './TransactionRow';
 import TransactionFilters from './TransactionFilters';
@@ -16,6 +16,13 @@ const TRANSACTION_PAGE_SIZE = 100;
 const TRANSACTIONS_WORKING_INDICATOR_DELAY_MS = 500;
 const BULK_CATEGORY_UNSET = '__bulk_category_unset__';
 const BULK_CATEGORY_UNCATEGORIZED = '__bulk_category_uncategorized__';
+const TRANSACTION_SORT_COLUMNS = [
+  { key: 'date', label: 'Date', asc: 'date_asc', desc: 'date_desc', initial: 'date_desc' },
+  { key: 'description', label: 'Description', asc: 'description_asc', desc: 'description_desc', initial: 'description_asc' },
+  { key: 'category', label: 'Category', asc: 'category_asc', desc: 'category_desc', initial: 'category_asc' },
+  { key: 'account', label: 'Account', asc: 'account_asc', desc: 'account_desc', initial: 'account_asc' },
+  { key: 'amount', label: 'Amount', asc: 'amount_asc', desc: 'amount_desc', initial: 'amount_desc' },
+];
 
 export default function TransactionsPage() {
   const navigate = useNavigate();
@@ -146,6 +153,28 @@ export default function TransactionsPage() {
 
   const bulkCategorySelectValue = BULK_CATEGORY_UNSET;
   const formatTransactionCount = (count) => `${count.toLocaleString()} matching transaction${count === 1 ? '' : 's'}`;
+  const activeSortBy = filters.sortBy || 'date_desc';
+  const sortColumn = TRANSACTION_SORT_COLUMNS.find(column =>
+    activeSortBy === column.asc || activeSortBy === column.desc
+  ) || TRANSACTION_SORT_COLUMNS[0];
+  const sortDirection = activeSortBy === sortColumn.asc ? 'asc' : 'desc';
+
+  const setColumnSort = (column) => {
+    const nextSortBy = activeSortBy === column.asc
+      ? column.desc
+      : activeSortBy === column.desc
+        ? column.asc
+        : column.initial;
+    handleFilterChange(previous => ({
+      ...previous,
+      sortBy: nextSortBy === 'date_desc' ? undefined : nextSortBy,
+    }));
+  };
+
+  const renderSortIcon = (column) => {
+    if (sortColumn.key !== column.key) return null;
+    return sortDirection === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} />;
+  };
 
   const confirmLargeBulkChange = (count, categoryName) => {
     if (count <= 50) return true;
@@ -360,6 +389,22 @@ export default function TransactionsPage() {
                 </div>
               </form>
             )}
+          </div>
+
+          <div className="transactions-table-header" role="row">
+            {TRANSACTION_SORT_COLUMNS.map(column => (
+              <button
+                key={column.key}
+                className={`transactions-table-header__cell transactions-table-header__cell--${column.key} ${sortColumn.key === column.key ? 'is-active' : ''}`}
+                type="button"
+                aria-pressed={sortColumn.key === column.key}
+                aria-label={`Sort by ${column.label}${sortColumn.key === column.key ? ` ${sortDirection === 'asc' ? 'ascending' : 'descending'}` : ''}`}
+                onClick={() => setColumnSort(column)}
+              >
+                <span>{column.label}</span>
+                {renderSortIcon(column)}
+              </button>
+            ))}
           </div>
 
           <div

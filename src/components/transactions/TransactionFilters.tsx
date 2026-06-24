@@ -118,6 +118,12 @@ export default function TransactionFilters({ filters, setFilters }: TransactionF
           >
             <option value="date_desc">Newest first</option>
             <option value="date_asc">Oldest first</option>
+            <option value="description_asc">Description A-Z</option>
+            <option value="description_desc">Description Z-A</option>
+            <option value="category_asc">Category A-Z</option>
+            <option value="category_desc">Category Z-A</option>
+            <option value="account_asc">Account A-Z</option>
+            <option value="account_desc">Account Z-A</option>
             <option value="amount_desc">Highest amount</option>
             <option value="amount_asc">Lowest amount</option>
             <option value="absolute_desc">Largest dollar amount</option>

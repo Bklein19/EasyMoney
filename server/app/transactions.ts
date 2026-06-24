@@ -118,6 +118,18 @@ function orderByFor(sortBy: string | null): string {
   switch (sortBy) {
     case 'date_asc':
       return 't.date ASC, t.id ASC';
+    case 'description_asc':
+      return "lower(COALESCE(t.merchant, t.description, t.originalDescription, '')) ASC, t.date DESC, t.id DESC";
+    case 'description_desc':
+      return "lower(COALESCE(t.merchant, t.description, t.originalDescription, '')) DESC, t.date DESC, t.id DESC";
+    case 'category_asc':
+      return "lower(COALESCE(c.name, '')) ASC, t.date DESC, t.id DESC";
+    case 'category_desc':
+      return "lower(COALESCE(c.name, '')) DESC, t.date DESC, t.id DESC";
+    case 'account_asc':
+      return "lower(COALESCE(a.name, '')) ASC, t.date DESC, t.id DESC";
+    case 'account_desc':
+      return "lower(COALESCE(a.name, '')) DESC, t.date DESC, t.id DESC";
     case 'amount_desc':
       return 't.amountCents DESC, t.date DESC, t.id DESC';
     case 'amount_asc':
