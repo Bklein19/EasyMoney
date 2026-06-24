@@ -1,7 +1,24 @@
+import type { ChangeEvent, Dispatch, SetStateAction } from 'react';
 import { useCategories } from '../../hooks/useCategories';
 import { useAccounts } from '../../hooks/useAccounts';
 
-export default function TransactionFilters({ filters, setFilters }) {
+interface TransactionFilterState {
+  searchQuery?: string;
+  accountId?: string;
+  categoryId?: string;
+  accountKind?: string;
+  flowType?: string;
+  startDate?: string;
+  endDate?: string;
+  sortBy?: string;
+}
+
+interface TransactionFiltersProps {
+  filters: TransactionFilterState;
+  setFilters: Dispatch<SetStateAction<TransactionFilterState>>;
+}
+
+export default function TransactionFilters({ filters, setFilters }: TransactionFiltersProps) {
   const { categories } = useCategories();
   const { accounts } = useAccounts();
   const advancedFilterCount = [
@@ -12,7 +29,7 @@ export default function TransactionFilters({ filters, setFilters }) {
     filters.sortBy && filters.sortBy !== 'date_desc' ? filters.sortBy : undefined,
   ].filter(Boolean).length;
 
-  const handleChange = (e) => {
+  const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFilters(prev => ({
       ...prev,
@@ -24,12 +41,14 @@ export default function TransactionFilters({ filters, setFilters }) {
     <div className="filters-container">
       <div className="transaction-search-control">
         <input
-          type="text"
+          type="search"
           name="searchQuery"
           placeholder="Search transactions..."
           className="filter-input"
           value={filters.searchQuery || ''}
           onChange={handleChange}
+          autoComplete="off"
+          enterKeyHint="search"
         />
       </div>
 
