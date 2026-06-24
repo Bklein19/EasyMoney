@@ -1420,6 +1420,64 @@ test('ai categorization persists merchant grouping rules for generic processor d
   ]);
 });
 
+test('ai categorization can split a merchant into individual transaction review groups', async () => {
+  const rows = [
+    {
+      id: 1,
+      ledgerTransactionId: 'venmo_rent',
+      accountName: 'Checking',
+      accountInstitution: 'Bank',
+      accountType: 'checking',
+      date: '2026-06-01',
+      amountCents: -120000,
+      description: 'Venmo',
+      merchant: 'Venmo',
+      originalDescription: 'Venmo',
+      originalCategory: null,
+      transactionKind: 'activity',
+    },
+    {
+      id: 2,
+      ledgerTransactionId: 'venmo_dinner',
+      accountName: 'Checking',
+      accountInstitution: 'Bank',
+      accountType: 'checking',
+      date: '2026-06-02',
+      amountCents: -4500,
+      description: 'Venmo',
+      merchant: 'Venmo',
+      originalDescription: 'Venmo',
+      originalCategory: null,
+      transactionKind: 'activity',
+    },
+  ];
+
+  const [combinedGroup] = groupTransactionsForAiCategorization(rows);
+  expect(combinedGroup).toMatchObject({
+    merchantName: 'Venmo',
+    transactionIds: ['venmo_dinner', 'venmo_rent'],
+  });
+
+  const rule = await trpcClient.transactions.createMerchantGroupingRule.mutate({
+    sourceMerchantKey: combinedGroup!.sourceMerchantKey,
+    strategy: 'individual_transactions',
+  });
+  expect(rule).toMatchObject({
+    sourceMerchantKey: 'VENMO',
+    strategy: 'individual_transactions',
+  });
+
+  const splitGroups = groupTransactionsForAiCategorization(rows);
+  expect(splitGroups.map(group => ({
+    merchantName: group.merchantName,
+    transactionIds: group.transactionIds,
+    transactionCount: group.transactionCount,
+  }))).toEqual([
+    { merchantName: 'Venmo', transactionIds: ['venmo_rent'], transactionCount: 1 },
+    { merchantName: 'Venmo', transactionIds: ['venmo_dinner'], transactionCount: 1 },
+  ]);
+});
+
 test('ai categorization normalizes PayPal processor descriptions to counterparties', () => {
   const groups = groupTransactionsForAiCategorization([
     {

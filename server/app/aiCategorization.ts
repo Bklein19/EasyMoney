@@ -8,7 +8,9 @@ const DEFAULT_MODEL = 'gpt-5.4-mini';
 const MAX_GROUPS = 500;
 const BATCH_SIZE = 32;
 const BANK_COUNTERPARTY_STRATEGY = 'bank_description_counterparty';
+const INDIVIDUAL_TRANSACTION_STRATEGY = 'individual_transactions';
 type AiCategorizationSort = 'count' | 'money';
+type MerchantGroupingStrategy = typeof BANK_COUNTERPARTY_STRATEGY | typeof INDIVIDUAL_TRANSACTION_STRATEGY;
 
 interface UncategorizedTransactionRow {
   id: number;
@@ -48,6 +50,7 @@ export interface AiCategorySuggestion {
   merchantName: string;
   sourceMerchantKey: string;
   canSplitMerchantGroup: boolean;
+  recommendedSplitStrategy: MerchantGroupingStrategy | null;
   decisionKind: Exclude<AiCategorizationDecision['kind'], 'needs_review'>;
   aliases: string[];
   accountNames: string[];
@@ -67,6 +70,7 @@ export interface AiCategoryQuestion {
   pattern: string;
   sourceMerchantKey: string;
   canSplitMerchantGroup: boolean;
+  recommendedSplitStrategy: MerchantGroupingStrategy | null;
   transactionIds: string[];
   aliases: string[];
   accountNames: string[];
@@ -103,7 +107,7 @@ interface MerchantCategorizationGroup {
 interface MerchantGroupingRule {
   id: number;
   sourceMerchantKey: string;
-  strategy: string;
+  strategy: MerchantGroupingStrategy;
 }
 
 interface CategoryUndoChange {
@@ -303,6 +307,17 @@ function extractBankDescriptionCounterparty(row: UncategorizedTransactionRow) {
 function merchantGroupingForRow(row: UncategorizedTransactionRow, rulesBySourceKey: Map<string, MerchantGroupingRule>) {
   const base = normalizeMerchantText(transactionMerchantText(row));
   const rule = rulesBySourceKey.get(base.key);
+  if (rule?.strategy === INDIVIDUAL_TRANSACTION_STRATEGY) {
+    return {
+      normalized: {
+        ...base,
+        key: `${base.key}\0${row.ledgerTransactionId}`,
+      },
+      sourceMerchantKey: base.key,
+      groupingRuleId: rule.id,
+    };
+  }
+
   if (!rule || rule.strategy !== BANK_COUNTERPARTY_STRATEGY) {
     return {
       normalized: base,
@@ -332,6 +347,13 @@ function bankDescriptionCounterpartyCount(group: MerchantCategorizationGroup) {
     .map(transaction => extractBankDescriptionCounterparty(transaction))
     .filter((value): value is string => Boolean(value))
     .map(value => normalizeMerchantText(value).key)).size;
+}
+
+function recommendedSplitStrategy(group: MerchantCategorizationGroup): MerchantGroupingStrategy | null {
+  if (group.groupingRuleId !== null || group.transactionCount <= 1) return null;
+  return bankDescriptionCounterpartyCount(group) > 1
+    ? BANK_COUNTERPARTY_STRATEGY
+    : INDIVIDUAL_TRANSACTION_STRATEGY;
 }
 
 function normalizeAiCategorizationSort(value: unknown): AiCategorizationSort {
@@ -464,7 +486,8 @@ function categorySuggestion(input: {
     groupId: input.group.id,
     merchantName: input.group.merchantName,
     sourceMerchantKey: input.group.sourceMerchantKey,
-    canSplitMerchantGroup: input.group.groupingRuleId === null && bankDescriptionCounterpartyCount(input.group) > 1,
+    canSplitMerchantGroup: recommendedSplitStrategy(input.group) !== null,
+    recommendedSplitStrategy: recommendedSplitStrategy(input.group),
     decisionKind: input.decisionKind,
     aliases: input.group.aliases,
     accountNames: merchantGroupAccountNames(input.group),
@@ -489,7 +512,8 @@ function reviewQuestion(input: {
     decisionKind: 'needs_review' as const,
     pattern: group.merchantName,
     sourceMerchantKey: group.sourceMerchantKey,
-    canSplitMerchantGroup: group.groupingRuleId === null && bankDescriptionCounterpartyCount(group) > 1,
+    canSplitMerchantGroup: recommendedSplitStrategy(group) !== null,
+    recommendedSplitStrategy: recommendedSplitStrategy(group),
     transactionIds: group.transactionIds,
     aliases: group.aliases,
     accountNames: merchantGroupAccountNames(group),
@@ -734,11 +758,14 @@ export async function previewAiCategorization(options: { limit?: unknown; sort?:
   };
 }
 
-export function createMerchantGroupingRule(input: { sourceMerchantKey: string }) {
+export function createMerchantGroupingRule(input: { sourceMerchantKey: string; strategy?: string }) {
   const sourceMerchantKey = String(input.sourceMerchantKey || '').trim().toUpperCase();
   if (!sourceMerchantKey) {
     throw new Error('Merchant grouping rule requires a source merchant key.');
   }
+  const strategy = input.strategy === INDIVIDUAL_TRANSACTION_STRATEGY
+    ? INDIVIDUAL_TRANSACTION_STRATEGY
+    : BANK_COUNTERPARTY_STRATEGY;
 
   const now = new Date().toISOString();
   getDb().prepare(`
@@ -747,7 +774,7 @@ export function createMerchantGroupingRule(input: { sourceMerchantKey: string })
     ON CONFLICT(sourceMerchantKey) DO UPDATE SET
       strategy = excluded.strategy,
       updatedAt = excluded.updatedAt
-  `).run(sourceMerchantKey, BANK_COUNTERPARTY_STRATEGY, now, now);
+  `).run(sourceMerchantKey, strategy, now, now);
 
   return getDb()
     .prepare('SELECT id, sourceMerchantKey, strategy, createdAt, updatedAt FROM merchantGroupingRules WHERE sourceMerchantKey = ?')

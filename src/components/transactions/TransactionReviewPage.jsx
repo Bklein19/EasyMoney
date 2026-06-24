@@ -95,6 +95,7 @@ export default function TransactionReviewPage() {
         decisionKind: suggestion.decisionKind,
         sourceMerchantKey: suggestion.sourceMerchantKey,
         canSplitMerchantGroup: suggestion.canSplitMerchantGroup,
+        recommendedSplitStrategy: suggestion.recommendedSplitStrategy,
         accountName: suggestion.accountNames?.length === 1 ? suggestion.accountNames[0] : '',
         suggestedCategoryId: String(suggestion.categoryId),
         categoryId: categoryByReviewKey[suggestionSelectionId(suggestion)] ?? String(suggestion.categoryId),
@@ -111,6 +112,7 @@ export default function TransactionReviewPage() {
       decisionKind: question.decisionKind,
       sourceMerchantKey: question.sourceMerchantKey,
       canSplitMerchantGroup: question.canSplitMerchantGroup,
+      recommendedSplitStrategy: question.recommendedSplitStrategy,
       accountName: question.accountNames?.length === 1 ? question.accountNames[0] : '',
       suggestedCategoryId: '',
       categoryId: categoryByReviewKey[question.key] ?? '',
@@ -230,6 +232,7 @@ export default function TransactionReviewPage() {
     try {
       await trpcClient.transactions.createMerchantGroupingRule.mutate({
         sourceMerchantKey: row.sourceMerchantKey,
+        strategy: row.recommendedSplitStrategy || 'individual_transactions',
       });
       await handlePreviewAiCategorization();
     } catch (error) {
@@ -593,7 +596,11 @@ export default function TransactionReviewPage() {
                                             disabled={splittingReviewKey === row.key || isAiCategorizing}
                                             onClick={() => splitMerchantGroup(row)}
                                           >
-                                            {splittingReviewKey === row.key ? 'Splitting...' : 'Split future groups'}
+                                            {splittingReviewKey === row.key
+                                              ? 'Splitting...'
+                                              : row.recommendedSplitStrategy === 'bank_description_counterparty'
+                                                ? 'Split by counterparty'
+                                                : 'Handle separately'}
                                           </button>
                                         </div>
                                       )}

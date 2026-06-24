@@ -101,6 +101,7 @@ export const appRouter = t.router({
     createMerchantGroupingRule: t.procedure
       .input(z.object({
         sourceMerchantKey: z.string().min(1),
+        strategy: z.enum(['bank_description_counterparty', 'individual_transactions']).optional(),
       }))
       .mutation(({ input }) => createMerchantGroupingRule(input)),
 
