@@ -14,6 +14,12 @@ export function createMoneyParserAdapter({
   name,
   parseMoneyFile,
 }: MoneyParserAdapterOptions): AppImportParser {
+  const toAppSourceRole = (transaction: ParseResult['transactions'][number]) => {
+    if (transaction.category === 'in-kind-transfer') return 'statement-only';
+    if (transaction.category === 'statement-summary') return 'statement-summary';
+    return 'activity';
+  };
+
   const toAppAmountCents = (transaction: ParseResult['transactions'][number]) => {
     if (transaction.raw?.type === 'credit-card-activity') {
       return -transaction.amount_cents;
@@ -42,7 +48,7 @@ export function createMoneyParserAdapter({
           description: transaction.description,
           institution: transaction.institution,
           account: transaction.account,
-          sourceRole: transaction.category === 'in-kind-transfer' ? 'statement-only' : 'activity',
+          sourceRole: toAppSourceRole(transaction),
           raw: {
             moneyId: transaction.id,
             moneyCategory: transaction.category,

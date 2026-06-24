@@ -67,6 +67,7 @@ export interface TransactionListItem {
   originalCategory: string | null;
   type: TransactionType | null;
   transactionKind: string | null;
+  sourceRole: string | null;
   status: TransactionStatus | null;
   notes: string | null;
   importBatchId: string | null;

@@ -22,10 +22,7 @@ function parseBalance(value: string): number {
   return value.trim() === "-" ? 0 : cents(value);
 }
 
-export default async function parse(filePath: string): Promise<ParseResult> {
-  const text = await pdfToText(filePath, true);
-  const date = statementDate(filePath);
-
+export function parseMerrillCmaStatementText(text: string, date: string): ParseResult {
   const accountMatch = text.match(/Account Number:\s*(\d{2}W-\d{5})/);
   if (!accountMatch) throw new Error("Could not find Merrill account number");
   const account = `CMA-Edge - ${accountMatch[1]}`;
@@ -47,6 +44,7 @@ export default async function parse(filePath: string): Promise<ParseResult> {
           institution: "Merrill",
           amount_cents,
           description: "Statement net cash flow",
+          category: "statement-summary",
           raw: { type: "statement-cash-flow-summary", metric: "netCashFlow" },
         })
       );
@@ -83,4 +81,9 @@ export default async function parse(filePath: string): Promise<ParseResult> {
     covered_from: date,
     covered_to: date,
   };
+}
+
+export default async function parse(filePath: string): Promise<ParseResult> {
+  const text = await pdfToText(filePath, true);
+  return parseMerrillCmaStatementText(text, statementDate(filePath));
 }

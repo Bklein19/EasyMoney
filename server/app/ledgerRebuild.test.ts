@@ -636,6 +636,7 @@ test('source rebuild drops lower-priority statement summaries by activity bucket
     date: '2026-03-31',
     amountCents: -500000,
     description: 'Statement net cash flow',
+    sourceRole: 'statement-summary',
     priority: 50,
     raw: {
       type: 'statement-cash-flow-summary',

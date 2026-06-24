@@ -29,6 +29,7 @@ interface LedgerTransactionRow {
   originalCategory: string | null;
   type: string | null;
   transactionKind: string | null;
+  sourceRole: string | null;
   status: string | null;
   notes: string | null;
   importBatchId: string | null;
@@ -215,6 +216,7 @@ function toTransactionListItem(row: LedgerTransactionRow): TransactionListItem {
     originalCategory: row.originalCategory,
     type: row.type,
     transactionKind: row.transactionKind,
+    sourceRole: row.sourceRole,
     status: row.status,
     notes: row.notes,
     importBatchId: row.importBatchId,
@@ -358,6 +360,7 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
         t.originalCategory,
         t.type,
         t.transactionKind,
+        t.sourceRole,
         t.status,
         ta.notes AS notes,
         t.importBatchId,

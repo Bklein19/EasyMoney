@@ -1,4 +1,4 @@
-export type TransactionCategory = 'activity' | 'in-kind-transfer';
+export type TransactionCategory = 'activity' | 'in-kind-transfer' | 'statement-summary';
 
 export interface ParsedTransaction {
   id: string;

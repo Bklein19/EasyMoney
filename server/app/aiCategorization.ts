@@ -22,6 +22,7 @@ interface UncategorizedTransactionRow {
   originalDescription: string | null;
   originalCategory: string | null;
   transactionKind: string | null;
+  sourceRole?: string | null;
 }
 
 export type AiCategorizationDecision =
@@ -81,6 +82,7 @@ export interface AiCategorizationTransaction {
   description: string | null;
   merchant: string | null;
   account: string | null;
+  sourceRole: string | null;
 }
 
 interface MerchantCategorizationGroup {
@@ -154,7 +156,8 @@ function listUncategorizedTransactions() {
         t.merchant,
         t.originalDescription,
         t.originalCategory,
-        t.transactionKind
+        t.transactionKind,
+        t.sourceRole
        FROM ledgerTransactions t
        LEFT JOIN accounts a ON a.id = t.accountId
        LEFT JOIN transactionAnnotations ta ON ta.ledgerTransactionId = t.ledgerTransactionId
@@ -228,6 +231,7 @@ function compactTransaction(row: UncategorizedTransactionRow) {
     account: [row.accountInstitution, row.accountName].filter(Boolean).join(' ') || null,
     accountType: row.accountType,
     transactionKind: row.transactionKind,
+    sourceRole: row.sourceRole ?? null,
   };
 }
 
@@ -493,6 +497,7 @@ function transactionSummary(row: UncategorizedTransactionRow): AiCategorizationT
     description: row.description,
     merchant: row.merchant,
     account: [row.accountInstitution, row.accountName].filter(Boolean).join(' ') || null,
+    sourceRole: row.sourceRole ?? null,
   };
 }
 
@@ -515,7 +520,8 @@ export function getAiCategorizationTransactionDetails(input: { transactionIds: s
         t.merchant,
         t.originalDescription,
         t.originalCategory,
-        t.transactionKind
+        t.transactionKind,
+        t.sourceRole
        FROM ledgerTransactions t
        LEFT JOIN accounts a ON a.id = t.accountId
        WHERE t.ledgerTransactionId IN (${placeholders})

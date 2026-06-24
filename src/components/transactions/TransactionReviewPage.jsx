@@ -51,6 +51,11 @@ export default function TransactionReviewPage() {
   const getSuggestionTransaction = (suggestion) => suggestion.transactions?.[0] || suggestion.transaction || null;
   const getQuestionTransactions = (question) => question.transactions ?? [];
   const getAiTransactionTitle = (transaction) => transaction?.merchant || transaction?.description || 'Transaction';
+  const getSourceRoleLabel = (sourceRole) => {
+    if (sourceRole === 'statement-summary') return 'Statement summary';
+    if (sourceRole === 'statement-only') return 'Statement only';
+    return '';
+  };
   const getCategoryById = (categoryId) => categories.find(item => String(item.id) === String(categoryId)) ?? null;
   const getCategoryGroups = (excludedCategoryId) => {
     const availableCategories = categories.filter(category => String(category.id) !== String(excludedCategoryId));
@@ -128,7 +133,14 @@ export default function TransactionReviewPage() {
           <div className="transaction-review-card__transaction" key={transaction.transactionId}>
             <div>
               <strong>{getAiTransactionTitle(transaction)}</strong>
-              <span>{transaction.account || 'Unknown account'} · {transaction.date}</span>
+              <span>
+                {transaction.account || 'Unknown account'} · {transaction.date}
+                {getSourceRoleLabel(transaction.sourceRole) && (
+                  <em className="transaction-review-card__source-role">
+                    {getSourceRoleLabel(transaction.sourceRole)}
+                  </em>
+                )}
+              </span>
             </div>
             <span>{formatCurrency(transaction.amount, true)}</span>
           </div>

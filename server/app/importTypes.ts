@@ -10,7 +10,7 @@ export interface ImportProfile {
 }
 
 export type ImportParserSourceType = 'activity-export' | 'statement';
-export type ParsedImportSourceRole = 'activity' | 'statement-only';
+export type ParsedImportSourceRole = 'activity' | 'statement-only' | 'statement-summary';
 
 export interface ParsedImportTransaction {
   sourceRowIndex: number;

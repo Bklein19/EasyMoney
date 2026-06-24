@@ -8,6 +8,7 @@ import { parseRobinhoodStatementText } from './moneyParsers/robinhood-statement-
 import { parseNetBenefitsStatementText } from './moneyParsers/fidelity-netbenefits-statement-pdf.ts';
 import { parseFidelityPortfolioStatementText } from './moneyParsers/fidelity-portfolio-statement-pdf.ts';
 import { parseWellsFargoStatementText } from './moneyParsers/wells-fargo-statement-pdf.ts';
+import { parseMerrillCmaStatementText } from './moneyParsers/merrill-cma-statement-pdf.ts';
 
 test('money parser adapter translates money activity output to app import output', async () => {
   const parser = createMoneyParserAdapter({
@@ -64,6 +65,16 @@ test('money parser adapter translates money activity output to app import output
             institution: 'Test Bank',
             category: 'activity',
             raw: { type: 'credit-card-activity', section: 'Payments' },
+          },
+          {
+            id: 'tx-5',
+            date: '2026-06-30',
+            amount_cents: 500000,
+            description: 'Statement net cash flow',
+            account: 'Brokerage-XXXX1234',
+            institution: 'Vanguard',
+            category: 'statement-summary',
+            raw: { type: 'statement-cash-flow-summary', metric: 'netCashFlow' },
           },
         ],
         balances: [
@@ -144,6 +155,21 @@ test('money parser adapter translates money activity output to app import output
         moneyCategory: 'activity',
         type: 'credit-card-activity',
         section: 'Payments',
+      },
+    },
+    {
+      sourceRowIndex: 4,
+      date: '2026-06-30',
+      amountCents: 500000,
+      description: 'Statement net cash flow',
+      institution: 'Vanguard',
+      account: 'Brokerage-XXXX1234',
+      sourceRole: 'statement-summary',
+      raw: {
+        moneyId: 'tx-5',
+        moneyCategory: 'statement-summary',
+        type: 'statement-cash-flow-summary',
+        metric: 'netCashFlow',
       },
     },
   ]);
@@ -1208,6 +1234,49 @@ test('Merrill activity adapter parses investment CSV rows', async () => {
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+test('Merrill statement parser emits net cash flow as a statement summary transaction', () => {
+  const result = parseMerrillCmaStatementText(`
+    CMA® ACCOUNT
+    Account Number: 11W-22222
+    Net Cash Flow $5,000.00
+    Dividends/Interest Income $12.34
+    Closing Value (06/28) $123,456.78
+  `, '2024-06-28');
+
+  expect(result.balances).toEqual([
+    {
+      date: '2024-06-28',
+      account: 'CMA-Edge - 11W-22222',
+      institution: 'Merrill',
+      balance_cents: 12345678,
+    },
+  ]);
+  expect(result.transactions).toHaveLength(2);
+  expect(result.transactions[0]).toMatchObject({
+    date: '2024-06-28',
+    amount_cents: 500000,
+    account: 'CMA-Edge - 11W-22222',
+    institution: 'Merrill',
+    description: 'Statement net cash flow',
+    category: 'statement-summary',
+    raw: {
+      type: 'statement-cash-flow-summary',
+      metric: 'netCashFlow',
+    },
+  });
+  expect(result.transactions[1]).toMatchObject({
+    date: '2024-06-28',
+    amount_cents: 1234,
+    account: 'CMA-Edge - 11W-22222',
+    institution: 'Merrill',
+    description: 'Statement dividends/interest income',
+    raw: {
+      type: 'statement-cash-flow-summary',
+      metric: 'dividendsInterestIncome',
+    },
+  });
 });
 
 test('TIAA activity adapter parses retirement CSV rows', async () => {

@@ -149,9 +149,11 @@ function getMaterializedImportBatchId(fingerprint: string) {
 }
 
 function isStatementSummary(transaction: {
+  sourceRole?: string | null;
   raw: Record<string, unknown>;
 }) {
-  return transaction.raw.type === 'statement-cash-flow-summary';
+  return transaction.sourceRole === 'statement-summary' ||
+    transaction.raw.type === 'statement-cash-flow-summary';
 }
 
 function classifyFlow(description: string) {
@@ -296,12 +298,12 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
   }
 
   const dedupedTransactionInputs = sourceUniqueTransactionInputs.filter(transaction => {
-    if (transaction.sourceRole !== 'activity') return true;
     const priority = transaction.priority ?? 0;
     if (isStatementSummary(transaction)) {
       const best = bestMonthBucketDetailPriority.get(monthBucketKey(transaction));
       return best === undefined || priority >= best;
     }
+    if (transaction.sourceRole !== 'activity') return true;
     const best = bestExactPriority.get(exactKey(transaction));
     return best === undefined || priority >= best;
   });
