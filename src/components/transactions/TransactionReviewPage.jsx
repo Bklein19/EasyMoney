@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useLocation, useNavigate } from 'react-router';
+import { Link } from 'react-router';
 import { ChevronRight, Sparkles, X } from 'lucide-react';
 import { useCategories } from '../../hooks/useCategories';
 import { formatCurrency } from '../../utils/formatters';
@@ -33,9 +33,7 @@ function withTimeout(promise, timeoutMs, message) {
 }
 
 export default function TransactionReviewPage() {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const hasStartedFromNavigation = useRef(false);
+  const hasStartedReview = useRef(false);
   const [aiCategorization, setAiCategorization] = useState(null);
   const [aiCategorizationError, setAiCategorizationError] = useState('');
   const [openAiApiKeyDraft, setOpenAiApiKeyDraft] = useState('');
@@ -233,11 +231,10 @@ export default function TransactionReviewPage() {
   };
 
   useEffect(() => {
-    if (hasStartedFromNavigation.current || location.state?.autostartAiReview !== true) return;
-    hasStartedFromNavigation.current = true;
-    navigate(location.pathname, { replace: true, state: null });
+    if (hasStartedReview.current) return;
+    hasStartedReview.current = true;
     void handlePreviewAiCategorization();
-  }, [handlePreviewAiCategorization, location.pathname, location.state, navigate]);
+  }, [handlePreviewAiCategorization]);
 
   const setReviewCategory = (reviewKey, categoryId) => {
     setCategoryByReviewKey(previous => ({
@@ -399,14 +396,14 @@ export default function TransactionReviewPage() {
                 </button>
               ))}
             </div>
-            {!isAiCategorizing && (!aiCategorization || aiCategorizationError) && (
+            {!isAiCategorizing && aiCategorizationError && (
               <button
                 className="btn btn--secondary btn--sm"
                 type="button"
                 disabled={isApplyingAiCategories}
                 onClick={() => handlePreviewAiCategorization()}
               >
-                {aiCategorizationError ? 'Retry' : 'Categorize with AI'}
+                Retry
               </button>
             )}
           </div>
@@ -652,11 +649,7 @@ export default function TransactionReviewPage() {
           </>
         ) : (
           <div className="transaction-review-empty">
-            <h2>Review uncategorized merchants</h2>
-            <p>Run AI categorization to group uncategorized transactions by merchant and review suggested categories.</p>
-            <button className="btn btn--primary btn--sm" type="button" onClick={() => handlePreviewAiCategorization()}>
-              Categorize with AI
-            </button>
+            <h2>Starting review...</h2>
           </div>
         )}
       </div>
