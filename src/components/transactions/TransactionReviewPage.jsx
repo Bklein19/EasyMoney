@@ -227,14 +227,55 @@ export default function TransactionReviewPage() {
 
   const splitMerchantGroup = async (row) => {
     if (!row.sourceMerchantKey) return;
+    const strategy = row.recommendedSplitStrategy || 'individual_transactions';
     setSplittingReviewKey(row.key);
     setAiCategorizationError('');
     try {
       await trpcClient.transactions.createMerchantGroupingRule.mutate({
         sourceMerchantKey: row.sourceMerchantKey,
-        strategy: row.recommendedSplitStrategy || 'individual_transactions',
+        strategy,
       });
-      await handlePreviewAiCategorization();
+      if (strategy === 'individual_transactions') {
+        const details = await trpcClient.transactions.aiCategorizationTransactionDetails.query({
+          transactionIds: row.transactionIds,
+        });
+        const transactions = details.transactions?.length ? details.transactions : (row.transactions ?? []);
+        const splitQuestions = transactions.map(transaction => ({
+          groupId: `${row.sourceMerchantKey}:individual:${transaction.transactionId}`,
+          decisionKind: 'needs_review',
+          pattern: getAiTransactionTitle(transaction),
+          sourceMerchantKey: row.sourceMerchantKey,
+          canSplitMerchantGroup: false,
+          recommendedSplitStrategy: null,
+          transactionIds: [transaction.transactionId],
+          aliases: [row.merchantName],
+          accountNames: transaction.account ? [transaction.account] : [],
+          transactionCount: 1,
+          totalAmount: transaction.amount,
+          reason: 'Handle this transaction separately.',
+          transactions: [transaction],
+        }));
+
+        setAiCategorization(previous => {
+          if (!previous) return previous;
+          return {
+            ...previous,
+            suggestions: (previous.suggestions ?? []).filter(suggestion => suggestionSelectionId(suggestion) !== row.key),
+            questions: [
+              ...(previous.questions ?? []).filter((question, index) => `${question.groupId || question.pattern}-${index}` !== row.key),
+              ...splitQuestions,
+            ],
+          };
+        });
+        setCategoryByReviewKey(previous => {
+          const next = { ...previous };
+          delete next[row.key];
+          return next;
+        });
+        setExpandedReviewKey(null);
+      } else {
+        await handlePreviewAiCategorization();
+      }
     } catch (error) {
       setAiCategorizationError(error instanceof Error ? error.message : String(error));
     } finally {

@@ -78,6 +78,12 @@ function cleanDescription(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function isLayoutContinuationLine(value: string): boolean {
+  return /^Page \d+/i.test(value) ||
+    /^continued on (?:the )?next page/i.test(value) ||
+    /continued on (?:the )?next page$/i.test(value);
+}
+
 function depositStatementTransactions(text: string, account: string): ParseResult["transactions"] {
   const transactions: ParseResult["transactions"] = [];
   const lines = text.split(/\n/);
@@ -136,7 +142,7 @@ function depositStatementTransactions(text: string, account: string): ParseResul
       continue;
     }
 
-    if (current && /^\s{8,}\S/.test(line) && !/^Page \d+/.test(trimmed) && !/^Total /.test(trimmed)) {
+    if (current && /^\s{8,}\S/.test(line) && !isLayoutContinuationLine(trimmed) && !/^Total /.test(trimmed)) {
       current.description += ` ${trimmed}`;
     }
   }
@@ -220,7 +226,7 @@ function cardStatementTransactions(text: string, account: string, coveredTo: str
       section = trimmed;
       continue;
     }
-    if (/^TOTAL .* FOR THIS PERIOD/i.test(trimmed) || /^continued on next page/i.test(trimmed)) {
+    if (/^TOTAL .* FOR THIS PERIOD/i.test(trimmed) || isLayoutContinuationLine(trimmed)) {
       flush();
       continue;
     }
@@ -239,7 +245,7 @@ function cardStatementTransactions(text: string, account: string, coveredTo: str
       continue;
     }
 
-    if (current && /^\s{8,}\S/.test(line) && !/^Page \d+/.test(trimmed) && !/^TOTAL /.test(trimmed)) {
+    if (current && /^\s{8,}\S/.test(line) && !isLayoutContinuationLine(trimmed) && !/^TOTAL /.test(trimmed)) {
       current.description += ` ${trimmed}`;
     }
   }
@@ -290,6 +296,10 @@ function parseCreditCard(text: string, filePath: string): ParseResult {
     covered_from,
     covered_to,
   };
+}
+
+export function parseBofaDepositStatementText(text: string, filePath: string): ParseResult {
+  return parseDeposit(text, filePath);
 }
 
 export default async function parse(filePath: string): Promise<ParseResult> {

@@ -9,6 +9,7 @@ import { parseNetBenefitsStatementText } from './moneyParsers/fidelity-netbenefi
 import { parseFidelityPortfolioStatementText } from './moneyParsers/fidelity-portfolio-statement-pdf.ts';
 import { parseWellsFargoStatementText } from './moneyParsers/wells-fargo-statement-pdf.ts';
 import { parseMerrillCmaStatementText } from './moneyParsers/merrill-cma-statement-pdf.ts';
+import { parseBofaDepositStatementText } from './moneyParsers/bofa-statement-pdf.ts';
 
 test('money parser adapter translates money activity output to app import output', async () => {
   const parser = createMoneyParserAdapter({
@@ -335,6 +336,32 @@ test('import parser registry resolves Bank of America statement PDFs', () => {
     sample: 'Bank of America Payment Information New Balance Total',
   });
   expect(contentParser?.id).toBe('bofa-statement-pdf');
+});
+
+test('Bank of America deposit statement parser ignores page continuation text', () => {
+  const result = parseBofaDepositStatementText(`
+Your Adv Plus Banking
+Account number: 1234
+for December 1, 2023 to December 31, 2023
+Beginning balance on December 1, 2023 $1,000.00
+
+Withdrawals and other subtractions
+12/29/23 Online Banking transfer to BRK 8092 Confirmation# 1111111111 -$500.00
+        continued on the next page
+Total withdrawals and other subtractions -$500.00
+
+Ending balance on December 31, 2023 $500.00
+  `, 'bofa-checking-1234-2023-december-statement.pdf');
+
+  expect(result.transactions).toHaveLength(1);
+  expect(result.transactions[0]).toMatchObject({
+    date: '2023-12-29',
+    amount_cents: -50000,
+    description: 'Online Banking transfer to BRK 8092 Confirmation# 1111111111',
+    account: 'Adv Plus Banking - 1234',
+    institution: 'Bank of America',
+  });
+  expect(result.transactions[0]?.description).not.toContain('continued on the next page');
 });
 
 test.each([
