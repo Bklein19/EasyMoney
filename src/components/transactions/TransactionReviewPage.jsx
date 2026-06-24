@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import { ChevronRight, Sparkles } from 'lucide-react';
@@ -9,6 +9,10 @@ import './TransactionsPage.css';
 
 const AI_CATEGORIZATION_GROUP_LIMIT = 32;
 const AI_CATEGORIZATION_TIMEOUT_MS = 90_000;
+const AI_SORT_OPTIONS = [
+  { value: 'count', label: 'Count' },
+  { value: 'money', label: 'Money' },
+];
 const CATEGORY_GROUPS = [
   { key: 'income', label: 'Income' },
   { key: 'transfer', label: 'Transfers' },
@@ -45,6 +49,7 @@ export default function TransactionReviewPage() {
   const [isRestoringAiCategories, setIsRestoringAiCategories] = useState(false);
   const [splittingReviewKey, setSplittingReviewKey] = useState('');
   const [isSavingOpenAiKey, setIsSavingOpenAiKey] = useState(false);
+  const [aiReviewSort, setAiReviewSort] = useState('count');
   const { categories } = useCategories();
   const categorizationCoverage = useQuery(trpc.transactions.categorizationCoverage.queryOptions());
 
@@ -75,7 +80,8 @@ export default function TransactionReviewPage() {
     .filter(question => !ignoredAiQuestionKeys.has(question.key)), [aiQuestions, ignoredAiQuestionKeys]);
   const suggestionSelectionId = (suggestion) => suggestion.id ?? suggestion.transactionId;
   const suggestionTransactionIds = (suggestion) => suggestion.transactionIds ?? [suggestion.transactionId].filter(Boolean);
-  const reviewRows = useMemo(() => [
+  const reviewRows = useMemo(() => {
+    const rows = [
     ...aiSuggestions
       .filter(suggestion => !suggestion.applied)
       .map(suggestion => ({
@@ -110,7 +116,20 @@ export default function TransactionReviewPage() {
       categoryId: categoryByReviewKey[question.key] ?? '',
       transactions: getQuestionTransactions(question),
     })),
-  ], [activeAiQuestions, aiSuggestions, categoryByReviewKey]);
+    ];
+
+    return rows.sort((a, b) => {
+      if (aiReviewSort === 'money') {
+        return Math.abs(b.totalAmount ?? 0) - Math.abs(a.totalAmount ?? 0) ||
+          b.transactionCount - a.transactionCount ||
+          a.merchantName.localeCompare(b.merchantName);
+      }
+
+      return b.transactionCount - a.transactionCount ||
+        Math.abs(b.totalAmount ?? 0) - Math.abs(a.totalAmount ?? 0) ||
+        a.merchantName.localeCompare(b.merchantName);
+    });
+  }, [activeAiQuestions, aiReviewSort, aiSuggestions, categoryByReviewKey]);
   const selectedReviewRows = reviewRows.filter(row => row.categoryId && row.transactionIds.length);
 
   useEffect(() => {
@@ -154,7 +173,8 @@ export default function TransactionReviewPage() {
     );
   };
 
-  const handlePreviewAiCategorization = async () => {
+  const handlePreviewAiCategorization = useCallback(async (sortOverride = aiReviewSort) => {
+    const sort = sortOverride === 'money' ? 'money' : 'count';
     setIsAiCategorizing(true);
     setAiReviewStartedAt(Date.now());
     setAiReviewElapsedSeconds(0);
@@ -166,11 +186,14 @@ export default function TransactionReviewPage() {
       groupCount: 0,
       suggestions: [],
       questions: [],
-      message: `Reviewing ${AI_CATEGORIZATION_GROUP_LIMIT} merchant groups...`,
+      message: `Reviewing ${AI_CATEGORIZATION_GROUP_LIMIT} merchant groups by ${sort === 'money' ? 'money' : 'count'}...`,
     });
     try {
       const result = await withTimeout(
-        trpcClient.transactions.aiCategorizationPreview.mutate({ limit: AI_CATEGORIZATION_GROUP_LIMIT }),
+        trpcClient.transactions.aiCategorizationPreview.mutate({
+          limit: AI_CATEGORIZATION_GROUP_LIMIT,
+          sort,
+        }),
         AI_CATEGORIZATION_TIMEOUT_MS,
         `AI categorization took longer than ${Math.round(AI_CATEGORIZATION_TIMEOUT_MS / 1000)} seconds. Try again with fewer uncategorized transactions or check the server logs.`
       );
@@ -185,13 +208,13 @@ export default function TransactionReviewPage() {
       setIsAiCategorizing(false);
       setAiReviewStartedAt(null);
     }
-  };
+  }, [aiReviewSort]);
 
   useEffect(() => {
     if (hasStartedFromUrl.current || searchParams.get('start') !== '1') return;
     hasStartedFromUrl.current = true;
-    handlePreviewAiCategorization();
-  }, [searchParams]);
+    void handlePreviewAiCategorization();
+  }, [handlePreviewAiCategorization, searchParams]);
 
   const setReviewCategory = (reviewKey, categoryId) => {
     setCategoryByReviewKey(previous => ({
@@ -350,14 +373,29 @@ export default function TransactionReviewPage() {
             </section>
           )}
           {!isAiCategorizing && (!aiCategorization || aiCategorizationError) && (
-            <button
-              className="btn btn--secondary btn--sm"
-              type="button"
-              disabled={isApplyingAiCategories}
-              onClick={handlePreviewAiCategorization}
-            >
-              {aiCategorizationError ? 'Retry' : 'Categorize with AI'}
-            </button>
+            <div className="transaction-review-header-actions">
+              <div className="transaction-review-sort" aria-label="AI review sort">
+                {AI_SORT_OPTIONS.map(option => (
+                  <button
+                    key={option.value}
+                    className={`transaction-review-sort__button ${aiReviewSort === option.value ? 'is-active' : ''}`}
+                    type="button"
+                    aria-pressed={aiReviewSort === option.value}
+                    onClick={() => setAiReviewSort(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <button
+                className="btn btn--secondary btn--sm"
+                type="button"
+                disabled={isApplyingAiCategories}
+                onClick={() => handlePreviewAiCategorization()}
+              >
+                {aiCategorizationError ? 'Retry' : 'Categorize with AI'}
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -431,6 +469,23 @@ export default function TransactionReviewPage() {
                       <div>
                         <strong>{reviewRows.length} merchants</strong>
                         <span>{selectedReviewRows.length} with categories selected</span>
+                      </div>
+                      <div className="transaction-review-sort" aria-label="AI review sort">
+                        {AI_SORT_OPTIONS.map(option => (
+                          <button
+                            key={option.value}
+                            className={`transaction-review-sort__button ${aiReviewSort === option.value ? 'is-active' : ''}`}
+                            type="button"
+                            aria-pressed={aiReviewSort === option.value}
+                            disabled={isAiCategorizing || isApplyingAiCategories}
+                            onClick={() => {
+                              setAiReviewSort(option.value);
+                              void handlePreviewAiCategorization(option.value);
+                            }}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
                       </div>
                       <button
                         className="btn btn--primary btn--sm"
@@ -566,7 +621,7 @@ export default function TransactionReviewPage() {
           <div className="transaction-review-empty">
             <h2>Review uncategorized merchants</h2>
             <p>Run AI categorization to group uncategorized transactions by merchant and review suggested categories.</p>
-            <button className="btn btn--primary btn--sm" type="button" onClick={handlePreviewAiCategorization}>
+            <button className="btn btn--primary btn--sm" type="button" onClick={() => handlePreviewAiCategorization()}>
               Categorize with AI
             </button>
           </div>

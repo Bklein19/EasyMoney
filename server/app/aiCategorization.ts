@@ -8,6 +8,7 @@ const DEFAULT_MODEL = 'gpt-5.4-mini';
 const MAX_GROUPS = 500;
 const BATCH_SIZE = 32;
 const BANK_COUNTERPARTY_STRATEGY = 'bank_description_counterparty';
+type AiCategorizationSort = 'count' | 'money';
 
 interface UncategorizedTransactionRow {
   id: number;
@@ -333,9 +334,31 @@ function bankDescriptionCounterpartyCount(group: MerchantCategorizationGroup) {
     .map(value => normalizeMerchantText(value).key)).size;
 }
 
-export function groupTransactionsForAiCategorization(rows: UncategorizedTransactionRow[]): MerchantCategorizationGroup[] {
+function normalizeAiCategorizationSort(value: unknown): AiCategorizationSort {
+  return value === 'money' ? 'money' : 'count';
+}
+
+function compareMerchantGroups(sort: AiCategorizationSort) {
+  return (a: MerchantCategorizationGroup, b: MerchantCategorizationGroup) => {
+    if (sort === 'money') {
+      return b.absoluteAmount - a.absoluteAmount ||
+        b.transactionCount - a.transactionCount ||
+        a.merchantName.localeCompare(b.merchantName);
+    }
+
+    return b.transactionCount - a.transactionCount ||
+      b.absoluteAmount - a.absoluteAmount ||
+      a.merchantName.localeCompare(b.merchantName);
+  };
+}
+
+export function groupTransactionsForAiCategorization(
+  rows: UncategorizedTransactionRow[],
+  options: { sort?: unknown } = {}
+): MerchantCategorizationGroup[] {
   const groupsByKey = new Map<string, MerchantCategorizationGroup>();
   const rulesBySourceKey = new Map(listMerchantGroupingRules().map(rule => [rule.sourceMerchantKey, rule]));
+  const sort = normalizeAiCategorizationSort(options.sort);
 
   for (const row of rows) {
     const { normalized, sourceMerchantKey, groupingRuleId } = merchantGroupingForRow(row, rulesBySourceKey);
@@ -379,11 +402,7 @@ export function groupTransactionsForAiCategorization(rows: UncategorizedTransact
         transactionIds: transactions.map(transaction => transaction.ledgerTransactionId),
       };
     })
-    .sort((a, b) =>
-      b.transactionCount - a.transactionCount ||
-      b.absoluteAmount - a.absoluteAmount ||
-      a.merchantName.localeCompare(b.merchantName)
-    );
+    .sort(compareMerchantGroups(sort));
 }
 
 function compactMerchantGroup(group: MerchantCategorizationGroup) {
@@ -596,13 +615,14 @@ async function categorizeBatchWithOpenAi(input: {
   return result.finalOutput as ModelResponse;
 }
 
-export async function previewAiCategorization(options: { limit?: unknown } = {}) {
+export async function previewAiCategorization(options: { limit?: unknown; sort?: unknown } = {}) {
   const apiKey = getOpenAiKey();
   const model = getOpenAiModel();
   const groupLimit = clampGroupLimit(options.limit);
+  const sort = normalizeAiCategorizationSort(options.sort);
   const categories = listCategorizationCategories();
   const transactions = listUncategorizedTransactions();
-  const groups = groupTransactionsForAiCategorization(transactions);
+  const groups = groupTransactionsForAiCategorization(transactions, { sort });
   const reviewGroups = groups.slice(0, groupLimit);
 
   if (!apiKey) {
@@ -612,6 +632,7 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
       scanned: transactions.length,
       groupCount: groups.length,
       reviewedGroupCount: reviewGroups.length,
+      sort,
       suggestions: [] as AiCategorySuggestion[],
       questions: [] as AiCategoryQuestion[],
       message: 'Set OPENAI_API_KEY on the server to enable AI categorization.',
@@ -625,6 +646,7 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
       scanned: transactions.length,
       groupCount: groups.length,
       reviewedGroupCount: reviewGroups.length,
+      sort,
       suggestions: [] as AiCategorySuggestion[],
       questions: [] as AiCategoryQuestion[],
     };
@@ -706,6 +728,7 @@ export async function previewAiCategorization(options: { limit?: unknown } = {})
     scanned: transactions.length,
     groupCount: groups.length,
     reviewedGroupCount: reviewGroups.length,
+    sort,
     suggestions,
     questions,
   };

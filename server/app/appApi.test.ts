@@ -1312,6 +1312,57 @@ test('ai categorization groups uncategorized transactions by merchant before mod
   });
 });
 
+test('ai categorization can sort merchant groups by money instead of count', () => {
+  const baseRow = {
+    accountName: 'Checking',
+    accountInstitution: 'Bank',
+    accountType: 'checking',
+    originalCategory: null,
+    transactionKind: 'activity',
+  };
+  const rows = [
+    {
+      ...baseRow,
+      id: 1,
+      ledgerTransactionId: 'coffee_1',
+      date: '2026-06-01',
+      amountCents: -500,
+      description: 'Coffee',
+      merchant: 'Coffee',
+      originalDescription: 'Coffee',
+    },
+    {
+      ...baseRow,
+      id: 2,
+      ledgerTransactionId: 'coffee_2',
+      date: '2026-06-02',
+      amountCents: -500,
+      description: 'Coffee',
+      merchant: 'Coffee',
+      originalDescription: 'Coffee',
+    },
+    {
+      ...baseRow,
+      id: 3,
+      ledgerTransactionId: 'rent_1',
+      date: '2026-06-03',
+      amountCents: -250000,
+      description: 'Rent',
+      merchant: 'Rent',
+      originalDescription: 'Rent',
+    },
+  ];
+
+  expect(groupTransactionsForAiCategorization(rows).map(group => group.merchantName)).toEqual([
+    'Coffee',
+    'Rent',
+  ]);
+  expect(groupTransactionsForAiCategorization(rows, { sort: 'money' }).map(group => group.merchantName)).toEqual([
+    'Rent',
+    'Coffee',
+  ]);
+});
+
 test('ai categorization persists merchant grouping rules for generic processor descriptions', async () => {
   const processorRows = [
     {

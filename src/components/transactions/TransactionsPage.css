@@ -477,6 +477,46 @@
   gap: var(--space-3);
 }
 
+.transaction-review-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.transaction-review-sort {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.transaction-review-sort__button {
+  min-height: 26px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.transaction-review-sort__button:hover:not(:disabled),
+.transaction-review-sort__button.is-active {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.transaction-review-sort__button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
 .transaction-review-coverage__item {
   display: grid;
   gap: 5px;

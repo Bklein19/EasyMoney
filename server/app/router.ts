@@ -94,6 +94,7 @@ export const appRouter = t.router({
     aiCategorizationPreview: t.procedure
       .input(z.object({
         limit: z.number().optional(),
+        sort: z.enum(['count', 'money']).optional(),
       }).optional())
       .mutation(({ input }) => previewAiCategorization(input ?? {})),
 
