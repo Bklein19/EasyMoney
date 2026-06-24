@@ -940,7 +940,10 @@ test('app transactions search requires all terms to match', async () => {
 
   const body = await getJson('/api/app/transactions?search=check%20930.00');
 
-  expect(body.transactions.map((transaction: { description: string }) => transaction.description)).toEqual(['Check 1234']);
+  expect(body.transactions.map((transaction: { description: string }) => transaction.description)).toEqual([
+    'Online transfer',
+    'Check 1234',
+  ]);
 });
 
 test('app transactions search supports quoted phrase terms', async () => {

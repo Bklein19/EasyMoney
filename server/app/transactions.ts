@@ -226,7 +226,9 @@ function buildTransactionFilter(options: ListTransactionsOptions = {}) {
         t.description LIKE $${searchParam} OR
         t.merchant LIKE $${searchParam} OR
         t.originalDescription LIKE $${searchParam} OR
-        ta.notes LIKE $${searchParam}
+        ta.notes LIKE $${searchParam} OR
+        c.name LIKE $${searchParam} OR
+        a.name LIKE $${searchParam}
         ${amountSearchClause}
       )`);
       params[searchParam] = `%${term}%`;
