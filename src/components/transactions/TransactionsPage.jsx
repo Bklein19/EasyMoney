@@ -300,12 +300,6 @@ export default function TransactionsPage() {
                   <span>{formatTransactionCount(totalCount)}</span>
                   <span>Income {formatCurrency(totals.income)}</span>
                   <span>Expenses {formatCurrency(totals.expenses)}</span>
-                  {totals.internalMovement > 0 && (
-                    <span>Internal {formatCurrency(totals.internalMovement)}</span>
-                  )}
-                  {totals.investments > 0 && (
-                    <span>Investments {formatCurrency(totals.investments)}</span>
-                  )}
                   <span>Net {formatCurrency(totals.net, true)}</span>
                 </div>
               </div>
