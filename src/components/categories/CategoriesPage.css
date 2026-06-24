@@ -188,6 +188,23 @@
   gap: var(--space-2);
 }
 
+.category-delete-button {
+  color: var(--color-danger);
+}
+
+.category-delete-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.25;
+}
+
+.category-delete-confirm span {
+  max-width: 260px;
+}
+
 .category-details-error {
   flex: 1 1 100%;
   color: var(--color-danger);

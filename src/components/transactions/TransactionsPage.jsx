@@ -281,6 +281,30 @@ export default function TransactionsPage() {
                 </div>
               </div>
               <div className="transactions-header-actions">
+                {bulkCategoryUndo && (
+                  <div className="transactions-bulk-undo" role="status" aria-live="polite">
+                    <span>
+                      Categorized {formatTransactionCount(bulkCategoryUndo.count)} as {bulkCategoryUndo.categoryName}.
+                    </span>
+                    <button
+                      className="btn btn--ghost btn--sm"
+                      type="button"
+                      disabled={isRestoringBulkCategory}
+                      onClick={handleUndoBulkCategory}
+                    >
+                      {isRestoringBulkCategory ? 'Undoing...' : 'Undo'}
+                    </button>
+                    <button
+                      className="transaction-feedback-dismiss"
+                      type="button"
+                      aria-label="Dismiss categorization update"
+                      disabled={isRestoringBulkCategory}
+                      onClick={() => setBulkCategoryUndo(null)}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                )}
                 <div className="transactions-bulk-category" aria-label="Bulk categorization">
                   <select
                     id="bulkTransactionCategory"
@@ -335,30 +359,6 @@ export default function TransactionsPage() {
                   </button>
                 </div>
               </form>
-            )}
-            {bulkCategoryUndo && (
-              <div className="transactions-bulk-undo" role="status" aria-live="polite">
-                <span>
-                  Categorized {formatTransactionCount(bulkCategoryUndo.count)} as {bulkCategoryUndo.categoryName}.
-                </span>
-                <button
-                  className="btn btn--ghost btn--sm"
-                  type="button"
-                  disabled={isRestoringBulkCategory}
-                  onClick={handleUndoBulkCategory}
-                >
-                  {isRestoringBulkCategory ? 'Undoing...' : 'Undo'}
-                </button>
-                <button
-                  className="transaction-feedback-dismiss"
-                  type="button"
-                  aria-label="Dismiss categorization update"
-                  disabled={isRestoringBulkCategory}
-                  onClick={() => setBulkCategoryUndo(null)}
-                >
-                  <X size={14} />
-                </button>
-              </div>
             )}
           </div>
 

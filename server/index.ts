@@ -193,6 +193,9 @@ export const routes = wrapRoutes({
     POST: (request) => {
       const db = getDb();
       const uncategorized = db.prepare("SELECT id FROM categories WHERE name = 'Uncategorized'").get() as { id: number } | undefined;
+      if (uncategorized && String(uncategorized.id) === String(request.params.id)) {
+        return json({ error: 'Uncategorized cannot be deleted.' }, 400);
+      }
       const remove = db.transaction((id: number | string) => {
         if (uncategorized) {
           db.prepare('UPDATE transactionAnnotations SET categoryId = ? WHERE categoryId = ?').run(uncategorized.id, id);

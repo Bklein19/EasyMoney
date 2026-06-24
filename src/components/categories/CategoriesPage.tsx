@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState, type FormEvent } from 'react';
-import { Check, ChevronRight } from 'lucide-react';
+import { Check, ChevronRight, Trash2 } from 'lucide-react';
 import { useCategories } from '../../hooks/useCategories';
 import './CategoriesPage.css';
 
@@ -31,17 +31,28 @@ function labelFor(value: string | null | undefined, labels: Record<string, strin
 function CategoryDetails({
   category,
   isSaving,
+  isDeleting,
+  isConfirmingDelete,
   error,
   onSave,
+  onRequestDelete,
+  onCancelDelete,
+  onConfirmDelete,
 }: {
   category: Category;
   isSaving: boolean;
+  isDeleting: boolean;
+  isConfirmingDelete: boolean;
   error?: string;
   onSave: (changes: { description: string | null }) => void;
+  onRequestDelete: () => void;
+  onCancelDelete: () => void;
+  onConfirmDelete: () => void;
 }) {
   const [description, setDescription] = useState(category.description || '');
   const currentDescription = category.description || '';
   const isDirty = description.trim() !== currentDescription;
+  const canDelete = category.name !== 'Uncategorized';
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -71,6 +82,39 @@ function CategoryDetails({
             <Check size={14} />
             Save
           </button>
+          {canDelete && (
+            isConfirmingDelete ? (
+              <div className="category-delete-confirm" role="group" aria-label={`Confirm deleting ${category.name}`}>
+                <span>Move annotations to Uncategorized and delete?</span>
+                <button
+                  className="btn btn--danger btn--sm"
+                  type="button"
+                  disabled={isSaving || isDeleting}
+                  onClick={onConfirmDelete}
+                >
+                  {isDeleting ? 'Deleting...' : 'Delete'}
+                </button>
+                <button
+                  className="btn btn--ghost btn--sm"
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={onCancelDelete}
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                className="btn btn--ghost btn--sm category-delete-button"
+                type="button"
+                disabled={isSaving || isDeleting}
+                onClick={onRequestDelete}
+              >
+                <Trash2 size={14} />
+                Delete
+              </button>
+            )
+          )}
         </div>
         {error && <div className="category-details-error">{error}</div>}
       </form>
@@ -79,9 +123,11 @@ function CategoryDetails({
 }
 
 export default function CategoriesPage() {
-  const { categories, updateCategory, isLoading } = useCategories();
+  const { categories, updateCategory, deleteCategory, isLoading } = useCategories();
   const [expandedCategoryId, setExpandedCategoryId] = useState<number | null>(null);
   const [savingCategoryId, setSavingCategoryId] = useState<number | null>(null);
+  const [deletingCategoryId, setDeletingCategoryId] = useState<number | null>(null);
+  const [confirmingDeleteCategoryId, setConfirmingDeleteCategoryId] = useState<number | null>(null);
   const [errorByCategoryId, setErrorByCategoryId] = useState<Record<number, string>>({});
 
   const sortedCategories = useMemo(
@@ -104,6 +150,23 @@ export default function CategoriesPage() {
       }));
     } finally {
       setSavingCategoryId(null);
+    }
+  };
+
+  const removeCategory = async (category: Category) => {
+    setDeletingCategoryId(category.id);
+    setErrorByCategoryId(current => ({ ...current, [category.id]: '' }));
+    try {
+      await deleteCategory(category.id);
+      setExpandedCategoryId(current => current === category.id ? null : current);
+      setConfirmingDeleteCategoryId(current => current === category.id ? null : current);
+    } catch (deleteError) {
+      setErrorByCategoryId(current => ({
+        ...current,
+        [category.id]: deleteError instanceof Error ? deleteError.message : 'Could not delete category.',
+      }));
+    } finally {
+      setDeletingCategoryId(null);
     }
   };
 
@@ -145,6 +208,7 @@ export default function CategoriesPage() {
               {sortedCategories.map((category: Category) => {
                 const isExpanded = expandedCategoryId === category.id;
                 const isSaving = savingCategoryId === category.id;
+                const isDeleting = deletingCategoryId === category.id;
                 return (
                   <Fragment key={category.id}>
                     <tr
@@ -188,8 +252,13 @@ export default function CategoriesPage() {
                             key={`${category.id}-${category.description || ''}`}
                             category={category}
                             isSaving={isSaving}
+                            isDeleting={isDeleting}
+                            isConfirmingDelete={confirmingDeleteCategoryId === category.id}
                             error={errorByCategoryId[category.id]}
                             onSave={(changes) => saveCategory(category, changes)}
+                            onRequestDelete={() => setConfirmingDeleteCategoryId(category.id)}
+                            onCancelDelete={() => setConfirmingDeleteCategoryId(null)}
+                            onConfirmDelete={() => removeCategory(category)}
                           />
                         </td>
                       </tr>

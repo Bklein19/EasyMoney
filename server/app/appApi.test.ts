@@ -561,6 +561,38 @@ test('app categories endpoint returns domain-shaped categories', async () => {
   });
 });
 
+test('category delete reassigns annotations to Uncategorized and protects Uncategorized', async () => {
+  const accountId = insertRow('accounts', {
+    name: 'Checking',
+    institution: 'Local Bank',
+    type: 'checking',
+  });
+  const uncategorizedId = insertRow('categories', { name: 'Uncategorized', type: 'expense' });
+  const groceriesId = insertRow('categories', { name: 'Groceries', type: 'expense' });
+  const transactionId = insertRow('transactions', {
+    accountId,
+    date: '2026-06-16',
+    amount: -25,
+    description: 'Market',
+    type: 'expense',
+  });
+  await putJson(`/api/transactions/${transactionId}`, { categoryId: groceriesId });
+
+  await postJson(`/api/categories/${groceriesId}/delete`, {});
+
+  expect(getDb().prepare('SELECT id FROM categories WHERE id = ?').get(groceriesId)).toBeNull();
+  expect(getDb().prepare('SELECT categoryId FROM transactionAnnotations').get()).toEqual({
+    categoryId: uncategorizedId,
+  });
+
+  const result = await postJson(`/api/categories/${uncategorizedId}/delete`, {}, 400);
+
+  expect(result).toEqual({ error: 'Uncategorized cannot be deleted.' });
+  expect(getDb().prepare('SELECT id FROM categories WHERE id = ?').get(uncategorizedId)).toEqual({
+    id: uncategorizedId,
+  });
+});
+
 test('app transactions endpoint joins account and category details', async () => {
   const accountId = insertRow('accounts', {
     name: 'Checking',
