@@ -444,8 +444,9 @@ export default function TransactionsPage() {
                 })}
               </>
             ) : (
-              <div className="empty-state-simple" style={{ height: 200 }}>
-                No transactions found for the selected filters.
+              <div className="transactions-empty-state">
+                <strong>No transactions found</strong>
+                <span>Adjust the filters or clear search to see transactions.</span>
               </div>
             )}
           </div>
