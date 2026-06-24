@@ -1,4 +1,4 @@
-import type { ChangeEvent, Dispatch, SetStateAction } from 'react';
+import type { ChangeEvent, Dispatch, KeyboardEvent, SetStateAction } from 'react';
 import { useCategories } from '../../hooks/useCategories';
 import { useAccounts } from '../../hooks/useAccounts';
 
@@ -37,6 +37,11 @@ export default function TransactionFilters({ filters, setFilters }: TransactionF
     }));
   };
 
+  const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+  };
+
   return (
     <div className="filters-container">
       <div className="transaction-search-control">
@@ -47,6 +52,7 @@ export default function TransactionFilters({ filters, setFilters }: TransactionF
           className="filter-input"
           value={filters.searchQuery || ''}
           onChange={handleChange}
+          onKeyDown={handleSearchKeyDown}
           autoComplete="off"
           enterKeyHint="search"
         />
