@@ -86,6 +86,13 @@ function parseSearchAmountCents(value: string): { cents: number; isSigned: boole
   };
 }
 
+function parseSearchTerms(value: string): string[] {
+  return [...value.matchAll(/"([^"]+)"|'([^']+)'|(\S+)/g)]
+    .map(match => match[1] ?? match[2] ?? match[3] ?? '')
+    .map(term => term.trim())
+    .filter(Boolean);
+}
+
 function isUncategorizedFilter(value: string | number | null | undefined): boolean {
   return typeof value === 'string' && value.toLowerCase() === 'uncategorized';
 }
@@ -205,23 +212,26 @@ function buildTransactionFilter(options: ListTransactionsOptions = {}) {
 
   const search = optionalString(options.search);
   if (search) {
-    const amountSearch = parseSearchAmountCents(search);
-    const amountSearchClause = amountSearch
-      ? amountSearch.isSigned
-        ? 'OR t.amountCents = $searchAmountCents'
-        : 'OR ABS(t.amountCents) = $searchAmountCents'
-      : '';
-    clauses.push(`(
-      t.description LIKE $search OR
-      t.merchant LIKE $search OR
-      t.originalDescription LIKE $search OR
-      ta.notes LIKE $search OR
-      c.name LIKE $search OR
-      a.name LIKE $search
-      ${amountSearchClause}
-    )`);
-    params.search = `%${search}%`;
-    if (amountSearch) params.searchAmountCents = amountSearch.isSigned ? amountSearch.cents : Math.abs(amountSearch.cents);
+    const searchTerms = parseSearchTerms(search);
+    searchTerms.forEach((term, index) => {
+      const searchParam = `search${index}`;
+      const amountParam = `searchAmountCents${index}`;
+      const amountSearch = parseSearchAmountCents(term);
+      const amountSearchClause = amountSearch
+        ? amountSearch.isSigned
+          ? `OR t.amountCents = $${amountParam}`
+          : `OR ABS(t.amountCents) = $${amountParam}`
+        : '';
+      clauses.push(`(
+        t.description LIKE $${searchParam} OR
+        t.merchant LIKE $${searchParam} OR
+        t.originalDescription LIKE $${searchParam} OR
+        ta.notes LIKE $${searchParam}
+        ${amountSearchClause}
+      )`);
+      params[searchParam] = `%${term}%`;
+      if (amountSearch) params[amountParam] = amountSearch.isSigned ? amountSearch.cents : Math.abs(amountSearch.cents);
+    });
   }
 
   return {

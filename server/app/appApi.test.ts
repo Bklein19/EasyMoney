@@ -909,6 +909,69 @@ test('app transactions search includes signed and unsigned amounts with optional
   ]);
 });
 
+test('app transactions search requires all terms to match', async () => {
+  const accountId = insertRow('accounts', {
+    name: 'Checking',
+    institution: 'Local Bank',
+    type: 'checking',
+  });
+
+  insertRow('transactions', {
+    accountId,
+    date: '2026-06-17',
+    amount: -930,
+    description: 'Check 1234',
+    type: 'expense',
+  });
+  insertRow('transactions', {
+    accountId,
+    date: '2026-06-18',
+    amount: -930,
+    description: 'Online transfer',
+    type: 'expense',
+  });
+  insertRow('transactions', {
+    accountId,
+    date: '2026-06-19',
+    amount: -120,
+    description: 'Check 5678',
+    type: 'expense',
+  });
+
+  const body = await getJson('/api/app/transactions?search=check%20930.00');
+
+  expect(body.transactions.map((transaction: { description: string }) => transaction.description)).toEqual(['Check 1234']);
+});
+
+test('app transactions search supports quoted phrase terms', async () => {
+  const accountId = insertRow('accounts', {
+    name: 'Checking',
+    institution: 'Local Bank',
+    type: 'checking',
+  });
+
+  insertRow('transactions', {
+    accountId,
+    date: '2026-06-17',
+    amount: -9000,
+    description: 'Customer Withdrawal Image',
+    type: 'expense',
+  });
+  insertRow('transactions', {
+    accountId,
+    date: '2026-06-18',
+    amount: -9000,
+    description: 'Customer Deposit Image',
+    type: 'expense',
+  });
+
+  const body = await getJson('/api/app/transactions?search=%22customer%20withdrawal%22%209000');
+
+  expect(body.transactions.map((transaction: { description: string }) => transaction.description)).toEqual([
+    'Customer Withdrawal Image',
+  ]);
+});
+
 test('app transactions ignore legacy category and notes columns without annotations', async () => {
   const accountId = insertRow('accounts', {
     name: 'Checking',
