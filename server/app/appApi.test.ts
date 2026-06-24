@@ -1196,6 +1196,62 @@ test('ai categorization apply reports skipped already categorized transactions',
   ).toMatchObject({ categoryId: oldCategoryId });
 });
 
+test('ai categorization preview excludes explicitly uncategorized transactions', async () => {
+  const previousOpenAiKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = '';
+  const uncategorizedId = Number(insertRow('categories', { name: 'Uncategorized', type: 'expense' }));
+  const accountId = Number(insertRow('accounts', {
+    name: 'AI Review Checking',
+    type: 'checking',
+    currentBalance: 0,
+  }));
+  insertRow('ledgerTransactions', {
+    ledgerTransactionId: 'txn_ai_empty',
+    accountId,
+    date: '2026-06-01',
+    amountCents: -1000,
+    description: 'Needs Review Coffee',
+    merchant: 'Needs Review Coffee',
+    type: 'expense',
+    transactionKind: 'activity',
+    createdAt: new Date().toISOString(),
+  });
+  insertRow('ledgerTransactions', {
+    ledgerTransactionId: 'txn_ai_explicit_uncategorized',
+    accountId,
+    date: '2026-06-02',
+    amountCents: -2000,
+    description: 'Leave Uncategorized',
+    merchant: 'Leave Uncategorized',
+    type: 'expense',
+    transactionKind: 'activity',
+    createdAt: new Date().toISOString(),
+  });
+  insertRow('transactionAnnotations', {
+    ledgerTransactionId: 'txn_ai_explicit_uncategorized',
+    categoryId: uncategorizedId,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  try {
+    const result = await trpcClient.transactions.aiCategorizationPreview.mutate({ limit: 32 });
+
+    expect(result).toMatchObject({
+      configured: false,
+      scanned: 1,
+      groupCount: 1,
+      reviewedGroupCount: 1,
+    });
+  } finally {
+    if (previousOpenAiKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = previousOpenAiKey;
+    }
+  }
+});
+
 test('ai categorization groups uncategorized transactions by merchant before model review', () => {
   const groups = groupTransactionsForAiCategorization([
     {

@@ -161,9 +161,8 @@ function listUncategorizedTransactions() {
        FROM ledgerTransactions t
        LEFT JOIN accounts a ON a.id = t.accountId
        LEFT JOIN transactionAnnotations ta ON ta.ledgerTransactionId = t.ledgerTransactionId
-       LEFT JOIN categories c ON c.id = ta.categoryId
        WHERE t.ledgerTransactionId IS NOT NULL
-         AND (ta.categoryId IS NULL OR lower(c.name) = 'uncategorized')
+         AND ta.categoryId IS NULL
          AND COALESCE(a.status, 'active') != 'archived'
        ORDER BY t.date DESC, t.id DESC`
     )
