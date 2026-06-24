@@ -9,7 +9,8 @@ import {
   LineChart,
   Wallet,
   PiggyBank,
-  Landmark
+  Landmark,
+  Tags
 } from 'lucide-react';
 import type { LucideProps } from 'lucide-react';
 import { AccountPicker } from '../investments/AccountPicker';
@@ -62,6 +63,7 @@ const Sidebar = ({
     { path: '/', label: 'Analytics', icon: PieChart },
     { path: '/transactions', label: 'Transactions', icon: ArrowLeftRight },
     { path: '/accounts', label: 'Accounts', icon: WalletCards },
+    { path: '/categories', label: 'Categories', icon: Tags },
     { path: '/budgeting', label: 'Budgeting', icon: PiggyBank },
     { path: '/net-worth', label: 'Net Worth', icon: Wallet },
     { path: '/performance', label: 'Performance', icon: LineChart },

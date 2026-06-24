@@ -18,6 +18,7 @@ interface LedgerTransactionRow {
   categoryName: string | null;
   categoryType: string | null;
   categoryGroup: string | null;
+  categoryDescription: string | null;
   categoryColor: string | null;
   categoryIcon: string | null;
   date: string;
@@ -202,6 +203,7 @@ function toTransactionListItem(row: LedgerTransactionRow): TransactionListItem {
       name: row.categoryName ?? 'Uncategorized',
       type: row.categoryType,
       categoryGroup: row.categoryGroup,
+      description: row.categoryDescription,
       color: row.categoryColor,
       icon: row.categoryIcon,
     },
@@ -345,6 +347,7 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
         c.name AS categoryName,
         c.type AS categoryType,
         c.categoryGroup AS categoryGroup,
+        c.description AS categoryDescription,
         c.color AS categoryColor,
         c.icon AS categoryIcon,
         t.date,

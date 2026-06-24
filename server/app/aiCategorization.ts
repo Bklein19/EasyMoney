@@ -103,6 +103,17 @@ interface MerchantGroupingRule {
   strategy: string;
 }
 
+interface CategoryUndoChange {
+  transactionId: string;
+  categoryId: number | string | null;
+}
+
+interface CategoryUndoOperation {
+  id: number;
+  categoryName: string;
+  count: number;
+}
+
 function getOpenAiKey() {
   return process.env.OPENAI_API_KEY?.trim() || '';
 }
@@ -120,7 +131,7 @@ function clampGroupLimit(value: unknown) {
 function listCategorizationCategories() {
   return getDb()
     .prepare(
-      `SELECT id, name, parentId, type, categoryGroup, color, icon
+      `SELECT id, name, parentId, type, categoryGroup, description, color, icon
        FROM categories
        WHERE lower(name) != 'uncategorized'
        ORDER BY name ASC, id ASC`
@@ -160,6 +171,41 @@ function listMerchantGroupingRules() {
   return getDb()
     .prepare('SELECT id, sourceMerchantKey, strategy FROM merchantGroupingRules ORDER BY id ASC')
     .all() as MerchantGroupingRule[];
+}
+
+function getCategoryName(categoryId: string | number | null | undefined) {
+  const id = Number(categoryId);
+  if (!Number.isFinite(id)) return 'Uncategorized';
+  const row = getDb()
+    .prepare('SELECT name FROM categories WHERE id = ?')
+    .get(id) as { name: string } | undefined;
+  return row?.name ?? 'selected category';
+}
+
+function createCategoryUndoOperation(input: {
+  categoryName: string;
+  previousCategories: CategoryUndoChange[];
+}): CategoryUndoOperation | null {
+  if (!input.previousCategories.length) return null;
+  const now = new Date().toISOString();
+  const result = getDb()
+    .prepare(`
+      INSERT INTO transactionCategoryUndoOperations
+        (categoryName, transactionCount, payloadJson, status, createdAt)
+      VALUES (?, ?, ?, 'pending', ?)
+    `)
+    .run(
+      input.categoryName,
+      input.previousCategories.length,
+      JSON.stringify(input.previousCategories),
+      now
+    );
+
+  return {
+    id: Number(result.lastInsertRowid),
+    categoryName: input.categoryName,
+    count: input.previousCategories.length,
+  };
 }
 
 function chunk<T>(items: T[], size: number) {
@@ -505,6 +551,7 @@ async function categorizeBatchWithOpenAi(input: {
       'Return flat decision objects with groupId, kind, categoryName, and reason.',
       "kind must be exactly one of: 'category', 'transfer', or 'needs_review'.",
       "Use kind: 'category' only for real spending or income categories. categoryName must exactly match the category list.",
+      'Category descriptions are user-specific guidance. Prefer those descriptions over generic personal-finance assumptions when deciding between categories.',
       "For kind: 'transfer' or kind: 'needs_review', set categoryName to an empty string.",
       "Use kind: 'transfer' only for explicit account-to-account movement visible from a cash, checking, savings, or credit-card account, including credit card payments, ACH transfers, cash sent to or from investments, and other account-to-account movement.",
       'Do not use transfer for investment-account activity that is already inside a retirement, brokerage, 401(k), IRA, or investment account. 401(k) contributions, employer match, dividend reinvestment, fund purchases, and similar in-account investment rows should be categorized as Investment when that category exists.',
@@ -530,6 +577,7 @@ async function categorizeBatchWithOpenAi(input: {
         name: category.name,
         type: category.type,
         categoryGroup: category.categoryGroup,
+        description: category.description || '',
       })),
       merchantGroups: input.groups.map(compactMerchantGroup),
     }),
@@ -686,7 +734,14 @@ export function createMerchantGroupingRule(input: { sourceMerchantKey: string })
 
 export function applyAiCategorizationSuggestions(input: {
   suggestions: Array<{ transactionId: string; categoryId: number | string }>;
-}) {
+}): {
+  ok: true;
+  count: number;
+  requested: number;
+  appliedTransactionIds: string[];
+  undoOperation: CategoryUndoOperation | null;
+  skipped: Array<{ transactionId: string; reason: string }>;
+} {
   const suggestions = input.suggestions ?? [];
   const validCategories = new Set(
     (getDb().prepare('SELECT id FROM categories').all() as Array<{ id: number }>).map(row => Number(row.id))
@@ -731,20 +786,34 @@ export function applyAiCategorizationSuggestions(input: {
     applyIds.push(transactionId);
   }
 
-  const apply = getDb().transaction(() => {
-    for (const transactionId of applyIds) {
-      const categoryId = requested.get(transactionId);
-      if (!categoryId) continue;
-      upsertTransactionAnnotation(transactionId, { categoryId });
-    }
-  });
-  apply();
+  const previousCategories = applyIds.map(transactionId => ({
+    transactionId,
+    categoryId: rowById.get(transactionId)?.categoryId ?? null,
+  }));
+  const appliedCategoryIds = [...new Set(applyIds.map(transactionId => requested.get(transactionId)).filter(Boolean))];
+  const categoryName = appliedCategoryIds.length === 1
+    ? getCategoryName(appliedCategoryIds[0])
+    : 'selected categories';
+  let undoOperation: CategoryUndoOperation | null = null;
+
+  if (applyIds.length) {
+    const apply = getDb().transaction(() => {
+      undoOperation = createCategoryUndoOperation({ categoryName, previousCategories });
+      for (const transactionId of applyIds) {
+        const categoryId = requested.get(transactionId);
+        if (!categoryId) continue;
+        upsertTransactionAnnotation(transactionId, { categoryId });
+      }
+    });
+    apply();
+  }
 
   return {
     ok: true,
     count: applyIds.length,
     requested: ids.length,
     appliedTransactionIds: applyIds,
+    undoOperation,
     skipped,
   };
 }

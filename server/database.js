@@ -318,7 +318,7 @@ const TABLES = {
   transactionAnnotations: ['ledgerTransactionId', 'categoryId', 'notes', 'createdAt', 'updatedAt'],
   transactionCategoryUndoOperations: ['id', 'categoryName', 'transactionCount', 'payloadJson', 'status', 'createdAt', 'consumedAt'],
   merchantGroupingRules: ['id', 'sourceMerchantKey', 'strategy', 'createdAt', 'updatedAt'],
-  categories: ['id', 'name', 'parentId', 'type', 'categoryGroup', 'color', 'icon'],
+  categories: ['id', 'name', 'parentId', 'type', 'categoryGroup', 'description', 'color', 'icon'],
   budgets: ['id', 'categoryId', 'month', 'amount'],
   balanceSnapshots: ['id', 'accountId', 'month', 'balance', 'capturedAt'],
   ledgerBalances: ['id', 'accountId', 'month', 'balanceCents', 'capturedAt', 'sourceBalanceId', 'createdAt', 'updatedAt'],
@@ -480,6 +480,7 @@ export function initDatabase() {
       parentId INTEGER,
       type TEXT,
       categoryGroup TEXT,
+      description TEXT,
       color TEXT,
       icon TEXT
     );
@@ -641,6 +642,12 @@ export function initDatabase() {
   runSchemaMigration('2026-06-22-category-groups', () => {
     if (!tableColumnNames('categories').includes('categoryGroup')) {
       db.prepare('ALTER TABLE categories ADD COLUMN categoryGroup TEXT').run();
+    }
+  });
+
+  runSchemaMigration('2026-06-23-category-descriptions', () => {
+    if (!tableColumnNames('categories').includes('description')) {
+      db.prepare('ALTER TABLE categories ADD COLUMN description TEXT').run();
     }
   });
 

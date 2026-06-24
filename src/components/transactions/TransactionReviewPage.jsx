@@ -41,6 +41,8 @@ export default function TransactionReviewPage() {
   const [aiReviewStartedAt, setAiReviewStartedAt] = useState(null);
   const [aiReviewElapsedSeconds, setAiReviewElapsedSeconds] = useState(0);
   const [isApplyingAiCategories, setIsApplyingAiCategories] = useState(false);
+  const [aiCategoryUndo, setAiCategoryUndo] = useState(null);
+  const [isRestoringAiCategories, setIsRestoringAiCategories] = useState(false);
   const [splittingReviewKey, setSplittingReviewKey] = useState('');
   const [isSavingOpenAiKey, setIsSavingOpenAiKey] = useState(false);
   const { categories } = useCategories();
@@ -61,8 +63,6 @@ export default function TransactionReviewPage() {
     }));
     return grouped.filter(group => group.categories.length > 0);
   };
-  const formatTransactionCount = (count) => `${count.toLocaleString()} matching transaction${count === 1 ? '' : 's'}`;
-
   const aiSuggestions = useMemo(() => aiCategorization?.suggestions ?? [], [aiCategorization?.suggestions]);
   const aiQuestions = useMemo(() => aiCategorization?.questions ?? [], [aiCategorization?.questions]);
   const activeAiQuestions = useMemo(() => aiQuestions
@@ -117,18 +117,6 @@ export default function TransactionReviewPage() {
 
     return () => window.clearInterval(intervalId);
   }, [isAiCategorizing, aiReviewStartedAt]);
-
-  const confirmLargeReviewBatch = (rows) => {
-    const transactionCount = rows.reduce((count, row) => count + row.transactionIds.length, 0);
-    if (transactionCount <= 50) return true;
-    const categoryCount = new Set(rows.map(row => String(row.categoryId))).size;
-    const merchantLabel = rows.length === 1 ? 'merchant group' : 'merchant groups';
-    const categoryLabel = categoryCount === 1 ? 'category' : 'categories';
-
-    return window.confirm(
-      `This will categorize ${formatTransactionCount(transactionCount)} across ${rows.length.toLocaleString()} ${merchantLabel} using ${categoryCount.toLocaleString()} ${categoryLabel}.\n\nContinue?`
-    );
-  };
 
   const renderTransactionPreview = (transactions, totalCount) => {
     const rows = transactions ?? [];
@@ -218,7 +206,6 @@ export default function TransactionReviewPage() {
 
   const applySelectedReviewRows = async () => {
     if (!selectedReviewRows.length) return;
-    if (!confirmLargeReviewBatch(selectedReviewRows)) return;
 
     setIsApplyingAiCategories(true);
     setAiCategorizationError('');
@@ -243,6 +230,7 @@ export default function TransactionReviewPage() {
         appliedCount: (previous.appliedCount ?? 0) + result.count,
         skippedCount: (previous.skippedCount ?? 0) + (result.skipped?.length ?? 0),
       } : previous);
+      setAiCategoryUndo(result.undoOperation ?? null);
       if (appliedQuestionKeys.size > 0) {
         setIgnoredAiQuestionKeys(previous => new Set([...previous, ...appliedQuestionKeys]));
       }
@@ -256,6 +244,28 @@ export default function TransactionReviewPage() {
       setAiCategorizationError(error instanceof Error ? error.message : String(error));
     } finally {
       setIsApplyingAiCategories(false);
+    }
+  };
+
+  const restoreAiCategoryBatch = async () => {
+    if (!aiCategoryUndo) return;
+    setIsRestoringAiCategories(true);
+    setAiCategorizationError('');
+    try {
+      await trpcClient.transactions.restoreCategories.mutate({
+        undoOperationId: aiCategoryUndo.id,
+      });
+      setAiCategoryUndo(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() }),
+        queryClient.invalidateQueries({ queryKey: trpc.transactions.categorizationCoverage.queryKey() }),
+        queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] }),
+      ]);
+      await handlePreviewAiCategorization();
+    } catch (error) {
+      setAiCategorizationError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsRestoringAiCategories(false);
     }
   };
 
@@ -380,6 +390,21 @@ export default function TransactionReviewPage() {
                   Applied {aiCategorization.appliedCount} category updates.
                   {aiCategorization.skippedCount > 0 ? ` Skipped ${aiCategorization.skippedCount} already-categorized or missing transactions.` : ''}
                 </p>
+              )}
+              {aiCategoryUndo && (
+                <div className="ai-category-action__undo" role="status" aria-live="polite">
+                  <span>
+                    Applied {aiCategoryUndo.count.toLocaleString()} update{aiCategoryUndo.count === 1 ? '' : 's'}.
+                  </span>
+                  <button
+                    className="btn btn--secondary btn--sm"
+                    type="button"
+                    disabled={isRestoringAiCategories || isApplyingAiCategories}
+                    onClick={restoreAiCategoryBatch}
+                  >
+                    {isRestoringAiCategories ? 'Undoing...' : 'Undo'}
+                  </button>
+                </div>
               )}
               {aiCategorizationError && (
                 <p className="ai-category-action__error">{aiCategorizationError}</p>

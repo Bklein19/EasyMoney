@@ -32,6 +32,7 @@ export interface CategorySummary {
   parentId: number | null;
   type: CategoryType | null;
   categoryGroup: CategoryGroup | null;
+  description: string | null;
   color: string | null;
   icon: string | null;
 }
@@ -41,6 +42,7 @@ export interface TransactionCategory {
   name: string;
   type: CategoryType | null;
   categoryGroup: CategoryGroup | null;
+  description: string | null;
   color: string | null;
   icon: string | null;
 }

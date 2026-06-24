@@ -171,6 +171,16 @@ test('init database records category group schema migration', () => {
   expect(categoryColumns.map(column => column.name)).toContain('categoryGroup');
 });
 
+test('init database records category description schema migration', () => {
+  const migration = getDb().prepare(
+    "SELECT name FROM schemaMigrations WHERE name = '2026-06-23-category-descriptions'"
+  ).get() as { name: string } | undefined;
+  const categoryColumns = getDb().prepare('PRAGMA table_info(categories)').all() as Array<{ name: string }>;
+
+  expect(migration).toEqual({ name: '2026-06-23-category-descriptions' });
+  expect(categoryColumns.map(column => column.name)).toContain('description');
+});
+
 test('init database records credit-card sign repair migration', () => {
   const migration = getDb().prepare(
     "SELECT name FROM schemaMigrations WHERE name = '2026-06-23-credit-card-cashflow-signs'"
@@ -528,6 +538,7 @@ test('app categories endpoint returns domain-shaped categories', async () => {
     parentId: null,
     type: 'expense',
     categoryGroup: 'variable',
+    description: 'Groceries and household staples.',
     color: '#22c55e',
     icon: 'shopping-cart',
   });
@@ -542,6 +553,7 @@ test('app categories endpoint returns domain-shaped categories', async () => {
         parentId: null,
         type: 'expense',
         categoryGroup: 'variable',
+        description: 'Groceries and household staples.',
         color: '#22c55e',
         icon: 'shopping-cart',
       },
@@ -1092,6 +1104,7 @@ test('trpc transactions categorization coverage summarizes categorized count and
 
 
 test('ai categorization apply writes transaction annotations by ledger id', async () => {
+  const oldCategoryId = Number(insertRow('categories', { name: 'Uncategorized', type: 'expense' }));
   const categoryId = Number(insertRow('categories', { name: 'Dining', type: 'expense' }));
   const accountId = Number(insertRow('accounts', {
     name: 'AI Test Checking',
@@ -1109,6 +1122,12 @@ test('ai categorization apply writes transaction annotations by ledger id', asyn
     transactionKind: 'activity',
     createdAt: new Date().toISOString(),
   });
+  insertRow('transactionAnnotations', {
+    ledgerTransactionId: 'txn_ai_apply',
+    categoryId: oldCategoryId,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
 
   const result = await trpcClient.transactions.applyAiCategorization.mutate({
     suggestions: [{ transactionId: 'txn_ai_apply', categoryId }],
@@ -1119,10 +1138,22 @@ test('ai categorization apply writes transaction annotations by ledger id', asyn
     requested: 1,
     appliedTransactionIds: ['txn_ai_apply'],
     skipped: [],
+    undoOperation: {
+      categoryName: 'Dining',
+      count: 1,
+    },
   });
   expect(
     getDb().prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId = ?').get('txn_ai_apply')
   ).toMatchObject({ categoryId });
+
+  expect(result.undoOperation).not.toBeNull();
+  await trpcClient.transactions.restoreCategories.mutate({
+    undoOperationId: result.undoOperation!.id,
+  });
+  expect(
+    getDb().prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId = ?').get('txn_ai_apply')
+  ).toMatchObject({ categoryId: oldCategoryId });
 });
 
 test('ai categorization apply reports skipped already categorized transactions', async () => {
@@ -1407,6 +1438,7 @@ test('ai categorization reviews investment-account transfer decisions instead of
     parentId: null,
     type: 'investment',
     categoryGroup: 'savings_investment',
+    description: null,
     color: '#f59e0b',
     icon: 'trending-up',
   };

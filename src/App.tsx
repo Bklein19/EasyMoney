@@ -5,6 +5,7 @@ import ImportPage from './components/import/ImportPage.jsx';
 import TransactionsPage from './components/transactions/TransactionsPage.jsx';
 import TransactionReviewPage from './components/transactions/TransactionReviewPage.jsx';
 import AccountsPage from './components/accounts/AccountsPage.jsx';
+import CategoriesPage from './components/categories/CategoriesPage';
 import Sidebar from './components/layout/Sidebar';
 import AnalyticsPage from './components/analytics/AnalyticsPage.jsx';
 import BudgetingPage from './components/budgeting/BudgetingPage.jsx';
@@ -133,6 +134,7 @@ function App() {
               <Route path="/transactions" element={<TransactionsPage />} />
               <Route path="/transactions/review" element={<TransactionReviewPage />} />
               <Route path="/accounts" element={<AccountsPage />} />
+              <Route path="/categories" element={<CategoriesPage />} />
               <Route path="/budgeting" element={<BudgetingPage />} />
               <Route path="/net-worth" element={<NetWorthPage view="networth" selectedIds={reportSelectedIds} />} />
               <Route path="/performance" element={<NetWorthPage view="performance" selectedIds={reportSelectedIds} />} />
