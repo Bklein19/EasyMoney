@@ -41,6 +41,7 @@ export default function TransactionReviewPage() {
   const [ignoredAiQuestionKeys, setIgnoredAiQuestionKeys] = useState(new Set());
   const [categoryByReviewKey, setCategoryByReviewKey] = useState({});
   const [expandedReviewKey, setExpandedReviewKey] = useState(null);
+  const aiPreviewRequestId = useRef(0);
   const [isAiCategorizing, setIsAiCategorizing] = useState(false);
   const [aiReviewStartedAt, setAiReviewStartedAt] = useState(null);
   const [aiReviewElapsedSeconds, setAiReviewElapsedSeconds] = useState(0);
@@ -180,6 +181,8 @@ export default function TransactionReviewPage() {
 
   const handlePreviewAiCategorization = useCallback(async (sortOverride = aiReviewSort) => {
     const sort = sortOverride === 'money' ? 'money' : 'count';
+    const requestId = aiPreviewRequestId.current + 1;
+    aiPreviewRequestId.current = requestId;
     setIsAiCategorizing(true);
     setAiReviewStartedAt(Date.now());
     setAiReviewElapsedSeconds(0);
@@ -202,19 +205,31 @@ export default function TransactionReviewPage() {
         AI_CATEGORIZATION_TIMEOUT_MS,
         `AI categorization took longer than ${Math.round(AI_CATEGORIZATION_TIMEOUT_MS / 1000)} seconds. Try again with fewer uncategorized transactions or check the server logs.`
       );
+      if (aiPreviewRequestId.current !== requestId) return;
       setAiCategorization(result);
       setCategoryByReviewKey({});
       setSplitByReviewKey({});
       setIgnoredAiQuestionKeys(new Set());
       setExpandedReviewKey(null);
     } catch (error) {
+      if (aiPreviewRequestId.current !== requestId) return;
       setAiCategorization(null);
       setAiCategorizationError(error instanceof Error ? error.message : String(error));
     } finally {
-      setIsAiCategorizing(false);
-      setAiReviewStartedAt(null);
+      if (aiPreviewRequestId.current === requestId) {
+        setIsAiCategorizing(false);
+        setAiReviewStartedAt(null);
+      }
     }
   }, [aiReviewSort]);
+
+  const handleAiReviewSortChange = (sort) => {
+    if (sort === aiReviewSort && isAiCategorizing) return;
+    setAiReviewSort(sort);
+    if (isAiCategorizing || aiCategorization || aiCategorizationError) {
+      void handlePreviewAiCategorization(sort);
+    }
+  };
 
   useEffect(() => {
     if (hasStartedFromUrl.current || searchParams.get('start') !== '1') return;
@@ -367,6 +382,32 @@ export default function TransactionReviewPage() {
           </h1>
         </div>
         <div className="transaction-review-page__actions">
+          <div className="transaction-review-header-actions">
+            <div className="transaction-review-sort" aria-label="AI review sort">
+              {AI_SORT_OPTIONS.map(option => (
+                <button
+                  key={option.value}
+                  className={`transaction-review-sort__button ${aiReviewSort === option.value ? 'is-active' : ''}`}
+                  type="button"
+                  aria-pressed={aiReviewSort === option.value}
+                  disabled={isApplyingAiCategories}
+                  onClick={() => handleAiReviewSortChange(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+            {!isAiCategorizing && (!aiCategorization || aiCategorizationError) && (
+              <button
+                className="btn btn--secondary btn--sm"
+                type="button"
+                disabled={isApplyingAiCategories}
+                onClick={() => handlePreviewAiCategorization()}
+              >
+                {aiCategorizationError ? 'Retry' : 'Categorize with AI'}
+              </button>
+            )}
+          </div>
           {coverage && (
             <section className="transaction-review-coverage" aria-label="Categorization coverage">
               <div className="transaction-review-coverage__item">
@@ -388,31 +429,6 @@ export default function TransactionReviewPage() {
                 </div>
               </div>
             </section>
-          )}
-          {!isAiCategorizing && (!aiCategorization || aiCategorizationError) && (
-            <div className="transaction-review-header-actions">
-              <div className="transaction-review-sort" aria-label="AI review sort">
-                {AI_SORT_OPTIONS.map(option => (
-                  <button
-                    key={option.value}
-                    className={`transaction-review-sort__button ${aiReviewSort === option.value ? 'is-active' : ''}`}
-                    type="button"
-                    aria-pressed={aiReviewSort === option.value}
-                    onClick={() => setAiReviewSort(option.value)}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-              <button
-                className="btn btn--secondary btn--sm"
-                type="button"
-                disabled={isApplyingAiCategories}
-                onClick={() => handlePreviewAiCategorization()}
-              >
-                {aiCategorizationError ? 'Retry' : 'Categorize with AI'}
-              </button>
-            </div>
           )}
         </div>
       </div>
@@ -498,23 +514,6 @@ export default function TransactionReviewPage() {
                           {categoryReviewRows.length} with categories selected
                           {splitReviewRows.length > 0 ? ` · ${splitReviewRows.length} to split` : ''}
                         </span>
-                      </div>
-                      <div className="transaction-review-sort" aria-label="AI review sort">
-                        {AI_SORT_OPTIONS.map(option => (
-                          <button
-                            key={option.value}
-                            className={`transaction-review-sort__button ${aiReviewSort === option.value ? 'is-active' : ''}`}
-                            type="button"
-                            aria-pressed={aiReviewSort === option.value}
-                            disabled={isAiCategorizing || isApplyingAiCategories}
-                            onClick={() => {
-                              setAiReviewSort(option.value);
-                              void handlePreviewAiCategorization(option.value);
-                            }}
-                          >
-                            {option.label}
-                          </button>
-                        ))}
                       </div>
                       <button
                         className="btn btn--primary btn--sm"
