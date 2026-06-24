@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
-import { ChevronRight, Sparkles } from 'lucide-react';
+import { ChevronRight, Sparkles, X } from 'lucide-react';
 import { useCategories } from '../../hooks/useCategories';
 import { formatCurrency } from '../../utils/formatters';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
@@ -470,6 +470,15 @@ export default function TransactionReviewPage() {
                     onClick={restoreAiCategoryBatch}
                   >
                     {isRestoringAiCategories ? 'Undoing...' : 'Undo'}
+                  </button>
+                  <button
+                    className="transaction-feedback-dismiss"
+                    type="button"
+                    aria-label="Dismiss categorization update"
+                    disabled={isRestoringAiCategories}
+                    onClick={() => setAiCategoryUndo(null)}
+                  >
+                    <X size={14} />
                   </button>
                 </div>
               )}

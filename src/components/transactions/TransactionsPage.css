@@ -149,6 +149,31 @@
   line-height: 1.35;
 }
 
+.transaction-feedback-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.transaction-feedback-dismiss:hover,
+.transaction-feedback-dismiss:focus-visible {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.transaction-feedback-dismiss:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
 .transactions-inline-create {
   margin-left: auto;
   width: min(480px, 100%);

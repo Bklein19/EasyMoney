@@ -1,6 +1,7 @@
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useNavigate } from 'react-router';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { X } from 'lucide-react';
 import { useTransactions } from '../../hooks/useTransactions';
 import TransactionRow from './TransactionRow';
 import TransactionFilters from './TransactionFilters';
@@ -347,6 +348,15 @@ export default function TransactionsPage() {
                   onClick={handleUndoBulkCategory}
                 >
                   {isRestoringBulkCategory ? 'Undoing...' : 'Undo'}
+                </button>
+                <button
+                  className="transaction-feedback-dismiss"
+                  type="button"
+                  aria-label="Dismiss categorization update"
+                  disabled={isRestoringBulkCategory}
+                  onClick={() => setBulkCategoryUndo(null)}
+                >
+                  <X size={14} />
                 </button>
               </div>
             )}
