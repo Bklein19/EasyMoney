@@ -80,6 +80,12 @@ export interface AiCategoryQuestion {
   transactions: AiCategorizationTransaction[];
 }
 
+interface CategorizedGroupBatch {
+  suggestions: AiCategorySuggestion[];
+  questions: AiCategoryQuestion[];
+  ignoredCount: number;
+}
+
 export interface AiCategorizationTransaction {
   transactionId: string;
   date: string;
@@ -640,6 +646,82 @@ async function categorizeBatchWithOpenAi(input: {
   return result.finalOutput as ModelResponse;
 }
 
+function categorizeModelDecisions(input: {
+  decisions: ModelGroupDecision[];
+  groups: MerchantCategorizationGroup[];
+  categories: CategorySummary[];
+}): CategorizedGroupBatch {
+  const categoryByName = new Map(input.categories.map(category => [category.name, category]));
+  const transferCategory = findTreatmentCategory(input.categories, 'transfer');
+  const groupById = new Map(input.groups.map(group => [group.id, group]));
+  const suggestions: AiCategorySuggestion[] = [];
+  const questions: AiCategoryQuestion[] = [];
+  let ignoredCount = 0;
+
+  for (const item of input.decisions ?? []) {
+    const group = groupById.get(item.groupId);
+    if (!group) {
+      ignoredCount += 1;
+      continue;
+    }
+
+    if (item.kind === 'category') {
+      const category = categoryByName.get(item.categoryName);
+      if (!category) {
+        ignoredCount += 1;
+        continue;
+      }
+      if (shouldTreatInvestmentCategoryAsTransfer({ group, category }) && transferCategory) {
+        suggestions.push(categorySuggestion({
+          group,
+          category: transferCategory,
+          decisionKind: 'transfer',
+          reason: `${item.reason} This looks like account-to-account movement, so EasyMoney will treat it as a transfer.`,
+        }));
+        continue;
+      }
+      suggestions.push(categorySuggestion({
+        group,
+        category,
+        decisionKind: 'category',
+        reason: item.reason,
+      }));
+      continue;
+    }
+
+    if (item.kind === 'transfer') {
+      if (shouldReviewInvestmentAccountTransferDecision({ group })) {
+        questions.push(reviewQuestion({
+          group,
+          reason: `${item.reason} This activity is already inside an investment account. It may be a transfer, contribution, purchase, or other investment activity, so it needs review before applying Transfer.`,
+        }));
+        continue;
+      }
+      if (!transferCategory) {
+        questions.push(reviewQuestion({
+          group,
+          reason: `${item.reason} EasyMoney could not find a Transfer category to apply automatically.`,
+        }));
+        continue;
+      }
+      suggestions.push(categorySuggestion({
+        group,
+        category: transferCategory,
+        decisionKind: 'transfer',
+        reason: item.reason,
+      }));
+      continue;
+    }
+
+    questions.push(reviewQuestion({
+      group,
+      reason: item.reason,
+    }));
+  }
+
+  return { suggestions, questions, ignoredCount };
+}
+
 export async function previewAiCategorization(options: { limit?: unknown; sort?: unknown } = {}) {
   const apiKey = getOpenAiKey();
   const model = getOpenAiModel();
@@ -677,11 +759,9 @@ export async function previewAiCategorization(options: { limit?: unknown; sort?:
     };
   }
 
-  const categoryByName = new Map(categories.map(category => [category.name, category]));
-  const transferCategory = findTreatmentCategory(categories, 'transfer');
-  const groupById = new Map(reviewGroups.map(group => [group.id, group]));
   const suggestions: AiCategorySuggestion[] = [];
   const questions: AiCategoryQuestion[] = [];
+  let ignoredDecisionCount = 0;
 
   for (const batch of chunk(reviewGroups, BATCH_SIZE)) {
     const result = await categorizeBatchWithOpenAi({
@@ -690,61 +770,14 @@ export async function previewAiCategorization(options: { limit?: unknown; sort?:
       categories,
       groups: batch,
     });
-
-    for (const item of result.decisions ?? []) {
-      const group = groupById.get(item.groupId);
-      if (!group) continue;
-
-      if (item.kind === 'category') {
-        const category = categoryByName.get(item.categoryName);
-        if (!category) continue;
-        if (shouldTreatInvestmentCategoryAsTransfer({ group, category }) && transferCategory) {
-          suggestions.push(categorySuggestion({
-            group,
-            category: transferCategory,
-            decisionKind: 'transfer',
-            reason: `${item.reason} This looks like account-to-account movement, so EasyMoney will treat it as a transfer.`,
-          }));
-          continue;
-        }
-        suggestions.push(categorySuggestion({
-          group,
-          category,
-          decisionKind: 'category',
-          reason: item.reason,
-        }));
-        continue;
-      }
-
-      if (item.kind === 'transfer') {
-        if (shouldReviewInvestmentAccountTransferDecision({ group })) {
-          questions.push(reviewQuestion({
-            group,
-            reason: `${item.reason} This activity is already inside an investment account. It may be a transfer, contribution, purchase, or other investment activity, so it needs review before applying Transfer.`,
-          }));
-          continue;
-        }
-        if (!transferCategory) {
-          questions.push(reviewQuestion({
-            group,
-            reason: `${item.reason} EasyMoney could not find a Transfer category to apply automatically.`,
-          }));
-          continue;
-        }
-        suggestions.push(categorySuggestion({
-          group,
-          category: transferCategory,
-          decisionKind: 'transfer',
-          reason: item.reason,
-        }));
-        continue;
-      }
-
-      questions.push(reviewQuestion({
-        group,
-        reason: item.reason,
-      }));
-    }
+    const categorized = categorizeModelDecisions({
+      decisions: result.decisions ?? [],
+      groups: batch,
+      categories,
+    });
+    suggestions.push(...categorized.suggestions);
+    questions.push(...categorized.questions);
+    ignoredDecisionCount += categorized.ignoredCount;
   }
 
   return {
@@ -756,6 +789,102 @@ export async function previewAiCategorization(options: { limit?: unknown; sort?:
     sort,
     suggestions,
     questions,
+    ignoredDecisionCount,
+  };
+}
+
+export async function autoApplyAiCategorization(input: { sort?: unknown } = {}) {
+  const apiKey = getOpenAiKey();
+  const model = getOpenAiModel();
+  const sort = normalizeAiCategorizationSort(input.sort);
+  const categories = listCategorizationCategories();
+  const transactions = listUncategorizedTransactions();
+  const groups = groupTransactionsForAiCategorization(transactions, { sort });
+
+  if (!apiKey) {
+    return {
+      configured: false,
+      model,
+      sort,
+      scanned: transactions.length,
+      groupCount: groups.length,
+      reviewedGroupCount: 0,
+      suggestedGroupCount: 0,
+      questionGroupCount: 0,
+      unresolvedGroupCount: groups.length,
+      ignoredDecisionCount: 0,
+      requested: 0,
+      appliedCount: 0,
+      skippedCount: 0,
+      undoOperation: null as CategoryUndoOperation | null,
+      message: 'Set OPENAI_API_KEY on the server to enable AI categorization.',
+    };
+  }
+
+  if (!categories.length || !transactions.length || !groups.length) {
+    return {
+      configured: true,
+      model,
+      sort,
+      scanned: transactions.length,
+      groupCount: groups.length,
+      reviewedGroupCount: 0,
+      suggestedGroupCount: 0,
+      questionGroupCount: 0,
+      unresolvedGroupCount: groups.length,
+      ignoredDecisionCount: 0,
+      requested: 0,
+      appliedCount: 0,
+      skippedCount: 0,
+      undoOperation: null as CategoryUndoOperation | null,
+    };
+  }
+
+  const suggestions: AiCategorySuggestion[] = [];
+  let questionGroupCount = 0;
+  let ignoredDecisionCount = 0;
+  let reviewedGroupCount = 0;
+
+  for (const batch of chunk(groups, BATCH_SIZE)) {
+    const result = await categorizeBatchWithOpenAi({
+      apiKey,
+      model,
+      categories,
+      groups: batch,
+    });
+    const categorized = categorizeModelDecisions({
+      decisions: result.decisions ?? [],
+      groups: batch,
+      categories,
+    });
+    suggestions.push(...categorized.suggestions.filter(suggestion => suggestion.confidence === 'high'));
+    questionGroupCount += categorized.questions.length;
+    ignoredDecisionCount += categorized.ignoredCount;
+    reviewedGroupCount += batch.length;
+  }
+
+  const applyResult = applyAiCategorizationSuggestions({
+    suggestions: suggestions.flatMap(suggestion => suggestion.transactionIds.map(transactionId => ({
+      transactionId,
+      categoryId: suggestion.categoryId,
+    }))),
+  });
+
+  return {
+    configured: true,
+    model,
+    sort,
+    scanned: transactions.length,
+    groupCount: groups.length,
+    reviewedGroupCount,
+    suggestedGroupCount: suggestions.length,
+    questionGroupCount,
+    unresolvedGroupCount: Math.max(0, groups.length - suggestions.length),
+    ignoredDecisionCount,
+    requested: applyResult.requested,
+    appliedCount: applyResult.count,
+    skippedCount: applyResult.skipped.length,
+    undoOperation: applyResult.undoOperation,
   };
 }
 

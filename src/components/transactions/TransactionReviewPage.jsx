@@ -46,6 +46,7 @@ export default function TransactionReviewPage() {
   const [aiReviewStartedAt, setAiReviewStartedAt] = useState(null);
   const [aiReviewElapsedSeconds, setAiReviewElapsedSeconds] = useState(0);
   const [isApplyingAiCategories, setIsApplyingAiCategories] = useState(false);
+  const [isAutoApplyingAiCategories, setIsAutoApplyingAiCategories] = useState(false);
   const [aiCategoryUndo, setAiCategoryUndo] = useState(null);
   const [isRestoringAiCategories, setIsRestoringAiCategories] = useState(false);
   const [splitByReviewKey, setSplitByReviewKey] = useState({});
@@ -307,6 +308,49 @@ export default function TransactionReviewPage() {
     }
   };
 
+  const autoApplyConfidentAiCategories = async () => {
+    setIsAutoApplyingAiCategories(true);
+    setAiCategorizationError('');
+    try {
+      const result = await withTimeout(
+        trpcClient.transactions.autoApplyAiCategorization.mutate({ sort: aiReviewSort }),
+        AI_CATEGORIZATION_TIMEOUT_MS * 8,
+        'Auto-apply took too long. Some transactions may still need review; check the server logs and try again.'
+      );
+      if (result.configured === false) {
+        setAiCategorization({
+          configured: false,
+          model: result.model,
+          scanned: result.scanned,
+          groupCount: result.groupCount,
+          suggestions: [],
+          questions: [],
+          message: result.message,
+        });
+        return;
+      }
+
+      setAiCategoryUndo(result.undoOperation ?? null);
+      const message = `Auto-applied ${result.appliedCount.toLocaleString()} confident category update${result.appliedCount === 1 ? '' : 's'}. Left ${result.unresolvedGroupCount.toLocaleString()} merchant group${result.unresolvedGroupCount === 1 ? '' : 's'} uncategorized for review.`;
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() }),
+        queryClient.invalidateQueries({ queryKey: trpc.transactions.categorizationCoverage.queryKey() }),
+        queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] }),
+      ]);
+      await handlePreviewAiCategorization();
+      setAiCategorization(previous => previous ? {
+        ...previous,
+        appliedCount: result.appliedCount,
+        skippedCount: result.skippedCount,
+        message,
+      } : previous);
+    } catch (error) {
+      setAiCategorizationError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsAutoApplyingAiCategories(false);
+    }
+  };
+
   const restoreAiCategoryBatch = async () => {
     if (!aiCategoryUndo) return;
     setIsRestoringAiCategories(true);
@@ -508,12 +552,20 @@ export default function TransactionReviewPage() {
                           {splitReviewRows.length > 0 ? ` · ${splitReviewRows.length} to split` : ''}
                         </span>
                       </div>
-                      <button
-                        className="btn btn--primary btn--sm"
-                        type="button"
-                        disabled={isApplyingAiCategories || actionableReviewRowCount === 0}
-                        onClick={applySelectedReviewRows}
-                      >
+                  <button
+                    className="btn btn--secondary btn--sm"
+                    type="button"
+                    disabled={isApplyingAiCategories || isAutoApplyingAiCategories || isAiCategorizing}
+                    onClick={autoApplyConfidentAiCategories}
+                  >
+                    {isAutoApplyingAiCategories ? 'Auto-applying...' : 'Do the rest with AI'}
+                  </button>
+                  <button
+                    className="btn btn--primary btn--sm"
+                    type="button"
+                    disabled={isApplyingAiCategories || isAutoApplyingAiCategories || actionableReviewRowCount === 0}
+                    onClick={applySelectedReviewRows}
+                  >
                         {isApplyingAiCategories ? 'Applying...' : 'Apply batch'}
                       </button>
                     </div>

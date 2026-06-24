@@ -1443,6 +1443,52 @@ test('ai categorization preview excludes explicitly uncategorized transactions',
   }
 });
 
+test('ai categorization auto-apply reports missing server key without categorizing', async () => {
+  const previousOpenAiKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = '';
+  const accountId = Number(insertRow('accounts', {
+    name: 'AI Auto Checking',
+    type: 'checking',
+    currentBalance: 0,
+  }));
+  insertRow('ledgerTransactions', {
+    ledgerTransactionId: 'txn_ai_auto_no_key',
+    accountId,
+    date: '2026-06-03',
+    amountCents: -2500,
+    description: 'Auto Apply Coffee',
+    merchant: 'Auto Apply Coffee',
+    type: 'expense',
+    transactionKind: 'activity',
+    createdAt: new Date().toISOString(),
+  });
+
+  try {
+    const result = await trpcClient.transactions.autoApplyAiCategorization.mutate({ sort: 'count' });
+
+    expect(result).toMatchObject({
+      configured: false,
+      scanned: 1,
+      groupCount: 1,
+      reviewedGroupCount: 0,
+      unresolvedGroupCount: 1,
+      appliedCount: 0,
+      requested: 0,
+      skippedCount: 0,
+      undoOperation: null,
+    });
+    expect(
+      getDb().prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId = ?').get('txn_ai_auto_no_key')
+    ).toBeNull();
+  } finally {
+    if (previousOpenAiKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = previousOpenAiKey;
+    }
+  }
+});
+
 test('ai categorization groups uncategorized transactions by merchant before model review', () => {
   const groups = groupTransactionsForAiCategorization([
     {

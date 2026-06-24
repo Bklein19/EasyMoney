@@ -2,6 +2,7 @@ import { initTRPC } from '@trpc/server';
 import { z } from 'zod';
 import { listAccounts } from './accounts.ts';
 import {
+  autoApplyAiCategorization,
   applyAiCategorizationSuggestions,
   createMerchantGroupingRule,
   getAiCategorizationTransactionDetails,
@@ -113,6 +114,12 @@ export const appRouter = t.router({
         })),
       }))
       .mutation(({ input }) => applyAiCategorizationSuggestions(input)),
+
+    autoApplyAiCategorization: t.procedure
+      .input(z.object({
+        sort: z.enum(['count', 'money']).optional(),
+      }).optional())
+      .mutation(({ input }) => autoApplyAiCategorization(input ?? {})),
 
     aiCategorizationTransactionDetails: t.procedure
       .input(z.object({
