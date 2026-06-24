@@ -773,14 +773,33 @@
 }
 
 .merchant-review-details-panel {
+  display: grid;
+  gap: var(--space-2);
   padding: var(--space-2);
   background: var(--bg-surface);
 }
 
-.merchant-review-details-actions {
-  display: flex;
-  justify-content: flex-end;
-  padding: 0 0 var(--space-2);
+.merchant-review-split-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: fit-content;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.merchant-review-split-choice input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--accent-blue);
+}
+
+.merchant-review-split-choice:has(input:disabled) {
+  cursor: default;
+  opacity: 0.6;
 }
 
 .transaction-review-card,

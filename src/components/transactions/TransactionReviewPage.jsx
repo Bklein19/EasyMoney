@@ -47,7 +47,7 @@ export default function TransactionReviewPage() {
   const [isApplyingAiCategories, setIsApplyingAiCategories] = useState(false);
   const [aiCategoryUndo, setAiCategoryUndo] = useState(null);
   const [isRestoringAiCategories, setIsRestoringAiCategories] = useState(false);
-  const [splittingReviewKey, setSplittingReviewKey] = useState('');
+  const [splitByReviewKey, setSplitByReviewKey] = useState({});
   const [isSavingOpenAiKey, setIsSavingOpenAiKey] = useState(false);
   const [aiReviewSort, setAiReviewSort] = useState('count');
   const { categories } = useCategories();
@@ -133,6 +133,9 @@ export default function TransactionReviewPage() {
     });
   }, [activeAiQuestions, aiReviewSort, aiSuggestions, categoryByReviewKey]);
   const selectedReviewRows = reviewRows.filter(row => row.categoryId && row.transactionIds.length);
+  const splitReviewRows = reviewRows.filter(row => splitByReviewKey[row.key] && row.sourceMerchantKey);
+  const categoryReviewRows = selectedReviewRows.filter(row => !splitByReviewKey[row.key]);
+  const actionableReviewRowCount = categoryReviewRows.length + splitReviewRows.length;
 
   useEffect(() => {
     if (!isAiCategorizing || !aiReviewStartedAt) return undefined;
@@ -201,6 +204,7 @@ export default function TransactionReviewPage() {
       );
       setAiCategorization(result);
       setCategoryByReviewKey({});
+      setSplitByReviewKey({});
       setIgnoredAiQuestionKeys(new Set());
       setExpandedReviewKey(null);
     } catch (error) {
@@ -225,79 +229,47 @@ export default function TransactionReviewPage() {
     }));
   };
 
-  const splitMerchantGroup = async (row) => {
-    if (!row.sourceMerchantKey) return;
-    const strategy = row.recommendedSplitStrategy || 'individual_transactions';
-    setSplittingReviewKey(row.key);
-    setAiCategorizationError('');
-    try {
-      await trpcClient.transactions.createMerchantGroupingRule.mutate({
-        sourceMerchantKey: row.sourceMerchantKey,
-        strategy,
-      });
-      if (strategy === 'individual_transactions') {
-        const details = await trpcClient.transactions.aiCategorizationTransactionDetails.query({
-          transactionIds: row.transactionIds,
-        });
-        const transactions = details.transactions?.length ? details.transactions : (row.transactions ?? []);
-        const splitQuestions = transactions.map(transaction => ({
-          groupId: `${row.sourceMerchantKey}:individual:${transaction.transactionId}`,
-          decisionKind: 'needs_review',
-          pattern: getAiTransactionTitle(transaction),
-          sourceMerchantKey: row.sourceMerchantKey,
-          canSplitMerchantGroup: false,
-          recommendedSplitStrategy: null,
-          transactionIds: [transaction.transactionId],
-          aliases: [row.merchantName],
-          accountNames: transaction.account ? [transaction.account] : [],
-          transactionCount: 1,
-          totalAmount: transaction.amount,
-          reason: 'Handle this transaction separately.',
-          transactions: [transaction],
-        }));
-
-        setAiCategorization(previous => {
-          if (!previous) return previous;
-          return {
-            ...previous,
-            suggestions: (previous.suggestions ?? []).filter(suggestion => suggestionSelectionId(suggestion) !== row.key),
-            questions: [
-              ...(previous.questions ?? []).filter((question, index) => `${question.groupId || question.pattern}-${index}` !== row.key),
-              ...splitQuestions,
-            ],
-          };
-        });
-        setCategoryByReviewKey(previous => {
-          const next = { ...previous };
-          delete next[row.key];
-          return next;
-        });
-        setExpandedReviewKey(null);
+  const setReviewSplit = (reviewKey, shouldSplit) => {
+    setSplitByReviewKey(previous => {
+      const next = { ...previous };
+      if (shouldSplit) {
+        next[reviewKey] = true;
       } else {
-        await handlePreviewAiCategorization();
+        delete next[reviewKey];
       }
-    } catch (error) {
-      setAiCategorizationError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setSplittingReviewKey('');
-    }
+      return next;
+    });
   };
 
   const applySelectedReviewRows = async () => {
-    if (!selectedReviewRows.length) return;
+    if (!actionableReviewRowCount) return;
 
     setIsApplyingAiCategories(true);
     setAiCategorizationError('');
     try {
-      const result = await trpcClient.transactions.applyAiCategorization.mutate({
-        suggestions: selectedReviewRows.flatMap(row => row.transactionIds.map(transactionId => ({
-          transactionId,
-          categoryId: row.categoryId,
-        }))),
-      });
+      await Promise.all(splitReviewRows.map(row =>
+        trpcClient.transactions.createMerchantGroupingRule.mutate({
+          sourceMerchantKey: row.sourceMerchantKey,
+          strategy: row.recommendedSplitStrategy || 'individual_transactions',
+        })
+      ));
+
+      const result = categoryReviewRows.length
+        ? await trpcClient.transactions.applyAiCategorization.mutate({
+          suggestions: categoryReviewRows.flatMap(row => row.transactionIds.map(transactionId => ({
+            transactionId,
+            categoryId: row.categoryId,
+          }))),
+        })
+        : {
+          count: 0,
+          appliedTransactionIds: [],
+          skipped: [],
+          undoOperation: null,
+        };
       const appliedIds = new Set(result.appliedTransactionIds ?? []);
       const appliedQuestionKeys = new Set(
-        selectedReviewRows
+        categoryReviewRows
           .filter(row => row.type === 'question' && row.transactionIds.some(transactionId => appliedIds.has(transactionId)))
           .map(row => row.key)
       );
@@ -313,6 +285,7 @@ export default function TransactionReviewPage() {
       if (appliedQuestionKeys.size > 0) {
         setIgnoredAiQuestionKeys(previous => new Set([...previous, ...appliedQuestionKeys]));
       }
+      setSplitByReviewKey({});
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() }),
         queryClient.invalidateQueries({ queryKey: trpc.transactions.categorizationCoverage.queryKey() }),
@@ -512,7 +485,10 @@ export default function TransactionReviewPage() {
                     <div className="merchant-review-toolbar">
                       <div>
                         <strong>{reviewRows.length} merchants</strong>
-                        <span>{selectedReviewRows.length} with categories selected</span>
+                        <span>
+                          {categoryReviewRows.length} with categories selected
+                          {splitReviewRows.length > 0 ? ` · ${splitReviewRows.length} to split` : ''}
+                        </span>
                       </div>
                       <div className="transaction-review-sort" aria-label="AI review sort">
                         {AI_SORT_OPTIONS.map(option => (
@@ -534,7 +510,7 @@ export default function TransactionReviewPage() {
                       <button
                         className="btn btn--primary btn--sm"
                         type="button"
-                        disabled={isApplyingAiCategories || selectedReviewRows.length === 0}
+                        disabled={isApplyingAiCategories || actionableReviewRowCount === 0}
                         onClick={applySelectedReviewRows}
                       >
                         {isApplyingAiCategories ? 'Applying...' : 'Apply batch'}
@@ -630,20 +606,19 @@ export default function TransactionReviewPage() {
                                   <td colSpan={5}>
                                     <div className="merchant-review-details-panel">
                                       {row.canSplitMerchantGroup && (
-                                        <div className="merchant-review-details-actions">
-                                          <button
-                                            className="btn btn--secondary btn--sm"
-                                            type="button"
-                                            disabled={splittingReviewKey === row.key || isAiCategorizing}
-                                            onClick={() => splitMerchantGroup(row)}
-                                          >
-                                            {splittingReviewKey === row.key
-                                              ? 'Splitting...'
-                                              : row.recommendedSplitStrategy === 'bank_description_counterparty'
-                                                ? 'Split by counterparty'
-                                                : 'Handle separately'}
-                                          </button>
-                                        </div>
+                                        <label className="merchant-review-split-choice">
+                                          <input
+                                            type="checkbox"
+                                            checked={Boolean(splitByReviewKey[row.key])}
+                                            disabled={isAiCategorizing || isApplyingAiCategories}
+                                            onChange={(event) => setReviewSplit(row.key, event.target.checked)}
+                                          />
+                                          <span>
+                                            {row.recommendedSplitStrategy === 'bank_description_counterparty'
+                                              ? 'Split by counterparty'
+                                              : 'Handle separately'}
+                                          </span>
+                                        </label>
                                       )}
                                       {renderTransactionPreview(row.transactions, row.transactionCount)}
                                     </div>
