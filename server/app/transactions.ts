@@ -65,6 +65,27 @@ function optionalString(value: string | number | null | undefined): string | nul
   return String(value);
 }
 
+function parseSearchAmountCents(value: string): { cents: number; isSigned: boolean } | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const isParenthesized = /^\(.*\)$/.test(trimmed);
+  const normalized = trimmed
+    .replace(/^\((.*)\)$/, '-$1')
+    .replace(/[$,\s]/g, '');
+
+  if (!/^[+-]?\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
+
+  const amount = Number(normalized);
+  if (!Number.isFinite(amount)) return null;
+
+  const isSigned = isParenthesized || /^[+-]/.test(normalized);
+  return {
+    cents: Math.round(amount * 100),
+    isSigned,
+  };
+}
+
 function isUncategorizedFilter(value: string | number | null | undefined): boolean {
   return typeof value === 'string' && value.toLowerCase() === 'uncategorized';
 }
@@ -172,6 +193,12 @@ function buildTransactionFilter(options: ListTransactionsOptions = {}) {
 
   const search = optionalString(options.search);
   if (search) {
+    const amountSearch = parseSearchAmountCents(search);
+    const amountSearchClause = amountSearch
+      ? amountSearch.isSigned
+        ? 'OR t.amountCents = $searchAmountCents'
+        : 'OR ABS(t.amountCents) = $searchAmountCents'
+      : '';
     clauses.push(`(
       t.description LIKE $search OR
       t.merchant LIKE $search OR
@@ -179,8 +206,10 @@ function buildTransactionFilter(options: ListTransactionsOptions = {}) {
       ta.notes LIKE $search OR
       c.name LIKE $search OR
       a.name LIKE $search
+      ${amountSearchClause}
     )`);
     params.search = `%${search}%`;
+    if (amountSearch) params.searchAmountCents = amountSearch.isSigned ? amountSearch.cents : Math.abs(amountSearch.cents);
   }
 
   return {

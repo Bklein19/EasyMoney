@@ -816,6 +816,52 @@ test('app transactions search includes notes', async () => {
   expect(body.transactions.map((transaction: { notes: string }) => transaction.notes)).toEqual(['reimbursable team lunch']);
 });
 
+test('app transactions search includes signed and unsigned amounts with optional thousands separators', async () => {
+  const accountId = insertRow('accounts', {
+    name: 'Checking',
+    institution: 'Local Bank',
+    type: 'checking',
+  });
+
+  insertRow('transactions', {
+    accountId,
+    date: '2026-06-17',
+    amount: -1234.56,
+    description: 'Large expense',
+    type: 'expense',
+  });
+  insertRow('transactions', {
+    accountId,
+    date: '2026-06-18',
+    amount: 1234.56,
+    description: 'Large income',
+    type: 'income',
+  });
+  insertRow('transactions', {
+    accountId,
+    date: '2026-06-19',
+    amount: -12.34,
+    description: 'Small expense',
+    type: 'expense',
+  });
+
+  const unsignedWithoutSeparator = await getJson('/api/app/transactions?search=1234.56');
+  const unsignedWithSeparator = await getJson('/api/app/transactions?search=1%2C234.56');
+  const signedNegative = await getJson('/api/app/transactions?search=-1234.56');
+
+  expect(unsignedWithoutSeparator.transactions.map((transaction: { description: string }) => transaction.description)).toEqual([
+    'Large income',
+    'Large expense',
+  ]);
+  expect(unsignedWithSeparator.transactions.map((transaction: { description: string }) => transaction.description)).toEqual([
+    'Large income',
+    'Large expense',
+  ]);
+  expect(signedNegative.transactions.map((transaction: { description: string }) => transaction.description)).toEqual([
+    'Large expense',
+  ]);
+});
+
 test('app transactions ignore legacy category and notes columns without annotations', async () => {
   const accountId = insertRow('accounts', {
     name: 'Checking',
