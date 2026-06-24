@@ -260,6 +260,7 @@ function normalizeMerchantText(value: string | null | undefined) {
     .replace(/\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b/g, ' ')
     .replace(/\b(?:card|visa|mastercard|debit)\s*[-*#]?\s*\d{3,}\b/g, ' ')
     .replace(/\b(?:auth|authorization|ref|trace|id)\s*[-#: ]*\s*[a-z0-9]{4,}\b/g, ' ')
+    .replace(/\bed\d{4,}\s*(?:\/?\s*web)?\b/g, ' ')
     .replace(/\b[a-z0-9]*\d[a-z0-9]*[a-z][a-z0-9]*\b/g, ' ')
     .replace(/\s+#?\d{3,}\b/g, ' ')
     .replace(/[^a-z0-9]+/g, ' ')

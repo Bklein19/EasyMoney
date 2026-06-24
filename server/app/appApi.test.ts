@@ -1498,6 +1498,48 @@ test('ai categorization persists merchant grouping rules for generic processor d
   ]);
 });
 
+test('ai categorization normalizes Money Line EFT reference suffixes', () => {
+  const rows = [
+    {
+      id: 1,
+      ledgerTransactionId: 'money_line_1',
+      accountName: 'Brokerage',
+      accountInstitution: 'Fidelity',
+      accountType: 'investment',
+      date: '2026-06-01',
+      amountCents: -40000,
+      description: 'Money Line Paid EFT FUNDS PAID ED84859299',
+      merchant: 'Money Line Paid EFT FUNDS PAID ED84859299',
+      originalDescription: 'Money Line Paid EFT FUNDS PAID ED84859299',
+      originalCategory: null,
+      transactionKind: 'activity',
+    },
+    {
+      id: 2,
+      ledgerTransactionId: 'money_line_2',
+      accountName: 'Brokerage',
+      accountInstitution: 'Fidelity',
+      accountType: 'investment',
+      date: '2026-06-02',
+      amountCents: -40000,
+      description: 'Money Line Paid EFT FUNDS PAID ED68854613 /WEB',
+      merchant: 'Money Line Paid EFT FUNDS PAID ED68854613 /WEB',
+      originalDescription: 'Money Line Paid EFT FUNDS PAID ED68854613 /WEB',
+      originalCategory: null,
+      transactionKind: 'activity',
+    },
+  ];
+
+  const groups = groupTransactionsForAiCategorization(rows);
+
+  expect(groups).toHaveLength(1);
+  expect(groups[0]).toMatchObject({
+    merchantName: 'Money Line Paid Eft Funds Paid',
+    normalizedMerchant: 'MONEY LINE PAID EFT FUNDS PAID',
+    transactionIds: ['money_line_2', 'money_line_1'],
+  });
+});
+
 test('ai categorization can split a merchant into individual transaction review groups', async () => {
   const rows = [
     {
