@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router';
 import { Menu } from 'lucide-react';
 import ImportPage from './components/import/ImportPage.jsx';
 import TransactionsPage from './components/transactions/TransactionsPage.jsx';
@@ -21,6 +21,10 @@ interface ReportAccount {
   institution: string;
   type: string;
   account_holder?: string | null;
+}
+
+interface AppRoutesProps {
+  reportSelectedIds: Set<number>;
 }
 
 const getInitialSidebarCollapsed = () => {
@@ -129,26 +133,41 @@ function App() {
         </button>
         <div className="app-content">
           <main className="app-main">
-            <Routes>
-              <Route path="/" element={<AnalyticsPage />} />
-              <Route path="/transactions" element={<TransactionsPage />} />
-              <Route path="/transactions/review" element={<TransactionReviewPage />} />
-              <Route path="/accounts" element={<AccountsPage />} />
-              <Route path="/categories" element={<CategoriesPage />} />
-              <Route path="/budgeting" element={<BudgetingPage />} />
-              <Route path="/net-worth" element={<NetWorthPage view="networth" selectedIds={reportSelectedIds} />} />
-              <Route path="/performance" element={<NetWorthPage view="performance" selectedIds={reportSelectedIds} />} />
-              <Route path="/savings-rate" element={<SavingsRatePage selectedIds={reportSelectedIds} />} />
-              <Route path="/retirement" element={<RetirementPage selectedIds={reportSelectedIds} />} />
-              <Route path="/investments" element={<Navigate to="/net-worth" replace />} />
-              <Route path="/import" element={<ImportPage />} />
-              <Route path="/analytics" element={<Navigate to="/" replace />} />
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
+            <AppRoutes reportSelectedIds={reportSelectedIds} />
           </main>
         </div>
       </div>
     </Router>
+  );
+}
+
+function AppRoutes({ reportSelectedIds }: AppRoutesProps) {
+  const location = useLocation();
+  const shouldStartTransactionReview =
+    new URLSearchParams(location.search).get('start') === '1' &&
+    location.pathname !== '/transactions/review';
+
+  if (shouldStartTransactionReview) {
+    return <Navigate to="/transactions/review?start=1" replace />;
+  }
+
+  return (
+    <Routes>
+      <Route path="/" element={<AnalyticsPage />} />
+      <Route path="/transactions" element={<TransactionsPage />} />
+      <Route path="/transactions/review" element={<TransactionReviewPage />} />
+      <Route path="/accounts" element={<AccountsPage />} />
+      <Route path="/categories" element={<CategoriesPage />} />
+      <Route path="/budgeting" element={<BudgetingPage />} />
+      <Route path="/net-worth" element={<NetWorthPage view="networth" selectedIds={reportSelectedIds} />} />
+      <Route path="/performance" element={<NetWorthPage view="performance" selectedIds={reportSelectedIds} />} />
+      <Route path="/savings-rate" element={<SavingsRatePage selectedIds={reportSelectedIds} />} />
+      <Route path="/retirement" element={<RetirementPage selectedIds={reportSelectedIds} />} />
+      <Route path="/investments" element={<Navigate to="/net-worth" replace />} />
+      <Route path="/import" element={<ImportPage />} />
+      <Route path="/analytics" element={<Navigate to="/" replace />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
 
