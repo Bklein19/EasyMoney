@@ -1140,7 +1140,6 @@ select.filter-input {
 .transaction-search-control .filter-input {
   width: 220px;
   min-width: 180px;
-  padding-right: 34px;
 }
 
 .transaction-search-control__spinner {
