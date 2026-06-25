@@ -1,6 +1,8 @@
 import { Fragment, useMemo, useState, type FormEvent } from 'react';
 import { Check, ChevronRight, Trash2 } from 'lucide-react';
+import { useSearchParams } from 'react-router';
 import { useCategories } from '../../hooks/useCategories';
+import { CATEGORY_GROUP_LABELS, CATEGORY_GROUPS, categoryGroupKey } from '../../utils/categoryGroups';
 import './CategoriesPage.css';
 
 interface Category {
@@ -12,16 +14,6 @@ interface Category {
   color?: string | null;
   icon?: string | null;
 }
-
-const CATEGORY_GROUP_LABELS: Record<string, string> = {
-  income: 'Income',
-  transfer: 'Transfers',
-  fixed: 'Fixed / Recurring',
-  variable: 'Variable / Necessary',
-  discretionary: 'Discretionary',
-  savings_investment: 'Savings / Investment',
-  other: 'Other',
-};
 
 function labelFor(value: string | null | undefined, labels: Record<string, string> = {}) {
   if (!value) return 'None';
@@ -124,18 +116,23 @@ function CategoryDetails({
 
 export default function CategoriesPage() {
   const { categories, updateCategory, deleteCategory, isLoading } = useCategories();
+  const [searchParams] = useSearchParams();
   const [expandedCategoryId, setExpandedCategoryId] = useState<number | null>(null);
   const [savingCategoryId, setSavingCategoryId] = useState<number | null>(null);
   const [deletingCategoryId, setDeletingCategoryId] = useState<number | null>(null);
   const [confirmingDeleteCategoryId, setConfirmingDeleteCategoryId] = useState<number | null>(null);
   const [errorByCategoryId, setErrorByCategoryId] = useState<Record<number, string>>({});
 
+  const selectedGroup = searchParams.get('group') || '';
+  const selectedGroupLabel = CATEGORY_GROUPS.find(group => group.key === selectedGroup)?.label ?? '';
   const sortedCategories = useMemo(
-    () => [...categories].sort((a: Category, b: Category) =>
-      labelFor(a.categoryGroup, CATEGORY_GROUP_LABELS).localeCompare(labelFor(b.categoryGroup, CATEGORY_GROUP_LABELS)) ||
-      a.name.localeCompare(b.name)
-    ),
-    [categories]
+    () => [...categories]
+      .filter((category: Category) => !selectedGroup || categoryGroupKey(category.categoryGroup) === selectedGroup)
+      .sort((a: Category, b: Category) =>
+        labelFor(a.categoryGroup, CATEGORY_GROUP_LABELS).localeCompare(labelFor(b.categoryGroup, CATEGORY_GROUP_LABELS)) ||
+        a.name.localeCompare(b.name)
+      ),
+    [categories, selectedGroup]
   );
 
   const saveCategory = async (category: Category, changes: { description: string | null }) => {
@@ -175,9 +172,11 @@ export default function CategoriesPage() {
       <header className="page__header categories-page__header">
         <div>
           <h1 className="page__title">
-            Categories <span className="categories-page__count">{categories.length}</span>
+            Categories <span className="categories-page__count">{sortedCategories.length}</span>
           </h1>
-          <p className="page__subtitle">Edit category guidance used during AI review.</p>
+          <p className="page__subtitle">
+            {selectedGroupLabel ? `${selectedGroupLabel} category guidance.` : 'Edit category guidance used during AI review.'}
+          </p>
         </div>
       </header>
 

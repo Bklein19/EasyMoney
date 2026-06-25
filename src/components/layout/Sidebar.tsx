@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ComponentType } from 'react';
+import { useEffect, useMemo, useRef, type ComponentType } from 'react';
 import { NavLink, useLocation } from 'react-router';
 import { 
   ArrowLeftRight, 
@@ -13,6 +13,8 @@ import {
   Tags
 } from 'lucide-react';
 import type { LucideProps } from 'lucide-react';
+import { useCategories } from '../../hooks/useCategories';
+import { CATEGORY_GROUPS, categoryGroupKey } from '../../utils/categoryGroups';
 import { AccountPicker } from '../investments/AccountPicker';
 import './Sidebar.css';
 
@@ -59,6 +61,15 @@ const Sidebar = ({
 }: SidebarProps) => {
   const location = useLocation();
   const sidebarRef = useRef<HTMLDivElement | null>(null);
+  const { categories } = useCategories();
+  const categoryGroupCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const category of categories) {
+      const key = categoryGroupKey(category.categoryGroup);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [categories]);
   const navItems: NavItem[] = [
     { path: '/', label: 'Analytics', icon: PieChart },
     { path: '/transactions', label: 'Transactions', icon: ArrowLeftRight },
@@ -77,6 +88,8 @@ const Sidebar = ({
     reportAccounts.length > 0 &&
     onReportAccountSelectionChange
   );
+  const showCategoryGroups = !isCollapsed || isPeekOpen;
+  const activeCategoryGroup = new URLSearchParams(location.search).get('group') || '';
 
   useEffect(() => {
     const savedWidth = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
@@ -174,19 +187,41 @@ const Sidebar = ({
 
         <nav className="sidebar-nav">
           {navItems.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={({ isActive }) => 
-                `sidebar-link ${isActive ? 'active' : ''}`
-              }
-              onClick={onClose}
-              aria-label={item.label}
-              title={isCollapsed && !isPeekOpen ? item.label : undefined}
-            >
-              <item.icon size={20} className="sidebar-link-icon" />
-              <span className="sidebar-link-label">{item.label}</span>
-            </NavLink>
+            <div className="sidebar-nav-item" key={item.path}>
+              <NavLink
+                to={item.path}
+                className={({ isActive }) =>
+                  `sidebar-link ${isActive ? 'active' : ''}`
+                }
+                onClick={onClose}
+                aria-label={item.label}
+                title={isCollapsed && !isPeekOpen ? item.label : undefined}
+              >
+                <item.icon size={20} className="sidebar-link-icon" />
+                <span className="sidebar-link-label">{item.label}</span>
+              </NavLink>
+
+              {item.path === '/categories' && showCategoryGroups && location.pathname === '/categories' && (
+                <div className="sidebar-category-groups" aria-label="Category groups">
+                  {CATEGORY_GROUPS.map(group => {
+                    const count = categoryGroupCounts.get(group.key) ?? 0;
+                    if (count === 0) return null;
+                    const isActive = activeCategoryGroup === group.key;
+                    return (
+                      <NavLink
+                        key={group.key}
+                        to={`/categories?group=${group.key}`}
+                        className={`sidebar-category-group ${isActive ? 'active' : ''}`}
+                        onClick={onClose}
+                      >
+                        <span>{group.label}</span>
+                        <span>{count}</span>
+                      </NavLink>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           ))}
 
           {showAccountPicker && (

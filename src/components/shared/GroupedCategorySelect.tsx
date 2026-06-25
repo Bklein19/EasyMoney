@@ -1,15 +1,6 @@
 import type { CSSProperties, SelectHTMLAttributes } from 'react';
 import { Sparkles } from 'lucide-react';
-
-const CATEGORY_GROUPS = [
-  { key: 'income', label: 'Income' },
-  { key: 'transfer', label: 'Transfers' },
-  { key: 'fixed', label: 'Fixed / Recurring' },
-  { key: 'variable', label: 'Variable / Necessary' },
-  { key: 'discretionary', label: 'Discretionary' },
-  { key: 'savings_investment', label: 'Savings / Investment' },
-  { key: 'other', label: 'Other' },
-];
+import { CATEGORY_GROUPS } from '../../utils/categoryGroups';
 
 interface Category {
   id: number | string;
@@ -66,7 +57,7 @@ export default function GroupedCategorySelect({
   if (suggestedValue) excludedIds.add(suggestedValue);
 
   const availableCategories = categories.filter(category => !excludedIds.has(normalizedId(category.id)));
-  const knownGroupKeys = new Set(CATEGORY_GROUPS.map(group => group.key).filter(key => key !== 'other'));
+  const knownGroupKeys = new Set<string>(CATEGORY_GROUPS.map(group => group.key).filter(key => key !== 'other'));
   const groupedCategories = CATEGORY_GROUPS
     .map(group => ({
       ...group,
