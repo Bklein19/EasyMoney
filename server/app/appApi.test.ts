@@ -1489,6 +1489,54 @@ test('ai categorization auto-apply reports missing server key without categorizi
   }
 });
 
+test('ai categorization auto-apply job reports progress without blocking on missing key', async () => {
+  const previousOpenAiKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = '';
+  const accountId = Number(insertRow('accounts', {
+    name: 'AI Auto Job Checking',
+    type: 'checking',
+    currentBalance: 0,
+  }));
+  insertRow('ledgerTransactions', {
+    ledgerTransactionId: 'txn_ai_auto_job_no_key',
+    accountId,
+    date: '2026-06-04',
+    amountCents: -2600,
+    description: 'Auto Apply Job Coffee',
+    merchant: 'Auto Apply Job Coffee',
+    type: 'expense',
+    transactionKind: 'activity',
+    createdAt: new Date().toISOString(),
+  });
+
+  try {
+    const job = await trpcClient.transactions.startAutoApplyAiCategorization.mutate({ sort: 'count' });
+    expect(['queued', 'running']).toContain(job.status);
+    expect(job.sort).toBe('count');
+
+    let finalJob = job;
+    for (let attempt = 0; attempt < 10 && finalJob.status !== 'completed'; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+      finalJob = await trpcClient.transactions.autoApplyAiCategorizationJob.query({ jobId: job.id });
+    }
+
+    expect(finalJob).toMatchObject({
+      status: 'completed',
+      configured: false,
+      scanned: 1,
+      groupCount: 1,
+      appliedCount: 0,
+      requested: 0,
+    });
+  } finally {
+    if (previousOpenAiKey === undefined) {
+      delete process.env.OPENAI_API_KEY;
+    } else {
+      process.env.OPENAI_API_KEY = previousOpenAiKey;
+    }
+  }
+});
+
 test('ai categorization groups uncategorized transactions by merchant before model review', () => {
   const groups = groupTransactionsForAiCategorization([
     {

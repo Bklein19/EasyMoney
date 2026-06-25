@@ -47,6 +47,7 @@ export default function TransactionReviewPage() {
   const [aiReviewElapsedSeconds, setAiReviewElapsedSeconds] = useState(0);
   const [isApplyingAiCategories, setIsApplyingAiCategories] = useState(false);
   const [isAutoApplyingAiCategories, setIsAutoApplyingAiCategories] = useState(false);
+  const [autoApplyJob, setAutoApplyJob] = useState(null);
   const [aiCategoryUndo, setAiCategoryUndo] = useState(null);
   const [isRestoringAiCategories, setIsRestoringAiCategories] = useState(false);
   const [splitByReviewKey, setSplitByReviewKey] = useState({});
@@ -212,6 +213,57 @@ export default function TransactionReviewPage() {
     }
   }, [aiReviewSort]);
 
+  useEffect(() => {
+    if (!autoApplyJob?.id || !['queued', 'running'].includes(autoApplyJob.status)) return undefined;
+
+    let cancelled = false;
+    const pollJob = async () => {
+      try {
+        const nextJob = await trpcClient.transactions.autoApplyAiCategorizationJob.query({
+          jobId: autoApplyJob.id,
+        });
+        if (cancelled) return;
+        setAutoApplyJob(nextJob);
+
+        if (nextJob.status === 'completed') {
+          setIsAutoApplyingAiCategories(false);
+          setAiCategoryUndo(nextJob.undoOperation ?? null);
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() }),
+            queryClient.invalidateQueries({ queryKey: trpc.transactions.categorizationCoverage.queryKey() }),
+            queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] }),
+          ]);
+          await handlePreviewAiCategorization();
+          if (!cancelled) {
+            setAiCategorization(previous => previous ? {
+              ...previous,
+              appliedCount: nextJob.appliedCount,
+              skippedCount: nextJob.skippedCount,
+              message: nextJob.message,
+            } : previous);
+          }
+        } else if (nextJob.status === 'failed') {
+          setIsAutoApplyingAiCategories(false);
+          setAiCategorizationError(nextJob.error || 'AI auto-apply failed.');
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setIsAutoApplyingAiCategories(false);
+        setAiCategorizationError(error instanceof Error ? error.message : String(error));
+      }
+    };
+
+    void pollJob();
+    const intervalId = window.setInterval(() => {
+      void pollJob();
+    }, 1000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [autoApplyJob?.id, autoApplyJob?.status, handlePreviewAiCategorization]);
+
   const handleAiReviewSortChange = (sort) => {
     if (sort === aiReviewSort && isAiCategorizing) return;
     try {
@@ -311,43 +363,17 @@ export default function TransactionReviewPage() {
   const autoApplyConfidentAiCategories = async () => {
     setIsAutoApplyingAiCategories(true);
     setAiCategorizationError('');
+    setAutoApplyJob(null);
     try {
-      const result = await withTimeout(
-        trpcClient.transactions.autoApplyAiCategorization.mutate({ sort: aiReviewSort }),
-        AI_CATEGORIZATION_TIMEOUT_MS * 8,
-        'Auto-apply took too long. Some transactions may still need review; check the server logs and try again.'
-      );
-      if (result.configured === false) {
-        setAiCategorization({
-          configured: false,
-          model: result.model,
-          scanned: result.scanned,
-          groupCount: result.groupCount,
-          suggestions: [],
-          questions: [],
-          message: result.message,
-        });
-        return;
-      }
-
-      setAiCategoryUndo(result.undoOperation ?? null);
-      const message = `Auto-applied ${result.appliedCount.toLocaleString()} confident category update${result.appliedCount === 1 ? '' : 's'}. Left ${result.unresolvedGroupCount.toLocaleString()} merchant group${result.unresolvedGroupCount === 1 ? '' : 's'} uncategorized for review.`;
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() }),
-        queryClient.invalidateQueries({ queryKey: trpc.transactions.categorizationCoverage.queryKey() }),
-        queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] }),
-      ]);
-      await handlePreviewAiCategorization();
+      const job = await trpcClient.transactions.startAutoApplyAiCategorization.mutate({ sort: aiReviewSort });
+      setAutoApplyJob(job);
       setAiCategorization(previous => previous ? {
         ...previous,
-        appliedCount: result.appliedCount,
-        skippedCount: result.skippedCount,
-        message,
+        message: job.message,
       } : previous);
     } catch (error) {
-      setAiCategorizationError(error instanceof Error ? error.message : String(error));
-    } finally {
       setIsAutoApplyingAiCategories(false);
+      setAiCategorizationError(error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -478,6 +504,22 @@ export default function TransactionReviewPage() {
                 <div className="ai-category-action__progress" role="status" aria-live="polite">
                   <div className="ai-category-action__progress-bar" aria-hidden="true" />
                   <span>Reviewing... {aiReviewElapsedSeconds}s</span>
+                </div>
+              )}
+              {autoApplyJob && ['queued', 'running'].includes(autoApplyJob.status) && (
+                <div className="ai-category-action__progress" role="status" aria-live="polite">
+                  <div className="ai-category-action__progress-bar" aria-hidden="true" />
+                  <span>
+                    {autoApplyJob.message || 'Auto-applying confident categories...'}
+                    {' '}
+                    {autoApplyJob.groupCount > 0 && (
+                      <>
+                        {autoApplyJob.reviewedGroupCount.toLocaleString()} / {autoApplyJob.groupCount.toLocaleString()} groups reviewed,
+                        {' '}
+                        {autoApplyJob.suggestedGroupCount.toLocaleString()} confident
+                      </>
+                    )}
+                  </span>
                 </div>
               )}
               {aiCategorization?.configured === false && (

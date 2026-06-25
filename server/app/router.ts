@@ -5,8 +5,10 @@ import {
   autoApplyAiCategorization,
   applyAiCategorizationSuggestions,
   createMerchantGroupingRule,
+  getAutoApplyAiCategorizationJob,
   getAiCategorizationTransactionDetails,
   previewAiCategorization,
+  startAutoApplyAiCategorizationJob,
 } from './aiCategorization.ts';
 import { listCategories } from './categories.ts';
 import { saveLocalEnvValue } from './localEnv.ts';
@@ -120,6 +122,18 @@ export const appRouter = t.router({
         sort: z.enum(['count', 'money']).optional(),
       }).optional())
       .mutation(({ input }) => autoApplyAiCategorization(input ?? {})),
+
+    startAutoApplyAiCategorization: t.procedure
+      .input(z.object({
+        sort: z.enum(['count', 'money']).optional(),
+      }).optional())
+      .mutation(({ input }) => startAutoApplyAiCategorizationJob(input ?? {})),
+
+    autoApplyAiCategorizationJob: t.procedure
+      .input(z.object({
+        jobId: z.string().min(1),
+      }))
+      .query(({ input }) => getAutoApplyAiCategorizationJob(input)),
 
     aiCategorizationTransactionDetails: t.procedure
       .input(z.object({

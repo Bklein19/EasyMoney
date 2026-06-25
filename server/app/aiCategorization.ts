@@ -127,6 +127,41 @@ interface CategoryUndoOperation {
   count: number;
 }
 
+type AutoApplyAiCategorizationStatus = 'queued' | 'running' | 'completed' | 'failed';
+
+interface AutoApplyAiCategorizationSnapshot {
+  id?: string;
+  status?: AutoApplyAiCategorizationStatus;
+  configured: boolean;
+  model: string;
+  sort: AiCategorizationSort;
+  scanned: number;
+  groupCount: number;
+  reviewedGroupCount: number;
+  suggestedGroupCount: number;
+  questionGroupCount: number;
+  unresolvedGroupCount: number;
+  ignoredDecisionCount: number;
+  requested: number;
+  appliedCount: number;
+  skippedCount: number;
+  undoOperation: CategoryUndoOperation | null;
+  message?: string;
+  error?: string;
+}
+
+type AutoApplyAiCategorizationProgress = (snapshot: AutoApplyAiCategorizationSnapshot) => void;
+
+interface AutoApplyAiCategorizationJob extends AutoApplyAiCategorizationSnapshot {
+  id: string;
+  status: AutoApplyAiCategorizationStatus;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+}
+
+const autoApplyJobs = new Map<string, AutoApplyAiCategorizationJob>();
+
 function getOpenAiKey() {
   return process.env.OPENAI_API_KEY?.trim() || '';
 }
@@ -793,50 +828,45 @@ export async function previewAiCategorization(options: { limit?: unknown; sort?:
   };
 }
 
-export async function autoApplyAiCategorization(input: { sort?: unknown } = {}) {
+export async function autoApplyAiCategorization(
+  input: { sort?: unknown } = {},
+  onProgress?: AutoApplyAiCategorizationProgress
+) {
   const apiKey = getOpenAiKey();
   const model = getOpenAiModel();
   const sort = normalizeAiCategorizationSort(input.sort);
   const categories = listCategorizationCategories();
   const transactions = listUncategorizedTransactions();
   const groups = groupTransactionsForAiCategorization(transactions, { sort });
+	const progressBase = {
+		configured: Boolean(apiKey),
+		model,
+		sort,
+    scanned: transactions.length,
+    groupCount: groups.length,
+    reviewedGroupCount: 0,
+    suggestedGroupCount: 0,
+    questionGroupCount: 0,
+    unresolvedGroupCount: groups.length,
+    ignoredDecisionCount: 0,
+    requested: 0,
+    appliedCount: 0,
+		skippedCount: 0,
+		undoOperation: null as CategoryUndoOperation | null,
+		message: '',
+	};
 
   if (!apiKey) {
     return {
-      configured: false,
-      model,
-      sort,
-      scanned: transactions.length,
-      groupCount: groups.length,
-      reviewedGroupCount: 0,
-      suggestedGroupCount: 0,
-      questionGroupCount: 0,
-      unresolvedGroupCount: groups.length,
-      ignoredDecisionCount: 0,
-      requested: 0,
-      appliedCount: 0,
-      skippedCount: 0,
-      undoOperation: null as CategoryUndoOperation | null,
+      ...progressBase,
       message: 'Set OPENAI_API_KEY on the server to enable AI categorization.',
     };
   }
 
   if (!categories.length || !transactions.length || !groups.length) {
     return {
+      ...progressBase,
       configured: true,
-      model,
-      sort,
-      scanned: transactions.length,
-      groupCount: groups.length,
-      reviewedGroupCount: 0,
-      suggestedGroupCount: 0,
-      questionGroupCount: 0,
-      unresolvedGroupCount: groups.length,
-      ignoredDecisionCount: 0,
-      requested: 0,
-      appliedCount: 0,
-      skippedCount: 0,
-      undoOperation: null as CategoryUndoOperation | null,
     };
   }
 
@@ -861,6 +891,16 @@ export async function autoApplyAiCategorization(input: { sort?: unknown } = {}) 
     questionGroupCount += categorized.questions.length;
     ignoredDecisionCount += categorized.ignoredCount;
     reviewedGroupCount += batch.length;
+    onProgress?.({
+      ...progressBase,
+      configured: true,
+      reviewedGroupCount,
+      suggestedGroupCount: suggestions.length,
+      questionGroupCount,
+      unresolvedGroupCount: Math.max(0, groups.length - suggestions.length),
+      ignoredDecisionCount,
+      message: `Reviewed ${reviewedGroupCount.toLocaleString()} of ${groups.length.toLocaleString()} merchant groups.`,
+    });
   }
 
   const applyResult = applyAiCategorizationSuggestions({
@@ -871,11 +911,8 @@ export async function autoApplyAiCategorization(input: { sort?: unknown } = {}) 
   });
 
   return {
+    ...progressBase,
     configured: true,
-    model,
-    sort,
-    scanned: transactions.length,
-    groupCount: groups.length,
     reviewedGroupCount,
     suggestedGroupCount: suggestions.length,
     questionGroupCount,
@@ -886,6 +923,105 @@ export async function autoApplyAiCategorization(input: { sort?: unknown } = {}) 
     skippedCount: applyResult.skipped.length,
     undoOperation: applyResult.undoOperation,
   };
+}
+
+function toAutoApplyJobSnapshot(job: AutoApplyAiCategorizationJob) {
+  return {
+    id: job.id,
+    status: job.status,
+    configured: job.configured,
+    model: job.model,
+    sort: job.sort,
+    scanned: job.scanned,
+    groupCount: job.groupCount,
+    reviewedGroupCount: job.reviewedGroupCount,
+    suggestedGroupCount: job.suggestedGroupCount,
+    questionGroupCount: job.questionGroupCount,
+    unresolvedGroupCount: job.unresolvedGroupCount,
+    ignoredDecisionCount: job.ignoredDecisionCount,
+    requested: job.requested,
+    appliedCount: job.appliedCount,
+    skippedCount: job.skippedCount,
+    undoOperation: job.undoOperation,
+    message: job.message,
+    error: job.error,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    completedAt: job.completedAt,
+  };
+}
+
+function updateAutoApplyJob(job: AutoApplyAiCategorizationJob, snapshot: Partial<AutoApplyAiCategorizationJob>) {
+  Object.assign(job, snapshot, { updatedAt: new Date().toISOString() });
+  autoApplyJobs.set(job.id, job);
+}
+
+export function startAutoApplyAiCategorizationJob(input: { sort?: unknown } = {}) {
+  const now = new Date().toISOString();
+  const sort = normalizeAiCategorizationSort(input.sort);
+  const job: AutoApplyAiCategorizationJob = {
+    id: crypto.randomUUID(),
+    status: 'queued',
+    configured: true,
+    model: getOpenAiModel(),
+    sort,
+    scanned: 0,
+    groupCount: 0,
+    reviewedGroupCount: 0,
+    suggestedGroupCount: 0,
+    questionGroupCount: 0,
+    unresolvedGroupCount: 0,
+    ignoredDecisionCount: 0,
+    requested: 0,
+    appliedCount: 0,
+    skippedCount: 0,
+    undoOperation: null,
+    message: 'Queued AI categorization.',
+    createdAt: now,
+    updatedAt: now,
+    completedAt: null,
+  };
+  autoApplyJobs.set(job.id, job);
+
+  void (async () => {
+    updateAutoApplyJob(job, {
+      status: 'running',
+      message: 'Starting AI categorization.',
+    });
+    try {
+      const result = await autoApplyAiCategorization(input, snapshot => {
+        updateAutoApplyJob(job, {
+          ...snapshot,
+          status: 'running',
+        });
+      });
+      updateAutoApplyJob(job, {
+        ...result,
+        status: 'completed',
+        completedAt: new Date().toISOString(),
+        message: result.configured === false
+          ? result.message
+          : `Auto-applied ${result.appliedCount.toLocaleString()} confident category update${result.appliedCount === 1 ? '' : 's'}. Left ${result.unresolvedGroupCount.toLocaleString()} merchant group${result.unresolvedGroupCount === 1 ? '' : 's'} uncategorized for review.`,
+      });
+    } catch (error) {
+      updateAutoApplyJob(job, {
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+        message: 'AI auto-apply failed.',
+        completedAt: new Date().toISOString(),
+      });
+    }
+  })();
+
+  return toAutoApplyJobSnapshot(job);
+}
+
+export function getAutoApplyAiCategorizationJob(input: { jobId: string }) {
+  const job = autoApplyJobs.get(String(input.jobId || ''));
+  if (!job) {
+    throw new Error('AI auto-apply job not found.');
+  }
+  return toAutoApplyJobSnapshot(job);
 }
 
 export function createMerchantGroupingRule(input: { sourceMerchantKey: string; strategy?: string }) {
