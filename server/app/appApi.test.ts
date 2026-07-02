@@ -2633,6 +2633,145 @@ test('app import history lists committed files and can unimport one', async () =
   });
 });
 
+test('app data freshness reports latest source fact dates by account', async () => {
+  const checkingId = Number(insertRow('accounts', {
+    name: 'Fresh Checking',
+    institution: 'Bank of America',
+    type: 'checking',
+    currentBalance: 0,
+  }));
+  const staleCardId = Number(insertRow('accounts', {
+    name: 'Old Card',
+    institution: 'Chase',
+    type: 'credit-card',
+    currentBalance: 0,
+  }));
+  const noDataId = Number(insertRow('accounts', {
+    name: 'Never Imported',
+    institution: 'Marcus',
+    type: 'savings',
+    currentBalance: 0,
+  }));
+  insertRow('accounts', {
+    name: 'Archived Account',
+    institution: 'Bank of America',
+    type: 'checking',
+    status: 'archived',
+    currentBalance: 0,
+  });
+
+  const freshImportFileId = Number(insertRow('importFiles', {
+    fileName: 'bofa-checking.csv',
+    contentHash: 'fresh-hash',
+    parserName: 'Bank of America Activity',
+    institution: 'Bank of America',
+    sourceType: 'activity-export',
+    status: 'committed',
+    committedAt: '2026-06-25T12:00:00.000Z',
+  }));
+  const freshSourceFileId = Number(insertRow('sourceFiles', {
+    importFileId: freshImportFileId,
+    fileName: 'bofa-checking.csv',
+    contentHash: 'fresh-hash',
+    parserName: 'Bank of America Activity',
+    institution: 'Bank of America',
+    sourceType: 'activity-export',
+    status: 'committed',
+    committedAt: '2026-06-25T12:00:00.000Z',
+  }));
+  const freshSourceAccountId = Number(insertRow('sourceAccounts', {
+    sourceFileId: freshSourceFileId,
+    accountId: checkingId,
+    institution: 'Bank of America',
+    sourceAccountKey: 'bofa-checking',
+    sourceAccountName: 'Fresh Checking',
+  }));
+  insertRow('sourceTransactions', {
+    sourceFileId: freshSourceFileId,
+    sourceAccountId: freshSourceAccountId,
+    stableSourceId: 'fresh-transaction',
+    date: '2026-06-20',
+    amountCents: -1200,
+    description: 'Fresh Coffee',
+    sourceRole: 'activity',
+    priority: 100,
+  });
+  insertRow('sourceBalances', {
+    sourceFileId: freshSourceFileId,
+    sourceAccountId: freshSourceAccountId,
+    date: '2026-06-25',
+    balanceCents: 100000,
+    priority: 100,
+  });
+
+  const staleImportFileId = Number(insertRow('importFiles', {
+    fileName: 'chase.csv',
+    contentHash: 'stale-hash',
+    parserName: 'Chase Credit Card',
+    institution: 'Chase',
+    sourceType: 'activity-export',
+    status: 'committed',
+    committedAt: '2026-04-01T12:00:00.000Z',
+  }));
+  const staleSourceFileId = Number(insertRow('sourceFiles', {
+    importFileId: staleImportFileId,
+    fileName: 'chase.csv',
+    contentHash: 'stale-hash',
+    parserName: 'Chase Credit Card',
+    institution: 'Chase',
+    sourceType: 'activity-export',
+    status: 'committed',
+    committedAt: '2026-04-01T12:00:00.000Z',
+  }));
+  const staleSourceAccountId = Number(insertRow('sourceAccounts', {
+    sourceFileId: staleSourceFileId,
+    accountId: staleCardId,
+    institution: 'Chase',
+    sourceAccountKey: 'chase-card',
+    sourceAccountName: 'Old Card',
+  }));
+  insertRow('sourceTransactions', {
+    sourceFileId: staleSourceFileId,
+    sourceAccountId: staleSourceAccountId,
+    stableSourceId: 'stale-transaction',
+    date: '2026-04-01',
+    amountCents: -3400,
+    description: 'Old Dinner',
+    sourceRole: 'activity',
+    priority: 100,
+  });
+
+  const body = await getJson('/api/app/data-freshness?today=2026-07-01');
+  const checking = body.accounts.find((account: { accountId: number }) => account.accountId === checkingId);
+  const staleCard = body.accounts.find((account: { accountId: number }) => account.accountId === staleCardId);
+  const noData = body.accounts.find((account: { accountId: number }) => account.accountId === noDataId);
+
+  expect(body.summary).toMatchObject({
+    totalAccounts: 3,
+    currentAccounts: 1,
+    staleAccounts: 1,
+    noDataAccounts: 1,
+  });
+  expect(checking).toMatchObject({
+    latestTransactionDate: '2026-06-20',
+    latestBalanceDate: '2026-06-25',
+    latestFactDate: '2026-06-25',
+    status: 'current',
+    latestImportFileName: 'bofa-checking.csv',
+  });
+  expect(checking.suggestedDownloads).toContain('Activity CSV');
+  expect(checking.suggestedDownloads).toContain('Statement PDF');
+  expect(staleCard).toMatchObject({
+    latestFactDate: '2026-04-01',
+    status: 'stale',
+  });
+  expect(staleCard.suggestedDownloads).toContain('Credit-card activity CSV');
+  expect(noData).toMatchObject({
+    latestFactDate: null,
+    status: 'no-data',
+  });
+});
+
 test('app import history can bulk unimport and reimport committed source facts', async () => {
   const accountId = insertRow('accounts', {
     name: 'Chase Sapphire',

@@ -9,6 +9,7 @@ import FileDropZone from './FileDropZone';
 import ColumnMapper from './ColumnMapper';
 import ImportPreview from './ImportPreview';
 import BankDetector from './BankDetector';
+import DataFreshnessPanel from './DataFreshnessPanel';
 import './ImportPage.css';
 
 export default function ImportPage() {
@@ -416,6 +417,7 @@ export default function ImportPage() {
 
       {stage === 'upload' && (
         <div className="upload-container">
+          <DataFreshnessPanel />
           <ImportHistory
             imports={importHistory}
             error={historyError}

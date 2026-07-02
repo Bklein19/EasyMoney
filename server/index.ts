@@ -14,6 +14,7 @@ import {
 import { seedDatabase } from './seed.js';
 import { archiveAccount, listAccounts, unarchiveAccount, updateAccountMetadata } from './app/accounts.ts';
 import { listCategories } from './app/categories.ts';
+import { getDataFreshnessReport } from './app/dataFreshness.ts';
 import { commitImport, listImportHistory, previewImport, reimportFile, reimportFiles, unimportFile, unimportFiles } from './app/imports.ts';
 import { getInvestmentNetWorthReport, getSavingsRateReport } from './app/investmentReports.ts';
 import { loadLocalEnv } from './app/localEnv.ts';
@@ -171,6 +172,10 @@ export const routes = wrapRoutes({
 
   '/api/app/imports': {
     GET: () => json({ imports: listImportHistory() }),
+  },
+
+  '/api/app/data-freshness': {
+    GET: (request) => json(getDataFreshnessReport({ today: queryObject(request).today })),
   },
 
   '/api/app/imports/bulk-unimport': {
