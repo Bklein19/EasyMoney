@@ -32,6 +32,8 @@ The `data/` directory is ignored by Git. Do not commit personal financial export
 
 ## Development
 
+EasyMoney uses Bun as its single runtime and package runner. Use `bun`/`bunx` for development, checks, scripts, and server execution. Do not add Python helper scripts, npm/yarn/pnpm workflows, or standalone Node commands for project tasks; `node:` imports are used only as runtime APIs inside code executed by Bun.
+
 Install dependencies:
 
 ```bash

@@ -11,6 +11,7 @@
   - `bun test`
   - `bun run lint`
   - `bun run build`
+- Use Bun as the single runtime and package runner for repo work. Do not add Python helper scripts, npm/yarn/pnpm workflows, or standalone Node commands for project tasks. `node:` imports are fine inside TypeScript/JavaScript that runs under Bun.
 
 ## Architecture Direction
 
