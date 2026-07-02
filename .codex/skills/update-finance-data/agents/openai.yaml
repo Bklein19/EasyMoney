@@ -1,0 +1,4 @@
+interface:
+  display_name: "Update Finance Data"
+  short_description: "Download and import supported bank data"
+  default_prompt: "Use $update-finance-data to plan a supported-bank download and EasyMoney import catch-up run."
