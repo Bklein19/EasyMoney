@@ -178,6 +178,10 @@ export const routes = wrapRoutes({
     GET: (request) => json(getDataFreshnessReport({ today: queryObject(request).today })),
   },
 
+  '/api/app/data-freshness/catch-up': {
+    GET: (request) => json(getDataFreshnessReport({ today: queryObject(request).today }).catchUp),
+  },
+
   '/api/app/imports/bulk-unimport': {
     POST: async (request) => json(unimportFiles((await bodyJson(request)).importFileIds)),
   },

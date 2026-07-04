@@ -19,8 +19,37 @@ interface DataFreshnessRow {
   latestImportedAt: string | null;
 }
 
+type DataFreshnessStatus = 'current' | 'due' | 'stale' | 'no-data';
+
+interface DataFreshnessAccount {
+  accountId: number;
+  accountName: string;
+  institution: string | null;
+  accountType: string;
+  accountStatus: string;
+  latestTransactionDate: string | null;
+  latestBalanceDate: string | null;
+  latestFactDate: string | null;
+  daysSinceLatestFact: number | null;
+  status: DataFreshnessStatus;
+  transactionCount: number;
+  balanceCount: number;
+  latestImportFileName: string | null;
+  latestParserName: string | null;
+  latestSourceType: string | null;
+  latestImportedAt: string | null;
+  suggestedDownloads: string[];
+}
+
 function isoDate(value: Date) {
   return value.toISOString().slice(0, 10);
+}
+
+function addDays(date: string, days: number) {
+  const value = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(value.getTime())) return date;
+  value.setUTCDate(value.getUTCDate() + days);
+  return isoDate(value);
 }
 
 function daysBetween(fromDate: string | null, toDate: string) {
@@ -35,7 +64,7 @@ function maxDate(...dates: Array<string | null>) {
   return dates.filter(Boolean).sort().at(-1) ?? null;
 }
 
-function statusFor(daysSinceLatestFact: number | null) {
+function statusFor(daysSinceLatestFact: number | null): DataFreshnessStatus {
   if (daysSinceLatestFact === null) return 'no-data';
   if (daysSinceLatestFact > STALE_AFTER_DAYS) return 'stale';
   if (daysSinceLatestFact > DUE_AFTER_DAYS) return 'due';
@@ -88,6 +117,87 @@ function supportedDownloadsFor(institution: string | null, accountType: string) 
   }
 
   return Array.from(downloads);
+}
+
+function downloadWindowFor(account: DataFreshnessAccount, today: string) {
+  if (!account.latestFactDate) {
+    return {
+      startDate: addDays(today, -365),
+      endDate: today,
+      overlapDays: 0,
+      label: `last 12 months through ${today}`,
+    };
+  }
+
+  const startDate = addDays(account.latestFactDate, -7);
+  return {
+    startDate,
+    endDate: today,
+    overlapDays: 7,
+    label: `${startDate} through ${today}`,
+  };
+}
+
+function buildCatchUpPlan(accounts: DataFreshnessAccount[], today: string) {
+  const items = accounts
+    .filter(account => account.status !== 'current')
+    .map(account => ({
+      id: `account-${account.accountId}`,
+      accountId: account.accountId,
+      accountName: account.accountName,
+      institution: account.institution || 'Unknown institution',
+      accountType: account.accountType,
+      status: account.status,
+      latestFactDate: account.latestFactDate,
+      daysSinceLatestFact: account.daysSinceLatestFact,
+      downloadWindow: downloadWindowFor(account, today),
+      suggestedDownloads: account.suggestedDownloads,
+      latestImport: account.latestImportFileName
+        ? {
+          fileName: account.latestImportFileName,
+          parserName: account.latestParserName,
+          sourceType: account.latestSourceType,
+          importedAt: account.latestImportedAt,
+        }
+        : null,
+    }));
+
+  const groups = Array.from(
+    items.reduce((byInstitution, item) => {
+      const existing = byInstitution.get(item.institution) || {
+        institution: item.institution,
+        statuses: { due: 0, stale: 0, noData: 0 },
+        items: [],
+      };
+      existing.statuses.due += item.status === 'due' ? 1 : 0;
+      existing.statuses.stale += item.status === 'stale' ? 1 : 0;
+      existing.statuses.noData += item.status === 'no-data' ? 1 : 0;
+      existing.items.push(item);
+      byInstitution.set(item.institution, existing);
+      return byInstitution;
+    }, new Map<string, {
+      institution: string;
+      statuses: { due: number; stale: number; noData: number };
+      items: typeof items;
+    }>())
+    .values()
+  )
+    .map(group => ({
+      ...group,
+      items: group.items.sort((a, b) => (
+        a.status.localeCompare(b.status)
+        || a.accountName.localeCompare(b.accountName)
+        || a.accountId - b.accountId
+      )),
+    }))
+    .sort((a, b) => a.institution.localeCompare(b.institution));
+
+  return {
+    generatedAt: today,
+    totalItems: items.length,
+    groups,
+    items,
+  };
 }
 
 export function getDataFreshnessReport(options: { today?: string } = {}) {
@@ -212,5 +322,6 @@ export function getDataFreshnessReport(options: { today?: string } = {}) {
     staleAfterDays: STALE_AFTER_DAYS,
     summary,
     accounts,
+    catchUp: buildCatchUpPlan(accounts, today),
   };
 }

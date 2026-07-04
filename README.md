@@ -88,9 +88,20 @@ GitHub Actions runs the same gate on pushes to `main` and pull requests.
 ## Useful Commands
 
 ```bash
+bun run data:freshness
+bun run data:freshness --catch-up
 bun run rebuild:ledger
 bun run build
 bun run start
+```
+
+`data:freshness` prints machine-readable JSON for account freshness. Use `--catch-up` to print only the programmatic download plan grouped by institution.
+
+The same JSON is available from the local app server:
+
+```text
+GET /api/app/data-freshness
+GET /api/app/data-freshness/catch-up
 ```
 
 `rebuild:ledger` is mainly for tests, migrations, and repair operations. The app should not rebuild the ledger for ordinary categorization edits.

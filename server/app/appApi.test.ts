@@ -2770,6 +2770,57 @@ test('app data freshness reports latest source fact dates by account', async () 
     latestFactDate: null,
     status: 'no-data',
   });
+  expect(body.catchUp).toMatchObject({
+    generatedAt: '2026-07-01',
+    totalItems: 2,
+  });
+  expect(body.catchUp.items).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      id: `account-${staleCardId}`,
+      accountId: staleCardId,
+      institution: 'Chase',
+      status: 'stale',
+      latestFactDate: '2026-04-01',
+      downloadWindow: {
+        startDate: '2026-03-25',
+        endDate: '2026-07-01',
+        overlapDays: 7,
+        label: '2026-03-25 through 2026-07-01',
+      },
+      suggestedDownloads: expect.arrayContaining(['Credit-card activity CSV']),
+    }),
+    expect.objectContaining({
+      id: `account-${noDataId}`,
+      accountId: noDataId,
+      institution: 'Marcus',
+      status: 'no-data',
+      latestFactDate: null,
+      downloadWindow: {
+        startDate: '2025-07-01',
+        endDate: '2026-07-01',
+        overlapDays: 0,
+        label: 'last 12 months through 2026-07-01',
+      },
+      suggestedDownloads: expect.arrayContaining(['Activity CSV', 'Statement PDF']),
+    }),
+  ]));
+  expect(body.catchUp.groups).toEqual(expect.arrayContaining([
+    expect.objectContaining({
+      institution: 'Chase',
+      statuses: { due: 0, stale: 1, noData: 0 },
+    }),
+    expect.objectContaining({
+      institution: 'Marcus',
+      statuses: { due: 0, stale: 0, noData: 1 },
+    }),
+  ]));
+
+  const catchUp = await getJson('/api/app/data-freshness/catch-up?today=2026-07-01');
+  expect(catchUp).toMatchObject({
+    generatedAt: '2026-07-01',
+    totalItems: 2,
+  });
+  expect(catchUp.items.map((item: { accountId: number }) => item.accountId).sort()).toEqual([noDataId, staleCardId].sort());
 });
 
 test('app import history can bulk unimport and reimport committed source facts', async () => {
