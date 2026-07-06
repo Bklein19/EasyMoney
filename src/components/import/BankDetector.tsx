@@ -1,8 +1,13 @@
-// @ts-nocheck
 import { CheckCircle2, AlertCircle, Settings } from 'lucide-react';
 import './BankDetector.css';
 
-export default function BankDetector({ profileUsed, requiresMapping, onReviewMapping }) {
+interface BankDetectorProps {
+  profileUsed?: string | null;
+  requiresMapping?: boolean;
+  onReviewMapping?: () => void;
+}
+
+export default function BankDetector({ profileUsed, requiresMapping, onReviewMapping }: BankDetectorProps) {
   if (requiresMapping) {
     return (
       <div className="bank-detector warning glass-card">

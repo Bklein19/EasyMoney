@@ -1,13 +1,19 @@
-// @ts-nocheck
 import { useCallback, useState } from 'react';
+import type { ChangeEvent, DragEvent } from 'react';
 import { UploadCloud } from 'lucide-react';
 import './FileDropZone.css';
 
-export default function FileDropZone({ onFileSelected, onFilesSelected, isParsing }) {
-  const [isDragging, setIsDragging] = useState(false);
-  const isSupportedFile = (file) => /\.(csv|txt|pdf|html?)$/i.test(file.name);
+interface FileDropZoneProps {
+  onFileSelected?: (file: File) => void;
+  onFilesSelected?: (files: File[]) => void;
+  isParsing?: boolean;
+}
 
-  const submitFiles = useCallback((files) => {
+export default function FileDropZone({ onFileSelected, onFilesSelected, isParsing }: FileDropZoneProps) {
+  const [isDragging, setIsDragging] = useState(false);
+  const isSupportedFile = (file: File) => /\.(csv|txt|pdf|html?)$/i.test(file.name);
+
+  const submitFiles = useCallback((files: File[]) => {
     const supportedFiles = Array.from(files).filter(isSupportedFile);
     if (supportedFiles.length === 0) {
       alert('Please upload CSV, PDF, or HTML import files.');
@@ -27,12 +33,12 @@ export default function FileDropZone({ onFileSelected, onFilesSelected, isParsin
     onFileSelected?.(supportedFiles[0]);
   }, [onFileSelected, onFilesSelected]);
 
-  const handleDrag = useCallback((e) => {
+  const handleDrag = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
   }, []);
 
-  const handleDragIn = useCallback((e) => {
+  const handleDragIn = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
@@ -40,13 +46,13 @@ export default function FileDropZone({ onFileSelected, onFilesSelected, isParsin
     }
   }, []);
 
-  const handleDragOut = useCallback((e) => {
+  const handleDragOut = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
   }, []);
 
-  const handleDrop = useCallback((e) => {
+  const handleDrop = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
@@ -57,7 +63,7 @@ export default function FileDropZone({ onFileSelected, onFilesSelected, isParsin
     }
   }, [submitFiles]);
 
-  const handleFileChange = (e) => {
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       submitFiles(Array.from(e.target.files));
       e.target.value = '';

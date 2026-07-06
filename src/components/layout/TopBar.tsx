@@ -1,9 +1,13 @@
-// @ts-nocheck
 import { Menu, ChevronDown, Bell } from 'lucide-react';
 import Button from '../shared/Button';
 import './TopBar.css';
 
-const TopBar = ({ onMenuClick, title = 'EasyMoney' }) => {
+interface TopBarProps {
+  onMenuClick?: () => void;
+  title?: string;
+}
+
+const TopBar = ({ onMenuClick, title = 'EasyMoney' }: TopBarProps) => {
   return (
     <header className="topbar">
       <div className="topbar-left">

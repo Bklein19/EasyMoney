@@ -1,9 +1,27 @@
-// @ts-nocheck
 import CategoryPicker from './CategoryPicker';
 import { formatDate, formatCurrency, getAmountClass } from '../../utils/formatters';
+import type { CategorySummary } from '../../../server/app/types';
 
-export default function TransactionRow({ transaction, onUpdate, categories, addCategory }) {
-  const handleCategoryChange = (categoryId) => {
+interface TransactionRowItem {
+  id: number | string;
+  categoryId: number | string | null;
+  date: string;
+  amount: number;
+  merchant?: string | null;
+  description?: string | null;
+  notes?: string | null;
+  accountName?: string | null;
+}
+
+interface TransactionRowProps {
+  transaction: TransactionRowItem;
+  onUpdate: (id: number | string, changes: { categoryId: number | string | null }) => void;
+  categories: CategorySummary[];
+  addCategory: (category: Record<string, unknown>) => Promise<number | string>;
+}
+
+export default function TransactionRow({ transaction, onUpdate, categories, addCategory }: TransactionRowProps) {
+  const handleCategoryChange = (categoryId: number | string | null) => {
     onUpdate(transaction.id, { categoryId });
   };
 
