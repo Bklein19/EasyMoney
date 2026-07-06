@@ -3,7 +3,7 @@ import { useCategories } from '../../hooks/useCategories';
 import { useAccounts } from '../../hooks/useAccounts';
 import GroupedCategorySelect, { isUncategorized } from '../shared/GroupedCategorySelect';
 
-interface TransactionFilterState {
+export interface TransactionFilterState {
   searchQuery?: string;
   accountId?: string;
   categoryId?: string;

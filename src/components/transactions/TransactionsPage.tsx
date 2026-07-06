@@ -1,11 +1,12 @@
-// @ts-nocheck
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { FormEvent, SetStateAction } from 'react';
 import { useNavigate } from 'react-router';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, ArrowUp, X } from 'lucide-react';
 import { useTransactions } from '../../hooks/useTransactions';
 import TransactionRow from './TransactionRow';
 import TransactionFilters from './TransactionFilters';
+import type { TransactionFilterState } from './TransactionFilters';
 import { formatCurrency } from '../../utils/formatters';
 import { useCategories } from '../../hooks/useCategories';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
@@ -22,20 +23,36 @@ const TRANSACTION_SORT_COLUMNS = [
   { key: 'category', label: 'Category', asc: 'category_asc', desc: 'category_desc', initial: 'category_asc' },
   { key: 'account', label: 'Account', asc: 'account_asc', desc: 'account_desc', initial: 'account_asc' },
   { key: 'amount', label: 'Amount', asc: 'amount_asc', desc: 'amount_desc', initial: 'amount_desc' },
-];
+] as const;
+
+type TransactionSortColumn = typeof TRANSACTION_SORT_COLUMNS[number];
+
+interface BulkCategoryUndo {
+  id: string | number;
+  count: number;
+  categoryName?: string | null;
+}
+
+interface TransactionTotals {
+  income: number;
+  expenses: number;
+  internalMovement: number;
+  investments: number;
+  net: number;
+}
 
 export default function TransactionsPage() {
   const navigate = useNavigate();
-  const [filters, setFilters] = useState({});
+  const [filters, setFilters] = useState<TransactionFilterState>({});
   const [isCreatingBulkCategory, setIsCreatingBulkCategory] = useState(false);
   const [newBulkCategoryName, setNewBulkCategoryName] = useState('');
-  const [bulkCategoryUndo, setBulkCategoryUndo] = useState(null);
+  const [bulkCategoryUndo, setBulkCategoryUndo] = useState<BulkCategoryUndo | null>(null);
   const [isApplyingBulkCategory, setIsApplyingBulkCategory] = useState(false);
   const [isRestoringBulkCategory, setIsRestoringBulkCategory] = useState(false);
   const [showTransactionsWorking, setShowTransactionsWorking] = useState(false);
-  const [transactionsScrollElement, setTransactionsScrollElement] = useState(null);
+  const [transactionsScrollElement, setTransactionsScrollElement] = useState<HTMLElement | null>(null);
   const [transactionsListOffsetTop, setTransactionsListOffsetTop] = useState(0);
-  const transactionsListRef = useRef(null);
+  const transactionsListRef = useRef<HTMLDivElement | null>(null);
   const deferredFilters = useDeferredValue(filters);
   const {
     transactions,
@@ -89,7 +106,7 @@ export default function TransactionsPage() {
 
     trpcClient.transactions.latestCategoryUndo.query()
       .then((undoOperation) => {
-        if (!cancelled && undoOperation) setBulkCategoryUndo(undoOperation);
+        if (!cancelled && undoOperation) setBulkCategoryUndo(undoOperation as BulkCategoryUndo);
       })
       .catch(() => {});
 
@@ -99,7 +116,8 @@ export default function TransactionsPage() {
   }, []);
 
   useLayoutEffect(() => {
-    setTransactionsScrollElement(document.querySelector('.app-main'));
+    const appMain = document.querySelector('.app-main');
+    setTransactionsScrollElement(appMain instanceof HTMLElement ? appMain : null);
   }, []);
 
   useLayoutEffect(() => {
@@ -136,19 +154,19 @@ export default function TransactionsPage() {
       hasNextPage &&
       !isFetchingNextPage
     ) {
-      fetchNextPage();
+      void fetchNextPage();
     }
   }, [fetchNextPage, hasNextPage, isFetchingNextPage, virtualRows, visibleTransactions.length]);
 
   const bulkCategorySelectValue = BULK_CATEGORY_UNSET;
-  const formatTransactionCount = (count) => `${count.toLocaleString()} matching transaction${count === 1 ? '' : 's'}`;
+  const formatTransactionCount = (count: number) => `${count.toLocaleString()} matching transaction${count === 1 ? '' : 's'}`;
   const activeSortBy = filters.sortBy || 'date_desc';
   const sortColumn = TRANSACTION_SORT_COLUMNS.find(column =>
     activeSortBy === column.asc || activeSortBy === column.desc
   ) || TRANSACTION_SORT_COLUMNS[0];
   const sortDirection = activeSortBy === sortColumn.asc ? 'asc' : 'desc';
 
-  const setColumnSort = (column) => {
+  const setColumnSort = (column: TransactionSortColumn) => {
     const nextSortBy = activeSortBy === column.asc
       ? column.desc
       : activeSortBy === column.desc
@@ -160,19 +178,19 @@ export default function TransactionsPage() {
     }));
   };
 
-  const renderSortIcon = (column) => {
+  const renderSortIcon = (column: TransactionSortColumn) => {
     if (sortColumn.key !== column.key) return null;
     return sortDirection === 'asc' ? <ArrowUp size={13} /> : <ArrowDown size={13} />;
   };
 
-  const confirmLargeBulkChange = (count, categoryName) => {
+  const confirmLargeBulkChange = (count: number, categoryName: string) => {
     if (count <= 50) return true;
     return window.confirm(
       `This will set the category for ${formatTransactionCount(count)} to "${categoryName}".\n\nContinue?`
     );
   };
 
-  const handleBulkCategoryChange = async (categoryId) => {
+  const handleBulkCategoryChange = async (categoryId: string | number) => {
     const nextCategoryId = categoryId === BULK_CATEGORY_UNCATEGORIZED ? null : Number(categoryId);
     return categorizeMatchingTransactions(nextCategoryId);
   };
@@ -222,7 +240,7 @@ export default function TransactionsPage() {
     setNewBulkCategoryName('');
   };
 
-  const handleCreateBulkCategory = async (event) => {
+  const handleCreateBulkCategory = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     const name = newBulkCategoryName.trim();
@@ -243,12 +261,12 @@ export default function TransactionsPage() {
     resetBulkCategoryCreate();
   };
 
-  const handleFilterChange = useCallback((nextFilters) => {
+  const handleFilterChange = useCallback((nextFilters: SetStateAction<TransactionFilterState>) => {
     setBulkCategoryUndo(null);
     setFilters(nextFilters);
   }, []);
 
-  const totals = serverTotals ?? { income: 0, expenses: 0, internalMovement: 0, investments: 0, net: 0 };
+  const totals: TransactionTotals = serverTotals ?? { income: 0, expenses: 0, internalMovement: 0, investments: 0, net: 0 };
 
   return (
     <div className="page">
