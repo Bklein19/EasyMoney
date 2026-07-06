@@ -1,4 +1,4 @@
-import { deleteRow, insertRow, listRows, updateRow } from '../database.js';
+import { deleteRow, insertRow, listRows, updateRow } from '../database.ts';
 
 function definedFields<T extends Record<string, unknown>>(value: T) {
   return Object.fromEntries(Object.entries(value).filter(([, fieldValue]) => fieldValue !== undefined));

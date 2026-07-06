@@ -1,6 +1,6 @@
 import { Agent, OpenAIProvider, Runner } from '@openai/agents';
 import { z } from 'zod';
-import { getDb } from '../database.js';
+import { getDb } from '../database.ts';
 import { upsertTransactionAnnotation } from './transactionAnnotations.ts';
 import type { CategorySummary } from './types.ts';
 

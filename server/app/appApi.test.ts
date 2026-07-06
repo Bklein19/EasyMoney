@@ -9,7 +9,7 @@ import type { AppRouter } from './router.ts';
 process.env.EASYMONEY_DB_PATH = path.join(os.tmpdir(), `easymoney-app-api-${process.pid}.sqlite`);
 
 const { createServer } = await import('../index.ts');
-const { getDb, initDatabase, insertRow } = await import('../database.js');
+const { getDb, initDatabase, insertRow } = await import('../database.ts');
 const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
 const { upsertTransactionAnnotation } = await import('./transactionAnnotations.ts');
 const {

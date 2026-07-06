@@ -1,4 +1,4 @@
-import { getDb } from '../database.js';
+import { getDb } from '../database.ts';
 
 const STALE_AFTER_DAYS = 45;
 const DUE_AFTER_DAYS = 30;

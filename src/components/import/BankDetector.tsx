@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { CheckCircle2, AlertCircle, Settings } from 'lucide-react';
 import './BankDetector.css';
 

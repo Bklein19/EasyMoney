@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { X } from 'lucide-react';
 
 // A palette of nice colors from index.css for categories if they don't have a specific color

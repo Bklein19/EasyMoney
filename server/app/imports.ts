@@ -2,7 +2,7 @@ import Papa from 'papaparse';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { getDb, hashContent, insertRow, updateRow } from '../database.js';
+import { getDb, hashContent, insertRow, updateRow } from '../database.ts';
 import type { CommitImportTransaction, ImportAccountMapping, ImportPreviewTransaction, ImportProfile, ParsedImportBalance, ParsedImportTransaction } from './importTypes.ts';
 import { CUSTOM_CSV_PARSER_ID, parseCustomCsv } from './importParsers/customCsv.ts';
 import { mappingFromProfile } from './importParsers/csvMapping.ts';

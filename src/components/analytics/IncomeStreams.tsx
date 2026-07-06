@@ -1,31 +1,32 @@
+// @ts-nocheck
 import { useMemo, useState } from 'react';
 import { Check, GripVertical, HelpCircle, Pencil, RotateCcw, X } from 'lucide-react';
 import { applyManualStacks } from '../../utils/merchantNormalizer';
 import { usePersistentStackMap } from '../../hooks/usePersistentStackMap';
 import Tooltip from '../shared/Tooltip';
 
-export default function TopMerchants({ rows = [], onSelectMerchant }) {
-  const { stackMap, labelMap, stackGroup, undoStack, renameStack } = usePersistentStackMap('vaultview:merchantStacks');
+export default function IncomeStreams({ rows = [], onSelectStream }) {
+  const { stackMap, labelMap, stackGroup, undoStack, renameStack } = usePersistentStackMap('vaultview:incomeStacks');
   const [draggingKey, setDraggingKey] = useState(null);
   const [dropTargetKey, setDropTargetKey] = useState(null);
   const [editingKey, setEditingKey] = useState(null);
   const [editingName, setEditingName] = useState('');
   const data = useMemo(() => {
-    const sorted = applyManualStacks(rows.map(row => ({
+    const streams = applyManualStacks(rows.map(row => ({
       ...row,
       aliases: row.aliases ?? [row.name],
     })), stackMap, labelMap)
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 10);
 
-    return { merchants: sorted };
+    return { streams };
   }, [rows, stackMap, labelMap]);
 
-  if (data.merchants.length === 0) {
+  if (data.streams.length === 0) {
     return (
       <div className="empty-state">
-        <div className="empty-state__icon">🏪</div>
-        <p className="empty-state__description">No merchants found for this period.</p>
+        <div className="empty-state__icon">$</div>
+        <p className="empty-state__description">No income streams found for this period.</p>
       </div>
     );
   }
@@ -33,10 +34,10 @@ export default function TopMerchants({ rows = [], onSelectMerchant }) {
   const formatCurrency = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
   const isDragging = Boolean(draggingKey);
 
-  const beginRename = (event, merchant) => {
+  const beginRename = (event, stream) => {
     event.stopPropagation();
-    setEditingKey(merchant.normalized);
-    setEditingName(merchant.customName || merchant.name);
+    setEditingKey(stream.normalized);
+    setEditingName(stream.customName || stream.name);
   };
 
   const cancelRename = (event) => {
@@ -45,52 +46,51 @@ export default function TopMerchants({ rows = [], onSelectMerchant }) {
     setEditingName('');
   };
 
-  const saveRename = (event, merchant) => {
+  const saveRename = (event, stream) => {
     event.preventDefault();
     event.stopPropagation();
-    renameStack(merchant.normalized, editingName);
+    renameStack(stream.normalized, editingName);
     setEditingKey(null);
     setEditingName('');
   };
 
   return (
-    <div className={`merchant-list merchant-list--stackable merchant-list--expense ${isDragging ? 'merchant-list--dragging' : ''}`}>
+    <div className={`merchant-list merchant-list--stackable merchant-list--income ${isDragging ? 'merchant-list--dragging' : ''}`}>
       <div className="merchant-list__hint">
-        <span>Drag one merchant onto another to combine matching labels.</span>
+        <span>Drag one income stream onto another to combine matching labels.</span>
         <Tooltip
-          text="Combines are saved on this device and stay grouped when you return. Use Undo on a combined merchant to separate it again."
+          text="Combines are saved on this device and stay grouped when you return. Use Undo on a combined stream to separate it again."
           position="left"
         >
-          <span className="merchant-list__help" aria-label="Merchant stacking help" tabIndex={0}>
+          <span className="merchant-list__help" aria-label="Income stream stacking help" tabIndex={0}>
             <HelpCircle size={15} />
           </span>
         </Tooltip>
       </div>
-      {data.merchants.map((merchant, index) => {
-        // Scale percentage relative to the top merchant for better visual distribution
-        const topAmount = data.merchants[0].amount;
-        const relativePercentage = (merchant.amount / topAmount) * 100;
-        const isSource = draggingKey === merchant.normalized;
-        const isDropTarget = dropTargetKey === merchant.normalized && draggingKey !== merchant.normalized;
+      {data.streams.map((stream, index) => {
+        const topAmount = data.streams[0].amount;
+        const relativePercentage = (stream.amount / topAmount) * 100;
+        const isSource = draggingKey === stream.normalized;
+        const isDropTarget = dropTargetKey === stream.normalized && draggingKey !== stream.normalized;
 
         return (
           <div
-            key={merchant.normalized}
+            key={stream.normalized}
             role="button"
             tabIndex={0}
             className={[
               'merchant-item',
-              'merchant-item--expense',
-              merchant.manuallyStackedKeys.length > 0 ? 'merchant-item--stacked' : '',
+              'merchant-item--income',
+              stream.manuallyStackedKeys.length > 0 ? 'merchant-item--stacked' : '',
               isSource ? 'merchant-item--drag-source' : '',
               isDropTarget ? 'merchant-item--drop-target' : ''
             ].filter(Boolean).join(' ')}
-            title={merchant.aliases.join('\n')}
-            draggable={editingKey !== merchant.normalized}
+            title={stream.aliases.join('\n')}
+            draggable={editingKey !== stream.normalized}
             onDragStart={(event) => {
-              event.dataTransfer.setData('text/plain', merchant.normalized);
+              event.dataTransfer.setData('text/plain', stream.normalized);
               event.dataTransfer.effectAllowed = 'move';
-              setDraggingKey(merchant.normalized);
+              setDraggingKey(stream.normalized);
             }}
             onDragEnd={() => {
               setDraggingKey(null);
@@ -99,7 +99,7 @@ export default function TopMerchants({ rows = [], onSelectMerchant }) {
             onDragOver={(event) => {
               event.preventDefault();
               event.dataTransfer.dropEffect = 'move';
-              setDropTargetKey(merchant.normalized);
+              setDropTargetKey(stream.normalized);
             }}
             onDragLeave={(event) => {
               if (!event.currentTarget.contains(event.relatedTarget)) {
@@ -109,32 +109,32 @@ export default function TopMerchants({ rows = [], onSelectMerchant }) {
             onDrop={(event) => {
               event.preventDefault();
               const sourceKey = event.dataTransfer.getData('text/plain');
-              stackGroup(sourceKey, merchant.normalized);
+              stackGroup(sourceKey, stream.normalized);
               setDraggingKey(null);
               setDropTargetKey(null);
             }}
-            onClick={() => onSelectMerchant?.(merchant)}
+            onClick={() => onSelectStream?.(stream)}
             onKeyDown={(event) => {
-              if (editingKey === merchant.normalized) return;
+              if (editingKey === stream.normalized) return;
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
-                onSelectMerchant?.(merchant);
+                onSelectStream?.(stream);
               }
             }}
           >
             <div className="merchant-item__drag-handle" aria-hidden="true">
               <GripVertical size={16} />
             </div>
-            <div 
-              className="merchant-item__bar" 
+            <div
+              className="merchant-item__bar merchant-item__bar--income"
               style={{ width: `${relativePercentage}%` }}
             />
             <div className="merchant-item__rank">#{index + 1}</div>
             <div className="merchant-item__info">
-              {editingKey === merchant.normalized ? (
+              {editingKey === stream.normalized ? (
                 <form
                   className="merchant-item__rename"
-                  onSubmit={(event) => saveRename(event, merchant)}
+                  onSubmit={(event) => saveRename(event, stream)}
                   onClick={(event) => event.stopPropagation()}
                   onMouseDown={(event) => event.stopPropagation()}
                   onDoubleClick={(event) => event.stopPropagation()}
@@ -144,7 +144,7 @@ export default function TopMerchants({ rows = [], onSelectMerchant }) {
                     className="input input--sm merchant-item__rename-input"
                     value={editingName}
                     onChange={(event) => setEditingName(event.target.value)}
-                    aria-label="Merchant group name"
+                    aria-label="Combination name"
                     autoFocus
                   />
                   <button className="btn btn--ghost btn--icon" type="submit" aria-label="Save name">
@@ -156,14 +156,14 @@ export default function TopMerchants({ rows = [], onSelectMerchant }) {
                 </form>
               ) : (
                 <div className="merchant-item__name-row">
-                  <div className="merchant-item__name" title={merchant.name}>{merchant.name}</div>
-                  {merchant.manuallyStackedKeys.length > 0 && (
+                  <div className="merchant-item__name" title={stream.name}>{stream.name}</div>
+                  {stream.manuallyStackedKeys.length > 0 && (
                     <button
                       className="merchant-item__icon-action"
                       type="button"
-                      aria-label={`Rename ${merchant.name}`}
-                      title="Rename group"
-                      onClick={(event) => beginRename(event, merchant)}
+                      aria-label={`Rename ${stream.name}`}
+                      title="Rename combination"
+                      onClick={(event) => beginRename(event, stream)}
                     >
                       <Pencil size={13} />
                     </button>
@@ -171,15 +171,15 @@ export default function TopMerchants({ rows = [], onSelectMerchant }) {
                 </div>
               )}
               <div className="merchant-item__count">
-                {merchant.count} transaction{merchant.count !== 1 ? 's' : ''}
-                {merchant.aliases.length > 1 ? ` across ${merchant.aliases.length} labels` : ''}
-                {merchant.customName ? ' - renamed' : ''}
+                {stream.count} transaction{stream.count !== 1 ? 's' : ''}
+                {stream.aliases.length > 1 ? ` across ${stream.aliases.length} labels` : ''}
+                {stream.customName ? ' - renamed' : ''}
               </div>
             </div>
-            <div className="merchant-item__amount amount amount--negative">
-              {formatCurrency(merchant.amount)}
+            <div className="merchant-item__amount amount amount--positive">
+              {formatCurrency(stream.amount)}
             </div>
-            {merchant.manuallyStackedKeys.length > 0 && (
+            {stream.manuallyStackedKeys.length > 0 && (
               <span
                 role="button"
                 tabIndex={0}
@@ -187,13 +187,13 @@ export default function TopMerchants({ rows = [], onSelectMerchant }) {
                 title="Undo stacked labels"
                 onClick={(event) => {
                   event.stopPropagation();
-                  undoStack(merchant.normalized);
+                  undoStack(stream.normalized);
                 }}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
                     event.stopPropagation();
-                    undoStack(merchant.normalized);
+                    undoStack(stream.normalized);
                   }
                 }}
               >

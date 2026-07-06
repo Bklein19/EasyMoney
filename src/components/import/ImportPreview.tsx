@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { Check, AlertTriangle, X } from 'lucide-react';

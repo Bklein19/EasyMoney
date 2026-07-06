@@ -1,4 +1,4 @@
-import { getDb, hashContent } from '../database.js';
+import { getDb, hashContent } from '../database.ts';
 import {
   assignLedgerTransactionIdentities,
   getLedgerTransactionBaseKey,

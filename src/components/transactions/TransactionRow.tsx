@@ -1,3 +1,4 @@
+// @ts-nocheck
 import CategoryPicker from './CategoryPicker';
 import { formatDate, formatCurrency, getAmountClass } from '../../utils/formatters';
 

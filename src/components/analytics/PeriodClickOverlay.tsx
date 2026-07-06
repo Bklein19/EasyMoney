@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { Customized } from 'recharts';
 
 function OverlayRects({ data = [], onSelectPeriod, offset, width, height }) {

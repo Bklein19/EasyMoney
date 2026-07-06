@@ -1,4 +1,4 @@
-import { getDb, syncLedgerReadModelFromLegacyTables } from '../database.js';
+import { getDb, syncLedgerReadModelFromLegacyTables } from '../database.ts';
 import type { NetWorthReport } from './types.ts';
 
 interface CurrentLedgerBalanceRow {

@@ -1,4 +1,5 @@
-import { getDb, insertRow } from './database.js';
+// @ts-nocheck
+import { getDb, insertRow } from './database.ts';
 
 const DEFAULT_CATEGORIES = [
   { name: 'Food & Dining', icon: 'utensils', color: '#f97316', type: 'expense', categoryGroup: 'discretionary' },

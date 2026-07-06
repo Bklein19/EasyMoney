@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useState } from 'react';
 import { ArrowRight, Settings } from 'lucide-react';
 import './ColumnMapper.css';

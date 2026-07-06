@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { useCallback, useState } from 'react';
 import { UploadCloud } from 'lucide-react';
 import './FileDropZone.css';

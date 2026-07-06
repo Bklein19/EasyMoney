@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fetchRequestHandler } from '@trpc/server/adapters/fetch';
-import { initDatabase } from './database.js';
-import { seedDatabase } from './seed.js';
+import { initDatabase } from './database.ts';
+import { seedDatabase } from './seed.ts';
 import { loadLocalEnv } from './app/localEnv.ts';
 import { appRouter } from './app/router.ts';
 import index from '../index.html';

@@ -1,4 +1,4 @@
-import { getDb } from '../database.js';
+import { getDb } from '../database.ts';
 import type { AccountAliasSummary, AccountListResponse, AccountSummary } from './types';
 
 interface AccountRow {

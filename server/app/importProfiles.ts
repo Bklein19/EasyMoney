@@ -1,4 +1,4 @@
-import { getDb, insertRow, listRows, updateRow } from '../database.js';
+import { getDb, insertRow, listRows, updateRow } from '../database.ts';
 
 export function listImportProfiles() {
   return listRows('importProfiles');

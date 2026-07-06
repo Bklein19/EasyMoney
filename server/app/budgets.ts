@@ -1,4 +1,4 @@
-import { deleteRow, getDb, insertRow, listRows, updateRow } from '../database.js';
+import { deleteRow, getDb, insertRow, listRows, updateRow } from '../database.ts';
 
 export function listBudgets(options: { month?: string | null } = {}) {
   return listRows('budgets', options.month ? { month: options.month } : {});

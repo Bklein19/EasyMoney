@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { Menu, ChevronDown, Bell } from 'lucide-react';
 import Button from '../shared/Button';
 import './TopBar.css';

@@ -1,4 +1,4 @@
-import { getDb, insertRow, updateRow } from '../database.js';
+import { getDb, insertRow, updateRow } from '../database.ts';
 import type { CategoryListResponse, CategorySummary } from './types';
 
 interface CategoryRow {

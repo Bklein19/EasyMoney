@@ -1,4 +1,4 @@
-import { getDb, updateRow } from '../database.js';
+import { getDb, updateRow } from '../database.ts';
 import { assignLedgerTransactionIdentities, getLedgerTransactionId } from './transactionIdentity.ts';
 
 interface TransactionRow {

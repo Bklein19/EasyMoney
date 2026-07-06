@@ -1,4 +1,4 @@
-import { getDb, syncLedgerReadModelFromLegacyTables } from '../database.js';
+import { getDb, syncLedgerReadModelFromLegacyTables } from '../database.ts';
 import { ensureLedgerTransactionId, upsertTransactionAnnotation } from './transactionAnnotations.ts';
 import { buildAccountMap, buildCategoryMap, getTransactionFlow } from './transactionSemantics.ts';
 import type {

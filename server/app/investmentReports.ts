@@ -1,4 +1,4 @@
-import { getDb, syncLedgerReadModelFromLegacyTables } from '../database.js';
+import { getDb, syncLedgerReadModelFromLegacyTables } from '../database.ts';
 import { classifyFlow } from './flowClassification.ts';
 import { summarizeReturns, type ReturnSummary } from './returns.ts';
 import { deriveTransferLinks, type TransferLink } from './transferLinks.ts';

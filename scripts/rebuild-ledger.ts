@@ -1,4 +1,4 @@
-import { getDb } from '../server/database.js';
+import { getDb } from '../server/database.ts';
 import { buildLedgerFromSourceFacts, materializeLedger } from '../server/app/ledgerRebuild.ts';
 
 const startedAt = Date.now();
