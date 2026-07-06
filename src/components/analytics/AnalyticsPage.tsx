@@ -561,7 +561,8 @@ export default function AnalyticsPage() {
 
   const renderAnalyticsFilters = (variant = 'page') => (
     <div className={`analytics-controls analytics-controls--${variant}`}>
-      <div className="date-range-selector">
+      <label className="analytics-control analytics-control--account">
+        <span className="analytics-control__label">Account</span>
         <Landmark size={18} className="text-muted" />
         <select
           className="input input--sm"
@@ -577,9 +578,10 @@ export default function AnalyticsPage() {
             <option key={account.id} value={account.id}>{account.name}</option>
           ))}
         </select>
-      </div>
+      </label>
 
-      <div className="category-filter-control">
+      <div className="analytics-control analytics-control--categories">
+        <span className="analytics-control__label">Categories</span>
         <div className="category-filter-control__row">
           <select
             className="input input--sm"
@@ -613,7 +615,7 @@ export default function AnalyticsPage() {
                     {category.name}
                   </option>
                 );
-              })}
+            })}
           </select>
         </div>
         {categoryFilterIds.length > 0 && (
@@ -640,7 +642,8 @@ export default function AnalyticsPage() {
         )}
       </div>
 
-      <div className="date-range-selector">
+      <label className="analytics-control analytics-control--range">
+        <span className="analytics-control__label">Range</span>
         <Calendar size={18} className="text-muted" />
         <select
           className="input input--sm"
@@ -653,9 +656,10 @@ export default function AnalyticsPage() {
             <option key={range} value={range}>{range}</option>
           ))}
         </select>
-      </div>
+      </label>
 
-      <div className="date-navigator" aria-label="Date range navigation">
+      <div className="analytics-control analytics-control--dates date-navigator" aria-label="Date range navigation">
+        <span className="analytics-control__label">Dates</span>
         <button
           className="btn btn--ghost btn--icon"
           type="button"
@@ -691,7 +695,8 @@ export default function AnalyticsPage() {
       </div>
 
       {dateRange === DATE_RANGES.CUSTOM && (
-        <div className="date-range-selector date-range-selector--custom">
+        <div className="analytics-control analytics-control--custom date-range-selector--custom">
+          <span className="analytics-control__label">Custom</span>
           <input
             className="input input--sm"
             type="date"
@@ -716,7 +721,8 @@ export default function AnalyticsPage() {
         </div>
       )}
 
-      <div className="date-range-selector">
+      <label className="analytics-control analytics-control--group">
+        <span className="analytics-control__label">Group by</span>
         <select
           className="input input--sm"
           value={cashFlowGroup}
@@ -728,7 +734,7 @@ export default function AnalyticsPage() {
             <option key={group} value={group}>{group}</option>
           ))}
         </select>
-      </div>
+      </label>
     </div>
   );
 
