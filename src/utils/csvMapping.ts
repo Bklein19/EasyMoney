@@ -19,11 +19,43 @@ const COMMON_DATE_FORMATS = [
   'yyyy/MM/dd',
 ];
 
+interface CsvMapping {
+  statementType?: string;
+  dateColumn?: string;
+  descriptionColumn?: string;
+  merchantColumn?: string;
+  categoryColumn?: string;
+  splitAmount?: boolean;
+  amountColumn?: string;
+  debitColumn?: string;
+  creditColumn?: string;
+  negativeIsDebit?: boolean;
+  positiveIsCharge?: boolean;
+}
+
+interface CsvProfile {
+  statementType?: string;
+  dateColumns?: string[];
+  descriptionColumn?: string;
+  merchantColumn?: string;
+  categoryColumn?: string | null;
+  amountConfig?: {
+    type?: string;
+    column?: string;
+    debitColumn?: string;
+    creditColumn?: string;
+    chargeColumn?: string;
+    paymentColumn?: string;
+    negativeIsDebit?: boolean;
+    positiveIsCharge?: boolean;
+  };
+}
+
 function normalizeHeader(value = '') {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
-function findHeader(headers, hints) {
+function findHeader(headers: string[], hints: string[]) {
   const normalizedHeaders = headers.map(header => ({
     original: header,
     normalized: normalizeHeader(header),
@@ -46,7 +78,7 @@ function findHeader(headers, hints) {
   return '';
 }
 
-export function inferMappingFromHeaders(headers = []) {
+export function inferMappingFromHeaders(headers: string[] = []) {
   const merchantColumn = findHeader(headers, HEADER_HINTS.merchant);
   const categoryColumn = findHeader(headers, HEADER_HINTS.category);
 
@@ -61,7 +93,7 @@ export function inferMappingFromHeaders(headers = []) {
   };
 }
 
-export function buildCustomProfile(mapping) {
+export function buildCustomProfile(mapping: CsvMapping) {
   return {
     name: 'Custom CSV',
     statementType: mapping.statementType || 'bank',
@@ -87,7 +119,7 @@ export function buildCustomProfile(mapping) {
   };
 }
 
-export function mappingFromProfile(profile, headers = []) {
+export function mappingFromProfile(profile: CsvProfile | null | undefined, headers: string[] = []) {
   const inferred = inferMappingFromHeaders(headers);
   if (!profile) {
     return {

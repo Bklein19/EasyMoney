@@ -1,4 +1,14 @@
-function normalizeText(value = '') {
+interface TransactionIdentityInput {
+  accountId?: string | number | null;
+  date?: string | null;
+  amount?: string | number | null;
+  originalDescription?: string | null;
+  description?: string | null;
+  merchant?: string | null;
+  fingerprint?: string | null;
+}
+
+function normalizeText(value: string | number | null | undefined = '') {
   return String(value)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
@@ -6,22 +16,22 @@ function normalizeText(value = '') {
     .trim();
 }
 
-function normalizeDate(value = '') {
+function normalizeDate(value: string | null | undefined = '') {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
   return date.toISOString().slice(0, 10);
 }
 
-function normalizeAmount(value) {
+function normalizeAmount(value: string | number | null | undefined) {
   return Number(value || 0).toFixed(2);
 }
 
-export function getHeaderSignature(headers = []) {
+export function getHeaderSignature(headers: string[] = []) {
   return headers.map(header => normalizeText(header)).join('|');
 }
 
-export function getTransactionFingerprint(transaction, accountId) {
+export function getTransactionFingerprint(transaction: TransactionIdentityInput, accountId: string | number | null | undefined) {
   const text = normalizeText(
     transaction.originalDescription ||
     transaction.description ||
@@ -36,7 +46,11 @@ export function getTransactionFingerprint(transaction, accountId) {
   ].join('|');
 }
 
-export function splitDuplicateTransactions(transactions, existingTransactions, accountId) {
+export function splitDuplicateTransactions<T extends TransactionIdentityInput>(
+  transactions: T[],
+  existingTransactions: TransactionIdentityInput[],
+  accountId: string | number | null | undefined
+) {
   const seen = new Set(
     existingTransactions.map(transaction =>
       transaction.fingerprint || getTransactionFingerprint(transaction, transaction.accountId || accountId)
