@@ -1,40 +1,136 @@
-// @ts-nocheck
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, RotateCcw, Search, Trash2 } from 'lucide-react';
-import { useCSVImport } from '../../hooks/useCSVImport';
+import { useCSVImport, type ImportPreviewResult } from '../../hooks/useCSVImport';
 import { buildCustomProfile, mappingFromProfile } from '../../utils/csvMapping';
 import { useImportProfiles } from '../../hooks/useImportProfiles';
 import { getHeaderSignature } from '../../utils/importIdentity';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import FileDropZone from './FileDropZone';
-import ColumnMapper from './ColumnMapper';
+import ColumnMapper, { type CsvColumnMapping } from './ColumnMapper';
 import ImportPreview from './ImportPreview';
 import BankDetector from './BankDetector';
 import DataFreshnessPanel from './DataFreshnessPanel';
 import './ImportPage.css';
 
+type ImportStage = 'upload' | 'mapping' | 'preview' | 'batch' | 'success';
+type BulkAction = 'unimport' | 'reimport' | null;
+
+interface ImportHistoryItem {
+  id: number;
+  fileName: string;
+  institution?: string | null;
+  parserName?: string | null;
+  sourceType?: string | null;
+  status?: string | null;
+  createdAt?: string | null;
+  committedAt?: string | null;
+  transactionCount?: number | null;
+  balanceCount?: number | null;
+  unresolvedSourceAccountCount?: number | null;
+}
+
+interface BatchState {
+  status: 'running' | 'cancelled' | 'error';
+  total: number;
+  index: number;
+  currentFile?: File;
+  importedCount: number;
+  skippedDuplicateCount: number;
+  completedFiles: number;
+  error: string;
+}
+
+interface ImportProfileSummary {
+  headerSignature: string;
+  profileJson?: string | null;
+}
+
+interface ImportOptions {
+  throwOnError?: boolean;
+}
+
+interface CommitImportResult {
+  importedCount?: number | null;
+  skippedDuplicateCount?: number | null;
+}
+
+interface ImportQueueStatusProps {
+  files: File[];
+  currentIndex: number;
+  isBatchImport: boolean;
+  currentFile: File | null;
+  message: string;
+  autoImportAll: boolean;
+}
+
+interface BatchImportProgressProps {
+  state: BatchState;
+  message: string;
+  onCancel: () => void;
+  onReset: () => void;
+}
+
+interface ImportHistoryProps {
+  imports: ImportHistoryItem[];
+  error: string;
+  unimportingId: number | null;
+  reimportingId: number | null;
+  bulkAction: BulkAction;
+  onUnimport: (item: ImportHistoryItem) => void;
+  onReimport: (item: ImportHistoryItem) => void;
+  onBulkUnimport: (items: ImportHistoryItem[]) => void;
+  onBulkReimport: (items: ImportHistoryItem[]) => void;
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
+function asCsvColumnMapping(profile: ImportPreviewResult['profile'], headers: string[]): Partial<CsvColumnMapping> {
+  return mappingFromProfile(profile, headers) as Partial<CsvColumnMapping>;
+}
+
+function getBatchStateFallback(
+  files: File[],
+  index: number,
+  importedCount: number,
+  skippedDuplicateCount: number,
+): BatchState {
+  return {
+    status: 'running',
+    total: files.length,
+    index,
+    currentFile: files[index],
+    importedCount,
+    skippedDuplicateCount,
+    completedFiles: index,
+    error: '',
+  };
+}
+
 export default function ImportPage() {
   const { processImport, isParsing, error } = useCSVImport();
   const { importProfiles } = useImportProfiles();
+  const typedImportProfiles = importProfiles as ImportProfileSummary[];
   const batchCancelRef = useRef(false);
   
-  const [stage, setStage] = useState('upload'); // upload, mapping, preview, batch, success
-  const [currentFile, setCurrentFile] = useState(null);
-  const [importResult, setImportResult] = useState(null);
+  const [stage, setStage] = useState<ImportStage>('upload');
+  const [currentFile, setCurrentFile] = useState<File | null>(null);
+  const [importResult, setImportResult] = useState<ImportPreviewResult | null>(null);
   const [importedCount, setImportedCount] = useState(0);
   const [skippedDuplicateCount, setSkippedDuplicateCount] = useState(0);
-  const [importQueue, setImportQueue] = useState([]);
+  const [importQueue, setImportQueue] = useState<File[]>([]);
   const [queueIndex, setQueueIndex] = useState(0);
   const [queueImportedCount, setQueueImportedCount] = useState(0);
   const [queueSkippedDuplicateCount, setQueueSkippedDuplicateCount] = useState(0);
   const [autoImportAll, setAutoImportAll] = useState(false);
   const [queueMessage, setQueueMessage] = useState('');
-  const [batchState, setBatchState] = useState(null);
-  const [importHistory, setImportHistory] = useState([]);
+  const [batchState, setBatchState] = useState<BatchState | null>(null);
+  const [importHistory, setImportHistory] = useState<ImportHistoryItem[]>([]);
   const [historyError, setHistoryError] = useState('');
-  const [unimportingId, setUnimportingId] = useState(null);
-  const [reimportingId, setReimportingId] = useState(null);
-  const [historyBulkAction, setHistoryBulkAction] = useState(null);
+  const [unimportingId, setUnimportingId] = useState<number | null>(null);
+  const [reimportingId, setReimportingId] = useState<number | null>(null);
+  const [historyBulkAction, setHistoryBulkAction] = useState<BulkAction>(null);
 
   const invalidateImportDependents = useCallback(async () => {
     await Promise.all([
@@ -55,7 +151,7 @@ export default function ImportPage() {
       const result = await trpcClient.imports.history.query();
       setImportHistory(result.imports || []);
     } catch (loadError) {
-      setHistoryError(loadError?.message || 'Could not load import history.');
+      setHistoryError(errorMessage(loadError, 'Could not load import history.'));
     }
   }, []);
 
@@ -69,14 +165,18 @@ export default function ImportPage() {
   const queueTotal = importQueue.length;
   const isBatchImport = queueTotal > 1;
 
-  const getFileLabel = (file) => file?.webkitRelativePath || file?.name || 'selected file';
+  const getFileLabel = (file?: File | null) => file?.webkitRelativePath || file?.name || 'selected file';
 
-  const applySavedProfile = async (file, initialResult, options = {}) => {
+  const applySavedProfile = async (
+    file: File,
+    initialResult: ImportPreviewResult | null,
+    options: ImportOptions = {},
+  ): Promise<ImportPreviewResult | null> => {
     let result = initialResult;
     if (!result) return null;
 
     const headerSignature = getHeaderSignature(result.headers);
-    const savedProfile = importProfiles.find(profile => profile.headerSignature === headerSignature);
+    const savedProfile = typedImportProfiles.find(profile => profile.headerSignature === headerSignature);
     if (savedProfile?.profileJson) {
       const profile = JSON.parse(savedProfile.profileJson);
       const remapped = await processImport(file, profile, options);
@@ -87,12 +187,12 @@ export default function ImportPage() {
     return result;
   };
 
-  const previewFile = async (file, options = {}) => {
+  const previewFile = async (file: File, options: ImportOptions = {}) => {
     const result = await processImport(file, null, options);
     return applySavedProfile(file, result, options);
   };
 
-  const canCommitAutomatically = (result) => {
+  const canCommitAutomatically = (result: ImportPreviewResult | null) => {
     const accountMappings = result?.accountMappings || [];
     const hasImportableFacts = (result?.transactions?.length || 0) > 0 || (result?.balanceRowIds?.length || 0) > 0;
     return Boolean(
@@ -108,12 +208,12 @@ export default function ImportPage() {
     );
   };
 
-  const buildAutoAccountMappings = (result) => (result.accountMappings || []).map(mapping => ({
+  const buildAutoAccountMappings = (result: ImportPreviewResult) => (result.accountMappings || []).map(mapping => ({
     sourceAccountId: mapping.sourceAccountId,
-    mode: 'auto',
+    mode: 'auto' as const,
   }));
 
-  const commitPreviewResult = async (result) => {
+  const commitPreviewResult = async (result: ImportPreviewResult): Promise<CommitImportResult> => {
     const accountMappings = buildAutoAccountMappings(result);
     return trpcClient.imports.commit.mutate({
       accountId: null,
@@ -135,7 +235,7 @@ export default function ImportPage() {
     });
   };
 
-  const processSelectedFile = async (file, index = 0) => {
+  const processSelectedFile = async (file: File, index = 0) => {
     setCurrentFile(file);
     setQueueIndex(index);
     setQueueMessage('');
@@ -151,7 +251,7 @@ export default function ImportPage() {
     }
   };
 
-  const handleFilesSelected = async (files) => {
+  const handleFilesSelected = async (files: File[]) => {
     const sortedFiles = [...files].sort((a, b) => {
       const aPath = a.webkitRelativePath || a.name;
       const bPath = b.webkitRelativePath || b.name;
@@ -172,11 +272,12 @@ export default function ImportPage() {
     }
   };
 
-  const handleFileSelected = async (file) => {
+  const handleFileSelected = async (file: File) => {
     await handleFilesSelected([file]);
   };
 
-  const handleMappingComplete = async (mapping) => {
+  const handleMappingComplete = async (mapping: CsvColumnMapping) => {
+    if (!currentFile) return;
     const customProfile = buildCustomProfile(mapping);
     const result = await processImport(currentFile, customProfile);
     
@@ -192,7 +293,7 @@ export default function ImportPage() {
     }
   };
 
-  const handleImportComplete = async (count, skipped = 0) => {
+  const handleImportComplete = async (count: number, skipped = 0) => {
     const nextImportedCount = queueImportedCount + count;
     const nextSkippedCount = queueSkippedDuplicateCount + skipped;
     setQueueImportedCount(nextImportedCount);
@@ -231,7 +332,11 @@ export default function ImportPage() {
     setBatchState(null);
   };
 
-  const runBatchImport = async (files, startIndex = 0, initialResult = null) => {
+  const runBatchImport = async (
+    files: File[],
+    startIndex = 0,
+    initialResult: ImportPreviewResult | null = null,
+  ) => {
     batchCancelRef.current = false;
     setAutoImportAll(true);
     setQueueMessage('');
@@ -263,7 +368,7 @@ export default function ImportPage() {
       setCurrentFile(file);
       setQueueIndex(index);
       setBatchState(previous => ({
-        ...(previous || {}),
+        ...(previous ?? getBatchStateFallback(files, index, nextImportedCount, nextSkippedCount)),
         status: 'running',
         total: files.length,
         index,
@@ -277,7 +382,7 @@ export default function ImportPage() {
           ? initialResult
           : await previewFile(file, { throwOnError: true });
 
-        if (!canCommitAutomatically(result)) {
+        if (!result || !canCommitAutomatically(result)) {
           setImportResult(result);
           setQueueMessage('Batch paused. Choose an account for this file, then continue.');
           setStage(result?.requiresMapping ? 'mapping' : 'preview');
@@ -292,16 +397,16 @@ export default function ImportPage() {
         setImportedCount(nextImportedCount);
         setSkippedDuplicateCount(nextSkippedCount);
         setBatchState(previous => ({
-          ...(previous || {}),
+          ...(previous ?? getBatchStateFallback(files, index, nextImportedCount, nextSkippedCount)),
           importedCount: nextImportedCount,
           skippedDuplicateCount: nextSkippedCount,
           completedFiles: index + 1,
         }));
       } catch (batchError) {
-        const message = batchError?.message || `${getFileLabel(file)}: Import failed`;
+        const message = errorMessage(batchError, `${getFileLabel(file)}: Import failed`);
         setQueueMessage(message);
         setBatchState(previous => ({
-          ...(previous || {}),
+          ...(previous ?? getBatchStateFallback(files, index, nextImportedCount, nextSkippedCount)),
           status: 'error',
           total: files.length,
           index,
@@ -326,7 +431,7 @@ export default function ImportPage() {
     void runBatchImport(importQueue, queueIndex, importResult);
   };
 
-  const handleAutoImportBlocked = (message) => {
+  const handleAutoImportBlocked = (message?: string) => {
     setQueueMessage(message || 'This file needs your guidance before the batch can continue.');
   };
 
@@ -335,7 +440,7 @@ export default function ImportPage() {
     setQueueMessage('Stopping after the current file...');
   };
 
-  const handleUnimport = async (item) => {
+  const handleUnimport = async (item: ImportHistoryItem) => {
     const confirmed = window.confirm(`Unimport ${item.fileName}? This removes transactions and balances created by that import.`);
     if (!confirmed) return;
 
@@ -346,13 +451,13 @@ export default function ImportPage() {
       await invalidateImportDependents();
       await loadImportHistory();
     } catch (unimportError) {
-      setHistoryError(unimportError?.message || 'Could not unimport file.');
+      setHistoryError(errorMessage(unimportError, 'Could not unimport file.'));
     } finally {
       setUnimportingId(null);
     }
   };
 
-  const handleReimport = async (item) => {
+  const handleReimport = async (item: ImportHistoryItem) => {
     const confirmed = window.confirm(`Reimport ${item.fileName}? This restores saved source facts from this file.`);
     if (!confirmed) return;
 
@@ -363,13 +468,13 @@ export default function ImportPage() {
       await invalidateImportDependents();
       await loadImportHistory();
     } catch (reimportError) {
-      setHistoryError(reimportError?.message || 'Could not reimport file.');
+      setHistoryError(errorMessage(reimportError, 'Could not reimport file.'));
     } finally {
       setReimportingId(null);
     }
   };
 
-  const handleBulkUnimport = async (items) => {
+  const handleBulkUnimport = async (items: ImportHistoryItem[]) => {
     if (items.length === 0) return;
     const confirmed = window.confirm(`Unimport ${items.length} import${items.length === 1 ? '' : 's'}? This removes their transactions and balances from the ledger.`);
     if (!confirmed) return;
@@ -381,13 +486,13 @@ export default function ImportPage() {
       await invalidateImportDependents();
       await loadImportHistory();
     } catch (bulkError) {
-      setHistoryError(bulkError?.message || 'Could not unimport selected files.');
+      setHistoryError(errorMessage(bulkError, 'Could not unimport selected files.'));
     } finally {
       setHistoryBulkAction(null);
     }
   };
 
-  const handleBulkReimport = async (items) => {
+  const handleBulkReimport = async (items: ImportHistoryItem[]) => {
     if (items.length === 0) return;
     const confirmed = window.confirm(`Reimport ${items.length} import${items.length === 1 ? '' : 's'}? This restores saved source facts and rebuilds the ledger.`);
     if (!confirmed) return;
@@ -399,7 +504,7 @@ export default function ImportPage() {
       await invalidateImportDependents();
       await loadImportHistory();
     } catch (bulkError) {
-      setHistoryError(bulkError?.message || 'Could not reimport selected files.');
+      setHistoryError(errorMessage(bulkError, 'Could not reimport selected files.'));
     } finally {
       setHistoryBulkAction(null);
     }
@@ -457,7 +562,7 @@ export default function ImportPage() {
           <BankDetector requiresMapping={true} profileUsed={importResult.profileUsed} />
           <ColumnMapper 
             headers={importResult.headers} 
-            initialMapping={mappingFromProfile(importResult.profile, importResult.headers)}
+            initialMapping={asCsvColumnMapping(importResult.profile, importResult.headers)}
             onComplete={handleMappingComplete}
             onCancel={resetImport}
           />
@@ -536,7 +641,7 @@ export default function ImportPage() {
   );
 }
 
-function ImportQueueStatus({ files, currentIndex, isBatchImport, currentFile, message, autoImportAll }) {
+function ImportQueueStatus({ files, currentIndex, isBatchImport, currentFile, message, autoImportAll }: ImportQueueStatusProps) {
   if (!isBatchImport || !currentFile) return null;
 
   const currentLabel = currentFile.webkitRelativePath || currentFile.name;
@@ -563,7 +668,7 @@ function ImportQueueStatus({ files, currentIndex, isBatchImport, currentFile, me
   );
 }
 
-function BatchImportProgress({ state, message, onCancel, onReset }) {
+function BatchImportProgress({ state, message, onCancel, onReset }: BatchImportProgressProps) {
   const total = state.total || 0;
   const completed = Math.min(state.completedFiles || 0, total);
   const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
@@ -625,7 +730,7 @@ function ImportHistory({
   onReimport,
   onBulkUnimport,
   onBulkReimport,
-}) {
+}: ImportHistoryProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const normalizedSearch = searchTerm.trim().toLowerCase();
   const filteredImports = useMemo(() => {
@@ -716,6 +821,7 @@ function ImportHistory({
               {filteredImports.map(item => {
                 const committed = item.status === 'committed';
                 const unimported = item.status === 'unimported';
+                const unresolvedSourceAccountCount = item.unresolvedSourceAccountCount ?? 0;
                 const date = item.committedAt || item.createdAt;
                 return (
                   <tr className="import-history__row" key={item.id}>
@@ -750,9 +856,9 @@ function ImportHistory({
                         <button
                           type="button"
                           className="icon-btn"
-                          title={item.unresolvedSourceAccountCount > 0 ? 'Resolve source accounts before reimporting' : 'Reimport file'}
+                          title={unresolvedSourceAccountCount > 0 ? 'Resolve source accounts before reimporting' : 'Reimport file'}
                           onClick={() => onReimport(item)}
-                          disabled={bulkAction !== null || reimportingId === item.id || item.unresolvedSourceAccountCount > 0}
+                          disabled={bulkAction !== null || reimportingId === item.id || unresolvedSourceAccountCount > 0}
                         >
                           <RotateCcw size={16} />
                         </button>

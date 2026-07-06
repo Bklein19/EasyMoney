@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { trpcClient } from '../api/trpc';
 
-interface ImportProfile {
+export interface ImportProfile {
   name: string;
   statementType?: string;
   dateColumns?: string[];
@@ -12,14 +12,15 @@ interface ImportProfile {
   amountConfig?: Record<string, unknown>;
 }
 
-interface ImportPreviewResult {
+export interface ImportPreviewResult {
   importFileId?: number;
   requiresMapping: boolean;
   profileUsed?: string;
   profile?: ImportProfile;
   headers: string[];
   previewData?: Array<Record<string, string>>;
-  mapping?: Record<string, unknown>;
+  mapping?: unknown;
+  savedImportProfile?: unknown;
   accountMappings?: Array<{
     sourceAccountId: number;
     institution: string | null;
@@ -31,7 +32,7 @@ interface ImportPreviewResult {
     balanceCount: number;
   }>;
   balanceRowIds?: number[];
-  transactions?: unknown[];
+  transactions?: Array<Record<string, unknown> & { importRowId: string | number }>;
 }
 
 function bytesToBase64(bytes: Uint8Array) {

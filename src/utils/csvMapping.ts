@@ -40,7 +40,7 @@ interface CsvProfile {
   merchantColumn?: string;
   categoryColumn?: string | null;
   amountConfig?: {
-    type?: string;
+    type?: 'single' | 'split';
     column?: string;
     debitColumn?: string;
     creditColumn?: string;
@@ -97,22 +97,22 @@ export function buildCustomProfile(mapping: CsvMapping) {
   return {
     name: 'Custom CSV',
     statementType: mapping.statementType || 'bank',
-    dateColumns: [mapping.dateColumn],
+    dateColumns: [mapping.dateColumn || ''],
     dateFormats: COMMON_DATE_FORMATS,
-    descriptionColumn: mapping.descriptionColumn,
-    merchantColumn: mapping.merchantColumn || mapping.descriptionColumn,
+    descriptionColumn: mapping.descriptionColumn || '',
+    merchantColumn: mapping.merchantColumn || mapping.descriptionColumn || '',
     categoryColumn: mapping.categoryColumn || null,
     amountConfig: mapping.splitAmount
       ? {
           type: 'split',
-          debitColumn: mapping.debitColumn,
-          creditColumn: mapping.creditColumn,
-          chargeColumn: mapping.debitColumn,
-          paymentColumn: mapping.creditColumn,
+          debitColumn: mapping.debitColumn || '',
+          creditColumn: mapping.creditColumn || '',
+          chargeColumn: mapping.debitColumn || '',
+          paymentColumn: mapping.creditColumn || '',
         }
       : {
           type: 'single',
-          column: mapping.amountColumn,
+          column: mapping.amountColumn || '',
           negativeIsDebit: mapping.negativeIsDebit !== false,
           positiveIsCharge: mapping.positiveIsCharge !== false,
         },
