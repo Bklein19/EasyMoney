@@ -1536,6 +1536,81 @@ test('trpc budgets and import profiles expose typed crud', async () => {
   ]);
 });
 
+test('trpc budgeting report computes period actuals and variance on the backend', async () => {
+  const checkingId = insertRow('accounts', {
+    name: 'Checking',
+    institution: 'Local Bank',
+    type: 'checking',
+  });
+  insertRow('accounts', {
+    name: 'Vanguard Brokerage',
+    institution: 'Vanguard',
+    type: 'investment',
+  });
+  const diningId = Number(insertRow('categories', {
+    name: 'Dining',
+    type: 'expense',
+    color: '#f97316',
+  }));
+  const incomeId = Number(insertRow('categories', {
+    name: 'Income',
+    type: 'income',
+  }));
+  await trpcClient.budgets.set.mutate({ categoryId: diningId, month: '2026-06', amount: 100 });
+
+  const cafeId = insertRow('transactions', {
+    accountId: checkingId,
+    date: '2026-06-10',
+    amount: -126,
+    description: 'Cafe',
+    merchant: 'Blue Cafe',
+    type: 'expense',
+  });
+  await updateTransactionForTest(cafeId, { categoryId: diningId });
+  const payrollId = insertRow('transactions', {
+    accountId: checkingId,
+    date: '2026-06-15',
+    amount: 1000,
+    description: 'Payroll',
+    merchant: 'ACME Payroll',
+    type: 'income',
+  });
+  await updateTransactionForTest(payrollId, { categoryId: incomeId });
+  insertRow('transactions', {
+    accountId: checkingId,
+    date: '2026-06-16',
+    amount: -400,
+    description: 'VANGUARD BROKERAGE TRANSFER',
+    merchant: 'Vanguard',
+    type: 'expense',
+  });
+
+  const report = await trpcClient.budgets.report.query({
+    startDate: '2026-06-01',
+    endDate: '2026-06-30',
+    month: '2026-06',
+  });
+
+  expect(report.cashFlow).toMatchObject({
+    income: 1000,
+    expenses: 126,
+    byCategory: { [String(diningId)]: 126 },
+  });
+  expect(report.summary).toMatchObject({
+    income: 1000,
+    expenses: 126,
+    budgetRemaining: 874,
+    unplannedCount: 0,
+    overCount: 1,
+  });
+  expect(report.rows).toContainEqual(expect.objectContaining({
+    actual: 126,
+    budgetAmount: 100,
+    variance: 26,
+    status: 'over',
+    category: expect.objectContaining({ id: diningId, name: 'Dining' }),
+  }));
+});
 
 test('ai categorization apply writes transaction annotations by ledger id', async () => {
   const oldCategoryId = Number(insertRow('categories', { name: 'Uncategorized', type: 'expense' }));

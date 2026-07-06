@@ -2,6 +2,7 @@ import { initTRPC } from '@trpc/server';
 import { z } from 'zod';
 import { archiveAccount, listAccounts, unarchiveAccount, updateAccountMetadata } from './accounts.ts';
 import { getAnalyticsReport } from './analytics.ts';
+import { getBudgetingReport } from './budgetingReport.ts';
 import {
   autoApplyAiCategorization,
   applyAiCategorizationSuggestions,
@@ -149,6 +150,17 @@ export const appRouter = t.router({
     list: t.procedure
       .input(z.object({ month: z.string().nullish() }).optional())
       .query(({ input }) => listBudgets(input ?? {})),
+
+    report: t.procedure
+      .input(z.object({
+        startDate: z.string().nullish(),
+        endDate: z.string().nullish(),
+        month: z.string().nullish(),
+        globalBudget: z.number().nullish(),
+        categoryPercents: z.record(z.string(), z.number()).nullish(),
+        periodScale: z.number().nullish(),
+      }).optional())
+      .query(({ input }) => getBudgetingReport(input ?? {})),
 
     set: t.procedure
       .input(z.object({
