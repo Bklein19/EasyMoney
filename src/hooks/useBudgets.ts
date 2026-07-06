@@ -6,13 +6,19 @@ export function useBudgets(month?: string) {
 
   async function setBudget(categoryId: number | string, amount: number) {
     const result = await trpcClient.budgets.set.mutate({ categoryId, month: month || '', amount });
-    await queryClient.invalidateQueries({ queryKey: trpc.budgets.list.queryKey() });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: trpc.budgets.list.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: trpc.budgets.report.queryKey() }),
+    ]);
     return result;
   }
 
   async function deleteBudget(id: number | string) {
     const result = await trpcClient.budgets.delete.mutate({ id });
-    await queryClient.invalidateQueries({ queryKey: trpc.budgets.list.queryKey() });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: trpc.budgets.list.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: trpc.budgets.report.queryKey() }),
+    ]);
     return result;
   }
 

@@ -1,13 +1,12 @@
 import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { addMonths, differenceInCalendarDays, endOfDay, endOfMonth, endOfYear, format, parseISO, startOfMonth, startOfYear } from 'date-fns';
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { ArrowDown, ArrowUp, Calendar, CheckCircle2, CircleAlert, PiggyBank, RotateCcw, Target, Wand2 } from 'lucide-react';
-import { useAccounts } from '../../hooks/useAccounts';
 import { useBudgets } from '../../hooks/useBudgets';
 import { useCategories } from '../../hooks/useCategories';
-import { useTransactions } from '../../hooks/useTransactions';
+import { trpc } from '../../api/trpc';
 import { formatCurrency } from '../../utils/formatters';
-import { buildAccountMap, isExcludedFromCashFlow, isExpense, isIncome } from '../../utils/transactionSemantics';
 import Modal from '../shared/Modal';
 import './BudgetingPage.css';
 
@@ -127,104 +126,34 @@ export default function BudgetingPage() {
   const globalBudgetInput = globalBudgetByPeriod[period.key] || '';
   const isMonthlyPeriod = periodMode === PERIOD_MODES.MONTH;
 
-  const { transactions } = useTransactions({ startDate: period.startDate, endDate: period.endDate });
-  const { expenseCategories, categories } = useCategories();
-  const { accounts } = useAccounts();
-  const { budgets, setBudget } = useBudgets(isMonthlyPeriod ? month : undefined);
-
-  const categoryMap = useMemo(() => {
-    const map = {};
-    categories.forEach(category => {
-      map[category.id] = category;
-    });
-    return map;
-  }, [categories]);
-
-  const accountMap = useMemo(() => buildAccountMap(accounts), [accounts]);
-
-  const cashFlow = useMemo(() => {
-    return transactions.reduce((totals, transaction) => {
-      if (isExcludedFromCashFlow(transaction, accountMap, categoryMap)) return totals;
-      if (isIncome(transaction, accountMap, categoryMap)) {
-        totals.income += transaction.amount;
-      }
-      if (isExpense(transaction, accountMap, categoryMap)) {
-        totals.expenses += Math.abs(transaction.amount);
-        const key = transaction.categoryId || 'uncategorized';
-        totals.byCategory[key] = (totals.byCategory[key] || 0) + Math.abs(transaction.amount);
-      }
-      return totals;
-    }, { income: 0, expenses: 0, byCategory: {} });
-  }, [transactions, accountMap, categoryMap]);
-
-  const budgetByCategoryId = useMemo(() => {
-    const map = {};
-    budgets.forEach(budget => {
-      map[budget.categoryId] = budget;
-    });
-    return map;
-  }, [budgets]);
-
-  const autoGlobalBudget = cashFlow.income > 0 ? cashFlow.income : cashFlow.expenses;
+  const { expenseCategories } = useCategories();
+  const { setBudget } = useBudgets(isMonthlyPeriod ? month : undefined);
   const manualGlobalBudget = Number(globalBudgetInput);
-  const globalBudget = Number.isFinite(manualGlobalBudget) && manualGlobalBudget > 0
+  const explicitGlobalBudget = Number.isFinite(manualGlobalBudget) && manualGlobalBudget > 0
     ? manualGlobalBudget
     : dreamBudget.globalBudget > 0
       ? dreamBudget.globalBudget * period.scale
-      : autoGlobalBudget;
+      : null;
   const hasDreamTargets = Object.values(dreamBudget.categoryPercents).some(value => Number(value) > 0);
-
-  const rows = useMemo(() => {
-    const categoryIds = new Set([
-      ...expenseCategories.map(category => category.id),
-      ...Object.keys(cashFlow.byCategory).map(id => (id === 'uncategorized' ? id : Number(id))),
-      ...budgets.map(budget => budget.categoryId)
-    ]);
-
-    return Array.from(categoryIds).map(categoryId => {
-      const category = categoryId === 'uncategorized'
-        ? { id: 'uncategorized', name: 'Uncategorized', color: '#94a3b8' }
-        : categoryMap[categoryId];
-      if (!category) return null;
-
-      const actual = cashFlow.byCategory[categoryId] || 0;
-      const budget = budgetByCategoryId[categoryId];
-      const dreamPercent = Number(dreamBudget.categoryPercents[String(categoryId)]) || 0;
-      const budgetAmount = hasDreamTargets && categoryId !== 'uncategorized'
-        ? (dreamPercent / 100) * globalBudget
-        : budget?.amount || 0;
-      const targetPercent = hasDreamTargets && categoryId !== 'uncategorized'
-        ? dreamPercent
-        : globalBudget > 0 ? (budgetAmount / globalBudget) * 100 : 0;
-      const actualPercent = cashFlow.expenses > 0 ? (actual / cashFlow.expenses) * 100 : 0;
-      const variance = actual - budgetAmount;
-      const percentGap = actualPercent - targetPercent;
-      const status = budgetAmount <= 0 && actual > 0
-        ? 'unplanned'
-        : variance > Math.max(25, budgetAmount * 0.05)
-          ? 'over'
-          : 'aligned';
-
-      return {
-        category,
-        actual,
-        budgetAmount,
-        targetPercent,
-        actualPercent,
-        variance,
-        percentGap,
-        status
-      };
-    }).filter(Boolean).sort((a, b) => b.actual - a.actual || a.category.name.localeCompare(b.category.name));
-  }, [budgetByCategoryId, budgets, cashFlow.byCategory, cashFlow.expenses, categoryMap, dreamBudget.categoryPercents, expenseCategories, globalBudget, hasDreamTargets]);
-
-  const targetTotalPercent = rows.reduce((sum, row) => sum + row.targetPercent, 0);
+  const budgetReportQuery = useQuery(trpc.budgets.report.queryOptions({
+    startDate: period.startDate,
+    endDate: period.endDate,
+    month: isMonthlyPeriod ? month : null,
+    globalBudget: explicitGlobalBudget,
+    categoryPercents: hasDreamTargets ? dreamBudget.categoryPercents : null,
+  }));
+  const budgetReport = budgetReportQuery.data;
+  const cashFlow = budgetReport?.cashFlow ?? { income: 0, expenses: 0, byCategory: {} };
+  const autoGlobalBudget = cashFlow.income > 0 ? cashFlow.income : cashFlow.expenses;
+  const globalBudget = budgetReport?.globalBudget ?? 0;
+  const rows = budgetReport?.rows ?? [];
+  const targetTotalPercent = budgetReport?.summary?.targetTotalPercent ?? 0;
   const overRows = rows.filter(row => row.status === 'over');
   const unplannedRows = rows.filter(row => row.status === 'unplanned');
-  const actualSpendPercent = globalBudget > 0 ? (cashFlow.expenses / globalBudget) * 100 : 0;
-  const budgetRemaining = globalBudget - cashFlow.expenses;
-  const unspentIncome = Math.max(0, cashFlow.income - cashFlow.expenses);
-  const overspentAmount = Math.max(0, cashFlow.expenses - cashFlow.income);
+  const actualSpendPercent = budgetReport?.summary?.actualSpendPercent ?? 0;
+  const budgetRemaining = budgetReport?.summary?.budgetRemaining ?? 0;
+  const unspentIncome = budgetReport?.summary?.unspentIncome ?? 0;
+  const overspentAmount = budgetReport?.summary?.overspentAmount ?? 0;
   const spendingAllocationData = rows
     .filter(row => row.actual > 0)
     .map(row => ({
