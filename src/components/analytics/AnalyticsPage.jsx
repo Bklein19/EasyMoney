@@ -1,11 +1,12 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { addMonths, endOfDay, endOfMonth, endOfWeek, endOfYear, format, parseISO, startOfMonth, startOfWeek, startOfYear, subMonths, subWeeks } from 'date-fns';
 import { Calendar, ChevronLeft, ChevronRight, HelpCircle, Landmark, Maximize2, RotateCcw, Search, X } from 'lucide-react';
-import { useTransactions } from '../../hooks/useTransactions';
 import { useCategories } from '../../hooks/useCategories';
 import { useAccounts } from '../../hooks/useAccounts';
+import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import { formatCurrency, formatDate, getAmountClass } from '../../utils/formatters';
-import { buildAccountMap, isExcludedFromCashFlow, isExpense, isIncome, isInvestmentMovement } from '../../utils/transactionSemantics';
+import { buildAccountMap, isExpense, isIncome, isInvestmentMovement } from '../../utils/transactionSemantics';
 
 import SpendingByCategory from './SpendingByCategory';
 import SpendingTrends from './SpendingTrends';
@@ -42,6 +43,14 @@ const CATEGORY_FILTER_MODES = {
   INCLUDE: 'include',
   EXCLUDE: 'exclude'
 };
+
+function toUiTransaction(transaction) {
+  return {
+    ...transaction,
+    accountId: transaction.account?.id ?? null,
+    categoryId: transaction.category?.id ?? null,
+  };
+}
 
 function getMonthSpan(startDate, endDate) {
   const start = parseISO(startDate);
@@ -98,21 +107,50 @@ export default function AnalyticsPage() {
     }
   }, [dateRange, customStartDate, customEndDate]);
 
-  const { transactions, categorizeTransactions } = useTransactions({ startDate, endDate, accountId });
   const { categories, addCategory } = useCategories();
   const { accounts } = useAccounts();
   const categoryFilterIds = useMemo(
     () => categoryFilterIdsByMode[categoryFilterMode] || [],
     [categoryFilterIdsByMode, categoryFilterMode]
   );
-  const deferredTransactions = useDeferredValue(transactions);
+  const analyticsInput = useMemo(() => ({
+    startDate,
+    endDate,
+    accountId,
+    categoryFilterIds,
+    categoryFilterMode,
+    groupMode: cashFlowGroup,
+  }), [accountId, cashFlowGroup, categoryFilterIds, categoryFilterMode, endDate, startDate]);
+  const analyticsReportQuery = useQuery(trpc.analytics.report.queryOptions(analyticsInput));
+  const analyticsReport = analyticsReportQuery.data;
+  const reportTransactions = useMemo(
+    () => (analyticsReport?.transactions ?? []).map(toUiTransaction),
+    [analyticsReport?.transactions]
+  );
+  const reportAnalysisTransactions = useMemo(
+    () => (analyticsReport?.analysisTransactions ?? []).map(toUiTransaction),
+    [analyticsReport?.analysisTransactions]
+  );
+  const reportSummary = analyticsReport?.summary ?? {
+    income: 0,
+    expenses: 0,
+    internalMovement: 0,
+    investments: 0,
+    net: 0,
+  };
+  const deferredTransactions = useDeferredValue(reportTransactions);
+  const deferredAnalysisTransactions = useDeferredValue(reportAnalysisTransactions);
   const deferredAccounts = useDeferredValue(accounts);
   const deferredCategories = useDeferredValue(categories);
+  const deferredCashFlow = useDeferredValue(analyticsReport?.cashFlow ?? []);
   const deferredCategoryFilterIds = useDeferredValue(categoryFilterIds);
   const deferredCategoryFilterMode = useDeferredValue(categoryFilterMode);
   const deferredCashFlowGroup = useDeferredValue(cashFlowGroup);
   const isAnalyticsWorking =
-    transactions !== deferredTransactions ||
+    analyticsReportQuery.isFetching ||
+    reportTransactions !== deferredTransactions ||
+    reportAnalysisTransactions !== deferredAnalysisTransactions ||
+    (analyticsReport?.cashFlow ?? []) !== deferredCashFlow ||
     accounts !== deferredAccounts ||
     categories !== deferredCategories ||
     categoryFilterIds !== deferredCategoryFilterIds ||
@@ -127,78 +165,13 @@ export default function AnalyticsPage() {
     return map;
   }, [deferredCategories]);
 
-  const categoryScopedTransactions = useMemo(() => {
-    if (deferredCategoryFilterIds.length === 0) return deferredTransactions;
-    const selected = new Set(deferredCategoryFilterIds);
-    return deferredTransactions.filter(transaction => {
-      const categoryKey = transaction.categoryId ? String(transaction.categoryId) : 'uncategorized';
-      const isSelected = selected.has(categoryKey);
-      return deferredCategoryFilterMode === CATEGORY_FILTER_MODES.INCLUDE ? isSelected : !isSelected;
-    });
-  }, [deferredTransactions, deferredCategoryFilterIds, deferredCategoryFilterMode]);
-
-  const analysisTransactions = useMemo(() => {
-    return categoryScopedTransactions.filter(transaction => !isExcludedFromCashFlow(transaction, accountMap, categoryMap));
-  }, [categoryScopedTransactions, accountMap, categoryMap]);
-
-  // Derived Summary
-  const { totalIncome, totalExpense, filteredInternalMovement, filteredInvestments } = useMemo(() => {
-    let inc = 0;
-    let exp = 0;
-    let internalMovement = 0;
-    let investments = 0;
-    categoryScopedTransactions.forEach(t => {
-      if (isInvestmentMovement(t, accountMap, categoryMap)) {
-        investments += Math.abs(t.amount);
-      } else if (isExcludedFromCashFlow(t, accountMap, categoryMap)) {
-        internalMovement += Math.abs(t.amount);
-      }
-    });
-    analysisTransactions.forEach(t => {
-      if (isIncome(t, accountMap, categoryMap)) inc += t.amount;
-      else if (isExpense(t, accountMap, categoryMap)) exp += Math.abs(t.amount);
-    });
-    return { totalIncome: inc, totalExpense: exp, filteredInternalMovement: internalMovement, filteredInvestments: investments };
-  }, [categoryScopedTransactions, analysisTransactions, accountMap, categoryMap]);
-
-  const cashFlowRows = useMemo(() => {
-    if (analysisTransactions.length === 0) return [];
-
-    const dates = analysisTransactions.map(t => new Date(t.date).getTime());
-    const diffDays = (Math.max(...dates) - Math.min(...dates)) / (1000 * 60 * 60 * 24);
-    const groupMode = deferredCashFlowGroup === CASH_FLOW_GROUPS.AUTO
-      ? (diffDays > 400 ? CASH_FLOW_GROUPS.YEAR : diffDays > 60 ? CASH_FLOW_GROUPS.MONTH : CASH_FLOW_GROUPS.WEEK)
-      : deferredCashFlowGroup;
-
-    const grouped = {};
-    analysisTransactions.forEach(t => {
-      const dateObj = parseISO(t.date);
-      const weekStart = startOfWeek(dateObj);
-      const key = groupMode === CASH_FLOW_GROUPS.YEAR
-        ? format(dateObj, 'yyyy')
-        : groupMode === CASH_FLOW_GROUPS.MONTH
-          ? format(dateObj, 'yyyy-MM')
-          : groupMode === CASH_FLOW_GROUPS.WEEK
-            ? format(weekStart, 'yyyy-MM-dd')
-            : format(dateObj, 'yyyy-MM-dd');
-      const label = groupMode === CASH_FLOW_GROUPS.YEAR
-        ? format(dateObj, 'yyyy')
-        : groupMode === CASH_FLOW_GROUPS.MONTH
-          ? format(dateObj, 'MMM yyyy')
-          : groupMode === CASH_FLOW_GROUPS.WEEK
-            ? `Week of ${format(weekStart, 'MMM d')}`
-            : format(dateObj, 'MMM d');
-      if (!grouped[key]) {
-        grouped[key] = { key, label, groupMode, income: 0, expenses: 0, net: 0, count: 0 };
-      }
-      if (isIncome(t, accountMap, categoryMap)) grouped[key].income += t.amount;
-      if (isExpense(t, accountMap, categoryMap)) grouped[key].expenses += Math.abs(t.amount);
-      grouped[key].net = grouped[key].income - grouped[key].expenses;
-      grouped[key].count += 1;
-    });
-
-    return Object.values(grouped).sort((a, b) => b.key.localeCompare(a.key));
-  }, [analysisTransactions, deferredCashFlowGroup, accountMap, categoryMap]);
+  const categoryScopedTransactions = deferredTransactions;
+  const analysisTransactions = deferredAnalysisTransactions;
+  const totalIncome = reportSummary.income;
+  const totalExpense = reportSummary.expenses;
+  const filteredInternalMovement = reportSummary.internalMovement;
+  const filteredInvestments = reportSummary.investments;
+  const cashFlowRows = useMemo(() => [...deferredCashFlow].sort((a, b) => b.key.localeCompare(a.key)), [deferredCashFlow]);
 
   const drilldownTransactions = useMemo(() => {
     if (!drilldown) return [];
@@ -289,7 +262,15 @@ export default function AnalyticsPage() {
 
   const handleBulkCategoryChange = async (categoryId) => {
     const nextCategoryId = categoryId ? Number(categoryId) : null;
-    await categorizeTransactions(visibleDrilldownTransactions.map(transaction => transaction.id), nextCategoryId);
+    await trpcClient.transactions.categorize.mutate({
+      transactionIds: visibleDrilldownTransactions.map(transaction => transaction.id),
+      categoryId: nextCategoryId,
+    });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: trpc.analytics.report.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] }),
+    ]);
   };
 
   const handleApplyDrilldownCategory = async (categoryValue = drilldownCategorySelectValue) => {
@@ -827,24 +808,14 @@ export default function AnalyticsPage() {
                 type: 'period',
                 title: `${row.label} Cash Flow`,
                 scrollIntoView: true,
-                ids: new Set(analysisTransactions.filter(t => {
-                  const dateObj = parseISO(t.date);
-                  const key = row.groupMode === CASH_FLOW_GROUPS.YEAR
-                    ? format(dateObj, 'yyyy')
-                    : row.groupMode === CASH_FLOW_GROUPS.MONTH
-                      ? format(dateObj, 'yyyy-MM')
-                      : row.groupMode === CASH_FLOW_GROUPS.WEEK
-                        ? format(startOfWeek(dateObj), 'yyyy-MM-dd')
-                        : format(dateObj, 'yyyy-MM-dd');
-                  return key === row.key;
-                }).map(t => t.id))
+                ids: new Set(row.transactionIds)
               })}
             >
               <span>{row.label}</span>
               <span className="amount amount--positive">{formatCurrency(row.income)}</span>
               <span className="amount amount--negative">{formatCurrency(row.expenses)}</span>
               <span className={`amount ${getAmountClass(row.net)}`}>{formatCurrency(row.net, true)}</span>
-              <span>{row.count} tx</span>
+              <span>{row.transactionIds.length} tx</span>
             </button>
           )) : (
             <div className="empty-state-simple">No cash flow data for this period.</div>
