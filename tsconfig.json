@@ -17,8 +17,7 @@
     "server/index.ts",
     "server/app/**/*.ts",
     "scripts/**/*.ts",
-    "src/api/**/*.ts",
-    "src/hooks/**/*.ts",
+    "src/**/*.ts",
     "src/**/*.tsx"
   ]
 }
