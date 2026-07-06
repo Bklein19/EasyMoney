@@ -1,5 +1,6 @@
 import { afterAll, beforeEach, expect, test } from 'bun:test';
 import { createTRPCClient, httpBatchLink } from '@trpc/client';
+import { Buffer } from 'node:buffer';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,6 +11,7 @@ process.env.EASYMONEY_DB_PATH = path.join(os.tmpdir(), `easymoney-app-api-${proc
 const { createServer } = await import('../index.ts');
 const { getDb, initDatabase, insertRow } = await import('../database.js');
 const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
+const { upsertTransactionAnnotation } = await import('./transactionAnnotations.ts');
 const {
   groupTransactionsForAiCategorization,
   shouldTreatInvestmentCategoryAsTransfer,
@@ -56,60 +58,36 @@ function resetAppTables() {
   })();
 }
 
-async function getJson(path: string) {
-  const response = await fetch(`${TEST_URL}${path}`);
-  expect(response.status).toBe(200);
-  return response.json();
-}
-
-async function postJson(path: string, payload: unknown, expectedStatus = 200) {
-  const response = await fetch(`${TEST_URL}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+async function postImportPreview(fileName: string, text: string, profile: unknown = null): Promise<any> {
+  const fileBytes = new TextEncoder().encode(text);
+  const fileBase64 = Buffer.from(fileBytes).toString('base64');
+  return trpcClient.imports.preview.mutate({
+    fileName,
+    text,
+    fileBase64,
+    customProfile: profile,
   });
-  expect(response.status).toBe(expectedStatus);
-  return response.json();
 }
 
-async function putJson(path: string, payload: unknown, expectedStatus = 200) {
-  const response = await fetch(`${TEST_URL}${path}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  expect(response.status).toBe(expectedStatus);
-  return response.json();
+async function updateTransactionForTest(
+  transactionId: number | string,
+  changes: { categoryId?: number | string | null; notes?: string | null }
+) {
+  upsertTransactionAnnotation(transactionId, changes);
+  return { ok: true };
 }
 
-async function patchJson(path: string, payload: unknown, expectedStatus = 200) {
-  const response = await fetch(`${TEST_URL}${path}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  expect(response.status).toBe(expectedStatus);
-  return response.json();
-}
-
-async function deleteJson(path: string, expectedStatus = 200) {
-  const response = await fetch(`${TEST_URL}${path}`, { method: 'DELETE' });
-  expect(response.status).toBe(expectedStatus);
-  return response.json();
-}
-
-async function postImportPreview(fileName: string, text: string, profile: unknown = null) {
-  const form = new FormData();
-  form.append('file', new File([text], fileName, { type: 'text/csv' }));
-  if (profile) form.append('profileJson', JSON.stringify(profile));
-
-  const response = await fetch(`${TEST_URL}/api/app/imports/preview`, {
-    method: 'POST',
-    body: form,
-  });
-  expect(response.status).toBe(200);
-  return response.json();
-}
+const listAccountsForTest = (input?: { includeArchived?: boolean }): Promise<any> => trpcClient.accounts.list.query(input);
+const listCategoriesForTest = (): Promise<any> => trpcClient.categories.list.query();
+const listTransactionsForTest = (input?: Parameters<typeof trpcClient.transactions.list.query>[0]): Promise<any> =>
+  trpcClient.transactions.list.query(input);
+const netWorthReportForTest = (): Promise<any> => trpcClient.reports.netWorth.query();
+const savingsRateReportForTest = (): Promise<any> => trpcClient.reports.savingsRate.query();
+const listImportHistoryForTest = (): Promise<any> => trpcClient.imports.history.query();
+const dataFreshnessForTest = (today?: string): Promise<any> => trpcClient.dataFreshness.report.query(today ? { today } : undefined);
+const dataCatchUpForTest = (today?: string): Promise<any> => trpcClient.dataFreshness.catchUp.query(today ? { today } : undefined);
+const commitImportForTest = (input: Parameters<typeof trpcClient.imports.commit.mutate>[0]): Promise<any> =>
+  trpcClient.imports.commit.mutate(input);
 
 function csvFromRows(rows: string[]) {
   return [
@@ -369,7 +347,7 @@ test('app accounts endpoint returns domain-shaped accounts', async () => {
     updatedAt: '2026-06-14T12:00:00.000Z',
   });
 
-  const body = await getJson('/api/app/accounts');
+  const body = await listAccountsForTest();
 
   expect(body).toEqual({
     accounts: [
@@ -414,7 +392,7 @@ test('app accounts endpoint derives closed accounts from zero ledger balances', 
     capturedAt: '2026-06-30T00:00:00.000Z',
   });
 
-  const body = await getJson('/api/app/accounts') as {
+  const body = await listAccountsForTest() as {
     accounts: Array<{ id: number; balance: number; latestBalanceMonth: string | null; isClosed: boolean; status: string }>;
   };
 
@@ -437,16 +415,16 @@ test('app accounts endpoint updates account owner metadata', async () => {
     currentBalance: 0,
   }));
 
-  await patchJson(`/api/app/accounts/${accountId}`, { accountHolder: 'Example Owner' });
-  expect(await getJson('/api/app/accounts')).toMatchObject({
+  await trpcClient.accounts.updateMetadata.mutate({ id: accountId, changes: { accountHolder: 'Example Owner' } });
+  expect(await listAccountsForTest()).toMatchObject({
     accounts: [expect.objectContaining({
       id: accountId,
       accountHolder: 'Example Owner',
     })],
   });
 
-  await patchJson(`/api/app/accounts/${accountId}`, { accountHolder: '' });
-  expect(await getJson('/api/app/accounts')).toMatchObject({
+  await trpcClient.accounts.updateMetadata.mutate({ id: accountId, changes: { accountHolder: '' } });
+  expect(await listAccountsForTest()).toMatchObject({
     accounts: [expect.objectContaining({
       id: accountId,
       accountHolder: null,
@@ -538,24 +516,24 @@ test('app account archive hides defaults without deleting source links or annota
     updatedAt: new Date().toISOString(),
   });
 
-  await postJson(`/api/app/accounts/${accountId}/archive`, {});
+  await trpcClient.accounts.archive.mutate({ id: accountId });
 
-  expect(await getJson('/api/app/accounts')).toEqual({ accounts: [] });
-  const withArchived = await getJson('/api/app/accounts?includeArchived=true') as { accounts: Array<{ id: number; status: string; archivedAt: string | null }> };
+  expect(await listAccountsForTest()).toEqual({ accounts: [] });
+  const withArchived = await listAccountsForTest({ includeArchived: true }) as { accounts: Array<{ id: number; status: string; archivedAt: string | null }> };
   expect(withArchived.accounts).toMatchObject([{ id: accountId, status: 'archived' }]);
   expect(withArchived.accounts[0].archivedAt).toEqual(expect.any(String));
-  expect(await getJson('/api/app/transactions')).toMatchObject({ transactions: [] });
+  expect(await listTransactionsForTest()).toMatchObject({ transactions: [] });
   expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(sourceAccountId)).toMatchObject({ accountId });
   expect(getDb().prepare('SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId = ?').get(ledgerTransaction.ledgerTransactionId)).toMatchObject({
     notes: 'keep archived note',
   });
 
-  await postJson(`/api/app/accounts/${accountId}/unarchive`, {});
-  expect(await getJson('/api/app/accounts')).toMatchObject({
+  await trpcClient.accounts.unarchive.mutate({ id: accountId });
+  expect(await listAccountsForTest()).toMatchObject({
     accounts: [expect.objectContaining({ id: accountId, status: 'active', archivedAt: null })],
   });
-  await patchJson(`/api/app/accounts/${accountId}`, { name: 'Archive Restored' });
-  expect(await getJson('/api/app/accounts')).toMatchObject({
+  await trpcClient.accounts.updateMetadata.mutate({ id: accountId, changes: { name: 'Archive Restored' } });
+  expect(await listAccountsForTest()).toMatchObject({
     accounts: [expect.objectContaining({ name: 'Archive Restored' })],
   });
 });
@@ -571,7 +549,7 @@ test('app categories endpoint returns domain-shaped categories', async () => {
     icon: 'shopping-cart',
   });
 
-  const body = await getJson('/api/app/categories');
+  const body = await listCategoriesForTest();
 
   expect(body).toEqual({
     categories: [
@@ -604,18 +582,16 @@ test('category delete reassigns annotations to Uncategorized and protects Uncate
     description: 'Market',
     type: 'expense',
   });
-  await putJson(`/api/transactions/${transactionId}`, { categoryId: groceriesId });
+  await updateTransactionForTest(transactionId, { categoryId: groceriesId });
 
-  await postJson(`/api/categories/${groceriesId}/delete`, {});
+  await trpcClient.categories.delete.mutate({ id: groceriesId });
 
   expect(getDb().prepare('SELECT id FROM categories WHERE id = ?').get(groceriesId)).toBeNull();
   expect(getDb().prepare('SELECT categoryId FROM transactionAnnotations').get()).toEqual({
     categoryId: uncategorizedId,
   });
 
-  const result = await postJson(`/api/categories/${uncategorizedId}/delete`, {}, 400);
-
-  expect(result).toEqual({ error: 'Uncategorized cannot be deleted.' });
+  await expect(trpcClient.categories.delete.mutate({ id: uncategorizedId })).rejects.toThrow('Uncategorized cannot be deleted.');
   expect(getDb().prepare('SELECT id FROM categories WHERE id = ?').get(uncategorizedId)).toEqual({
     id: uncategorizedId,
   });
@@ -714,12 +690,12 @@ test('app transactions endpoint joins account and category details', async () =>
     fingerprint: 'fingerprint-1',
     createdAt: '2026-06-14T12:00:00.000Z',
   });
-  await putJson(`/api/transactions/${transactionId}`, {
+  await updateTransactionForTest(transactionId, {
     categoryId,
     notes: 'weekly shop',
   });
 
-  const body = await getJson('/api/app/transactions');
+  const body = await listTransactionsForTest();
 
   expect(body.transactions).toHaveLength(1);
   expect(body.transactions[0].ledgerTransactionId.startsWith('txn_')).toBe(true);
@@ -771,7 +747,7 @@ test('app transactions endpoint supports domain query filters', async () => {
     merchant: 'Blue Cafe',
     type: 'expense',
   });
-  await putJson(`/api/transactions/${cafeId}`, { categoryId: foodId });
+  await updateTransactionForTest(cafeId, { categoryId: foodId });
 
   const payrollId = insertRow('transactions', {
     accountId,
@@ -781,9 +757,14 @@ test('app transactions endpoint supports domain query filters', async () => {
     merchant: 'Employer',
     type: 'income',
   });
-  await putJson(`/api/transactions/${payrollId}`, { categoryId: incomeId });
+  await updateTransactionForTest(payrollId, { categoryId: incomeId });
 
-  const body = await getJson('/api/app/transactions?type=expense&search=cafe&startDate=2026-06-01&endDate=2026-06-30');
+  const body = await listTransactionsForTest({
+    type: 'expense',
+    search: 'cafe',
+    startDate: '2026-06-01',
+    endDate: '2026-06-30',
+  });
 
   expect(body.transactions.map((transaction: { description: string }) => transaction.description)).toEqual(['Cafe']);
 });
@@ -817,14 +798,14 @@ test('app transactions endpoint supports infinite-scroll paging metadata', async
     type: 'expense',
   });
 
-  const firstPage = await getJson('/api/app/transactions?limit=2&offset=0') as {
+  const firstPage = await listTransactionsForTest({ limit: 2, offset: 0 }) as {
     transactions: Array<{ description: string }>;
     totalCount: number;
     hasMore: boolean;
     nextOffset: number | null;
     totals: { income: number; expenses: number; net: number };
   };
-  const secondPage = await getJson('/api/app/transactions?limit=2&offset=2') as {
+  const secondPage = await listTransactionsForTest({ limit: 2, offset: 2 }) as {
     transactions: Array<{ description: string }>;
     totalCount: number;
     hasMore: boolean;
@@ -863,7 +844,7 @@ test('app transactions endpoint supports column sort keys', async () => {
     description: 'Beta merchant',
     type: 'expense',
   });
-  await putJson(`/api/transactions/${betaId}`, { categoryId: travelId });
+  await updateTransactionForTest(betaId, { categoryId: travelId });
 
   const alphaId = insertRow('transactions', {
     accountId: checkingId,
@@ -872,15 +853,15 @@ test('app transactions endpoint supports column sort keys', async () => {
     description: 'Alpha merchant',
     type: 'expense',
   });
-  await putJson(`/api/transactions/${alphaId}`, { categoryId: groceriesId });
+  await updateTransactionForTest(alphaId, { categoryId: groceriesId });
 
-  const descriptionAsc = await getJson('/api/app/transactions?sortBy=description_asc') as {
+  const descriptionAsc = await listTransactionsForTest({ sortBy: 'description_asc' }) as {
     transactions: Array<{ description: string }>;
   };
-  const accountDesc = await getJson('/api/app/transactions?sortBy=account_desc') as {
+  const accountDesc = await listTransactionsForTest({ sortBy: 'account_desc' }) as {
     transactions: Array<{ account: { name: string } }>;
   };
-  const categoryDesc = await getJson('/api/app/transactions?sortBy=category_desc') as {
+  const categoryDesc = await listTransactionsForTest({ sortBy: 'category_desc' }) as {
     transactions: Array<{ category: { name: string } }>;
   };
 
@@ -912,7 +893,7 @@ test('app transactions endpoint filters uncategorized transactions by missing or
     description: 'Explicit uncategorized',
     type: 'expense',
   });
-  await putJson(`/api/transactions/${explicitUncategorizedId}`, { categoryId: uncategorizedId });
+  await updateTransactionForTest(explicitUncategorizedId, { categoryId: uncategorizedId });
   const categorizedId = insertRow('transactions', {
     accountId,
     date: '2026-06-16',
@@ -920,9 +901,9 @@ test('app transactions endpoint filters uncategorized transactions by missing or
     description: 'Categorized',
     type: 'expense',
   });
-  await putJson(`/api/transactions/${categorizedId}`, { categoryId: foodId });
+  await updateTransactionForTest(categorizedId, { categoryId: foodId });
 
-  const body = await getJson('/api/app/transactions?categoryId=uncategorized');
+  const body = await listTransactionsForTest({ categoryId: 'uncategorized' });
 
   expect(body.transactions.map((transaction: { description: string }) => transaction.description)).toEqual([
     'Explicit uncategorized',
@@ -949,9 +930,9 @@ test('app transactions search includes notes', async () => {
     merchant: 'Store',
     type: 'expense',
   });
-  await putJson(`/api/transactions/${transactionId}`, { notes: 'reimbursable team lunch' });
+  await updateTransactionForTest(transactionId, { notes: 'reimbursable team lunch' });
 
-  const body = await getJson('/api/app/transactions?search=reimbursable');
+  const body = await listTransactionsForTest({ search: 'reimbursable' });
 
   expect(body.transactions.map((transaction: { notes: string }) => transaction.notes)).toEqual(['reimbursable team lunch']);
 });
@@ -985,9 +966,9 @@ test('app transactions search includes signed and unsigned amounts with optional
     type: 'expense',
   });
 
-  const unsignedWithoutSeparator = await getJson('/api/app/transactions?search=1234.56');
-  const unsignedWithSeparator = await getJson('/api/app/transactions?search=1%2C234.56');
-  const signedNegative = await getJson('/api/app/transactions?search=-1234.56');
+  const unsignedWithoutSeparator = await listTransactionsForTest({ search: '1234.56' });
+  const unsignedWithSeparator = await listTransactionsForTest({ search: '1,234.56' });
+  const signedNegative = await listTransactionsForTest({ search: '-1234.56' });
 
   expect(unsignedWithoutSeparator.transactions.map((transaction: { description: string }) => transaction.description)).toEqual([
     'Large income',
@@ -1031,7 +1012,7 @@ test('app transactions search requires all terms to match', async () => {
     type: 'expense',
   });
 
-  const body = await getJson('/api/app/transactions?search=check%20930.00');
+  const body = await listTransactionsForTest({ search: 'check 930.00' });
 
   expect(body.transactions.map((transaction: { description: string }) => transaction.description)).toEqual([
     'Online transfer',
@@ -1061,7 +1042,7 @@ test('app transactions search supports quoted phrase terms', async () => {
     type: 'expense',
   });
 
-  const body = await getJson('/api/app/transactions?search=%22customer%20withdrawal%22%209000');
+  const body = await listTransactionsForTest({ search: '"customer withdrawal" 9000' });
 
   expect(body.transactions.map((transaction: { description: string }) => transaction.description)).toEqual([
     'Customer Withdrawal Image',
@@ -1086,14 +1067,14 @@ test('app transactions ignore legacy category and notes columns without annotati
     type: 'expense',
   });
 
-  const body = await getJson('/api/app/transactions');
+  const body = await listTransactionsForTest();
   expect(body.transactions[0].category).toBeNull();
   expect(body.transactions[0].notes).toBeNull();
 
-  const categoryFiltered = await getJson(`/api/app/transactions?categoryId=${categoryId}`);
+  const categoryFiltered = await listTransactionsForTest({ categoryId });
   expect(categoryFiltered.transactions).toEqual([]);
 
-  const searchFiltered = await getJson('/api/app/transactions?search=legacy-only-note');
+  const searchFiltered = await listTransactionsForTest({ search: 'legacy-only-note' });
   expect(searchFiltered.transactions).toEqual([]);
 });
 
@@ -1113,7 +1094,7 @@ test('app transaction updates store category and notes only as annotations', asy
     type: 'expense',
   });
 
-  await putJson(`/api/transactions/${transactionId}`, {
+  await updateTransactionForTest(transactionId, {
     categoryId,
     notes: 'annotation-only',
   });
@@ -1125,7 +1106,7 @@ test('app transaction updates store category and notes only as annotations', asy
   expect(transaction.categoryId).toBeNull();
   expect(transaction.notes).toBeNull();
 
-  const body = await getJson('/api/app/transactions?search=annotation-only');
+  const body = await listTransactionsForTest({ search: 'annotation-only' });
   expect(body.transactions[0].category.id).toBe(categoryId);
   expect(body.transactions[0].notes).toBe('annotation-only');
 });
@@ -1146,7 +1127,7 @@ test('transaction annotations survive transaction row rebuild', async () => {
     type: 'expense',
   });
 
-  await putJson(`/api/transactions/${transactionId}`, {
+  await updateTransactionForTest(transactionId, {
     categoryId,
     notes: 'household groceries',
   });
@@ -1170,7 +1151,7 @@ test('transaction annotations survive transaction row rebuild', async () => {
     type: 'expense',
   });
 
-  const body = await getJson('/api/app/transactions');
+  const body = await listTransactionsForTest();
   expect(body.transactions[0].category.id).toBe(categoryId);
   expect(body.transactions[0].notes).toBe('household groceries');
 });
@@ -1193,19 +1174,19 @@ test('app transactions endpoint reads and annotates ledger rows without legacy t
     status: 'cleared',
   }));
 
-  await putJson(`/api/transactions/${transactionId}`, {
+  await updateTransactionForTest(transactionId, {
     categoryId,
     notes: 'before legacy delete',
   });
 
-  const beforeDelete = await getJson('/api/app/transactions?search=Ledger Cafe');
+  const beforeDelete = await listTransactionsForTest({ search: 'Ledger Cafe' });
   expect(beforeDelete.transactions).toHaveLength(1);
   const ledgerTransactionId = beforeDelete.transactions[0].ledgerTransactionId;
   expect(ledgerTransactionId.startsWith('txn_')).toBe(true);
 
   getDb().prepare('DELETE FROM transactions WHERE id = ?').run(transactionId);
 
-  const ledgerOnly = await getJson('/api/app/transactions?search=Ledger Cafe');
+  const ledgerOnly = await listTransactionsForTest({ search: 'Ledger Cafe' });
   expect(ledgerOnly.transactions).toHaveLength(1);
   expect(ledgerOnly.transactions[0]).toMatchObject({
     ledgerTransactionId,
@@ -1222,10 +1203,10 @@ test('app transactions endpoint reads and annotates ledger rows without legacy t
   });
   expect((getDb().prepare('SELECT COUNT(*) AS count FROM transactions').get() as { count: number }).count).toBe(0);
 
-  await putJson(`/api/transactions/${ledgerOnly.transactions[0].id}`, {
+  await updateTransactionForTest(ledgerOnly.transactions[0].id, {
     notes: 'ledger-only annotation',
   });
-  const updated = await getJson('/api/app/transactions?search=ledger-only annotation');
+  const updated = await listTransactionsForTest({ search: 'ledger-only annotation' });
   expect(updated.transactions).toHaveLength(1);
   expect(updated.transactions[0].ledgerTransactionId).toBe(ledgerTransactionId);
 });
@@ -2147,7 +2128,7 @@ test('investment report endpoints expose money-style ledger reports', async () =
     updatedAt: new Date().toISOString(),
   });
 
-  const netWorth = await getJson('/api/networth') as {
+  const netWorth = await netWorthReportForTest() as {
     accounts: Array<{ id: number; name: string; institution: string; type: string; account_holder: string | null }>;
     rows: Array<{
       month: string;
@@ -2184,7 +2165,7 @@ test('investment report endpoints expose money-style ledger reports', async () =
     ending_balance_cents: 112000,
   }));
 
-  const savingsRate = await getJson('/api/savings-rate') as {
+  const savingsRate = await savingsRateReportForTest() as {
     account_months: Array<{
       account_id: number;
       month: string;
@@ -2289,7 +2270,7 @@ test('investment report carries basis and gains across Roth IRA transfers', asyn
     });
   }
 
-  const netWorth = await getJson('/api/networth') as {
+  const netWorth = await netWorthReportForTest() as {
     rows: Array<{
       month: string;
       account_id: number;
@@ -2388,7 +2369,7 @@ test('net worth uses balance snapshots rather than transaction activity for cash
     });
   }
 
-  const netWorth = await getJson('/api/networth') as {
+  const netWorth = await netWorthReportForTest() as {
     rows: Array<{
       month: string;
       account_id: number;
@@ -2615,7 +2596,7 @@ test('app imports commit inserts unique transactions and updates account balance
   });
   const preview = await postImportPreview('chase-credit-card-demo.csv', csv);
 
-  const firstCommit = await postJson('/api/app/imports/commit', {
+  const firstCommit = await commitImportForTest( {
     accountId,
     importFileId: preview.importFileId,
     importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
@@ -2626,7 +2607,7 @@ test('app imports commit inserts unique transactions and updates account balance
       mapping: preview.mapping,
       profileName: preview.profileUsed,
     },
-  }, 201);
+  });
 
   expect(firstCommit.importedCount).toBe(10);
   expect(firstCommit.skippedDuplicateCount).toBe(0);
@@ -2710,7 +2691,7 @@ test('app imports commit inserts unique transactions and updates account balance
   const savedProfile = getDb().prepare('SELECT * FROM importProfiles').get();
   expect(savedProfile).toBeNull();
 
-  const secondCommit = await postJson('/api/app/imports/commit', {
+  const secondCommit = await commitImportForTest( {
     accountId,
     importFileId: preview.importFileId,
     importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
@@ -2721,12 +2702,12 @@ test('app imports commit inserts unique transactions and updates account balance
       mapping: preview.mapping,
       profileName: preview.profileUsed,
     },
-  }, 201);
+  });
 
   expect(secondCommit.importedCount).toBe(0);
   expect(secondCommit.skippedDuplicateCount).toBe(10);
 
-  const forcedCommit = await postJson('/api/app/imports/commit', {
+  const forcedCommit = await commitImportForTest( {
     accountId,
     importFileId: preview.importFileId,
     importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
@@ -2738,7 +2719,7 @@ test('app imports commit inserts unique transactions and updates account balance
       mapping: preview.mapping,
       profileName: preview.profileUsed,
     },
-  }, 201);
+  });
 
   expect(forcedCommit.importedCount).toBe(1);
   expect(forcedCommit.skippedDuplicateCount).toBe(9);
@@ -2757,11 +2738,11 @@ test('app import history lists committed files and can unimport one', async () =
   });
   const preview = await postImportPreview('chase-credit-card-demo.csv', csv);
 
-  await postJson('/api/app/imports/commit', {
+  await commitImportForTest( {
     accountId,
     importFileId: preview.importFileId,
     importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
-  }, 201);
+  });
   const annotatedTransaction = getDb().prepare(`
     SELECT ledgerTransactionId
     FROM ledgerTransactions
@@ -2776,7 +2757,7 @@ test('app import history lists committed files and can unimport one', async () =
     updatedAt: new Date().toISOString(),
   });
 
-  const history = await getJson('/api/app/imports') as {
+  const history = await listImportHistoryForTest() as {
     imports: Array<{
       id: number;
       fileName: string;
@@ -2791,7 +2772,7 @@ test('app import history lists committed files and can unimport one', async () =
     transactionCount: 10,
   });
 
-  await deleteJson(`/api/app/imports/${preview.importFileId}`);
+  await trpcClient.imports.unimport.mutate({ importFileId: preview.importFileId });
 
   expect(getDb().prepare('SELECT COUNT(*) AS count FROM transactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
   expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
@@ -2802,7 +2783,7 @@ test('app import history lists committed files and can unimport one', async () =
     notes: 'keep this user note',
   });
 
-  const reimport = await postJson(`/api/app/imports/${preview.importFileId}/reimport`, {});
+  const reimport = await trpcClient.imports.reimport.mutate({ importFileId: preview.importFileId });
   expect(reimport).toMatchObject({
     ok: true,
     importFileId: preview.importFileId,
@@ -2925,7 +2906,7 @@ test('app data freshness reports latest source fact dates by account', async () 
     priority: 100,
   });
 
-  const body = await getJson('/api/app/data-freshness?today=2026-07-01');
+  const body = await dataFreshnessForTest('2026-07-01');
   const checking = body.accounts.find((account: { accountId: number }) => account.accountId === checkingId);
   const staleCard = body.accounts.find((account: { accountId: number }) => account.accountId === staleCardId);
   const noData = body.accounts.find((account: { accountId: number }) => account.accountId === noDataId);
@@ -2999,7 +2980,7 @@ test('app data freshness reports latest source fact dates by account', async () 
     }),
   ]));
 
-  const catchUp = await getJson('/api/app/data-freshness/catch-up?today=2026-07-01');
+  const catchUp = await dataCatchUpForTest('2026-07-01');
   expect(catchUp).toMatchObject({
     generatedAt: '2026-07-01',
     totalItems: 2,
@@ -3036,27 +3017,27 @@ test('app import history can bulk unimport and reimport committed source facts',
   const firstPreview = await postImportPreview('chase-credit-card-first.csv', firstCsv);
   const secondPreview = await postImportPreview('chase-credit-card-second.csv', secondCsv);
 
-  await postJson('/api/app/imports/commit', {
+  await commitImportForTest( {
     accountId,
     importFileId: firstPreview.importFileId,
     importRowIds: firstPreview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
-  }, 201);
-  await postJson('/api/app/imports/commit', {
+  });
+  await commitImportForTest( {
     accountId,
     importFileId: secondPreview.importFileId,
     importRowIds: secondPreview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
-  }, 201);
+  });
 
   expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 2 });
 
   const importFileIds = [firstPreview.importFileId, secondPreview.importFileId];
-  const unimport = await postJson('/api/app/imports/bulk-unimport', { importFileIds });
+  const unimport = await trpcClient.imports.bulkUnimport.mutate({ importFileIds });
   expect(unimport).toMatchObject({ ok: true, count: 2, importFileIds });
   expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
   expect(getDb().prepare("SELECT COUNT(*) AS count FROM importFiles WHERE status = 'unimported'").get()).toMatchObject({ count: 2 });
   expect(getDb().prepare('SELECT COUNT(*) AS count FROM sourceAccounts WHERE accountId = ?').get(accountId)).toMatchObject({ count: 2 });
 
-  const reimport = await postJson('/api/app/imports/bulk-reimport', { importFileIds });
+  const reimport = await trpcClient.imports.bulkReimport.mutate({ importFileIds });
   expect(reimport).toMatchObject({ ok: true, count: 2, importFileIds, transactionCount: 2 });
   expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 2 });
   expect(getDb().prepare("SELECT COUNT(*) AS count FROM importFiles WHERE status = 'committed'").get()).toMatchObject({ count: 2 });
@@ -3129,11 +3110,11 @@ test('app imports commit resolves parser-emitted accounts without selected accou
     createdAt: now,
   });
 
-  const commit = await postJson('/api/app/imports/commit', {
+  const commit = await commitImportForTest( {
     accountId: null,
     importFileId,
     importRowIds: [transactionRowId],
-  }, 201);
+  });
 
   expect(commit.importedCount).toBe(1);
   const account = getDb().prepare(`
@@ -3178,17 +3159,17 @@ test('source facts can rebuild committed transaction app rows without losing ann
     type: 'income',
   });
   const preview = await postImportPreview('chase-credit-card-demo.csv', csv);
-  await postJson('/api/app/imports/commit', {
+  await commitImportForTest( {
     accountId,
     importFileId: preview.importFileId,
     importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
-  }, 201);
+  });
 
   const payroll = getDb().prepare("SELECT id, ledgerTransactionId FROM transactions WHERE description = 'ACME PAYROLL'").get() as {
     id: number;
     ledgerTransactionId: string;
   };
-  await putJson(`/api/transactions/${payroll.id}`, {
+  await updateTransactionForTest(payroll.id, {
     categoryId,
     notes: 'source-fact-safe',
   });
@@ -3211,7 +3192,7 @@ test('source facts can rebuild committed transaction app rows without losing ann
   expect(snapshotAccountTransactions(accountId)).toEqual(beforeTransactions);
   expect(snapshotBalanceSnapshots(accountId)).toEqual(beforeBalances);
 
-  const body = await getJson('/api/app/transactions?search=source-fact-safe');
+  const body = await listTransactionsForTest({ search: 'source-fact-safe' });
   expect(body.transactions).toHaveLength(1);
   expect(body.transactions[0].category.id).toBe(categoryId);
   expect(body.transactions[0].notes).toBe('source-fact-safe');
@@ -3273,12 +3254,12 @@ test('app imports commit materializes staged statement balances', async () => {
     createdAt: now,
   }));
 
-  const commit = await postJson('/api/app/imports/commit', {
+  const commit = await commitImportForTest( {
     accountId,
     importFileId,
     importRowIds: [],
     balanceRowIds: [balanceRowId],
-  }, 201);
+  });
 
   expect(transactionRowId).toBe(1);
   expect(commit.importedCount).toBe(0);
@@ -3354,7 +3335,7 @@ test('app imports commit uses source account mapping overrides', async () => {
   ].join('\n'));
 
   const sourceAccountId = preview.accountMappings[0].sourceAccountId;
-  const commit = await postJson('/api/app/imports/commit', {
+  const commit = await commitImportForTest( {
     accountId: null,
     importFileId: preview.importFileId,
     importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
@@ -3363,7 +3344,7 @@ test('app imports commit uses source account mapping overrides', async () => {
       sourceAccountId,
       accountId: existingAccountId,
     }],
-  }, 201);
+  });
 
   expect(commit.importedCount).toBe(1);
   expect(commit.importedBalanceCount).toBe(1);
@@ -3425,19 +3406,14 @@ test('app import preview reports archived matches and commit requires explicit u
     resolution: 'archived-match',
   });
 
-  const rejected = await fetch(`${TEST_URL}/api/app/imports/commit`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  await expect(commitImportForTest({
     accountId: null,
     importFileId: preview.importFileId,
     importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
     accountMappings: [{ sourceAccountId: preview.accountMappings[0].sourceAccountId, mode: 'auto' }],
-    }),
-  });
-  expect(rejected.status).toBe(500);
+  })).rejects.toThrow('Import account mapping requires an explicit account choice.');
 
-  const commit = await postJson('/api/app/imports/commit', {
+  const commit = await commitImportForTest( {
     accountId: null,
     importFileId: preview.importFileId,
     importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
@@ -3447,7 +3423,7 @@ test('app import preview reports archived matches and commit requires explicit u
       mode: 'unarchive',
       accountId: archivedAccountId,
     }],
-  }, 201);
+  });
 
   expect(commit.importedCount).toBe(1);
   expect(getDb().prepare('SELECT status, archivedAt FROM accounts WHERE id = ?').get(archivedAccountId)).toMatchObject({
@@ -3467,7 +3443,7 @@ test('app imports commit creates accounts from explicit source account mapping d
     '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
   ].join('\n'));
 
-  const commit = await postJson('/api/app/imports/commit', {
+  const commit = await commitImportForTest( {
     accountId: null,
     importFileId: preview.importFileId,
     importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
@@ -3482,7 +3458,7 @@ test('app imports commit creates accounts from explicit source account mapping d
         currency: 'USD',
       },
     }],
-  }, 201);
+  });
 
   expect(commit.importedCount).toBe(1);
   const account = getDb().prepare("SELECT * FROM accounts WHERE name = 'Imported Savings'").get() as {
@@ -3547,11 +3523,11 @@ test('app import materialization is independent of import file commit order', as
   const previewB = await postImportPreview('chase-b.csv', csvFromRows(rows.slice(1, 4)));
 
   const commitPreview = (preview: { importFileId: number; transactions: Array<{ importRowId: number }> }) =>
-    postJson('/api/app/imports/commit', {
+    commitImportForTest({
       accountId,
       importFileId: preview.importFileId,
       importRowIds: preview.transactions.map(transaction => transaction.importRowId),
-    }, 201);
+    });
 
   await commitPreview(previewA);
   await commitPreview(previewB);
