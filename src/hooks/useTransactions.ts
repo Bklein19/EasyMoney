@@ -151,6 +151,7 @@ function fromAppTransaction(transaction: TransactionListItem) {
     id: transaction.id,
     ledgerTransactionId: transaction.ledgerTransactionId,
     accountId: transaction.account?.id ?? null,
+    accountName: transaction.account?.name ?? null,
     categoryId: transaction.category?.id ?? null,
     date: transaction.date,
     amount: transaction.amount,

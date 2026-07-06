@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, ArrowUp, X } from 'lucide-react';
@@ -6,10 +6,8 @@ import { useTransactions } from '../../hooks/useTransactions';
 import TransactionRow from './TransactionRow';
 import TransactionFilters from './TransactionFilters';
 import { formatCurrency } from '../../utils/formatters';
-import { useAccounts } from '../../hooks/useAccounts';
 import { useCategories } from '../../hooks/useCategories';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
-import { buildAccountMap, isExcludedFromCashFlow, isExpense, isIncome, isInvestmentMovement } from '../../utils/transactionSemantics';
 import GroupedCategorySelect, { isUncategorized } from '../shared/GroupedCategorySelect';
 import './TransactionsPage.css';
 
@@ -52,22 +50,13 @@ export default function TransactionsPage() {
     infinite: true,
     limit: TRANSACTION_PAGE_SIZE,
   });
-  const { accounts } = useAccounts();
   const { categories, addCategory } = useCategories();
   const deferredTransactions = useDeferredValue(transactions);
-  const deferredAccounts = useDeferredValue(accounts);
   const deferredCategories = useDeferredValue(categories);
   const isTransactionsWorking =
     transactions !== deferredTransactions ||
-    accounts !== deferredAccounts ||
     categories !== deferredCategories ||
     filters !== deferredFilters;
-  const accountMap = useMemo(() => buildAccountMap(deferredAccounts), [deferredAccounts]);
-  const categoryMap = useMemo(() => {
-    const map = {};
-    deferredCategories.forEach(c => { map[c.id] = c; });
-    return map;
-  }, [deferredCategories]);
   const visibleTransactions = deferredTransactions;
   const virtualRowCount = hasNextPage ? visibleTransactions.length + 1 : visibleTransactions.length;
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual is the intended virtual scroller for this dense list.
@@ -258,17 +247,7 @@ export default function TransactionsPage() {
     setFilters(nextFilters);
   }, []);
 
-  const loadedTotals = useMemo(() => {
-    return visibleTransactions.reduce((summary, tx) => {
-      if (isIncome(tx, accountMap, categoryMap)) summary.income += tx.amount;
-      if (isExpense(tx, accountMap, categoryMap)) summary.expenses += Math.abs(tx.amount);
-      if (isInvestmentMovement(tx, accountMap, categoryMap)) summary.investments += Math.abs(tx.amount);
-      else if (isExcludedFromCashFlow(tx, accountMap, categoryMap)) summary.internalMovement += Math.abs(tx.amount);
-      summary.net = summary.income - summary.expenses;
-      return summary;
-    }, { income: 0, expenses: 0, internalMovement: 0, investments: 0, net: 0 });
-  }, [visibleTransactions, accountMap, categoryMap]);
-  const totals = serverTotals ?? loadedTotals;
+  const totals = serverTotals ?? { income: 0, expenses: 0, internalMovement: 0, investments: 0, net: 0 };
 
   return (
     <div className="page">
@@ -432,7 +411,6 @@ export default function TransactionsPage() {
                         <TransactionRow
                           transaction={tx}
                           onUpdate={updateTransaction}
-                          account={accountMap[tx.accountId]}
                           categories={categories}
                           addCategory={addCategory}
                         />

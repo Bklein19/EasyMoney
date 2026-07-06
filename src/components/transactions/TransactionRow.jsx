@@ -1,7 +1,7 @@
 import CategoryPicker from './CategoryPicker';
 import { formatDate, formatCurrency, getAmountClass } from '../../utils/formatters';
 
-export default function TransactionRow({ transaction, onUpdate, account, categories, addCategory }) {
+export default function TransactionRow({ transaction, onUpdate, categories, addCategory }) {
   const handleCategoryChange = (categoryId) => {
     onUpdate(transaction.id, { categoryId });
   };
@@ -25,7 +25,7 @@ export default function TransactionRow({ transaction, onUpdate, account, categor
         />
       </div>
       <div className="tx-account truncate">
-        {account ? account.name : 'Unknown Account'}
+        {transaction.accountName || 'Unknown Account'}
       </div>
       <div className={`tx-amount ${getAmountClass(transaction.amount)}`}>
         {formatCurrency(transaction.amount, true)}
