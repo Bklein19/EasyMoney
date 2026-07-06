@@ -1,7 +1,26 @@
-// @ts-nocheck
 import { getDb, insertRow } from './database.ts';
 
-const DEFAULT_CATEGORIES = [
+interface SeedCategory {
+  name: string;
+  icon: string;
+  color: string;
+  type: string;
+  categoryGroup: string;
+}
+
+type SeedRule = [pattern: string, categoryName: string, priority: number];
+
+interface ExistingCategoryRow {
+  id: number;
+  name: string;
+}
+
+interface ExistingRuleRow {
+  pattern: string;
+  categoryId: number;
+}
+
+const DEFAULT_CATEGORIES: SeedCategory[] = [
   { name: 'Food & Dining', icon: 'utensils', color: '#f97316', type: 'expense', categoryGroup: 'discretionary' },
   { name: 'Groceries', icon: 'shopping-cart', color: '#22c55e', type: 'expense', categoryGroup: 'variable' },
   { name: 'Housing', icon: 'home', color: '#6366f1', type: 'expense', categoryGroup: 'fixed' },
@@ -23,7 +42,7 @@ const DEFAULT_CATEGORIES = [
   { name: 'Uncategorized', icon: 'help-circle', color: '#94a3b8', type: 'expense', categoryGroup: 'other' }
 ];
 
-const DEFAULT_RULES = [
+const DEFAULT_RULES: SeedRule[] = [
   ['starbucks', 'Food & Dining', 10], ['mcdonald', 'Food & Dining', 10], ['chipotle', 'Food & Dining', 10],
   ['doordash', 'Food & Dining', 10], ['uber eats', 'Food & Dining', 10], ['restaurant', 'Food & Dining', 10],
   ['coffee', 'Food & Dining', 6], ['cafe', 'Food & Dining', 6],
@@ -54,7 +73,7 @@ const DEFAULT_RULES = [
 
 export function seedDatabase() {
   const db = getDb();
-  const existingCategories = db.prepare('SELECT id, name FROM categories').all();
+  const existingCategories = db.prepare('SELECT id, name FROM categories').all() as ExistingCategoryRow[];
   const categoryIds = Object.fromEntries(existingCategories.map(category => [category.name, category.id]));
 
   for (const category of DEFAULT_CATEGORIES) {
@@ -70,7 +89,7 @@ export function seedDatabase() {
   }
 
   const existingRuleKeys = new Set(
-    db.prepare('SELECT pattern, categoryId FROM categorizationRules').all()
+    (db.prepare('SELECT pattern, categoryId FROM categorizationRules').all() as ExistingRuleRow[])
       .map(rule => `${rule.pattern}:${rule.categoryId}`)
   );
 
