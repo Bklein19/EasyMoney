@@ -1,6 +1,5 @@
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery } from '@tanstack/react-query';
-import { subscribeToDataChanges } from '../db/api';
 import { queryClient, trpc, trpcClient } from '../api/trpc';
 import type { TransactionListItem } from '../../server/app/types.ts';
 
@@ -82,16 +81,6 @@ export function useTransactions(filters: TransactionFilters = {}) {
       queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] });
     },
   }));
-
-  useEffect(() => {
-    const unsubscribe = subscribeToDataChanges(() => {
-      queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() });
-      queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] });
-    });
-    return () => {
-      unsubscribe();
-    };
-  }, []);
 
   const transactions = useMemo(() => {
     let result = isInfinite

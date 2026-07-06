@@ -3,7 +3,7 @@ import { format } from 'date-fns';
 import { Check, AlertTriangle, X } from 'lucide-react';
 import { useAccounts } from '../../hooks/useAccounts';
 import { useTransactions } from '../../hooks/useTransactions';
-import { apiAction } from '../../db/api';
+import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import { isCreditAccount } from '../../utils/transactionSemantics';
 import { getAccountTypeLabel } from '../../utils/formatters';
 import { splitDuplicateTransactions } from '../../utils/importIdentity';
@@ -143,6 +143,19 @@ function ImportPreviewContent({ transactions, importMeta, isBatchImport = false,
   const uniqueTotalAmount = effectiveUnique.reduce((sum, t) => sum + t.amount, 0);
   const forcedDuplicateCount = forcedDuplicates.length;
 
+  const invalidateImportDependents = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: trpc.imports.history.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: trpc.dataFreshness.report.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: trpc.accounts.list.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] }),
+      queryClient.invalidateQueries({ queryKey: trpc.netWorth.report.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: trpc.reports.netWorth.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: trpc.reports.savingsRate.queryKey() }),
+    ]);
+  };
+
   useEffect(() => {
     if (autoImportAll) return;
     if (duplicates.length > 0 && duplicateModalKey !== duplicateModalSeenKey) {
@@ -228,21 +241,20 @@ function ImportPreviewContent({ transactions, importMeta, isBatchImport = false,
 
     setIsImporting(true);
     try {
-      const result = await apiAction('/app/imports/commit', {
-        method: 'POST',
-        body: JSON.stringify({
-          accountId: null,
-          importFileId: importMeta?.importFileId,
-          importRowIds: validTransactions.map(transaction => transaction.importRowId),
-          forceImportRowIds: [...forceImportRowIds],
-          balanceRowIds: importMeta?.balanceRowIds || [],
-          accountMappings: buildAccountMappingsPayload(),
-          importMeta: {
-            ...importMeta,
-            accountMappings: buildAccountMappingsPayload(),
-          },
-        }),
+      const accountMappings = buildAccountMappingsPayload();
+      const result = await trpcClient.imports.commit.mutate({
+        accountId: null,
+        importFileId: importMeta?.importFileId,
+        importRowIds: validTransactions.map(transaction => transaction.importRowId),
+        forceImportRowIds: [...forceImportRowIds],
+        balanceRowIds: importMeta?.balanceRowIds || [],
+        accountMappings,
+        importMeta: {
+          ...importMeta,
+          accountMappings,
+        },
       });
+      await invalidateImportDependents();
       await onComplete(result.importedCount, result.skippedDuplicateCount);
     } catch (error) {
       console.error('Import error:', error);

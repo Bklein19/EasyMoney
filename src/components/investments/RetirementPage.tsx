@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Area,
   CartesianGrid,
@@ -13,6 +14,7 @@ import {
 } from "recharts";
 import { Info } from "lucide-react";
 import "./ReportPages.css";
+import { trpc } from "../../api/trpc";
 
 interface AccountSummary {
   id: number;
@@ -260,9 +262,10 @@ function runProjection({
 }
 
 export function RetirementPage({ selectedIds: selectedIdsProp }: { selectedIds?: Set<number> }) {
-  const [netWorthReport, setNetWorthReport] = useState<NetWorthReport | null>(null);
-  const [savingsReport, setSavingsReport] = useState<SavingsRateReport | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const netWorthQuery = useQuery(trpc.reports.netWorth.queryOptions());
+  const savingsRateQuery = useQuery(trpc.reports.savingsRate.queryOptions());
+  const netWorthReport = (netWorthQuery.data || null) as NetWorthReport | null;
+  const savingsReport = (savingsRateQuery.data || null) as SavingsRateReport | null;
   const [currentAge, setCurrentAge] = useState("35");
   const [retirementAge, setRetirementAge] = useState("65");
   const [expectedReturnPct, setExpectedReturnPct] = useState("6");
@@ -277,24 +280,6 @@ export function RetirementPage({ selectedIds: selectedIdsProp }: { selectedIds?:
   const [dragStartAge, setDragStartAge] = useState<number | null>(null);
   const [dragEndAge, setDragEndAge] = useState<number | null>(null);
   const seededInputs = useRef(false);
-
-  useEffect(() => {
-    Promise.all([
-      fetch("/api/networth").then((r) => {
-        if (!r.ok) throw new Error(`Net worth request failed: ${r.status}`);
-        return r.json();
-      }),
-      fetch("/api/savings-rate").then((r) => {
-        if (!r.ok) throw new Error(`Savings rate request failed: ${r.status}`);
-        return r.json();
-      }),
-    ])
-      .then(([netWorth, savings]) => {
-        setNetWorthReport(netWorth as NetWorthReport);
-        setSavingsReport(savings as SavingsRateReport);
-      })
-      .catch((e) => setError(String(e)));
-  }, []);
 
   const allAccountIds = useMemo(
     () => new Set(netWorthReport?.accounts.map((account) => account.id) ?? []),
@@ -395,7 +380,8 @@ export function RetirementPage({ selectedIds: selectedIdsProp }: { selectedIds?:
     setDragEndAge(null);
   };
 
-  if (error) return <div className="page page-retirement"><div className="meta import-error">{error}</div></div>;
+  const reportError = netWorthQuery.error || savingsRateQuery.error;
+  if (reportError) return <div className="page page-retirement"><div className="meta import-error">{String(reportError)}</div></div>;
   if (!netWorthReport) return <div className="page page-retirement"><div className="empty-state">Loading...</div></div>;
 
   return (

@@ -1,8 +1,5 @@
-import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { apiAction } from '../db/api';
-import { queryClient, trpc } from '../api/trpc';
-import { subscribeToDataChanges } from '../db/api';
+import { queryClient, trpc, trpcClient } from '../api/trpc';
 import type { AccountSummary } from '../../server/app/types.ts';
 
 type AccountMetadataChanges = {
@@ -19,15 +16,6 @@ export function useAccounts(options: { includeArchived?: boolean } = {}) {
     select: data => data.accounts.map(fromAppAccount),
   }));
 
-  useEffect(() => {
-    const unsubscribe = subscribeToDataChanges(() => {
-      queryClient.invalidateQueries({ queryKey: trpc.accounts.list.queryKey() });
-    });
-    return () => {
-      unsubscribe();
-    };
-  }, []);
-
   async function updateAccount(id: number | string, changes: AccountMetadataChanges) {
     const allowed = new Set(['name', 'institution', 'type', 'currency', 'accountHolder']);
     const unsupported = Object.keys(changes).filter(field => !allowed.has(field));
@@ -35,18 +23,21 @@ export function useAccounts(options: { includeArchived?: boolean } = {}) {
       throw new Error(`Accounts only support metadata updates: ${unsupported.join(', ')}`);
     }
 
-    return apiAction(`/app/accounts/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify(changes),
-    });
+    const result = await trpcClient.accounts.updateMetadata.mutate({ id, changes });
+    await queryClient.invalidateQueries({ queryKey: trpc.accounts.list.queryKey() });
+    return result;
   }
 
   async function archiveAccount(id: number | string) {
-    return apiAction(`/app/accounts/${id}/archive`, { method: 'POST' });
+    const result = await trpcClient.accounts.archive.mutate({ id });
+    await queryClient.invalidateQueries({ queryKey: trpc.accounts.list.queryKey() });
+    return result;
   }
 
   async function unarchiveAccount(id: number | string) {
-    return apiAction(`/app/accounts/${id}/unarchive`, { method: 'POST' });
+    const result = await trpcClient.accounts.unarchive.mutate({ id });
+    await queryClient.invalidateQueries({ queryKey: trpc.accounts.list.queryKey() });
+    return result;
   }
 
   return {

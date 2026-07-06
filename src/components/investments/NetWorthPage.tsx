@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   ComposedChart,
   Area,
@@ -13,6 +14,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import "./ReportPages.css";
+import { trpc } from "../../api/trpc";
 
 interface AccountSummary {
   id: number;
@@ -132,16 +134,9 @@ interface NetWorthPageProps {
 }
 
 export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPageProps) {
-  const [report, setReport] = useState<NetWorthReport | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const reportQuery = useQuery(trpc.reports.netWorth.queryOptions());
+  const report = (reportQuery.data || null) as NetWorthReport | null;
   const [derivativePeriod, setDerivativePeriod] = useState<Period>("month");
-
-  useEffect(() => {
-    fetch("/api/networth")
-      .then((r) => r.json())
-      .then((data) => setReport(data as NetWorthReport))
-      .catch((e) => setError(String(e)));
-  }, []);
 
   const allAccountIds = useMemo(
     () => new Set(report?.accounts.map((account) => account.id) ?? []),
@@ -405,7 +400,7 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
     return points;
   }, [data]);
 
-  if (error) return <div className="page"><div className="meta import-error">{error}</div></div>;
+  if (reportQuery.error) return <div className="page"><div className="meta import-error">{String(reportQuery.error)}</div></div>;
   if (!report) return <div className="page"><div className="meta">Loading…</div></div>;
   if (report.rows.length === 0) {
     return (

@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { trpcClient } from '../api/trpc';
 
 interface ImportProfile {
   name: string;
@@ -33,6 +34,15 @@ interface ImportPreviewResult {
   transactions?: unknown[];
 }
 
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
 export function useCSVImport() {
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,22 +56,13 @@ export function useCSVImport() {
     setError(null);
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      if (customProfile) {
-        formData.append('profileJson', JSON.stringify(customProfile));
-      }
-
-      const response = await fetch('/api/app/imports/preview', {
-        method: 'POST',
-        body: formData,
-      });
-      if (!response.ok) {
-        const details = await response.json().catch(() => ({} as { error?: string }));
-        throw new Error(details.error || `Import preview failed: ${response.status}`);
-      }
-
-      return response.json() as Promise<ImportPreviewResult>;
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      return await trpcClient.imports.preview.mutate({
+        fileName: file.name || 'import.csv',
+        text: new TextDecoder().decode(bytes),
+        fileBase64: bytesToBase64(bytes),
+        customProfile,
+      }) as ImportPreviewResult;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Import preview failed';
       const fileLabel = file.webkitRelativePath || file.name || 'selected file';

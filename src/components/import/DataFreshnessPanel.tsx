@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, CircleDashed, Clock3 } from 'lucide-react';
-import { appRequest, subscribeToDataChanges } from '../../db/api';
+import { trpc } from '../../api/trpc';
 import { formatDate } from '../../utils/formatters';
 
 type FreshnessStatus = 'current' | 'due' | 'stale' | 'no-data';
@@ -73,27 +74,9 @@ function accountSort(a: FreshnessAccount, b: FreshnessAccount) {
 }
 
 export default function DataFreshnessPanel() {
-  const [report, setReport] = useState<FreshnessReport | null>(null);
-  const [error, setError] = useState('');
-
-  const loadReport = async () => {
-    setError('');
-    try {
-      setReport(await appRequest('/data-freshness'));
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : 'Could not load data freshness.');
-    }
-  };
-
-  useEffect(() => {
-    void loadReport();
-    const unsubscribe = subscribeToDataChanges(() => {
-      void loadReport();
-    });
-    return () => {
-      unsubscribe();
-    };
-  }, []);
+  const freshnessQuery = useQuery(trpc.dataFreshness.report.queryOptions());
+  const report = freshnessQuery.data as FreshnessReport | undefined;
+  const error = freshnessQuery.error ? freshnessQuery.error.message : '';
 
   const accounts = useMemo(
     () => [...(report?.accounts || [])].sort(accountSort),

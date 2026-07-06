@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router';
 import { Menu } from 'lucide-react';
 import ImportPage from './components/import/ImportPage.jsx';
@@ -12,7 +13,7 @@ import BudgetingPage from './components/budgeting/BudgetingPage.jsx';
 import { NetWorthPage } from './components/investments/NetWorthPage';
 import { RetirementPage } from './components/investments/RetirementPage';
 import { SavingsRatePage } from './components/investments/SavingsRatePage';
-import { subscribeToDataChanges } from './db/api';
+import { trpc } from './api/trpc';
 import './App.css';
 
 interface ReportAccount {
@@ -39,38 +40,15 @@ function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(getInitialSidebarCollapsed);
   const [isSidebarPeekOpen, setIsSidebarPeekOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [reportAccounts, setReportAccounts] = useState<ReportAccount[]>([]);
   const [selectedReportAccountIds, setSelectedReportAccountIds] = useState<Set<number> | null>(null);
+  const reportAccountsQuery = useQuery(trpc.reports.netWorth.queryOptions());
+  const reportAccounts: ReportAccount[] = reportAccountsQuery.data?.accounts || [];
 
   const handleSidebarCollapsedChange = (nextValue: boolean) => {
     setIsSidebarCollapsed(nextValue);
     setIsSidebarPeekOpen(false);
     window.localStorage.setItem('easymoney:sidebar-collapsed', String(nextValue));
   };
-
-  useEffect(() => {
-    let cancelled = false;
-    const loadReportAccounts = () => {
-      fetch('/api/networth')
-        .then(response => {
-          if (!response.ok) throw new Error(`Account picker request failed: ${response.status}`);
-          return response.json() as Promise<{ accounts?: ReportAccount[] }>;
-        })
-        .then(data => {
-          if (!cancelled) setReportAccounts(data.accounts || []);
-        })
-        .catch(() => {
-          if (!cancelled) setReportAccounts([]);
-        });
-    };
-    loadReportAccounts();
-    const unsubscribe = subscribeToDataChanges(loadReportAccounts);
-
-    return () => {
-      cancelled = true;
-      unsubscribe();
-    };
-  }, []);
 
   useEffect(() => {
     if (!isSidebarCollapsed || !isSidebarPeekOpen) return undefined;

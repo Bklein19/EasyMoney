@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Bar,
   BarChart,
@@ -9,6 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import "./ReportPages.css";
+import { trpc } from "../../api/trpc";
 
 type Period = "month" | "quarter" | "year";
 
@@ -113,16 +115,9 @@ const periodKey = (month: string, period: Period) => {
 };
 
 export function SavingsRatePage({ selectedIds: selectedIdsProp }: { selectedIds?: Set<number> }) {
-  const [report, setReport] = useState<SavingsRateReport | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const reportQuery = useQuery(trpc.reports.savingsRate.queryOptions());
+  const report = (reportQuery.data || null) as SavingsRateReport | null;
   const [period, setPeriod] = useState<Period>("year");
-
-  useEffect(() => {
-    fetch("/api/savings-rate")
-      .then((r) => r.json())
-      .then((data) => setReport(data as SavingsRateReport))
-      .catch((e) => setError(String(e)));
-  }, []);
 
   const allAccountIds = useMemo(
     () => new Set(report?.account_months.map((row) => row.account_id) ?? []),
@@ -225,7 +220,7 @@ export function SavingsRatePage({ selectedIds: selectedIdsProp }: { selectedIds?
     };
   }, [rows]);
 
-  if (error) return <div className="page page-wide"><div className="meta import-error">{error}</div></div>;
+  if (reportQuery.error) return <div className="page page-wide"><div className="meta import-error">{String(reportQuery.error)}</div></div>;
   if (!report) return <div className="page page-wide"><div className="empty-state">Loading…</div></div>;
 
   return (

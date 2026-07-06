@@ -4,7 +4,7 @@ import { useCSVImport } from '../../hooks/useCSVImport';
 import { buildCustomProfile, mappingFromProfile } from '../../utils/csvMapping';
 import { useImportProfiles } from '../../hooks/useImportProfiles';
 import { getHeaderSignature } from '../../utils/importIdentity';
-import { apiAction, appRequest } from '../../db/api';
+import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import FileDropZone from './FileDropZone';
 import ColumnMapper from './ColumnMapper';
 import ImportPreview from './ImportPreview';
@@ -35,10 +35,23 @@ export default function ImportPage() {
   const [reimportingId, setReimportingId] = useState(null);
   const [historyBulkAction, setHistoryBulkAction] = useState(null);
 
+  const invalidateImportDependents = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: trpc.imports.history.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: trpc.dataFreshness.report.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: trpc.accounts.list.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] }),
+      queryClient.invalidateQueries({ queryKey: trpc.netWorth.report.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: trpc.reports.netWorth.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: trpc.reports.savingsRate.queryKey() }),
+    ]);
+  }, []);
+
   const loadImportHistory = useCallback(async () => {
     setHistoryError('');
     try {
-      const result = await appRequest('/imports');
+      const result = await trpcClient.imports.history.query();
       setImportHistory(result.imports || []);
     } catch (loadError) {
       setHistoryError(loadError?.message || 'Could not load import history.');
@@ -101,26 +114,23 @@ export default function ImportPage() {
 
   const commitPreviewResult = async (result) => {
     const accountMappings = buildAutoAccountMappings(result);
-    return apiAction('/app/imports/commit', {
-      method: 'POST',
-      body: JSON.stringify({
-        accountId: null,
+    return trpcClient.imports.commit.mutate({
+      accountId: null,
+      importFileId: result.importFileId,
+      importRowIds: (result.transactions || []).map(transaction => transaction.importRowId),
+      forceImportRowIds: [],
+      balanceRowIds: result.balanceRowIds || [],
+      accountMappings,
+      importMeta: {
         importFileId: result.importFileId,
-        importRowIds: (result.transactions || []).map(transaction => transaction.importRowId),
-        forceImportRowIds: [],
-        balanceRowIds: result.balanceRowIds || [],
+        headers: result.headers,
+        profile: result.profile,
+        mapping: result.mapping || mappingFromProfile(result.profile, result.headers),
+        profileName: result.profileUsed || result.profile?.name || 'Custom',
+        savedImportProfile: result.savedImportProfile,
         accountMappings,
-        importMeta: {
-          importFileId: result.importFileId,
-          headers: result.headers,
-          profile: result.profile,
-          mapping: result.mapping || mappingFromProfile(result.profile, result.headers),
-          profileName: result.profileUsed || result.profile?.name || 'Custom',
-          savedImportProfile: result.savedImportProfile,
-          accountMappings,
-          balanceRowIds: result.balanceRowIds || [],
-        },
-      }),
+        balanceRowIds: result.balanceRowIds || [],
+      },
     });
   };
 
@@ -189,6 +199,7 @@ export default function ImportPage() {
     setImportedCount(nextImportedCount);
     setSkippedDuplicateCount(nextSkippedCount);
     setQueueMessage('');
+    await invalidateImportDependents();
     await loadImportHistory();
 
     const nextIndex = queueIndex + 1;
@@ -298,11 +309,13 @@ export default function ImportPage() {
           error: message,
         }));
         setAutoImportAll(false);
+        await invalidateImportDependents();
         await loadImportHistory();
         return;
       }
     }
 
+    await invalidateImportDependents();
     await loadImportHistory();
     setAutoImportAll(false);
     setStage('success');
@@ -328,7 +341,8 @@ export default function ImportPage() {
     setUnimportingId(item.id);
     setHistoryError('');
     try {
-      await apiAction(`/app/imports/${item.id}`, { method: 'DELETE' });
+      await trpcClient.imports.unimport.mutate({ importFileId: item.id });
+      await invalidateImportDependents();
       await loadImportHistory();
     } catch (unimportError) {
       setHistoryError(unimportError?.message || 'Could not unimport file.');
@@ -344,7 +358,8 @@ export default function ImportPage() {
     setReimportingId(item.id);
     setHistoryError('');
     try {
-      await apiAction(`/app/imports/${item.id}/reimport`, { method: 'POST' });
+      await trpcClient.imports.reimport.mutate({ importFileId: item.id });
+      await invalidateImportDependents();
       await loadImportHistory();
     } catch (reimportError) {
       setHistoryError(reimportError?.message || 'Could not reimport file.');
@@ -361,10 +376,8 @@ export default function ImportPage() {
     setHistoryBulkAction('unimport');
     setHistoryError('');
     try {
-      await apiAction('/app/imports/bulk-unimport', {
-        method: 'POST',
-        body: JSON.stringify({ importFileIds: items.map(item => item.id) }),
-      });
+      await trpcClient.imports.bulkUnimport.mutate({ importFileIds: items.map(item => item.id) });
+      await invalidateImportDependents();
       await loadImportHistory();
     } catch (bulkError) {
       setHistoryError(bulkError?.message || 'Could not unimport selected files.');
@@ -381,10 +394,8 @@ export default function ImportPage() {
     setHistoryBulkAction('reimport');
     setHistoryError('');
     try {
-      await apiAction('/app/imports/bulk-reimport', {
-        method: 'POST',
-        body: JSON.stringify({ importFileIds: items.map(item => item.id) }),
-      });
+      await trpcClient.imports.bulkReimport.mutate({ importFileIds: items.map(item => item.id) });
+      await invalidateImportDependents();
       await loadImportHistory();
     } catch (bulkError) {
       setHistoryError(bulkError?.message || 'Could not reimport selected files.');
