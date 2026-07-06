@@ -24,6 +24,30 @@ Imports are intentionally separate from categorization.
 
 This model is meant to handle overlapping activity exports without dropping real same-day duplicate purchases.
 
+## Import Parser Coverage
+
+Parsers try to extract durable source facts plus account context when the file format exposes it. Account number or suffix means the parser can infer a source-account identifier such as a full account number, masked number, or last four digits for account matching. Today that identifier is usually folded into the parsed account name; the import model is being extended toward first-class account-number metadata.
+
+| Institution / source | File types | Transactions | Balances | Account name | Account holder | Account number / suffix |
+| --- | --- | --- | --- | --- | --- | --- |
+| American Express | CSV activity | Yes | No | No | No | No |
+| Apple Card | CSV activity | Yes | No | No | No | No |
+| Bank of America | CSV activity, PDF statements | Yes | Yes | Yes | No | Last four from filename or statement |
+| Capital One | CSV activity | Yes | No | No | No | No |
+| Chase | CSV activity | Yes | No | No | No | No |
+| Citi | CSV activity | Yes | No | No | No | No |
+| Fidelity 401(k) / NetBenefits | HTML/PDF statements | Yes | Yes | Yes | No | No |
+| Fidelity portfolio / investment reports | PDF statements | Yes | Yes | Yes | Limited, format-specific | Full or formatted account number |
+| Marcus | PDF statements | Yes | Yes | Yes | No | Last four from filename or statement |
+| Merrill | CSV activity, PDF CMA statements | Yes | Yes | Yes | No | CSV account number or statement account number |
+| Morgan Stanley | PDF activity, PDF statements | Yes | Yes | Yes | Yes for activity exports | Full or last-four statement/account number |
+| Robinhood | CSV banking, PDF statements | Yes | Yes for statements | Yes | Yes for personal statement headings | Last four from statement account number |
+| Sequoia Fund | PDF statements | Yes | Yes | Fixed fund account | No | No |
+| TIAA | CSV activity, PDF statements | Yes | Yes | Fixed retirement account | No | No |
+| Vanguard | PDF activity, PDF statements | Yes | Yes | Yes | No | Masked suffix when present |
+| Wells Fargo | CSV activity, PDF statements | Yes | Yes for statements | Yes when filename/statement identifies it | No | Last four from filename or statement |
+| Custom CSV mapping | CSV activity | Yes | No | User-selected or mapped | No | No |
+
 ## Local Data
 
 EasyMoney stores local app data in `data/easymoney.sqlite`.
