@@ -876,6 +876,91 @@ test('trpc transaction totals classify bank-side card payments and investment tr
   });
 });
 
+test('trpc analytics report aggregates backend-owned cashflow semantics', async () => {
+  const checkingId = insertRow('accounts', {
+    name: 'Checking',
+    institution: 'Local Bank',
+    type: 'checking',
+  });
+  insertRow('accounts', {
+    name: 'Vanguard Brokerage',
+    institution: 'Vanguard',
+    type: 'investment',
+  });
+  const diningId = insertRow('categories', {
+    name: 'Dining',
+    type: 'expense',
+    color: '#f97316',
+  });
+  const incomeId = insertRow('categories', {
+    name: 'Income',
+    type: 'income',
+    color: '#22c55e',
+  });
+
+  const cafeId = insertRow('transactions', {
+    accountId: checkingId,
+    date: '2026-06-10',
+    amount: -25,
+    description: 'Cafe',
+    merchant: 'Blue Cafe',
+    type: 'expense',
+  });
+  await updateTransactionForTest(cafeId, { categoryId: diningId });
+  const payrollId = insertRow('transactions', {
+    accountId: checkingId,
+    date: '2026-06-15',
+    amount: 1000,
+    description: 'Payroll',
+    merchant: 'ACME Payroll',
+    type: 'income',
+  });
+  await updateTransactionForTest(payrollId, { categoryId: incomeId });
+  insertRow('transactions', {
+    accountId: checkingId,
+    date: '2026-06-16',
+    amount: -400,
+    description: 'VANGUARD BROKERAGE TRANSFER',
+    merchant: 'Vanguard',
+    type: 'expense',
+  });
+
+  const report = await trpcClient.analytics.report.query({
+    startDate: '2026-06-01',
+    endDate: '2026-06-30',
+    groupMode: 'Monthly',
+  });
+
+  expect(report.summary).toMatchObject({
+    income: 1000,
+    expenses: 25,
+    investments: 400,
+    net: 975,
+    transactionCount: 3,
+  });
+  expect(report.cashFlow).toEqual([
+    expect.objectContaining({ key: '2026-06', income: 1000, expenses: 25, net: 975 }),
+  ]);
+  expect(report.spendingByCategory).toEqual([
+    expect.objectContaining({ id: String(diningId), name: 'Dining', amount: 25 }),
+  ]);
+  expect(report.topMerchants).toEqual([
+    expect.objectContaining({ name: 'Blue Cafe', amount: 25, count: 1 }),
+  ]);
+  expect(report.incomeStreams).toEqual([
+    expect.objectContaining({ name: 'ACME Payroll', amount: 1000, count: 1 }),
+  ]);
+  expect(report.investments).toEqual([
+    expect.objectContaining({ key: '2026-06', amount: 400 }),
+  ]);
+
+  const diningOnly = await trpcClient.analytics.report.query({
+    categoryFilterIds: [diningId],
+    categoryFilterMode: 'include',
+  });
+  expect(diningOnly.summary).toMatchObject({ income: 0, expenses: 25, net: -25 });
+});
+
 test('app transactions endpoint supports column sort keys', async () => {
   const checkingId = insertRow('accounts', {
     name: 'Checking',

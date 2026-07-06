@@ -1,6 +1,7 @@
 import { initTRPC } from '@trpc/server';
 import { z } from 'zod';
 import { archiveAccount, listAccounts, unarchiveAccount, updateAccountMetadata } from './accounts.ts';
+import { getAnalyticsReport } from './analytics.ts';
 import {
   autoApplyAiCategorization,
   applyAiCategorizationSuggestions,
@@ -347,6 +348,19 @@ export const appRouter = t.router({
   reports: t.router({
     netWorth: t.procedure.query(() => getInvestmentNetWorthReport()),
     savingsRate: t.procedure.query(() => getSavingsRateReport()),
+  }),
+
+  analytics: t.router({
+    report: t.procedure
+      .input(z.object({
+        startDate: z.string().nullish(),
+        endDate: z.string().nullish(),
+        accountId: optionalId,
+        categoryFilterIds: z.array(z.union([z.string(), z.number()])).optional(),
+        categoryFilterMode: z.enum(['include', 'exclude']).nullish(),
+        groupMode: z.enum(['Auto', 'Daily', 'Weekly', 'Monthly', 'Yearly']).nullish(),
+      }).optional())
+      .query(({ input }) => getAnalyticsReport(input ?? {})),
   }),
 });
 
