@@ -1,6 +1,9 @@
 import { getDb, syncLedgerReadModelFromLegacyTables } from '../database.js';
 import { ensureLedgerTransactionId, upsertTransactionAnnotation } from './transactionAnnotations.ts';
+import { buildAccountMap, buildCategoryMap, getTransactionFlow } from './transactionSemantics.ts';
 import type {
+  AccountSummary,
+  CategorySummary,
   ListTransactionsOptions,
   TransactionListItem,
   TransactionListResponse,
@@ -278,6 +281,79 @@ function toTransactionListItem(row: LedgerTransactionRow): TransactionListItem {
   };
 }
 
+const transactionSelect = `SELECT
+  COALESCE(t.legacyTransactionId, t.id) AS id,
+  t.id AS ledgerRowId,
+  t.ledgerTransactionId,
+  t.accountId,
+  a.name AS accountName,
+  a.institution AS accountInstitution,
+  a.type AS accountType,
+  ta.categoryId AS categoryId,
+  c.name AS categoryName,
+  c.type AS categoryType,
+  c.categoryGroup AS categoryGroup,
+  c.description AS categoryDescription,
+  c.color AS categoryColor,
+  c.icon AS categoryIcon,
+  t.date,
+  t.amountCents / 100.0 AS amount,
+  t.description,
+  t.merchant,
+  t.originalDescription,
+  t.originalCategory,
+  t.type,
+  t.transactionKind,
+  t.sourceRole,
+  t.status,
+  ta.notes AS notes,
+  t.importBatchId,
+  t.fingerprint,
+  t.createdAt
+ ${fromAndJoins}`;
+
+function getAllAccountsForSemantics() {
+  const rows = getDb().prepare(`
+    SELECT id, name, institution, type
+    FROM accounts
+  `).all() as Array<Pick<AccountSummary, 'id' | 'name' | 'institution' | 'type'>>;
+  return buildAccountMap(rows);
+}
+
+function getAllCategoriesForSemantics() {
+  const rows = getDb().prepare(`
+    SELECT id, name, type, parentId, categoryGroup, description, color, icon
+    FROM categories
+  `).all() as CategorySummary[];
+  return buildCategoryMap(rows);
+}
+
+function transactionTotals(transactions: TransactionListItem[]) {
+  const accountMap = getAllAccountsForSemantics();
+  const categoryMap = getAllCategoriesForSemantics();
+  const totals = {
+    income: 0,
+    expenses: 0,
+    internalMovement: 0,
+    investments: 0,
+  };
+
+  for (const transaction of transactions) {
+    const flow = getTransactionFlow(transaction, accountMap, categoryMap);
+    if (flow === 'income') totals.income += transaction.amount;
+    else if (flow === 'expense') totals.expenses += Math.abs(transaction.amount);
+    else if (flow === 'investment') totals.investments += Math.abs(transaction.amount);
+    else if (flow === 'transfer' || flow === 'card_payment' || flow === 'internal_transfer') {
+      totals.internalMovement += Math.abs(transaction.amount);
+    }
+  }
+
+  return {
+    ...totals,
+    net: totals.income - totals.expenses,
+  };
+}
+
 function getCategoryName(categoryId: string | number | null | undefined): string {
   const id = optionalNumber(categoryId);
   if (id === null) return 'Uncategorized';
@@ -372,54 +448,12 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
   const totalCount = (db
     .prepare(`SELECT COUNT(*) AS count ${fromAndJoins} ${where}`)
     .get(params) as { count: number }).count;
-  const totalsRow = db
-    .prepare(
-      `SELECT
-        COALESCE(SUM(CASE WHEN ${flowSql} = 'income' THEN t.amountCents ELSE 0 END), 0) / 100.0 AS income,
-        ABS(COALESCE(SUM(CASE WHEN ${flowSql} = 'expense' THEN t.amountCents ELSE 0 END), 0)) / 100.0 AS expenses,
-        ABS(COALESCE(SUM(CASE WHEN ${flowSql} IN ('transfer', 'card_payment', 'internal_transfer') THEN t.amountCents ELSE 0 END), 0)) / 100.0 AS internalMovement,
-        ABS(COALESCE(SUM(CASE WHEN ${flowSql} = 'investment' THEN t.amountCents ELSE 0 END), 0)) / 100.0 AS investments
-       ${fromAndJoins}
-       ${where}`
-    )
-    .get(params) as {
-      income: number;
-      expenses: number;
-      internalMovement: number;
-      investments: number;
-    };
+  const allMatchingRows = db
+    .prepare(`${transactionSelect} ${where}`)
+    .all(params) as LedgerTransactionRow[];
   const rows = db
     .prepare(
-      `SELECT
-        COALESCE(t.legacyTransactionId, t.id) AS id,
-        t.id AS ledgerRowId,
-        t.ledgerTransactionId,
-        t.accountId,
-        a.name AS accountName,
-        a.institution AS accountInstitution,
-        a.type AS accountType,
-        ta.categoryId AS categoryId,
-        c.name AS categoryName,
-        c.type AS categoryType,
-        c.categoryGroup AS categoryGroup,
-        c.description AS categoryDescription,
-        c.color AS categoryColor,
-        c.icon AS categoryIcon,
-        t.date,
-        t.amountCents / 100.0 AS amount,
-        t.description,
-        t.merchant,
-        t.originalDescription,
-        t.originalCategory,
-        t.type,
-        t.transactionKind,
-        t.sourceRole,
-        t.status,
-        ta.notes AS notes,
-        t.importBatchId,
-        t.fingerprint,
-        t.createdAt
-       ${fromAndJoins}
+      `${transactionSelect}
        ${where}
        ORDER BY ${orderBy}
        ${limitClause}`
@@ -428,18 +462,13 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
 
   const nextOffset = limit === null ? null : offset + rows.length;
   const hasMore = nextOffset !== null && nextOffset < totalCount;
+  const totals = transactionTotals(allMatchingRows.map(toTransactionListItem));
   return {
     transactions: rows.map(toTransactionListItem),
     totalCount,
     hasMore,
     nextOffset: hasMore ? nextOffset : null,
-    totals: {
-      income: totalsRow.income,
-      expenses: totalsRow.expenses,
-      internalMovement: totalsRow.internalMovement,
-      investments: totalsRow.investments,
-      net: totalsRow.income - totalsRow.expenses,
-    },
+    totals,
   };
 }
 

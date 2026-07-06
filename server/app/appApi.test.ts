@@ -823,6 +823,59 @@ test('app transactions endpoint supports infinite-scroll paging metadata', async
   expect(secondPage.nextOffset).toBeNull();
 });
 
+test('trpc transaction totals classify bank-side card payments and investment transfers outside spending', async () => {
+  const checkingId = insertRow('accounts', {
+    name: 'Checking',
+    institution: 'Local Bank',
+    type: 'checking',
+  });
+  insertRow('accounts', {
+    name: 'Chase Sapphire',
+    institution: 'Chase',
+    type: 'credit-card',
+  });
+  insertRow('accounts', {
+    name: 'Vanguard Brokerage',
+    institution: 'Vanguard',
+    type: 'investment',
+  });
+
+  insertRow('transactions', {
+    accountId: checkingId,
+    date: '2026-06-16',
+    amount: -300,
+    description: 'CHASE CREDIT CARD PAYMENT',
+    merchant: 'Chase Card',
+    type: 'expense',
+  });
+  insertRow('transactions', {
+    accountId: checkingId,
+    date: '2026-06-17',
+    amount: -400,
+    description: 'VANGUARD BROKERAGE TRANSFER',
+    merchant: 'Vanguard',
+    type: 'expense',
+  });
+  insertRow('transactions', {
+    accountId: checkingId,
+    date: '2026-06-18',
+    amount: -25,
+    description: 'Coffee',
+    merchant: 'Cafe',
+    type: 'expense',
+  });
+
+  const body = await listTransactionsForTest();
+
+  expect(body.totals).toMatchObject({
+    income: 0,
+    expenses: 25,
+    internalMovement: 300,
+    investments: 400,
+    net: -25,
+  });
+});
+
 test('app transactions endpoint supports column sort keys', async () => {
   const checkingId = insertRow('accounts', {
     name: 'Checking',
