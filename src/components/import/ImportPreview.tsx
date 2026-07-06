@@ -1,9 +1,9 @@
-// @ts-nocheck
 import { useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
 import { Check, AlertTriangle, X } from 'lucide-react';
 import { useAccounts } from '../../hooks/useAccounts';
 import { useTransactions } from '../../hooks/useTransactions';
+import type { ImportPreviewResult } from '../../hooks/useCSVImport';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import { isCreditAccount } from '../../utils/accounts';
 import { getAccountTypeLabel } from '../../utils/formatters';
@@ -13,13 +13,62 @@ import './ImportPreview.css';
 const DEFAULT_ACCOUNT_TYPE = 'checking';
 const DEFAULT_CURRENCY = 'USD';
 
-function sourceAccountLabel(mapping) {
+type SourceAccountMapping = NonNullable<ImportPreviewResult['accountMappings']>[number];
+type ImportPreviewTransaction = Record<string, unknown> & {
+  importRowId: string | number;
+  date: string;
+  amount: number;
+  description?: string | null;
+  merchant?: string | null;
+  originalDescription?: string | null;
+  fingerprint?: string | null;
+};
+
+type ImportMeta = {
+  importFileId?: string | number | null;
+  headers?: string[];
+  profile?: unknown;
+  mapping?: unknown;
+  profileName?: string | null;
+  savedImportProfile?: unknown;
+  accountMappings?: SourceAccountMapping[];
+  balanceRowIds?: Array<string | number>;
+};
+
+interface AccountDraft {
+  name: string;
+  institution: string;
+  type: string;
+  currency: string;
+}
+
+type MappingDecision =
+  | { mode: 'auto'; accountId: string; account: AccountDraft }
+  | { mode: 'needs-selection'; accountId: string; account: AccountDraft }
+  | { mode: 'existing'; accountId: string; account: AccountDraft }
+  | { mode: 'unarchive'; accountId: string; account: AccountDraft }
+  | { mode: 'create'; accountId: string; account: AccountDraft };
+
+type MappingDecisions = Record<string, MappingDecision>;
+
+interface ImportPreviewProps {
+  transactions?: Array<Record<string, unknown> & { importRowId: string | number }>;
+  importMeta?: ImportMeta | null;
+  isBatchImport?: boolean;
+  autoImportAll?: boolean;
+  onStartAutoImportAll?: () => void;
+  onAutoImportBlocked?: (message: string) => void;
+  onComplete: (importedCount: number, skippedDuplicateCount?: number) => void | Promise<void>;
+  onCancel: () => void;
+}
+
+function sourceAccountLabel(mapping: SourceAccountMapping) {
   return mapping.sourceAccountName && mapping.sourceAccountName !== 'Selected account'
     ? mapping.sourceAccountName
     : '';
 }
 
-function createDraftFromMapping(mapping) {
+function createDraftFromMapping(mapping: SourceAccountMapping): AccountDraft {
   const name = sourceAccountLabel(mapping);
   const normalized = `${name} ${mapping.institution || ''}`.toLowerCase();
   return {
@@ -34,7 +83,7 @@ function createDraftFromMapping(mapping) {
   };
 }
 
-function initialDecision(mapping) {
+function initialDecision(mapping: SourceAccountMapping): MappingDecision {
   if (mapping.resolution === 'archived-match') {
     return {
       mode: 'needs-selection',
@@ -56,7 +105,7 @@ function initialDecision(mapping) {
   };
 }
 
-function isDecisionComplete(decision, mapping) {
+function isDecisionComplete(decision: MappingDecision | undefined, mapping: SourceAccountMapping) {
   if (!decision) return false;
   if (decision.mode === 'auto') {
     return Boolean(mapping.resolvedAccountId) && mapping.resolution !== 'archived-match';
@@ -74,7 +123,7 @@ function isDecisionComplete(decision, mapping) {
   return false;
 }
 
-function selectedExistingAccountId(decision, mapping) {
+function selectedExistingAccountId(decision: MappingDecision | undefined, mapping: SourceAccountMapping) {
   if (!decision) return null;
   if (decision.mode === 'auto' && mapping.resolvedAccountId) return mapping.resolvedAccountId;
   if ((decision.mode === 'existing' || decision.mode === 'unarchive') && decision.accountId) {
@@ -83,7 +132,7 @@ function selectedExistingAccountId(decision, mapping) {
   return null;
 }
 
-function previewStateKey(importMeta) {
+function previewStateKey(importMeta?: ImportMeta | null) {
   const mappings = importMeta?.accountMappings || [];
   return [
     importMeta?.importFileId || 'no-file',
@@ -95,25 +144,38 @@ function previewStateKey(importMeta) {
   ].join(':');
 }
 
-function ImportPreviewContent({ transactions, importMeta, isBatchImport = false, autoImportAll = false, onStartAutoImportAll, onAutoImportBlocked, onComplete, onCancel }) {
+function isValidImportTransaction(transaction: Record<string, unknown> & { importRowId: string | number }): transaction is ImportPreviewTransaction {
+  return Boolean(transaction?.date && typeof transaction.amount === 'number');
+}
+
+function ImportPreviewContent({
+  transactions = [],
+  importMeta = null,
+  isBatchImport = false,
+  autoImportAll = false,
+  onStartAutoImportAll,
+  onAutoImportBlocked,
+  onComplete,
+  onCancel,
+}: ImportPreviewProps) {
   const { accounts } = useAccounts({ includeArchived: true });
   const accountMappings = useMemo(() => importMeta?.accountMappings || [], [importMeta?.accountMappings]);
   const activeAccounts = accounts.filter(account => account.status !== 'archived');
-  const [mappingDecisions, setMappingDecisions] = useState(() => Object.fromEntries(
+  const [mappingDecisions, setMappingDecisions] = useState<MappingDecisions>(() => Object.fromEntries(
     accountMappings.map(mapping => [String(mapping.sourceAccountId), initialDecision(mapping)])
-  ));
-  const [forceImportRowIds, setForceImportRowIds] = useState(() => new Set());
+  ) as MappingDecisions);
+  const [forceImportRowIds, setForceImportRowIds] = useState<Set<string | number>>(() => new Set());
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
   const [duplicateModalSeenKey, setDuplicateModalSeenKey] = useState('');
   const [isImporting, setIsImporting] = useState(false);
 
-  const validTransactions = transactions.filter(t => t && t.date && typeof t.amount === 'number');
+  const validTransactions = transactions.filter(isValidImportTransaction);
   const balanceCount = importMeta?.balanceRowIds?.length || 0;
   const hasBalances = balanceCount > 0;
   const singleExistingAccountId = useMemo(() => {
     const ids = new Set(accountMappings
       .map(mapping => selectedExistingAccountId(mappingDecisions[String(mapping.sourceAccountId)], mapping))
-      .filter(Boolean));
+      .filter((id): id is number => typeof id === 'number'));
     return ids.size === 1 ? [...ids][0] : null;
   }, [accountMappings, mappingDecisions]);
   const selectedAccount = accounts.find(account => account.id === singleExistingAccountId);
@@ -168,16 +230,17 @@ function ImportPreviewContent({ transactions, importMeta, isBatchImport = false,
     }
   }, [autoImportAll, duplicates.length, duplicateModalKey, duplicateModalSeenKey]);
 
-  const updateDecision = (sourceAccountId, nextDecision) => {
+  const updateDecision = (sourceAccountId: string | number, nextDecision: MappingDecision) => {
     setMappingDecisions(previous => ({
       ...previous,
       [String(sourceAccountId)]: nextDecision,
     }));
   };
 
-  const updateCreateDraft = (sourceAccountId, field, value) => {
+  const updateCreateDraft = (sourceAccountId: string | number, field: keyof AccountDraft, value: string) => {
     setMappingDecisions(previous => {
       const current = previous[String(sourceAccountId)];
+      if (!current) return previous;
       return {
         ...previous,
         [String(sourceAccountId)]: {
@@ -193,6 +256,9 @@ function ImportPreviewContent({ transactions, importMeta, isBatchImport = false,
 
   const buildAccountMappingsPayload = () => accountMappings.map(mapping => {
     const decision = mappingDecisions[String(mapping.sourceAccountId)];
+    if (!decision) {
+      throw new Error('Resolve every source account before importing.');
+    }
     if (decision.mode === 'auto') {
       return { sourceAccountId: mapping.sourceAccountId, mode: 'auto' };
     }
@@ -222,7 +288,7 @@ function ImportPreviewContent({ transactions, importMeta, isBatchImport = false,
     };
   });
 
-  const toggleForceImport = (importRowId) => {
+  const toggleForceImport = (importRowId: string | number) => {
     setForceImportRowIds(previous => {
       const next = new Set(previous);
       if (next.has(importRowId)) {
@@ -259,7 +325,7 @@ function ImportPreviewContent({ transactions, importMeta, isBatchImport = false,
       await onComplete(result.importedCount, result.skippedDuplicateCount);
     } catch (error) {
       console.error('Import error:', error);
-      alert(error?.message || 'An error occurred during import. Check console for details.');
+      alert(error instanceof Error ? error.message : 'An error occurred during import. Check console for details.');
     } finally {
       setIsImporting(false);
     }
@@ -600,6 +666,6 @@ function ImportPreviewContent({ transactions, importMeta, isBatchImport = false,
   );
 }
 
-export default function ImportPreview(props) {
+export default function ImportPreview(props: ImportPreviewProps) {
   return <ImportPreviewContent key={previewStateKey(props.importMeta)} {...props} />;
 }
