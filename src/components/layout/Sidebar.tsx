@@ -234,6 +234,7 @@ const Sidebar = ({
                 accounts={reportAccounts}
                 selectedIds={selectedReportAccountIds}
                 onChange={onReportAccountSelectionChange}
+                variant="owner-groups"
               />
             </section>
           )}

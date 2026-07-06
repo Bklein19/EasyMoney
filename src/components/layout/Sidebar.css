@@ -288,6 +288,115 @@ body.sidebar-resizing {
   width: 100%;
 }
 
+.account-filter--owner-groups {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 10px;
+}
+
+.account-owner-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.account-owner-group__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 2px;
+  color: var(--text-muted);
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.045em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.account-owner-group__header span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-owner-group__header span:last-child {
+  color: var(--text-subtle);
+  font-size: 0.62rem;
+}
+
+.account-owner-group__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.account-row-picker {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: none;
+}
+
+.account-row-picker:hover,
+.account-row-picker:focus-visible {
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  outline: none;
+}
+
+.account-row-picker.active {
+  border-color: color-mix(in srgb, var(--accent-blue) 22%, transparent);
+  background: var(--color-info-bg);
+  color: var(--text-primary);
+}
+
+.account-row-picker__check {
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--text-muted);
+  border-radius: var(--radius-full);
+}
+
+.account-row-picker.active .account-row-picker__check {
+  border-color: var(--accent-blue);
+  background: var(--accent-blue);
+}
+
+.account-row-picker__name,
+.account-row-picker__meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-row-picker__name {
+  font-size: 0.73rem;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.account-row-picker__meta {
+  color: var(--text-muted);
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
 .account-chip {
   display: flex;
   flex-direction: column;

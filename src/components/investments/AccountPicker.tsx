@@ -12,10 +12,12 @@ export function AccountPicker({
   accounts,
   selectedIds,
   onChange,
+  variant = 'chips',
 }: {
   accounts: PickerAccount[];
   selectedIds: Set<number>;
   onChange: (next: Set<number>) => void;
+  variant?: 'chips' | 'owner-groups';
 }) {
   const pickerRef = useRef<HTMLDivElement | null>(null);
   const pickerActive = useRef(false);
@@ -31,6 +33,20 @@ export function AccountPicker({
       holderMap.set(account.account_holder, ids);
     }
     return [...holderMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [accounts]);
+  const ownerGroups = useMemo(() => {
+    const groups = new Map<string, PickerAccount[]>();
+    for (const account of accounts) {
+      const owner = account.account_holder?.trim() || 'No owner';
+      const group = groups.get(owner) ?? [];
+      group.push(account);
+      groups.set(owner, group);
+    }
+    return [...groups.entries()].sort((a, b) => {
+      if (a[0] === 'No owner') return 1;
+      if (b[0] === 'No owner') return -1;
+      return a[0].localeCompare(b[0]);
+    });
   }, [accounts]);
 
   const setExactly = (ids: number[]) => {
@@ -128,25 +144,54 @@ export function AccountPicker({
         ))}
       </div>
 
-      <div className="account-filter">
-        {accounts.map(account => (
-          <button
-            key={account.id}
-            type="button"
-            className={selectedIds.has(account.id) ? 'account-chip active' : 'account-chip'}
-            aria-pressed={selectedIds.has(account.id)}
-            title="Click to add or remove this account from the report"
-            onClick={event => selectAccount(account.id, event)}
-          >
-            <span className="account-chip-name">{account.name}</span>
-            {account.account_holder ? (
-              <span className="account-chip-holder">{account.account_holder}</span>
-            ) : (
-              <span className="account-chip-meta">{account.institution || account.type}</span>
-            )}
-          </button>
-        ))}
-      </div>
+      {variant === 'owner-groups' ? (
+        <div className="account-filter account-filter--owner-groups">
+          {ownerGroups.map(([owner, ownerAccounts]) => (
+            <div className="account-owner-group" key={owner}>
+              <div className="account-owner-group__header">
+                <span>{owner}</span>
+                <span>{ownerAccounts.filter(account => selectedIds.has(account.id)).length}/{ownerAccounts.length}</span>
+              </div>
+              <div className="account-owner-group__list">
+                {ownerAccounts.map(account => (
+                  <button
+                    key={account.id}
+                    type="button"
+                    className={selectedIds.has(account.id) ? 'account-row-picker active' : 'account-row-picker'}
+                    aria-pressed={selectedIds.has(account.id)}
+                    title="Click to add or remove this account from the report"
+                    onClick={event => selectAccount(account.id, event)}
+                  >
+                    <span className="account-row-picker__check" aria-hidden="true" />
+                    <span className="account-row-picker__name">{account.name}</span>
+                    <span className="account-row-picker__meta">{account.type}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="account-filter">
+          {accounts.map(account => (
+            <button
+              key={account.id}
+              type="button"
+              className={selectedIds.has(account.id) ? 'account-chip active' : 'account-chip'}
+              aria-pressed={selectedIds.has(account.id)}
+              title="Click to add or remove this account from the report"
+              onClick={event => selectAccount(account.id, event)}
+            >
+              <span className="account-chip-name">{account.name}</span>
+              {account.account_holder ? (
+                <span className="account-chip-holder">{account.account_holder}</span>
+              ) : (
+                <span className="account-chip-meta">{account.institution || account.type}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
