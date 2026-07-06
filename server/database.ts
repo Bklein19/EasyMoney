@@ -1,9 +1,94 @@
-// @ts-nocheck
 import { Database } from 'bun:sqlite';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+type DatabaseValue = string | number | bigint | boolean | null | Uint8Array | Date;
+type DatabaseParams = DatabaseValue | object | undefined;
+type DatabaseRow = Record<string, any>;
+type MutableDatabaseRow = Record<string, DatabaseValue | undefined>;
+
+interface WrappedStatement {
+  all: (...params: DatabaseParams[]) => DatabaseRow[];
+  get: (...params: DatabaseParams[]) => DatabaseRow | undefined;
+  run: (...params: DatabaseParams[]) => { changes: number; lastInsertRowid: number };
+}
+
+interface WrappedDatabase {
+  exec: (sql: string) => void;
+  prepare: (sql: string) => WrappedStatement;
+  transaction: <Args extends unknown[], Result>(fn: (...args: Args) => Result) => (...args: Args) => Result;
+}
+
+interface TransactionIdentityInput {
+  id?: string | number | null;
+  accountId?: string | number | null;
+  date?: string | null;
+  amount?: string | number | null;
+  originalDescription?: string | null;
+  description?: string | null;
+  merchant?: string | null;
+  transactionKind?: string | null;
+  sourceRole?: string | null;
+  stableSourceId?: string | null;
+  importFileId?: string | number | null;
+  importRowId?: string | number | null;
+  sourceRowIndex?: string | number | null;
+  fingerprint?: string | null;
+  createdAt?: string | null;
+}
+
+interface TransactionFingerprintInput {
+  accountId?: string | number | null;
+  date?: string | null;
+  amount?: string | number | null;
+  originalDescription?: string | null;
+  description?: string | null;
+  merchant?: string | null;
+}
+
+interface StableSourceTransactionInput {
+  importFileId?: string | number | null;
+  sourceRowIndex?: string | number | null;
+  date?: string | null;
+  amountCents?: string | number | null;
+  description?: string | null;
+  sourceRole?: string | null;
+}
+
+interface SourceAccountRepairRow extends DatabaseRow {
+  id: number;
+  accountId: number;
+  accountType: string;
+}
+
+interface SourceTransactionRepairRow extends DatabaseRow {
+  amountCents: number;
+  description: string | null;
+  rawJson: string | null;
+}
+
+interface SourceTransactionFlipRow extends DatabaseRow {
+  id: number;
+  importFileId: number | null;
+  rowIndex: number | null;
+  normalizedJson: string | null;
+  date: string | null;
+  amountCents: number;
+  description: string | null;
+  sourceRole: string | null;
+}
+
+interface TableInfoRow extends DatabaseRow {
+  name: string;
+}
+
+interface IndexListRow extends DatabaseRow {
+  name: string;
+  unique: number;
+  origin: string;
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dbPath = process.env.EASYMONEY_DB_PATH
@@ -15,11 +100,11 @@ const sqlite = new Database(dbPath, { create: true });
 sqlite.run('PRAGMA journal_mode = WAL');
 sqlite.run('PRAGMA foreign_keys = ON');
 
-function normalizeSql(sql) {
+function normalizeSql(sql: string) {
   return sql.replace(/@([A-Za-z_][A-Za-z0-9_]*)/g, '$$$1');
 }
 
-function normalizeParams(params) {
+function normalizeParams(params: DatabaseParams) {
   if (!params || typeof params !== 'object' || Array.isArray(params)) return params;
   return Object.fromEntries(
     Object.entries(params).flatMap(([key, value]) => (
@@ -28,7 +113,7 @@ function normalizeParams(params) {
   );
 }
 
-function normalizeIdentityText(value = '') {
+function normalizeIdentityText(value: string | number | null | undefined = '') {
   return String(value || '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
@@ -36,14 +121,14 @@ function normalizeIdentityText(value = '') {
     .trim();
 }
 
-function normalizeIdentityDate(value = '') {
+function normalizeIdentityDate(value: string | null | undefined = '') {
   if (!value) return '';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
   return date.toISOString().slice(0, 10);
 }
 
-function transactionIdentityBaseKey(transaction) {
+function transactionIdentityBaseKey(transaction: TransactionIdentityInput) {
   return [
     transaction.accountId || '',
     normalizeIdentityDate(transaction.date),
@@ -53,8 +138,8 @@ function transactionIdentityBaseKey(transaction) {
   ].join('|');
 }
 
-function transactionOccurrenceSortKey(transaction) {
-  const token = value => typeof value === 'number' ? String(value).padStart(16, '0') : String(value || '');
+function transactionOccurrenceSortKey(transaction: TransactionIdentityInput) {
+  const token = (value: string | number | null | undefined) => typeof value === 'number' ? String(value).padStart(16, '0') : String(value || '');
   return [
     transaction.stableSourceId || '',
     token(transaction.importFileId),
@@ -69,19 +154,19 @@ function transactionOccurrenceSortKey(transaction) {
   ].join('|');
 }
 
-function ledgerTransactionIdFor(transaction, occurrenceIndex) {
+function ledgerTransactionIdFor(transaction: TransactionIdentityInput, occurrenceIndex: number) {
   return `txn_${hashContent(`${transactionIdentityBaseKey(transaction)}|${occurrenceIndex}`).slice(0, 32)}`;
 }
 
-function isCreditAccountType(type) {
+function isCreditAccountType(type: string | null | undefined) {
   return type === 'credit' || type === 'credit_card' || type === 'credit-card';
 }
 
-function isLikelyCreditCardPaymentDescription(description = '') {
+function isLikelyCreditCardPaymentDescription(description: string | null | undefined = '') {
   return /\b(payment|pmt|autopay|auto pay|online transfer|thank you)\b/i.test(String(description || ''));
 }
 
-function transactionFingerprintFor({ accountId, date, amount, originalDescription, description, merchant }) {
+function transactionFingerprintFor({ accountId, date, amount, originalDescription, description, merchant }: TransactionFingerprintInput) {
   const text = normalizeIdentityText(originalDescription || description || merchant || '');
   return [
     accountId,
@@ -91,7 +176,7 @@ function transactionFingerprintFor({ accountId, date, amount, originalDescriptio
   ].join('|');
 }
 
-function stableSourceTransactionIdFor({ importFileId, sourceRowIndex, date, amountCents, description, sourceRole }) {
+function stableSourceTransactionIdFor({ importFileId, sourceRowIndex, date, amountCents, description, sourceRole }: StableSourceTransactionInput) {
   return `src_txn_${hashContent([
     importFileId,
     sourceRowIndex,
@@ -102,25 +187,28 @@ function stableSourceTransactionIdFor({ importFileId, sourceRowIndex, date, amou
   ].join('|')).slice(0, 32)}`;
 }
 
-function wrapStatement(statement) {
+function wrapStatement(statement: { all: (...params: any[]) => any[]; get: (...params: any[]) => any; run: (...params: any[]) => { changes: number; lastInsertRowid: number | bigint } }): WrappedStatement {
   return {
     all: (...params) => statement.all(...params.map(normalizeParams)),
     get: (...params) => statement.get(...params.map(normalizeParams)),
-    run: (...params) => statement.run(...params.map(normalizeParams)),
+    run: (...params) => {
+      const result = statement.run(...params.map(normalizeParams));
+      return { ...result, lastInsertRowid: Number(result.lastInsertRowid) };
+    },
   };
 }
 
-const db = {
+const db: WrappedDatabase = {
   exec: (sql) => sqlite.exec(sql),
   prepare: (sql) => wrapStatement(sqlite.prepare(normalizeSql(sql))),
   transaction: (fn) => sqlite.transaction(fn),
 };
 
-function tableColumnNames(tableName) {
-  return db.prepare(`PRAGMA table_info(${tableName})`).all().map(column => column.name);
+function tableColumnNames(tableName: string) {
+  return (db.prepare(`PRAGMA table_info(${tableName})`).all() as TableInfoRow[]).map(column => column.name);
 }
 
-function runSchemaMigration(name, migrate) {
+function runSchemaMigration(name: string, migrate: () => void) {
   db.prepare(`
     CREATE TABLE IF NOT EXISTS schemaMigrations (
       name TEXT PRIMARY KEY,
@@ -146,7 +234,7 @@ function repairCreditCardCashflowSigns() {
     FROM sourceAccounts sa
     JOIN accounts a ON a.id = sa.accountId
     WHERE a.type IN ('credit', 'credit_card', 'credit-card')
-  `).all();
+  `).all() as SourceAccountRepairRow[];
 
   const sourceAccountIdsToFlip = [];
   for (const sourceAccount of sourceAccounts) {
@@ -155,7 +243,7 @@ function repairCreditCardCashflowSigns() {
       SELECT amountCents, description, rawJson
       FROM sourceTransactions
       WHERE sourceAccountId = ?
-    `).all(sourceAccount.id);
+    `).all(sourceAccount.id) as SourceTransactionRepairRow[];
     const moneyRows = rows.filter(row => {
       try {
         const raw = JSON.parse(row.rawJson || '{}');
@@ -204,7 +292,7 @@ function repairCreditCardCashflowSigns() {
   `);
 
   for (const sourceAccountId of sourceAccountIdsToFlip) {
-    for (const row of sourceRowsToFlip.all(sourceAccountId)) {
+    for (const row of sourceRowsToFlip.all(sourceAccountId) as SourceTransactionFlipRow[]) {
       const amountCents = -Number(row.amountCents || 0);
       const sourceRowIndex = row.normalizedJson
         ? JSON.parse(row.normalizedJson).sourceRowIndex ?? row.rowIndex
@@ -348,9 +436,11 @@ const TABLES = {
     'id', 'sourceFileId', 'sourceAccountId', 'importRowId', 'date', 'balanceCents',
     'priority', 'rawJson', 'createdAt'
   ]
-};
+} as const;
 
-const ORDER_BY = {
+type TableName = keyof typeof TABLES;
+
+const ORDER_BY: Partial<Record<TableName, string>> = {
   accounts: 'id ASC',
   transactions: 'date DESC, id DESC',
   ledgerTransactions: 'date DESC, id DESC',
@@ -687,7 +777,7 @@ export function initDatabase() {
     LEFT JOIN sourceTransactions st ON st.importRowId = ir.id
     WHERE t.ledgerTransactionId IS NULL OR t.ledgerTransactionId = ''
   `).all();
-  const groups = new Map();
+  const groups = new Map<string, TransactionIdentityInput[]>();
   for (const transaction of transactionsNeedingLedgerIds) {
     const baseKey = transactionIdentityBaseKey(transaction);
     const group = groups.get(baseKey);
@@ -750,11 +840,11 @@ export function initDatabase() {
 
   runSchemaMigration('2026-06-23-credit-card-cashflow-signs', repairCreditCardCashflowSigns);
 
-  const sourceBalanceIndexes = db.prepare('PRAGMA index_list(sourceBalances)').all();
+  const sourceBalanceIndexes = db.prepare('PRAGMA index_list(sourceBalances)').all() as IndexListRow[];
   const hasLegacySourceBalanceUniqueIndex = sourceBalanceIndexes.some(index =>
     index.unique === 1 &&
     index.origin === 'u' &&
-    db.prepare(`PRAGMA index_info(${index.name})`).all().map(column => column.name).join(',') === 'sourceFileId,sourceAccountId,date'
+    (db.prepare(`PRAGMA index_info(${index.name})`).all() as TableInfoRow[]).map(column => column.name).join(',') === 'sourceFileId,sourceAccountId,date'
   );
   if (hasLegacySourceBalanceUniqueIndex) {
     db.transaction(() => {
@@ -934,7 +1024,7 @@ function assignMissingLegacyTransactionIds() {
     LEFT JOIN sourceTransactions st ON st.importRowId = ir.id
     WHERE t.ledgerTransactionId IS NULL OR t.ledgerTransactionId = ''
   `).all();
-  const groups = new Map();
+  const groups = new Map<string, TransactionIdentityInput[]>();
   for (const transaction of transactionsNeedingLedgerIds) {
     const baseKey = transactionIdentityBaseKey(transaction);
     const group = groups.get(baseKey);
@@ -957,21 +1047,21 @@ function assignMissingLegacyTransactionIds() {
   }
 }
 
-export function assertTable(table) {
-  if (!TABLES[table]) throw new Error(`Unknown table: ${table}`);
+export function assertTable(table: string): asserts table is TableName {
+  if (!(table in TABLES)) throw new Error(`Unknown table: ${table}`);
 }
 
-function cleanRow(table, row, includeId = false) {
-  const allowed = new Set(includeId ? TABLES[table] : TABLES[table].filter(column => column !== 'id'));
+function cleanRow(table: TableName, row: DatabaseRow | null | undefined, includeId = false) {
+  const allowed = new Set<string>(includeId ? [...TABLES[table]] : TABLES[table].filter(column => column !== 'id'));
   return Object.fromEntries(
     Object.entries(row || {}).filter(([key]) => allowed.has(key))
-  );
+  ) as MutableDatabaseRow;
 }
 
-export function listRows(table, query = {}) {
+export function listRows(table: string, query: Record<string, string | number | null | undefined> = {}) {
   assertTable(table);
-  const clauses = [];
-  const params = {};
+  const clauses: string[] = [];
+  const params: MutableDatabaseRow = {};
 
   for (const key of ['accountId', 'categoryId', 'month', 'headerSignature', 'importFileId']) {
     if (query[key] !== undefined && query[key] !== '') {
@@ -981,10 +1071,10 @@ export function listRows(table, query = {}) {
   }
 
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-  return db.prepare(`SELECT * FROM ${table} ${where} ORDER BY ${ORDER_BY[table]}`).all(params);
+  return db.prepare(`SELECT * FROM ${table} ${where} ORDER BY ${ORDER_BY[table] ?? 'id ASC'}`).all(params);
 }
 
-export function insertRow(table, row, preserveId = false) {
+export function insertRow(table: string, row: DatabaseRow, preserveId = false): number {
   assertTable(table);
   const data = cleanRow(table, row, preserveId);
   const columns = Object.keys(data);
@@ -992,18 +1082,18 @@ export function insertRow(table, row, preserveId = false) {
   const result = db.prepare(
     `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders.join(', ')})`
   ).run(data);
-  return preserveId && data.id ? data.id : result.lastInsertRowid;
+  return preserveId && data.id !== undefined && data.id !== null ? Number(data.id) : result.lastInsertRowid;
 }
 
-export function insertRows(table, rows, preserveIds = false) {
+export function insertRows(table: string, rows: DatabaseRow[], preserveIds = false) {
   assertTable(table);
-  const insert = db.transaction((items) => {
+  const insert = db.transaction((items: DatabaseRow[]) => {
     for (const row of items) insertRow(table, row, preserveIds);
   });
   insert(rows);
 }
 
-export function updateRow(table, id, changes) {
+export function updateRow(table: string, id: string | number, changes: DatabaseRow) {
   assertTable(table);
   const data = cleanRow(table, changes);
   const columns = Object.keys(data);
@@ -1012,7 +1102,7 @@ export function updateRow(table, id, changes) {
   return db.prepare(`UPDATE ${table} SET ${assignments} WHERE id = @id`).run({ ...data, id }).changes;
 }
 
-export function deleteRow(table, id) {
+export function deleteRow(table: string, id: string | number) {
   assertTable(table);
   return db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(id).changes;
 }
@@ -1021,6 +1111,6 @@ export function getDb() {
   return db;
 }
 
-export function hashContent(content) {
+export function hashContent(content: string) {
   return crypto.createHash('sha256').update(content).digest('hex');
 }
