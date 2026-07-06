@@ -1,31 +1,25 @@
 import { useMemo, useState } from 'react';
 import { Check, GripVertical, HelpCircle, Pencil, RotateCcw, X } from 'lucide-react';
-import { isIncome } from '../../utils/transactionSemantics';
-import { applyManualStacks, groupMerchantTransactions } from '../../utils/merchantNormalizer';
+import { applyManualStacks } from '../../utils/merchantNormalizer';
 import { usePersistentStackMap } from '../../hooks/usePersistentStackMap';
 import Tooltip from '../shared/Tooltip';
 
-export default function IncomeStreams({ transactions, accountMap = {}, categoryMap = {}, onSelectStream }) {
+export default function IncomeStreams({ rows = [], onSelectStream }) {
   const { stackMap, labelMap, stackGroup, undoStack, renameStack } = usePersistentStackMap('vaultview:incomeStacks');
   const [draggingKey, setDraggingKey] = useState(null);
   const [dropTargetKey, setDropTargetKey] = useState(null);
   const [editingKey, setEditingKey] = useState(null);
   const [editingName, setEditingName] = useState('');
   const data = useMemo(() => {
-    const incomeTransactions = transactions.filter(t => isIncome(t, accountMap, categoryMap));
-    const totalIncome = incomeTransactions.reduce((sum, t) => sum + Math.abs(t.amount), 0);
-
-    const grouped = groupMerchantTransactions(
-      incomeTransactions,
-      transaction => transaction.merchant || transaction.description || 'Unknown'
-    );
-
-    const streams = applyManualStacks(grouped, stackMap, labelMap)
+    const streams = applyManualStacks(rows.map(row => ({
+      ...row,
+      aliases: row.aliases ?? [row.name],
+    })), stackMap, labelMap)
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 10);
 
-    return { streams, totalIncome };
-  }, [transactions, accountMap, categoryMap, stackMap, labelMap]);
+    return { streams };
+  }, [rows, stackMap, labelMap]);
 
   if (data.streams.length === 0) {
     return (

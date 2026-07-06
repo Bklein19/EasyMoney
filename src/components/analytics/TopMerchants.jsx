@@ -1,31 +1,25 @@
 import { useMemo, useState } from 'react';
 import { Check, GripVertical, HelpCircle, Pencil, RotateCcw, X } from 'lucide-react';
-import { isExpense } from '../../utils/transactionSemantics';
-import { applyManualStacks, groupMerchantTransactions } from '../../utils/merchantNormalizer';
+import { applyManualStacks } from '../../utils/merchantNormalizer';
 import { usePersistentStackMap } from '../../hooks/usePersistentStackMap';
 import Tooltip from '../shared/Tooltip';
 
-export default function TopMerchants({ transactions, accountMap = {}, categoryMap = {}, onSelectMerchant }) {
+export default function TopMerchants({ rows = [], onSelectMerchant }) {
   const { stackMap, labelMap, stackGroup, undoStack, renameStack } = usePersistentStackMap('vaultview:merchantStacks');
   const [draggingKey, setDraggingKey] = useState(null);
   const [dropTargetKey, setDropTargetKey] = useState(null);
   const [editingKey, setEditingKey] = useState(null);
   const [editingName, setEditingName] = useState('');
   const data = useMemo(() => {
-    const expenseTransactions = transactions.filter(t => isExpense(t, accountMap, categoryMap));
-    const totalExpenses = expenseTransactions.reduce((sum, t) => sum + Math.abs(t.amount), 0);
-
-    const grouped = groupMerchantTransactions(
-      expenseTransactions,
-      transaction => transaction.merchant || transaction.description || 'Unknown'
-    );
-
-    const sorted = applyManualStacks(grouped, stackMap, labelMap)
+    const sorted = applyManualStacks(rows.map(row => ({
+      ...row,
+      aliases: row.aliases ?? [row.name],
+    })), stackMap, labelMap)
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 10);
 
-    return { merchants: sorted, totalExpenses };
-  }, [transactions, accountMap, categoryMap, stackMap, labelMap]);
+    return { merchants: sorted };
+  }, [rows, stackMap, labelMap]);
 
   if (data.merchants.length === 0) {
     return (

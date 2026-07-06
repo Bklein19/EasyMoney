@@ -156,6 +156,7 @@ export function getAnalyticsReport(input: AnalyticsReportInput = {}) {
     income: number;
     expenses: number;
     net: number;
+    categoryAmounts: Record<string, number>;
     transactionIds: number[];
   }>();
   const spendingByCategory = new Map<string, {
@@ -196,10 +197,16 @@ export function getAnalyticsReport(input: AnalyticsReportInput = {}) {
       income: 0,
       expenses: 0,
       net: 0,
+      categoryAmounts: {},
       transactionIds: [],
     };
     if (isIncome(transaction, accountMap, categoryMap)) periodRow.income += transaction.amount;
-    if (isExpense(transaction, accountMap, categoryMap)) periodRow.expenses += Math.abs(transaction.amount);
+    if (isExpense(transaction, accountMap, categoryMap)) {
+      const amount = Math.abs(transaction.amount);
+      const name = categoryName(transaction);
+      periodRow.expenses += amount;
+      periodRow.categoryAmounts[name] = (periodRow.categoryAmounts[name] ?? 0) + amount;
+    }
     periodRow.net = periodRow.income - periodRow.expenses;
     periodRow.transactionIds.push(transaction.id);
     cashFlowByPeriod.set(period.key, periodRow);

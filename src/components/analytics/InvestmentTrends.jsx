@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import {
   Bar,
   BarChart,
@@ -8,29 +7,12 @@ import {
   XAxis,
   YAxis
 } from 'recharts';
-import { format, parseISO, startOfWeek } from 'date-fns';
-import { isInvestmentMovement } from '../../utils/transactionSemantics';
 
 const formatCurrency = (val) => new Intl.NumberFormat('en-US', {
   style: 'currency',
   currency: 'USD',
   maximumFractionDigits: 0
 }).format(val);
-
-const resolveGrouping = (transactions, groupMode) => {
-  if (groupMode === 'Daily') return { labelFormat: 'MMM d', keyFormat: 'yyyy-MM-dd' };
-  if (groupMode === 'Weekly') return { labelFormat: 'week', keyFormat: 'week' };
-  if (groupMode === 'Monthly') return { labelFormat: 'MMM yyyy', keyFormat: 'yyyy-MM' };
-  if (groupMode === 'Yearly') return { labelFormat: 'yyyy', keyFormat: 'yyyy' };
-
-  const dates = transactions.map(t => new Date(t.date).getTime());
-  const diffDays = (Math.max(...dates) - Math.min(...dates)) / (1000 * 60 * 60 * 24);
-  return diffDays > 400
-    ? { labelFormat: 'yyyy', keyFormat: 'yyyy' }
-    : diffDays > 60
-    ? { labelFormat: 'MMM yyyy', keyFormat: 'yyyy-MM' }
-    : { labelFormat: 'week', keyFormat: 'week' };
-};
 
 const CustomTooltip = ({ active, payload }) => {
   if (active && payload && payload.length) {
@@ -47,30 +29,13 @@ const CustomTooltip = ({ active, payload }) => {
   return null;
 };
 
-export default function InvestmentTrends({ transactions, accountMap = {}, categoryMap = {}, groupMode = 'Auto', onSelectPeriod }) {
-  const data = useMemo(() => {
-    const investmentTransactions = transactions.filter(t => isInvestmentMovement(t, accountMap, categoryMap));
-    if (investmentTransactions.length === 0) return [];
-
-    const { labelFormat, keyFormat } = resolveGrouping(investmentTransactions, groupMode);
-    const grouped = {};
-
-    investmentTransactions.forEach(t => {
-      const dateObj = parseISO(t.date);
-      const weekStart = startOfWeek(dateObj);
-      const groupKey = keyFormat === 'week' ? format(weekStart, 'yyyy-MM-dd') : format(dateObj, keyFormat);
-      const displayLabel = keyFormat === 'week' ? `Week of ${format(weekStart, 'MMM d')}` : format(dateObj, labelFormat);
-
-      if (!grouped[groupKey]) {
-        grouped[groupKey] = { timeKey: groupKey, displayLabel, Investments: 0, transactionIds: [] };
-      }
-
-      grouped[groupKey].Investments += Math.abs(t.amount);
-      grouped[groupKey].transactionIds.push(t.id);
-    });
-
-    return Object.values(grouped).sort((a, b) => a.timeKey.localeCompare(b.timeKey));
-  }, [transactions, accountMap, categoryMap, groupMode]);
+export default function InvestmentTrends({ rows = [], onSelectPeriod }) {
+  const data = rows.map(row => ({
+    ...row,
+    timeKey: row.key,
+    displayLabel: row.label,
+    Investments: row.amount,
+  }));
 
   if (data.length === 0) {
     return (

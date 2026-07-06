@@ -939,7 +939,13 @@ test('trpc analytics report aggregates backend-owned cashflow semantics', async 
     transactionCount: 3,
   });
   expect(report.cashFlow).toEqual([
-    expect.objectContaining({ key: '2026-06', income: 1000, expenses: 25, net: 975 }),
+    expect.objectContaining({
+      key: '2026-06',
+      income: 1000,
+      expenses: 25,
+      net: 975,
+      categoryAmounts: { Dining: 25 },
+    }),
   ]);
   expect(report.spendingByCategory).toEqual([
     expect.objectContaining({ id: String(diningId), name: 'Dining', amount: 25 }),

@@ -1,6 +1,4 @@
-import { useMemo } from 'react';
 import { X } from 'lucide-react';
-import { isExpense } from '../../utils/transactionSemantics';
 
 // A palette of nice colors from index.css for categories if they don't have a specific color
 const COLORS = [
@@ -11,33 +9,11 @@ const COLORS = [
 const formatCurrency = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val);
 
 export default function SpendingByCategory({
-  transactions,
-  categoryMap,
-  accountMap = {},
+  rows = [],
   onSelectCategory,
   onExcludeCategory
 }) {
-  const data = useMemo(() => {
-    const expensesMap = {};
-    
-    transactions.forEach(t => {
-      if (isExpense(t, accountMap, categoryMap)) {
-        const catId = t.categoryId || 'uncategorized';
-        expensesMap[catId] = (expensesMap[catId] || 0) + Math.abs(t.amount);
-      }
-    });
-
-    return Object.entries(expensesMap)
-      .map(([catId, amount]) => {
-        const cat = categoryMap[catId];
-        return {
-          id: catId,
-          name: cat ? cat.name : 'Uncategorized',
-          amount,
-        };
-      })
-      .sort((a, b) => b.amount - a.amount);
-  }, [transactions, categoryMap, accountMap]);
+  const data = rows;
 
   if (data.length === 0) {
     return (

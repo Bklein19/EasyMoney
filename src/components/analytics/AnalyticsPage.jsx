@@ -6,7 +6,6 @@ import { useCategories } from '../../hooks/useCategories';
 import { useAccounts } from '../../hooks/useAccounts';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import { formatCurrency, formatDate, getAmountClass } from '../../utils/formatters';
-import { buildAccountMap, isExpense, isIncome, isInvestmentMovement } from '../../utils/transactionSemantics';
 
 import SpendingByCategory from './SpendingByCategory';
 import SpendingTrends from './SpendingTrends';
@@ -143,6 +142,10 @@ export default function AnalyticsPage() {
   const deferredAccounts = useDeferredValue(accounts);
   const deferredCategories = useDeferredValue(categories);
   const deferredCashFlow = useDeferredValue(analyticsReport?.cashFlow ?? []);
+  const deferredSpendingByCategory = useDeferredValue(analyticsReport?.spendingByCategory ?? []);
+  const deferredTopMerchants = useDeferredValue(analyticsReport?.topMerchants ?? []);
+  const deferredIncomeStreams = useDeferredValue(analyticsReport?.incomeStreams ?? []);
+  const deferredInvestments = useDeferredValue(analyticsReport?.investments ?? []);
   const deferredCategoryFilterIds = useDeferredValue(categoryFilterIds);
   const deferredCategoryFilterMode = useDeferredValue(categoryFilterMode);
   const deferredCashFlowGroup = useDeferredValue(cashFlowGroup);
@@ -151,12 +154,15 @@ export default function AnalyticsPage() {
     reportTransactions !== deferredTransactions ||
     reportAnalysisTransactions !== deferredAnalysisTransactions ||
     (analyticsReport?.cashFlow ?? []) !== deferredCashFlow ||
+    (analyticsReport?.spendingByCategory ?? []) !== deferredSpendingByCategory ||
+    (analyticsReport?.topMerchants ?? []) !== deferredTopMerchants ||
+    (analyticsReport?.incomeStreams ?? []) !== deferredIncomeStreams ||
+    (analyticsReport?.investments ?? []) !== deferredInvestments ||
     accounts !== deferredAccounts ||
     categories !== deferredCategories ||
     categoryFilterIds !== deferredCategoryFilterIds ||
     categoryFilterMode !== deferredCategoryFilterMode ||
     cashFlowGroup !== deferredCashFlowGroup;
-  const accountMap = useMemo(() => buildAccountMap(deferredAccounts), [deferredAccounts]);
 
   // Create a fast map for category lookup
   const categoryMap = useMemo(() => {
@@ -175,29 +181,27 @@ export default function AnalyticsPage() {
 
   const drilldownTransactions = useMemo(() => {
     if (!drilldown) return [];
-
     const sourceTransactions = drilldown.type === 'investmentPeriod' ? categoryScopedTransactions : analysisTransactions;
 
     return sourceTransactions.filter(t => {
       if (drilldown.type === 'category') {
-        const catId = t.categoryId || 'uncategorized';
-        return String(catId) === String(drilldown.id) && isExpense(t, accountMap, categoryMap);
+        return drilldown.ids?.has(t.id);
       }
       if (drilldown.type === 'merchant') {
-        return drilldown.ids?.has(t.id) && isExpense(t, accountMap, categoryMap);
+        return drilldown.ids?.has(t.id);
       }
       if (drilldown.type === 'incomeStream') {
-        return drilldown.ids?.has(t.id) && isIncome(t, accountMap, categoryMap);
+        return drilldown.ids?.has(t.id);
       }
       if (drilldown.type === 'period') {
         return drilldown.ids.has(t.id);
       }
       if (drilldown.type === 'investmentPeriod') {
-        return drilldown.ids.has(t.id) && isInvestmentMovement(t, accountMap, categoryMap);
+        return drilldown.ids.has(t.id);
       }
       return false;
     });
-  }, [analysisTransactions, categoryScopedTransactions, drilldown, accountMap, categoryMap]);
+  }, [analysisTransactions, categoryScopedTransactions, drilldown]);
 
   const visibleDrilldownTransactions = useMemo(() => {
     const query = drilldownSearch.trim().toLowerCase();
@@ -387,6 +391,7 @@ export default function AnalyticsPage() {
     openDrilldown({
       type: 'category',
       id: categoryId,
+      ids: new Set(category.transactionIds),
       title: `${category.name} Spending`,
       scrollIntoView: true
     });
@@ -697,10 +702,7 @@ export default function AnalyticsPage() {
             </button>
           </div>
           <IncomeVsExpense
-            transactions={analysisTransactions}
-            groupMode={deferredCashFlowGroup}
-            accountMap={accountMap}
-            categoryMap={categoryMap}
+            rows={cashFlowRows}
             onSelectPeriod={handlePeriodSelect}
           />
         </div>
@@ -728,10 +730,7 @@ export default function AnalyticsPage() {
             </div>
           </div>
           <SpendingTrends
-            transactions={analysisTransactions}
-            categoryMap={categoryMap}
-            accountMap={accountMap}
-            groupMode={deferredCashFlowGroup}
+            rows={cashFlowRows}
             showTotalSpend={showTotalSpendTrend}
             onSelectPeriod={handlePeriodSelect}
           />
@@ -745,9 +744,7 @@ export default function AnalyticsPage() {
             </p>
           </div>
           <SpendingByCategory
-            transactions={analysisTransactions}
-            categoryMap={categoryMap}
-            accountMap={accountMap}
+            rows={deferredSpendingByCategory}
             onSelectCategory={(category) => includeCategoryFromChart(category)}
             onExcludeCategory={(category) => excludeCategoryFromChart(String(category.id))}
           />
@@ -756,9 +753,7 @@ export default function AnalyticsPage() {
         <div className="analytics-card glass-card">
           <h3 className="analytics-card__title">Top Merchants</h3>
           <TopMerchants
-            transactions={analysisTransactions}
-            accountMap={accountMap}
-            categoryMap={categoryMap}
+            rows={deferredTopMerchants}
             onSelectMerchant={(merchant) => openDrilldown({
               type: 'merchant',
               id: merchant.normalized,
@@ -772,9 +767,7 @@ export default function AnalyticsPage() {
         <div className="analytics-card glass-card">
           <h3 className="analytics-card__title">Income Streams</h3>
           <IncomeStreams
-            transactions={analysisTransactions}
-            accountMap={accountMap}
-            categoryMap={categoryMap}
+            rows={deferredIncomeStreams}
             onSelectStream={(stream) => openDrilldown({
               type: 'incomeStream',
               id: stream.normalized,
@@ -788,10 +781,7 @@ export default function AnalyticsPage() {
         <div className="analytics-card glass-card">
           <h3 className="analytics-card__title">Investments Over Time</h3>
           <InvestmentTrends
-            transactions={categoryScopedTransactions}
-            accountMap={accountMap}
-            categoryMap={categoryMap}
-            groupMode={deferredCashFlowGroup}
+            rows={deferredInvestments}
             onSelectPeriod={handleInvestmentPeriodSelect}
           />
         </div>
@@ -968,10 +958,7 @@ export default function AnalyticsPage() {
         {renderAnalyticsWorking()}
         <div className="analytics-expanded-chart">
           <IncomeVsExpense
-            transactions={analysisTransactions}
-            groupMode={deferredCashFlowGroup}
-            accountMap={accountMap}
-            categoryMap={categoryMap}
+            rows={cashFlowRows}
             onSelectPeriod={(period) => {
               setExpandedChart(null);
               handlePeriodSelect(period);
@@ -1001,10 +988,7 @@ export default function AnalyticsPage() {
         </div>
         <div className="analytics-expanded-chart">
           <SpendingTrends
-            transactions={analysisTransactions}
-            categoryMap={categoryMap}
-            accountMap={accountMap}
-            groupMode={deferredCashFlowGroup}
+            rows={cashFlowRows}
             showTotalSpend={showTotalSpendTrend}
             onSelectPeriod={(period) => {
               setExpandedChart(null);
