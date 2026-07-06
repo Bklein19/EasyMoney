@@ -139,6 +139,16 @@ test('init database records account owner schema migration', () => {
   expect(accountColumns.map(column => column.name)).toContain('accountHolder');
 });
 
+test('init database records source account owner schema migration', () => {
+  const migration = getDb().prepare(
+    "SELECT name FROM schemaMigrations WHERE name = '2026-07-06-source-account-owner'"
+  ).get() as { name: string } | undefined;
+  const sourceAccountColumns = getDb().prepare('PRAGMA table_info(sourceAccounts)').all() as Array<{ name: string }>;
+
+  expect(migration).toEqual({ name: '2026-07-06-source-account-owner' });
+  expect(sourceAccountColumns.map(column => column.name)).toContain('accountHolder');
+});
+
 test('init database records category group schema migration', () => {
   const migration = getDb().prepare(
     "SELECT name FROM schemaMigrations WHERE name = '2026-06-22-category-groups'"
@@ -3529,6 +3539,7 @@ test('app import preview allows native parsers to handle malformed institution C
     sourceAccountId: preview.transactions[0].sourceAccountId,
     institution: 'Bank of America',
     sourceAccountName: 'Adv Plus Banking - 1234',
+    sourceAccountHolder: null,
     resolvedAccountId: null,
     resolvedAccountStatus: null,
     resolution: 'auto-create',
@@ -3675,6 +3686,7 @@ test('app imports commit creates accounts from explicit source account mapping d
         institution: 'Bank of America',
         type: 'savings',
         currency: 'USD',
+        accountHolder: 'Alex',
       },
     }],
   });
@@ -3685,10 +3697,12 @@ test('app imports commit creates accounts from explicit source account mapping d
     institution: string;
     type: string;
     status: string;
+    accountHolder: string | null;
   };
   expect(account).toMatchObject({
     institution: 'Bank of America',
     type: 'savings',
+    accountHolder: 'Alex',
     status: 'active',
   });
   expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(preview.accountMappings[0].sourceAccountId)).toMatchObject({

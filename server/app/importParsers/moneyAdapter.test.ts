@@ -34,6 +34,7 @@ test('money parser adapter translates money activity output to app import output
             description: 'Buy VTI',
             account: 'Brokerage-XXXX1234',
             institution: 'Vanguard',
+            account_holder: 'Alex',
             category: 'activity',
             raw: { row: 'raw activity row' },
           },
@@ -107,6 +108,7 @@ test('money parser adapter translates money activity output to app import output
       description: 'Buy VTI',
       institution: 'Vanguard',
       account: 'Brokerage-XXXX1234',
+      accountHolder: 'Alex',
       sourceRole: 'activity',
       raw: {
         moneyId: 'tx-1',
@@ -719,7 +721,9 @@ test('Robinhood statement parser normalizes personal account holder headings to 
   ].join('\n'));
 
   expect(result.balances[0]?.account).toBe('Robinhood Individual - 9769');
+  expect(result.balances[0]?.account_holder).toBe('Alex Example');
   expect(result.transactions[0]?.account).toBe('Robinhood Individual - 9769');
+  expect(result.transactions[0]?.account_holder).toBe('Alex Example');
 });
 
 test('Fidelity NetBenefits statement parser extracts contributions and balance', () => {

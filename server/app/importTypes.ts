@@ -19,6 +19,7 @@ export interface ParsedImportTransaction {
   description: string;
   institution?: string | null;
   account?: string | null;
+  accountHolder?: string | null;
   sourceRole: ParsedImportSourceRole;
   raw?: Record<string, unknown>;
 }
@@ -29,6 +30,7 @@ export interface ParsedImportBalance {
   balanceCents: number;
   account?: string | null;
   institution?: string | null;
+  accountHolder?: string | null;
   raw?: Record<string, unknown>;
 }
 
@@ -73,6 +75,7 @@ export interface ImportPreviewTransaction {
   notes: string;
   institution?: string | null;
   account?: string | null;
+  accountHolder?: string | null;
   sourceRole: ParsedImportSourceRole;
   raw?: Record<string, unknown>;
   categoryId: null;
@@ -94,6 +97,7 @@ export interface ImportAccountMapping {
   sourceAccountId: number;
   institution: string | null;
   sourceAccountName: string | null;
+  sourceAccountHolder: string | null;
   resolvedAccountId: number | null;
   resolvedAccountStatus?: string | null;
   resolution: ImportAccountMappingResolution;

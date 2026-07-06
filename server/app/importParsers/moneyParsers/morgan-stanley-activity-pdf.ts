@@ -54,6 +54,7 @@ export default async function parse(filePath: string): Promise<ParseResult> {
           description: rest,
           account,
           institution: "Morgan Stanley",
+          account_holder: owner || null,
           raw: { line: trimmed, owner, accountName, accountNumber },
         })
       );

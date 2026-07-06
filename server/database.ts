@@ -426,7 +426,7 @@ const TABLES = {
     'parserPriority', 'institution', 'coveredFrom', 'coveredTo', 'status', 'createdAt', 'committedAt'
   ],
   sourceAccounts: [
-    'id', 'sourceFileId', 'accountId', 'institution', 'sourceAccountKey', 'sourceAccountName', 'rawJson', 'createdAt'
+    'id', 'sourceFileId', 'accountId', 'institution', 'sourceAccountKey', 'sourceAccountName', 'accountHolder', 'rawJson', 'createdAt'
   ],
   sourceTransactions: [
     'id', 'sourceFileId', 'sourceAccountId', 'importRowId', 'stableSourceId', 'date',
@@ -681,6 +681,7 @@ export function initDatabase() {
       institution TEXT,
       sourceAccountKey TEXT NOT NULL,
       sourceAccountName TEXT,
+      accountHolder TEXT,
       rawJson TEXT,
       createdAt TEXT,
       UNIQUE(sourceFileId, institution, sourceAccountKey),
@@ -727,6 +728,12 @@ export function initDatabase() {
   runSchemaMigration('2026-06-20-account-owner', () => {
     if (!tableColumnNames('accounts').includes('accountHolder')) {
       db.prepare('ALTER TABLE accounts ADD COLUMN accountHolder TEXT').run();
+    }
+  });
+
+  runSchemaMigration('2026-07-06-source-account-owner', () => {
+    if (!tableColumnNames('sourceAccounts').includes('accountHolder')) {
+      db.prepare('ALTER TABLE sourceAccounts ADD COLUMN accountHolder TEXT').run();
     }
   });
 

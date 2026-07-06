@@ -25,6 +25,7 @@ export interface ImportPreviewResult {
     sourceAccountId: number;
     institution: string | null;
     sourceAccountName: string | null;
+    sourceAccountHolder: string | null;
     resolvedAccountId: number | null;
     resolvedAccountStatus?: string | null;
     resolution: string;

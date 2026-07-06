@@ -7,6 +7,7 @@ export interface ParsedTransaction {
   description: string;
   account: string;
   institution: string;
+  account_holder?: string | null;
   category: TransactionCategory;
   raw: Record<string, unknown>;
 }
@@ -15,6 +16,7 @@ export interface ParsedBalance {
   date: string;
   account: string;
   institution: string;
+  account_holder?: string | null;
   balance_cents: number;
 }
 

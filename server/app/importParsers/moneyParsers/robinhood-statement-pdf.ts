@@ -46,7 +46,12 @@ function normalizeWhitespace(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function accountFromLine(line: string, nextLine = "") {
+interface RobinhoodAccountContext {
+  account: string;
+  account_holder: string | null;
+}
+
+function accountFromLine(line: string, nextLine = ""): RobinhoodAccountContext | null {
   const account = line.match(/^([A-Za-z][A-Za-z ]*?)\s+Account #:\s*(\d+)/i);
   if (!account) return null;
   const label = normalizeWhitespace(account[1]!);
@@ -61,10 +66,14 @@ function accountFromLine(line: string, nextLine = "") {
       : normalizedLabel.includes("ira")
         ? label
         : "Individual";
-  return `Robinhood ${accountTypeLabel} - ${account[2]!.slice(-4)}`;
+  const account_holder = accountTypeLabel === "Individual" && !/^individual$/i.test(label) ? label : null;
+  return {
+    account: `Robinhood ${accountTypeLabel} - ${account[2]!.slice(-4)}`,
+    account_holder,
+  };
 }
 
-function firstAccountName(text: string) {
+function firstAccountContext(text: string) {
   const lines = text.split(/\r?\n/).map(normalizeWhitespace);
   for (let index = 0; index < lines.length; index += 1) {
     const account = accountFromLine(lines[index]!, lines[index + 1] || "");
@@ -162,10 +171,10 @@ function parseActivityLine(line: string, pendingDescription: string | null) {
 }
 
 export function parseRobinhoodStatementText(text: string): ParseResult {
-  const fallbackAccount = firstAccountName(text);
+  const fallbackAccount = firstAccountContext(text);
   const { covered_from, covered_to } = statementPeriod(text);
   const transactions: ParseResult["transactions"] = [];
-  const balancesByAccount = new Map<string, number>();
+  const balancesByAccount = new Map<string, { balance_cents: number; account_holder: string | null }>();
   let currentAccount = fallbackAccount;
   let pendingDescription: string | null = null;
   const lines = text.split(/\r?\n/).map(normalizeWhitespace);
@@ -183,7 +192,10 @@ export function parseRobinhoodStatementText(text: string): ParseResult {
 
     const balance = portfolioValueFromLine(line);
     if (balance !== null) {
-      balancesByAccount.set(currentAccount, balance);
+      balancesByAccount.set(currentAccount.account, {
+        balance_cents: balance,
+        account_holder: currentAccount.account_holder,
+      });
       pendingDescription = null;
       continue;
     }
@@ -194,8 +206,9 @@ export function parseRobinhoodStatementText(text: string): ParseResult {
     if (activity) {
       transactions.push(makeTx({
         ...activity,
-        account: currentAccount,
+        account: currentAccount.account,
         institution: "Robinhood",
+        ...(currentAccount.account_holder ? { account_holder: currentAccount.account_holder } : {}),
       }));
       pendingDescription = null;
       continue;
@@ -209,17 +222,19 @@ export function parseRobinhoodStatementText(text: string): ParseResult {
   return {
     transactions,
     balances: balancesByAccount.size
-      ? [...balancesByAccount.entries()].map(([account, balance_cents]) => ({
+      ? [...balancesByAccount.entries()].map(([account, balance]) => ({
           date: covered_to,
           account,
           institution: "Robinhood",
-          balance_cents,
+          balance_cents: balance.balance_cents,
+          ...(balance.account_holder ? { account_holder: balance.account_holder } : {}),
         }))
       : [{
           date: covered_to,
-          account: fallbackAccount,
+          account: fallbackAccount.account,
           institution: "Robinhood",
           balance_cents: closingPortfolioValue(text),
+          ...(fallbackAccount.account_holder ? { account_holder: fallbackAccount.account_holder } : {}),
         }],
     covered_from,
     covered_to,

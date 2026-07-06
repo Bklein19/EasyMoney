@@ -34,6 +34,7 @@ type AccountMappingDecision =
         institution?: string | null;
         type?: string | null;
         currency?: string | null;
+        accountHolder?: string | null;
       };
     };
 
@@ -423,6 +424,7 @@ function normalizeAccountStatus(status: string | null | undefined) {
 function normalizeAccountCreateInput(mapping: Extract<AccountMappingDecision, { mode: 'create' }>, sourceAccount: {
   institution: string | null;
   sourceAccountName: string | null;
+  accountHolder?: string | null;
 }) {
   const input = mapping.account || {};
   const sourceName = sourceAccount.sourceAccountName && sourceAccount.sourceAccountName !== 'Selected account'
@@ -435,14 +437,18 @@ function normalizeAccountCreateInput(mapping: Extract<AccountMappingDecision, { 
     : String(input.institution).trim() || null;
   const type = String(input.type || inferAccountType(name)).trim();
   const currency = String(input.currency || 'USD').trim().toUpperCase();
+  const accountHolder = input.accountHolder === null || input.accountHolder === undefined
+    ? sourceAccount.accountHolder || null
+    : String(input.accountHolder).trim() || null;
   if (!type) throw new Error('Account type is required for import-created accounts.');
   if (!currency) throw new Error('Account currency is required for import-created accounts.');
-  return { name, institution, type, currency };
+  return { name, institution, type, currency, accountHolder };
 }
 
 function createAccountForSourceMapping(mapping: Extract<AccountMappingDecision, { mode: 'create' }>, sourceAccount: {
   institution: string | null;
   sourceAccountName: string | null;
+  accountHolder?: string | null;
 }) {
   const now = new Date().toISOString();
   const account = normalizeAccountCreateInput(mapping, sourceAccount);
@@ -475,6 +481,22 @@ function upsertAccountAlias(sourceAccount: {
   `).run(institution, alias, accountId, now, now);
 }
 
+function applySourceAccountHolder(sourceAccount: { accountHolder?: string | null }, accountId: number | null) {
+  const accountHolder = sourceAccount.accountHolder?.trim();
+  if (!accountHolder || !accountId) return;
+  getDb().prepare(`
+    UPDATE accounts
+    SET accountHolder = @accountHolder,
+        updatedAt = @updatedAt
+    WHERE id = @accountId
+      AND (accountHolder IS NULL OR TRIM(accountHolder) = '')
+  `).run({
+    accountId,
+    accountHolder,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 function linkSourceAccount(sourceAccountId: number, accountId: number | null, options: { allowArchived?: boolean } = {}) {
   const db = getDb();
   if (accountId !== null) {
@@ -488,25 +510,28 @@ function linkSourceAccount(sourceAccountId: number, accountId: number | null, op
   }
 
   const sourceAccount = db.prepare(`
-    SELECT id, institution, sourceAccountName
+    SELECT id, institution, sourceAccountName, accountHolder
     FROM sourceAccounts
     WHERE id = ?
   `).get(sourceAccountId) as
-    | { id: number; institution: string | null; sourceAccountName: string | null }
+    | { id: number; institution: string | null; sourceAccountName: string | null; accountHolder: string | null }
     | undefined;
   if (!sourceAccount) throw new Error(`Source account not found: ${sourceAccountId}`);
 
   db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(accountId, sourceAccountId);
-  if (accountId !== null) upsertAccountAlias(sourceAccount, accountId);
+  if (accountId !== null) {
+    upsertAccountAlias(sourceAccount, accountId);
+    applySourceAccountHolder(sourceAccount, accountId);
+  }
 }
 
 function getSourceAccount(sourceAccountId: number) {
   const sourceAccount = getDb().prepare(`
-    SELECT id, accountId, institution, sourceAccountName
+    SELECT id, accountId, institution, sourceAccountName, accountHolder
     FROM sourceAccounts
     WHERE id = ?
   `).get(sourceAccountId) as
-    | { id: number; accountId: number | null; institution: string | null; sourceAccountName: string | null }
+    | { id: number; accountId: number | null; institution: string | null; sourceAccountName: string | null; accountHolder: string | null }
     | undefined;
   if (!sourceAccount) throw new Error(`Source account not found: ${sourceAccountId}`);
   return sourceAccount;
@@ -570,6 +595,7 @@ function getImportAccountResolution(sourceAccount: {
   accountId: number | null;
   institution: string | null;
   sourceAccountName: string | null;
+  accountHolder?: string | null;
 }): Pick<ImportAccountMapping, 'resolvedAccountId' | 'resolvedAccountStatus' | 'resolution'> {
   if (sourceAccount.accountId) {
     const linked = getDb().prepare('SELECT status FROM accounts WHERE id = ?').get(sourceAccount.accountId) as
@@ -628,6 +654,7 @@ function getImportAccountMappings(importFileId: number): ImportAccountMapping[] 
       sa.accountId,
       sa.institution,
       sa.sourceAccountName,
+      sa.accountHolder AS sourceAccountHolder,
       COUNT(DISTINCT st.id) AS transactionCount,
       COUNT(DISTINCT sb.id) AS balanceCount
     FROM sourceAccounts sa
@@ -642,6 +669,7 @@ function getImportAccountMappings(importFileId: number): ImportAccountMapping[] 
     accountId: number | null;
     institution: string | null;
     sourceAccountName: string | null;
+    sourceAccountHolder: string | null;
     transactionCount: number;
     balanceCount: number;
   }>;
@@ -650,11 +678,13 @@ function getImportAccountMappings(importFileId: number): ImportAccountMapping[] 
     sourceAccountId: row.sourceAccountId,
     institution: row.institution,
     sourceAccountName: row.sourceAccountName,
+    sourceAccountHolder: row.sourceAccountHolder,
     ...getImportAccountResolution({
       id: row.sourceAccountId,
       accountId: row.accountId,
       institution: row.institution,
       sourceAccountName: row.sourceAccountName,
+      accountHolder: row.sourceAccountHolder,
     }),
     transactionCount: Number(row.transactionCount || 0),
     balanceCount: Number(row.balanceCount || 0),
@@ -669,11 +699,11 @@ function resolveImportedAccount(sourceAccountId: number | null | undefined, fall
   }
 
   const sourceAccount = db.prepare(`
-    SELECT id, accountId, institution, sourceAccountName
+    SELECT id, accountId, institution, sourceAccountName, accountHolder
     FROM sourceAccounts
     WHERE id = ?
   `).get(sourceAccountId) as
-    | { id: number; accountId: number | null; institution: string | null; sourceAccountName: string | null }
+    | { id: number; accountId: number | null; institution: string | null; sourceAccountName: string | null; accountHolder: string | null }
     | undefined;
 
   if (!sourceAccount) {
@@ -695,6 +725,7 @@ function resolveImportedAccount(sourceAccountId: number | null | undefined, fall
   if (!alias || alias === 'Selected account') {
     if (!fallbackAccountId) throw new Error('accountId is required when parser does not identify an account');
     db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(fallbackAccountId, sourceAccount.id);
+    applySourceAccountHolder(sourceAccount, fallbackAccountId);
     return fallbackAccountId;
   }
 
@@ -709,6 +740,7 @@ function resolveImportedAccount(sourceAccountId: number | null | undefined, fall
       throw new Error('Import account mapping matched an archived account. Choose unarchive, another account, or create a new account.');
     }
     db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(aliased.accountId, sourceAccount.id);
+    applySourceAccountHolder(sourceAccount, aliased.accountId);
     return aliased.accountId;
   }
 
@@ -727,6 +759,7 @@ function resolveImportedAccount(sourceAccountId: number | null | undefined, fall
     type: inferAccountType(alias),
     currentBalance: 0,
     currency: 'USD',
+    accountHolder: sourceAccount.accountHolder || null,
     status: 'active',
     archivedAt: null,
     createdAt: now,
@@ -735,6 +768,7 @@ function resolveImportedAccount(sourceAccountId: number | null | undefined, fall
 
   upsertAccountAlias(sourceAccount, accountId);
   db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(accountId, sourceAccount.id);
+  applySourceAccountHolder(sourceAccount, accountId);
 
   return accountId;
 }
@@ -872,10 +906,11 @@ function saveImportPreview({
     createdAt: now,
   });
   const sourceAccountIds = new Map<string, number>();
-  const getSourceAccountId = (item: Pick<ParsedImportTransaction | ParsedImportBalance, 'institution' | 'account' | 'raw'>) => {
+  const getSourceAccountId = (item: Pick<ParsedImportTransaction | ParsedImportBalance, 'institution' | 'account' | 'accountHolder' | 'raw'>) => {
     const sourceInstitution = item.institution || institution || null;
     const sourceAccountName = item.account || 'Selected account';
-    const sourceAccountKey = `${sourceInstitution || 'unknown'}|${sourceAccountName}`;
+    const sourceAccountHolder = item.accountHolder?.trim() || null;
+    const sourceAccountKey = `${sourceInstitution || 'unknown'}|${sourceAccountHolder || ''}|${sourceAccountName}`;
     const existing = sourceAccountIds.get(sourceAccountKey);
     if (existing) return existing;
 
@@ -884,7 +919,8 @@ function saveImportPreview({
       institution: sourceInstitution,
       sourceAccountKey,
       sourceAccountName,
-      rawJson: JSON.stringify({ account: item.account, institution: item.institution }),
+      accountHolder: sourceAccountHolder,
+      rawJson: JSON.stringify({ account: item.account, institution: item.institution, accountHolder: sourceAccountHolder }),
       createdAt: now,
     }));
     sourceAccountIds.set(sourceAccountKey, sourceAccountId);

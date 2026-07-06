@@ -40,6 +40,7 @@ interface AccountDraft {
   institution: string;
   type: string;
   currency: string;
+  accountHolder: string;
 }
 
 type MappingDecision =
@@ -74,6 +75,7 @@ function createDraftFromMapping(mapping: SourceAccountMapping): AccountDraft {
   return {
     name,
     institution: mapping.institution || '',
+    accountHolder: mapping.sourceAccountHolder || '',
     type: normalized.match(/\b(credit|card|visa|mastercard|amex|discover)\b/)
       ? 'credit'
       : normalized.match(/\b(ira|roth|brokerage|investment|merrill|robinhood|vanguard|retirement|annuity)\b/)
@@ -284,6 +286,7 @@ function ImportPreviewContent({
         institution: decision.account.institution?.trim() || null,
         type: decision.account.type,
         currency: decision.account.currency,
+        accountHolder: decision.account.accountHolder?.trim() || null,
       },
     };
   });
@@ -476,6 +479,12 @@ function ImportPreviewContent({
                         <option value="loan">Loan</option>
                         <option value="other">Other</option>
                       </select>
+                      <input
+                        className="form-input"
+                        value={decision.account.accountHolder}
+                        onChange={event => updateCreateDraft(mapping.sourceAccountId, 'accountHolder', event.target.value)}
+                        placeholder="Owner"
+                      />
                       <select
                         className="form-input"
                         value={decision.account.currency}

@@ -48,6 +48,7 @@ export function createMoneyParserAdapter({
           description: transaction.description,
           institution: transaction.institution,
           account: transaction.account,
+          ...(transaction.account_holder ? { accountHolder: transaction.account_holder } : {}),
           sourceRole: toAppSourceRole(transaction),
           raw: {
             moneyId: transaction.id,
@@ -61,6 +62,7 @@ export function createMoneyParserAdapter({
           balanceCents: balance.balance_cents,
           institution: balance.institution,
           account: balance.account,
+          ...(balance.account_holder ? { accountHolder: balance.account_holder } : {}),
           raw: {},
         })),
       };
