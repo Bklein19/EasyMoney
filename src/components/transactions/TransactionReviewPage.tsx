@@ -1,5 +1,5 @@
-// @ts-nocheck
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { FormEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { ChevronRight, X } from 'lucide-react';
@@ -15,17 +15,125 @@ const AI_REVIEW_SORT_STORAGE_KEY = 'easymoney:transaction-review-sort';
 const AI_SORT_OPTIONS = [
   { value: 'count', label: 'Count' },
   { value: 'money', label: 'Money' },
-];
-function withTimeout(promise, timeoutMs, message) {
-  let timeoutId;
+] as const;
+
+type AiReviewSort = typeof AI_SORT_OPTIONS[number]['value'];
+type SplitStrategy = 'bank_description_counterparty' | 'individual_transactions';
+
+interface AiReviewTransaction {
+  transactionId: string;
+  account?: string | null;
+  date?: string | null;
+  amount: number;
+  merchant?: string | null;
+  description?: string | null;
+  sourceRole?: string | null;
+}
+
+interface AiSuggestion {
+  id?: string;
+  transactionId?: string;
+  transactionIds?: string[];
+  transaction?: AiReviewTransaction | null;
+  transactions?: AiReviewTransaction[];
+  transactionCount?: number;
+  totalAmount?: number | null;
+  merchantName?: string | null;
+  reason?: string | null;
+  decisionKind?: string | null;
+  sourceMerchantKey?: string | null;
+  canSplitMerchantGroup?: boolean;
+  recommendedSplitStrategy?: SplitStrategy | null;
+  accountNames?: string[];
+  categoryId: string | number;
+  applied?: boolean;
+}
+
+interface AiQuestion {
+  key?: string;
+  groupId?: string | null;
+  pattern: string;
+  transactionIds: string[];
+  transactions?: AiReviewTransaction[];
+  transactionCount?: number;
+  totalAmount?: number | null;
+  reason?: string | null;
+  decisionKind?: string | null;
+  sourceMerchantKey?: string | null;
+  canSplitMerchantGroup?: boolean;
+  recommendedSplitStrategy?: SplitStrategy | null;
+  accountNames?: string[];
+}
+
+interface AiCategorizationPreview {
+  configured?: boolean;
+  model?: string | null;
+  scanned?: number;
+  groupCount?: number;
+  suggestions: AiSuggestion[];
+  questions: AiQuestion[];
+  message?: string | null;
+  appliedCount?: number;
+  skippedCount?: number;
+}
+
+interface AiCategoryUndo {
+  id: string | number;
+  count: number;
+}
+
+interface AutoApplyJob {
+  id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | string;
+  message?: string | null;
+  groupCount: number;
+  reviewedGroupCount: number;
+  suggestedGroupCount: number;
+  appliedCount?: number;
+  skippedCount?: number;
+  error?: string | null;
+  undoOperation?: AiCategoryUndo | null;
+}
+
+interface ReviewQuestion extends AiQuestion {
+  key: string;
+}
+
+interface ReviewRow {
+  type: 'suggestion' | 'question';
+  key: string;
+  merchantName: string;
+  transactionIds: string[];
+  transactionCount: number;
+  totalAmount?: number | null;
+  reason?: string | null;
+  decisionKind?: string | null;
+  sourceMerchantKey?: string | null;
+  canSplitMerchantGroup?: boolean;
+  recommendedSplitStrategy?: SplitStrategy | null;
+  accountName: string;
+  suggestedCategoryId: string;
+  categoryId: string;
+  transactions: AiReviewTransaction[];
+}
+
+interface CategorizationCoverage {
+  transactionPercent: number;
+  amountPercent: number;
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timeoutId: number | undefined;
   const timeout = new Promise((_, reject) => {
     timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs);
   });
 
-  return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timeoutId));
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+  }) as Promise<T>;
 }
 
-function getInitialAiReviewSort() {
+function getInitialAiReviewSort(): AiReviewSort {
   try {
     const storedSort = window.localStorage.getItem(AI_REVIEW_SORT_STORAGE_KEY);
     return storedSort === 'money' ? 'money' : 'count';
@@ -36,64 +144,67 @@ function getInitialAiReviewSort() {
 
 export default function TransactionReviewPage() {
   const hasStartedReview = useRef(false);
-  const [aiCategorization, setAiCategorization] = useState(null);
+  const [aiCategorization, setAiCategorization] = useState<AiCategorizationPreview | null>(null);
   const [aiCategorizationError, setAiCategorizationError] = useState('');
   const [openAiApiKeyDraft, setOpenAiApiKeyDraft] = useState('');
-  const [ignoredAiQuestionKeys, setIgnoredAiQuestionKeys] = useState(new Set());
-  const [categoryByReviewKey, setCategoryByReviewKey] = useState({});
-  const [expandedReviewKey, setExpandedReviewKey] = useState(null);
+  const [ignoredAiQuestionKeys, setIgnoredAiQuestionKeys] = useState<Set<string>>(() => new Set());
+  const [categoryByReviewKey, setCategoryByReviewKey] = useState<Record<string, string>>({});
+  const [expandedReviewKey, setExpandedReviewKey] = useState<string | null>(null);
   const aiPreviewRequestId = useRef(0);
   const [isAiCategorizing, setIsAiCategorizing] = useState(false);
-  const [aiReviewStartedAt, setAiReviewStartedAt] = useState(null);
+  const [aiReviewStartedAt, setAiReviewStartedAt] = useState<number | null>(null);
   const [aiReviewElapsedSeconds, setAiReviewElapsedSeconds] = useState(0);
   const [isApplyingAiCategories, setIsApplyingAiCategories] = useState(false);
   const [isAutoApplyingAiCategories, setIsAutoApplyingAiCategories] = useState(false);
-  const [autoApplyJob, setAutoApplyJob] = useState(null);
-  const [aiCategoryUndo, setAiCategoryUndo] = useState(null);
+  const [autoApplyJob, setAutoApplyJob] = useState<AutoApplyJob | null>(null);
+  const [aiCategoryUndo, setAiCategoryUndo] = useState<AiCategoryUndo | null>(null);
   const [isRestoringAiCategories, setIsRestoringAiCategories] = useState(false);
-  const [splitByReviewKey, setSplitByReviewKey] = useState({});
+  const [splitByReviewKey, setSplitByReviewKey] = useState<Record<string, boolean>>({});
   const [isSavingOpenAiKey, setIsSavingOpenAiKey] = useState(false);
   const [aiReviewSort, setAiReviewSort] = useState(getInitialAiReviewSort);
   const { categories } = useCategories();
   const categorizationCoverage = useQuery(trpc.transactions.categorizationCoverage.queryOptions());
 
-  const getSuggestionTransaction = (suggestion) => suggestion.transactions?.[0] || suggestion.transaction || null;
-  const getQuestionTransactions = (question) => question.transactions ?? [];
-  const getAiTransactionTitle = (transaction) => transaction?.merchant || transaction?.description || 'Transaction';
-  const getSourceRoleLabel = (sourceRole) => {
+  const getSuggestionTransaction = (suggestion: AiSuggestion) => suggestion.transactions?.[0] || suggestion.transaction || null;
+  const getQuestionTransactions = (question: AiQuestion) => question.transactions ?? [];
+  const getAiTransactionTitle = (transaction?: AiReviewTransaction | null) => transaction?.merchant || transaction?.description || 'Transaction';
+  const getSourceRoleLabel = (sourceRole?: string | null) => {
     if (sourceRole === 'statement-summary') return 'Statement summary';
     if (sourceRole === 'statement-only') return 'Statement only';
     return '';
   };
   const aiSuggestions = useMemo(() => aiCategorization?.suggestions ?? [], [aiCategorization?.suggestions]);
   const aiQuestions = useMemo(() => aiCategorization?.questions ?? [], [aiCategorization?.questions]);
-  const activeAiQuestions = useMemo(() => aiQuestions
+  const activeAiQuestions = useMemo<ReviewQuestion[]>(() => aiQuestions
     .map((question, index) => ({ ...question, key: `${question.groupId || question.pattern}-${index}` }))
     .filter(question => !ignoredAiQuestionKeys.has(question.key)), [aiQuestions, ignoredAiQuestionKeys]);
-  const suggestionSelectionId = (suggestion) => suggestion.id ?? suggestion.transactionId;
-  const suggestionTransactionIds = (suggestion) => suggestion.transactionIds ?? [suggestion.transactionId].filter(Boolean);
-  const reviewRows = useMemo(() => {
-    const rows = [
-    ...aiSuggestions
+  const suggestionSelectionId = (suggestion: AiSuggestion) => suggestion.id ?? suggestion.transactionId ?? '';
+  const suggestionTransactionIds = (suggestion: AiSuggestion) => suggestion.transactionIds ?? [suggestion.transactionId].filter((id): id is string => Boolean(id));
+  const reviewRows = useMemo<ReviewRow[]>(() => {
+    const suggestionRows: ReviewRow[] = aiSuggestions
       .filter(suggestion => !suggestion.applied)
-      .map(suggestion => ({
-        type: 'suggestion',
-        key: suggestionSelectionId(suggestion),
-        merchantName: suggestion.merchantName || getAiTransactionTitle(getSuggestionTransaction(suggestion)),
-        transactionIds: suggestionTransactionIds(suggestion),
-        transactionCount: suggestion.transactionCount ?? suggestionTransactionIds(suggestion).length,
-        totalAmount: suggestion.totalAmount,
-        reason: suggestion.reason,
-        decisionKind: suggestion.decisionKind,
-        sourceMerchantKey: suggestion.sourceMerchantKey,
-        canSplitMerchantGroup: suggestion.canSplitMerchantGroup,
-        recommendedSplitStrategy: suggestion.recommendedSplitStrategy,
-        accountName: suggestion.accountNames?.length === 1 ? suggestion.accountNames[0] : '',
-        suggestedCategoryId: String(suggestion.categoryId),
-        categoryId: categoryByReviewKey[suggestionSelectionId(suggestion)] ?? String(suggestion.categoryId),
-        transactions: suggestion.transactions ?? (getSuggestionTransaction(suggestion) ? [getSuggestionTransaction(suggestion)] : []),
-      })),
-    ...activeAiQuestions.map(question => ({
+      .map(suggestion => {
+        const transaction = getSuggestionTransaction(suggestion);
+        const transactionIds = suggestionTransactionIds(suggestion);
+        return {
+          type: 'suggestion',
+          key: suggestionSelectionId(suggestion),
+          merchantName: suggestion.merchantName || getAiTransactionTitle(transaction),
+          transactionIds,
+          transactionCount: suggestion.transactionCount ?? transactionIds.length,
+          totalAmount: suggestion.totalAmount,
+          reason: suggestion.reason,
+          decisionKind: suggestion.decisionKind,
+          sourceMerchantKey: suggestion.sourceMerchantKey,
+          canSplitMerchantGroup: suggestion.canSplitMerchantGroup,
+          recommendedSplitStrategy: suggestion.recommendedSplitStrategy,
+          accountName: suggestion.accountNames?.length === 1 ? suggestion.accountNames[0] : '',
+          suggestedCategoryId: String(suggestion.categoryId),
+          categoryId: categoryByReviewKey[suggestionSelectionId(suggestion)] ?? String(suggestion.categoryId),
+          transactions: suggestion.transactions ?? (transaction ? [transaction] : []),
+        };
+      });
+    const questionRows: ReviewRow[] = activeAiQuestions.map(question => ({
       type: 'question',
       key: question.key,
       merchantName: question.pattern,
@@ -109,8 +220,8 @@ export default function TransactionReviewPage() {
       suggestedCategoryId: '',
       categoryId: categoryByReviewKey[question.key] ?? '',
       transactions: getQuestionTransactions(question),
-    })),
-    ];
+    }));
+    const rows = [...suggestionRows, ...questionRows];
 
     return rows.sort((a, b) => {
       if (aiReviewSort === 'money') {
@@ -125,7 +236,7 @@ export default function TransactionReviewPage() {
     });
   }, [activeAiQuestions, aiReviewSort, aiSuggestions, categoryByReviewKey]);
   const selectedReviewRows = reviewRows.filter(row => row.categoryId && row.transactionIds.length);
-  const splitReviewRows = reviewRows.filter(row => splitByReviewKey[row.key] && row.sourceMerchantKey);
+  const splitReviewRows = reviewRows.filter((row): row is ReviewRow & { sourceMerchantKey: string } => Boolean(splitByReviewKey[row.key] && row.sourceMerchantKey));
   const categoryReviewRows = selectedReviewRows.filter(row => !splitByReviewKey[row.key]);
   const actionableReviewRowCount = categoryReviewRows.length + splitReviewRows.length;
 
@@ -139,7 +250,7 @@ export default function TransactionReviewPage() {
     return () => window.clearInterval(intervalId);
   }, [isAiCategorizing, aiReviewStartedAt]);
 
-  const renderTransactionPreview = (transactions, totalCount) => {
+  const renderTransactionPreview = (transactions: AiReviewTransaction[], totalCount: number) => {
     const rows = transactions ?? [];
     if (!rows.length) return null;
 
@@ -170,7 +281,7 @@ export default function TransactionReviewPage() {
     );
   };
 
-  const handlePreviewAiCategorization = useCallback(async (sortOverride = aiReviewSort) => {
+  const handlePreviewAiCategorization = useCallback(async (sortOverride: AiReviewSort = aiReviewSort) => {
     const sort = sortOverride === 'money' ? 'money' : 'count';
     const requestId = aiPreviewRequestId.current + 1;
     aiPreviewRequestId.current = requestId;
@@ -197,7 +308,7 @@ export default function TransactionReviewPage() {
         `AI categorization took longer than ${Math.round(AI_CATEGORIZATION_TIMEOUT_MS / 1000)} seconds. Try again with fewer uncategorized transactions or check the server logs.`
       );
       if (aiPreviewRequestId.current !== requestId) return;
-      setAiCategorization(result);
+      setAiCategorization(result as AiCategorizationPreview);
       setCategoryByReviewKey({});
       setSplitByReviewKey({});
       setIgnoredAiQuestionKeys(new Set());
@@ -222,7 +333,7 @@ export default function TransactionReviewPage() {
       try {
         const nextJob = await trpcClient.transactions.autoApplyAiCategorizationJob.query({
           jobId: autoApplyJob.id,
-        });
+        }) as AutoApplyJob;
         if (cancelled) return;
         setAutoApplyJob(nextJob);
 
@@ -265,7 +376,7 @@ export default function TransactionReviewPage() {
     };
   }, [autoApplyJob?.id, autoApplyJob?.status, handlePreviewAiCategorization]);
 
-  const handleAiReviewSortChange = (sort) => {
+  const handleAiReviewSortChange = (sort: AiReviewSort) => {
     if (sort === aiReviewSort && isAiCategorizing) return;
     try {
       window.localStorage.setItem(AI_REVIEW_SORT_STORAGE_KEY, sort);
@@ -284,14 +395,14 @@ export default function TransactionReviewPage() {
     void handlePreviewAiCategorization();
   }, [handlePreviewAiCategorization]);
 
-  const setReviewCategory = (reviewKey, categoryId) => {
+  const setReviewCategory = (reviewKey: string, categoryId: string) => {
     setCategoryByReviewKey(previous => ({
       ...previous,
       [reviewKey]: categoryId,
     }));
   };
 
-  const setReviewSplit = (reviewKey, shouldSplit) => {
+  const setReviewSplit = (reviewKey: string, shouldSplit: boolean) => {
     setSplitByReviewKey(previous => {
       const next = { ...previous };
       if (shouldSplit) {
@@ -328,6 +439,11 @@ export default function TransactionReviewPage() {
           appliedTransactionIds: [],
           skipped: [],
           undoOperation: null,
+        } as {
+          count: number;
+          appliedTransactionIds: string[];
+          skipped: unknown[];
+          undoOperation: AiCategoryUndo | null;
         };
       const appliedIds = new Set(result.appliedTransactionIds ?? []);
       const appliedQuestionKeys = new Set(
@@ -366,7 +482,7 @@ export default function TransactionReviewPage() {
     setAiCategorizationError('');
     setAutoApplyJob(null);
     try {
-      const job = await trpcClient.transactions.startAutoApplyAiCategorization.mutate({ sort: aiReviewSort });
+      const job = await trpcClient.transactions.startAutoApplyAiCategorization.mutate({ sort: aiReviewSort }) as AutoApplyJob;
       setAutoApplyJob(job);
       setAiCategorization(previous => previous ? {
         ...previous,
@@ -400,7 +516,7 @@ export default function TransactionReviewPage() {
     }
   };
 
-  const handleSaveOpenAiKey = async (event) => {
+  const handleSaveOpenAiKey = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const apiKey = openAiApiKeyDraft.trim();
     if (!apiKey) return;
@@ -428,12 +544,14 @@ export default function TransactionReviewPage() {
     }
   };
 
-  const formatPercent = (value) => value.toLocaleString('en-US', {
+  const formatPercent = (value: number) => value.toLocaleString('en-US', {
     style: 'percent',
     minimumFractionDigits: 0,
     maximumFractionDigits: value > 0 && value < 0.01 ? 1 : 0,
   });
-  const coverage = categorizationCoverage.data;
+  const coverage = categorizationCoverage.data as CategorizationCoverage | undefined;
+  const aiAppliedCount = aiCategorization?.appliedCount ?? 0;
+  const aiSkippedCount = aiCategorization?.skippedCount ?? 0;
 
   return (
     <div className="page transaction-review-page">
@@ -548,10 +666,10 @@ export default function TransactionReviewPage() {
               {!isAiCategorizing && aiCategorization?.message && aiCategorization.configured !== false && (
                 <p className="ai-category-action__message">{aiCategorization.message}</p>
               )}
-              {aiCategorization?.appliedCount > 0 && (
+              {aiAppliedCount > 0 && (
                 <p className="ai-category-action__message">
-                  Applied {aiCategorization.appliedCount} category updates.
-                  {aiCategorization.skippedCount > 0 ? ` Skipped ${aiCategorization.skippedCount} already-categorized or missing transactions.` : ''}
+                  Applied {aiAppliedCount} category updates.
+                  {aiSkippedCount > 0 ? ` Skipped ${aiSkippedCount} already-categorized or missing transactions.` : ''}
                 </p>
               )}
               {aiCategoryUndo && (
