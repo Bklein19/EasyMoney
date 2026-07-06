@@ -1,5 +1,5 @@
-// @ts-nocheck
 import { useMemo, useState } from 'react';
+import type { ChangeEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { addMonths, differenceInCalendarDays, endOfDay, endOfMonth, endOfYear, format, parseISO, startOfMonth, startOfYear } from 'date-fns';
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
@@ -11,33 +11,112 @@ import { formatCurrency } from '../../utils/formatters';
 import Modal from '../shared/Modal';
 import './BudgetingPage.css';
 
-const toMonthKey = (date) => format(date, 'yyyy-MM');
-const toDateInput = (date) => format(date, 'yyyy-MM-dd');
-const clampPercent = (value) => Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
-const formatPercentValue = (value) => `${value.toFixed(value >= 10 || value === 0 ? 0 : 1)}%`;
 const PERIOD_MODES = {
   MONTH: 'month',
   YEAR: 'year',
   CUSTOM: 'custom'
-};
+} as const;
 const DREAM_BUDGET_KEY = 'easymoney:dream-budget';
 const SAVED_BUDGETS_KEY = 'easymoney:saved-budgets';
 const AVERAGE_DAYS_PER_MONTH = 365.2425 / 12;
 
-function getStoredGlobalBudget(periodKey) {
+type PeriodMode = typeof PERIOD_MODES[keyof typeof PERIOD_MODES];
+type CategoryId = string | number;
+
+interface DreamBudget {
+  globalBudget: number;
+  categoryPercents: Record<string, number>;
+}
+
+interface SavedBudget extends DreamBudget {
+  id: string;
+  name: string;
+  updatedAt: string;
+}
+
+interface BudgetPeriod {
+  key: string;
+  label: string;
+  scale: number;
+  startDate: string;
+  endDate: string;
+}
+
+interface BudgetCategory {
+  id: CategoryId;
+  name: string;
+  color?: string | null;
+}
+
+interface BudgetRow {
+  category: BudgetCategory;
+  actual: number;
+  budgetAmount: number;
+  targetPercent: number;
+  actualPercent: number;
+  variance: number;
+  status: 'unplanned' | 'over' | 'aligned' | string;
+}
+
+interface BudgetReport {
+  cashFlow: {
+    income: number;
+    expenses: number;
+    byCategory: Record<string, number>;
+  };
+  globalBudget: number;
+  rows: BudgetRow[];
+  summary: {
+    targetTotalPercent: number;
+    actualSpendPercent: number;
+    budgetRemaining: number;
+    unspentIncome: number;
+    overspentAmount: number;
+  };
+}
+
+interface AllocationItem {
+  name: string;
+  value: number;
+  color: string;
+}
+
+interface BudgetTooltipPayload {
+  name: string;
+  value: number;
+  payload: AllocationItem;
+}
+
+interface BudgetTooltipProps {
+  active?: boolean;
+  payload?: BudgetTooltipPayload[];
+}
+
+const toMonthKey = (date: Date) => format(date, 'yyyy-MM');
+const toDateInput = (date: Date) => format(date, 'yyyy-MM-dd');
+const clampPercent = (value: number) => Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
+const formatPercentValue = (value: number) => `${value.toFixed(value >= 10 || value === 0 ? 0 : 1)}%`;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function getStoredGlobalBudget(periodKey: string) {
   const value = window.localStorage.getItem(`easymoney:global-budget:${periodKey}`);
   if (!value) return '';
   const numberValue = Number(value);
   return Number.isFinite(numberValue) && numberValue > 0 ? String(numberValue) : '';
 }
 
-function getStoredDreamBudget() {
+function getStoredDreamBudget(): DreamBudget {
   try {
-    const stored = JSON.parse(window.localStorage.getItem(DREAM_BUDGET_KEY) || '{}');
+    const stored: unknown = JSON.parse(window.localStorage.getItem(DREAM_BUDGET_KEY) || '{}');
+    const storedRecord = isRecord(stored) ? stored : {};
+    const storedPercents = storedRecord.categoryPercents;
     return {
-      globalBudget: Number(stored.globalBudget) > 0 ? Number(stored.globalBudget) : 0,
-      categoryPercents: stored.categoryPercents && typeof stored.categoryPercents === 'object'
-        ? stored.categoryPercents
+      globalBudget: Number(storedRecord.globalBudget) > 0 ? Number(storedRecord.globalBudget) : 0,
+      categoryPercents: isRecord(storedPercents)
+        ? Object.fromEntries(Object.entries(storedPercents).map(([key, value]) => [key, Number(value) || 0]))
         : {}
     };
   } catch {
@@ -45,16 +124,25 @@ function getStoredDreamBudget() {
   }
 }
 
-function getStoredSavedBudgets() {
+function isSavedBudget(value: unknown): value is SavedBudget {
+  return isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.name === 'string' &&
+    typeof value.updatedAt === 'string' &&
+    typeof value.globalBudget === 'number' &&
+    isRecord(value.categoryPercents);
+}
+
+function getStoredSavedBudgets(): SavedBudget[] {
   try {
-    const stored = JSON.parse(window.localStorage.getItem(SAVED_BUDGETS_KEY) || '[]');
-    return Array.isArray(stored) ? stored : [];
+    const stored: unknown = JSON.parse(window.localStorage.getItem(SAVED_BUDGETS_KEY) || '[]');
+    return Array.isArray(stored) ? stored.filter(isSavedBudget) : [];
   } catch {
     return [];
   }
 }
 
-function BudgetTooltip({ active, payload }) {
+function BudgetTooltip({ active, payload }: BudgetTooltipProps) {
   if (!active || !payload?.length) return null;
   const item = payload[0];
 
@@ -70,12 +158,12 @@ function BudgetTooltip({ active, payload }) {
 
 export default function BudgetingPage() {
   const today = new Date();
-  const [periodMode, setPeriodMode] = useState(PERIOD_MODES.MONTH);
+  const [periodMode, setPeriodMode] = useState<PeriodMode>(PERIOD_MODES.MONTH);
   const [month, setMonth] = useState(() => toMonthKey(new Date()));
   const [year, setYear] = useState(() => String(new Date().getFullYear()));
   const [customStartDate, setCustomStartDate] = useState(() => toDateInput(startOfMonth(today)));
   const [customEndDate, setCustomEndDate] = useState(() => toDateInput(endOfMonth(today)));
-  const [globalBudgetByPeriod, setGlobalBudgetByPeriod] = useState(() => {
+  const [globalBudgetByPeriod, setGlobalBudgetByPeriod] = useState<Record<string, string>>(() => {
     const currentMonth = toMonthKey(new Date());
     return { [`month:${currentMonth}`]: getStoredGlobalBudget(`month:${currentMonth}`) };
   });
@@ -87,9 +175,9 @@ export default function BudgetingPage() {
   const [draftDreamBudget, setDraftDreamBudget] = useState(() => getStoredDreamBudget());
   const [draftBudgetName, setDraftBudgetName] = useState('Budget Template');
   const [periodBudgetName, setPeriodBudgetName] = useState('');
-  const [savingCategoryId, setSavingCategoryId] = useState(null);
+  const [savingCategoryId, setSavingCategoryId] = useState<CategoryId | null>(null);
 
-  const period = useMemo(() => {
+  const period = useMemo<BudgetPeriod>(() => {
     if (periodMode === PERIOD_MODES.YEAR) {
       const yearDate = parseISO(`${year}-01-01`);
       return {
@@ -143,7 +231,7 @@ export default function BudgetingPage() {
     globalBudget: explicitGlobalBudget,
     categoryPercents: hasDreamTargets ? dreamBudget.categoryPercents : null,
   }));
-  const budgetReport = budgetReportQuery.data;
+  const budgetReport = budgetReportQuery.data as BudgetReport | undefined;
   const cashFlow = budgetReport?.cashFlow ?? { income: 0, expenses: 0, byCategory: {} };
   const autoGlobalBudget = cashFlow.income > 0 ? cashFlow.income : cashFlow.expenses;
   const globalBudget = budgetReport?.globalBudget ?? 0;
@@ -176,7 +264,7 @@ export default function BudgetingPage() {
   const dreamTargetTotalPercent = Object.values(dreamBudget.categoryPercents)
     .reduce((sum, value) => sum + (Number(value) || 0), 0);
 
-  const handleGlobalBudgetChange = (event) => {
+  const handleGlobalBudgetChange = (event: ChangeEvent<HTMLInputElement>) => {
     const nextValue = event.target.value;
     setGlobalBudgetByPeriod(previous => ({ ...previous, [period.key]: nextValue }));
     const nextNumber = Number(nextValue);
@@ -187,7 +275,7 @@ export default function BudgetingPage() {
     }
   };
 
-  const hydratePeriodBudget = (periodKey) => {
+  const hydratePeriodBudget = (periodKey: string) => {
     setGlobalBudgetByPeriod(previous => (
       Object.prototype.hasOwnProperty.call(previous, periodKey)
         ? previous
@@ -195,7 +283,7 @@ export default function BudgetingPage() {
     ));
   };
 
-  const handleTargetPercentChange = async (categoryId, value) => {
+  const handleTargetPercentChange = async (categoryId: CategoryId, value: string) => {
     if (!isMonthlyPeriod || categoryId === 'uncategorized' || globalBudget <= 0) return;
     const nextPercent = clampPercent(Number(value));
     setSavingCategoryId(categoryId);
@@ -206,13 +294,13 @@ export default function BudgetingPage() {
     }
   };
 
-  const shiftMonth = (direction) => {
+  const shiftMonth = (direction: number) => {
     const nextMonth = toMonthKey(addMonths(parseISO(`${month}-01`), direction));
     setMonth(nextMonth);
     hydratePeriodBudget(`month:${nextMonth}`);
   };
 
-  const shiftYear = (direction) => {
+  const shiftYear = (direction: number) => {
     const nextYear = String(Number(year) + direction);
     setYear(nextYear);
     hydratePeriodBudget(`year:${nextYear}`);
@@ -223,14 +311,15 @@ export default function BudgetingPage() {
     setGlobalBudgetByPeriod(previous => ({ ...previous, [period.key]: '' }));
   };
 
-  const persistDreamBudget = (nextDreamBudget) => {
-    const cleaned = {
+  const persistDreamBudget = (nextDreamBudget: DreamBudget): DreamBudget => {
+    const categoryPercents = Object.fromEntries(
+      Object.entries(nextDreamBudget.categoryPercents || {})
+        .map(([categoryId, value]): [string, number] => [categoryId, clampPercent(Number(value))])
+        .filter(([, value]) => value > 0)
+    );
+    const cleaned: DreamBudget = {
       globalBudget: Number(nextDreamBudget.globalBudget) > 0 ? Number(nextDreamBudget.globalBudget) : 0,
-      categoryPercents: Object.fromEntries(
-        Object.entries(nextDreamBudget.categoryPercents || {})
-          .map(([categoryId, value]) => [categoryId, clampPercent(Number(value))])
-          .filter(([, value]) => value > 0)
-      )
+      categoryPercents
     };
     window.localStorage.setItem(DREAM_BUDGET_KEY, JSON.stringify(cleaned));
     setDreamBudget(cleaned);
@@ -238,7 +327,7 @@ export default function BudgetingPage() {
     return cleaned;
   };
 
-  const persistSavedBudgets = (nextSavedBudgets) => {
+  const persistSavedBudgets = (nextSavedBudgets: SavedBudget[]) => {
     window.localStorage.setItem(SAVED_BUDGETS_KEY, JSON.stringify(nextSavedBudgets));
     setSavedBudgets(nextSavedBudgets);
   };
@@ -255,10 +344,10 @@ export default function BudgetingPage() {
     setDraftDreamBudget(applied);
   };
 
-  const buildDreamFromDisplayedPeriod = () => {
+  const buildDreamFromDisplayedPeriod = (): DreamBudget => {
     const denominator = cashFlow.income > 0 ? Math.max(cashFlow.income, cashFlow.expenses) : cashFlow.expenses;
     const monthlyDenominator = period.scale > 0 ? denominator / period.scale : denominator;
-    const nextCategoryPercents = {};
+    const nextCategoryPercents: Record<string, number> = {};
     if (denominator > 0) {
       rows.forEach(row => {
         if (row.category.id === 'uncategorized' || row.actual <= 0) return;
@@ -282,7 +371,7 @@ export default function BudgetingPage() {
     return `${period.label} Budget`;
   };
 
-  const upsertSavedBudget = (name, nextBudget) => {
+  const upsertSavedBudget = (name: string, nextBudget: DreamBudget) => {
     const applied = persistDreamBudget(nextBudget);
     const existing = savedBudgets.find(item => item.name.toLowerCase() === name.toLowerCase());
     const savedBudget = {
@@ -319,7 +408,7 @@ export default function BudgetingPage() {
     setIsDesigningBudget(true);
   };
 
-  const updateDraftCategoryPercent = (categoryId, value) => {
+  const updateDraftCategoryPercent = (categoryId: CategoryId, value: string) => {
     const nextValue = clampPercent(Number(value));
     setDraftDreamBudget(previous => ({
       ...previous,
@@ -705,7 +794,7 @@ export default function BudgetingPage() {
               {overRows.slice(0, 5).map(row => (
                 <div className="budgeting-insight-row" key={row.category.id}>
                   <span>{row.category.name}</span>
-                  <strong>{formatPercentValue(row.percentGap)} over</strong>
+                  <strong>{formatPercentValue(row.budgetAmount > 0 ? (row.variance / row.budgetAmount) * 100 : row.actualPercent)} over</strong>
                 </div>
               ))}
               {overRows.length === 0 && <p className="budgeting-muted">No categories are over their target.</p>}
