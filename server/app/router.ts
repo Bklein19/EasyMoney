@@ -1,6 +1,6 @@
 import { initTRPC } from '@trpc/server';
 import { z } from 'zod';
-import { listAccounts } from './accounts.ts';
+import { archiveAccount, listAccounts, unarchiveAccount, updateAccountMetadata } from './accounts.ts';
 import {
   autoApplyAiCategorization,
   applyAiCategorizationSuggestions,
@@ -10,7 +10,18 @@ import {
   previewAiCategorization,
   startAutoApplyAiCategorizationJob,
 } from './aiCategorization.ts';
-import { listCategories } from './categories.ts';
+import { listBudgets, setBudget, deleteBudget } from './budgets.ts';
+import {
+  createCategorizationRule,
+  deleteCategorizationRule,
+  listCategorizationRules,
+  updateCategorizationRule,
+} from './categorizationRules.ts';
+import { createCategory, deleteCategory, listCategories, updateCategory } from './categories.ts';
+import { getDataFreshnessReport } from './dataFreshness.ts';
+import { commitImport, listImportHistory, previewImport, reimportFile, reimportFiles, unimportFile, unimportFiles } from './imports.ts';
+import { listImportProfiles, upsertImportProfile } from './importProfiles.ts';
+import { getInvestmentNetWorthReport, getSavingsRateReport } from './investmentReports.ts';
 import { saveLocalEnvValue } from './localEnv.ts';
 import { getNetWorthReport } from './netWorth.ts';
 import {
@@ -25,6 +36,43 @@ import {
 const t = initTRPC.create();
 
 const optionalId = z.union([z.string(), z.number()]).nullish();
+const categoryInput = z.object({
+  name: z.string().min(1),
+  parentId: optionalId,
+  type: z.string().nullish(),
+  categoryGroup: z.string().nullish(),
+  description: z.string().nullish(),
+  color: z.string().nullish(),
+  icon: z.string().nullish(),
+});
+const categoryUpdateInput = categoryInput.partial().extend({
+  id: z.union([z.string(), z.number()]),
+});
+const accountMetadataInput = z.object({
+  id: z.union([z.string(), z.number()]),
+  changes: z.object({
+    name: z.unknown().optional(),
+    institution: z.unknown().optional(),
+    type: z.unknown().optional(),
+    currency: z.unknown().optional(),
+    accountHolder: z.unknown().optional(),
+  }),
+});
+const commitImportInput = z.object({
+  accountId: optionalId,
+  importFileId: optionalId,
+  importRowIds: z.array(z.union([z.string(), z.number()])).nullish(),
+  forceImportRowIds: z.array(z.union([z.string(), z.number()])).nullish(),
+  balanceRowIds: z.array(z.union([z.string(), z.number()])).nullish(),
+  transactions: z.array(z.unknown()).optional(),
+  accountMappings: z.array(z.unknown()).nullish(),
+  importMeta: z.any().nullish(),
+});
+
+function bytesFromBase64(value?: string | null) {
+  if (!value) return new Uint8Array();
+  return Uint8Array.from(Buffer.from(value, 'base64'));
+}
 
 export const appRouter = t.router({
   accounts: t.router({
@@ -33,10 +81,147 @@ export const appRouter = t.router({
         includeArchived: z.boolean().optional(),
       }).optional())
       .query(({ input }) => listAccounts(input ?? {})),
+
+    updateMetadata: t.procedure
+      .input(accountMetadataInput)
+      .mutation(({ input }) => updateAccountMetadata(input.id, input.changes)),
+
+    archive: t.procedure
+      .input(z.object({ id: z.union([z.string(), z.number()]) }))
+      .mutation(({ input }) => archiveAccount(input.id)),
+
+    unarchive: t.procedure
+      .input(z.object({ id: z.union([z.string(), z.number()]) }))
+      .mutation(({ input }) => unarchiveAccount(input.id)),
   }),
 
   categories: t.router({
     list: t.procedure.query(() => listCategories()),
+
+    create: t.procedure
+      .input(categoryInput)
+      .mutation(({ input }) => createCategory(input)),
+
+    update: t.procedure
+      .input(categoryUpdateInput)
+      .mutation(({ input }) => {
+        const { id, ...changes } = input;
+        return updateCategory(id, changes);
+      }),
+
+    delete: t.procedure
+      .input(z.object({ id: z.union([z.string(), z.number()]) }))
+      .mutation(({ input }) => deleteCategory(input.id)),
+  }),
+
+  categorizationRules: t.router({
+    list: t.procedure.query(() => listCategorizationRules()),
+
+    create: t.procedure
+      .input(z.object({
+        categoryId: z.union([z.string(), z.number()]),
+        pattern: z.string().min(1),
+        matchType: z.string().nullish(),
+        priority: z.union([z.string(), z.number()]).nullish(),
+      }))
+      .mutation(({ input }) => createCategorizationRule(input)),
+
+    update: t.procedure
+      .input(z.object({
+        id: z.union([z.string(), z.number()]),
+        categoryId: z.union([z.string(), z.number()]).optional(),
+        pattern: z.string().optional(),
+        matchType: z.string().nullish(),
+        priority: z.union([z.string(), z.number()]).nullish(),
+      }))
+      .mutation(({ input }) => {
+        const { id, ...changes } = input;
+        return updateCategorizationRule(id, changes);
+      }),
+
+    delete: t.procedure
+      .input(z.object({ id: z.union([z.string(), z.number()]) }))
+      .mutation(({ input }) => deleteCategorizationRule(input.id)),
+  }),
+
+  budgets: t.router({
+    list: t.procedure
+      .input(z.object({ month: z.string().nullish() }).optional())
+      .query(({ input }) => listBudgets(input ?? {})),
+
+    set: t.procedure
+      .input(z.object({
+        categoryId: z.union([z.string(), z.number()]),
+        month: z.string().min(1),
+        amount: z.number(),
+      }))
+      .mutation(({ input }) => setBudget(input)),
+
+    delete: t.procedure
+      .input(z.object({ id: z.union([z.string(), z.number()]) }))
+      .mutation(({ input }) => deleteBudget(input.id)),
+  }),
+
+  importProfiles: t.router({
+    list: t.procedure.query(() => listImportProfiles()),
+
+    upsert: t.procedure
+      .input(z.object({
+        headerSignature: z.string().min(1),
+        profileName: z.string().nullish(),
+        profileJson: z.string().min(1),
+        mappingJson: z.string().nullish(),
+        lastAccountId: optionalId,
+      }))
+      .mutation(({ input }) => upsertImportProfile(input)),
+  }),
+
+  imports: t.router({
+    preview: t.procedure
+      .input(z.object({
+        fileName: z.string().min(1),
+        text: z.string(),
+        fileBase64: z.string().nullish(),
+        customProfile: z.any().nullish(),
+      }))
+      .mutation(({ input }) => previewImport({
+        fileName: input.fileName,
+        text: input.text,
+        fileBytes: bytesFromBase64(input.fileBase64),
+        customProfile: input.customProfile,
+      })),
+
+    commit: t.procedure
+      .input(commitImportInput)
+      .mutation(({ input }) => commitImport(input as Parameters<typeof commitImport>[0])),
+
+    history: t.procedure.query(() => ({ imports: listImportHistory() })),
+
+    unimport: t.procedure
+      .input(z.object({ importFileId: z.union([z.string(), z.number()]) }))
+      .mutation(({ input }) => unimportFile(input.importFileId)),
+
+    reimport: t.procedure
+      .input(z.object({ importFileId: z.union([z.string(), z.number()]) }))
+      .mutation(({ input }) => reimportFile(input.importFileId)),
+
+    bulkUnimport: t.procedure
+      .input(z.object({ importFileIds: z.array(z.union([z.string(), z.number()])) }))
+      .mutation(({ input }) => unimportFiles(input.importFileIds)),
+
+    bulkReimport: t.procedure
+      .input(z.object({ importFileIds: z.array(z.union([z.string(), z.number()])) }))
+      .mutation(({ input }) => reimportFiles(input.importFileIds)),
+  }),
+
+  dataFreshness: t.router({
+    report: t.procedure
+      .input(z.object({ today: z.string().optional() }).optional())
+      .query(({ input }) => getDataFreshnessReport(input ?? {})),
+
+    catchUp: t.procedure
+      .input(z.object({ today: z.string().optional() }).optional())
+      .query(({ input }) => getDataFreshnessReport(input ?? {}).catchUp),
   }),
 
   transactions: t.router({
@@ -157,6 +342,11 @@ export const appRouter = t.router({
 
   netWorth: t.router({
     report: t.procedure.query(() => getNetWorthReport()),
+  }),
+
+  reports: t.router({
+    netWorth: t.procedure.query(() => getInvestmentNetWorthReport()),
+    savingsRate: t.procedure.query(() => getSavingsRateReport()),
   }),
 });
 
