@@ -17,7 +17,31 @@ const GENERIC_SUFFIXES = new Set([
 
 const SMALL_WORDS = new Set(['and', 'of', 'the', 'a', 'an']);
 
-function toTitleCase(value) {
+interface MerchantTransactionLike {
+  id: number | string;
+  amount: number;
+}
+
+export interface MerchantGroup {
+  name: string;
+  normalized: string;
+  amount: number;
+  count: number;
+  aliases: string[];
+  transactionIds: Array<number | string>;
+}
+
+export interface StackedMerchantGroup extends MerchantGroup {
+  customName: string;
+  stackedKeys: string[];
+  manuallyStackedKeys: string[];
+}
+
+type MutableMerchantGroup = Omit<StackedMerchantGroup, 'aliases'> & {
+  aliases: Set<string>;
+};
+
+function toTitleCase(value: string) {
   return value
     .split(' ')
     .filter(Boolean)
@@ -28,7 +52,7 @@ function toTitleCase(value) {
     .join(' ');
 }
 
-function extractPayPalCounterparty(value) {
+function extractPayPalCounterparty(value: string | null | undefined) {
   const text = String(value || '').trim();
   const bankDescriptionMatch = text.match(/^PAYPAL\s+DES:[\s\S]+?\bID:([\s\S]+?)\s+INDN:/i);
   if (bankDescriptionMatch?.[1]) return bankDescriptionMatch[1].trim();
@@ -39,7 +63,7 @@ function extractPayPalCounterparty(value) {
   return null;
 }
 
-export function normalizeMerchantName(value) {
+export function normalizeMerchantName(value: string | null | undefined) {
   const original = (value || 'Unknown').trim();
   if (!original) {
     return { key: 'UNKNOWN', displayName: 'Unknown', originalName: 'Unknown' };
@@ -78,8 +102,11 @@ export function normalizeMerchantName(value) {
   };
 }
 
-export function groupMerchantTransactions(transactions, getName) {
-  const groups = {};
+export function groupMerchantTransactions<T extends MerchantTransactionLike>(
+  transactions: T[],
+  getName: (transaction: T) => string
+) {
+  const groups: Record<string, MutableMerchantGroup> = {};
 
   transactions.forEach(transaction => {
     const { key, displayName, originalName } = normalizeMerchantName(getName(transaction));
@@ -91,6 +118,9 @@ export function groupMerchantTransactions(transactions, getName) {
         count: 0,
         aliases: new Set(),
         transactionIds: [],
+        customName: '',
+        stackedKeys: [key],
+        manuallyStackedKeys: [],
       };
     }
 
@@ -106,13 +136,18 @@ export function groupMerchantTransactions(transactions, getName) {
   }));
 }
 
-export function applyManualStacks(groups, stackMap = {}, labelMap = {}) {
-  const byKey = {};
+export function applyManualStacks(
+  groups: MerchantGroup[],
+  stackMap: Record<string, string> = {},
+  labelMap: Record<string, string> = {}
+): StackedMerchantGroup[] {
+  const byKey: Record<string, MutableMerchantGroup> = {};
   groups.forEach(group => {
     byKey[group.normalized] = {
       ...group,
       aliases: new Set(group.aliases),
       transactionIds: [...group.transactionIds],
+      customName: '',
       stackedKeys: [group.normalized],
       manuallyStackedKeys: []
     };

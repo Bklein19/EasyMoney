@@ -4,7 +4,7 @@ import { Check, AlertTriangle, X } from 'lucide-react';
 import { useAccounts } from '../../hooks/useAccounts';
 import { useTransactions } from '../../hooks/useTransactions';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
-import { isCreditAccount } from '../../utils/transactionSemantics';
+import { isCreditAccount } from '../../utils/accounts';
 import { getAccountTypeLabel } from '../../utils/formatters';
 import { splitDuplicateTransactions } from '../../utils/importIdentity';
 import './ImportPreview.css';
