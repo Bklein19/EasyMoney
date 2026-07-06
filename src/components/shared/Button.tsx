@@ -1,3 +1,11 @@
+import type { ButtonHTMLAttributes, ReactNode } from 'react';
+
+interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+  children: ReactNode;
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
+  size?: 'sm' | 'md' | 'lg';
+  iconOnly?: boolean;
+}
 
 const Button = ({
   children,
@@ -9,7 +17,7 @@ const Button = ({
   onClick,
   type = 'button',
   ...props
-}) => {
+}: ButtonProps) => {
   const baseClass = 'btn';
   const variantClass = variant ? `btn--${variant}` : '';
   const sizeClass = size !== 'md' ? `btn--${size}` : '';

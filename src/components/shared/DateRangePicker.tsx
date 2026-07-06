@@ -1,6 +1,14 @@
 import { Calendar } from 'lucide-react';
 
-const DateRangePicker = ({ startDate, endDate, onStartDateChange, onEndDateChange, className = '' }) => {
+interface DateRangePickerProps {
+  startDate?: string | null;
+  endDate?: string | null;
+  onStartDateChange: (value: string) => void;
+  onEndDateChange: (value: string) => void;
+  className?: string;
+}
+
+const DateRangePicker = ({ startDate, endDate, onStartDateChange, onEndDateChange, className = '' }: DateRangePickerProps) => {
   return (
     <div className={`date-range-picker flex items-center gap-2 ${className}`}>
       <div className="relative flex items-center">

@@ -1,11 +1,19 @@
 import { Search } from 'lucide-react';
+import type { ComponentType, ReactNode } from 'react';
 
-const EmptyState = ({ 
+interface EmptyStateProps {
+  icon?: ComponentType<{ size?: number }>;
+  title?: string;
+  description?: string;
+  action?: ReactNode;
+}
+
+const EmptyState = ({
   icon: Icon = Search, 
   title = 'No results found', 
   description = 'Try adjusting your search or filters.', 
   action 
-}) => {
+}: EmptyStateProps) => {
   return (
     <div className="empty-state">
       <div className="empty-state__icon">

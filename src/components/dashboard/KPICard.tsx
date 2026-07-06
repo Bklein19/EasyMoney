@@ -1,7 +1,17 @@
 import { formatCurrency, formatPercent } from '../../utils/formatters';
+import type { ComponentType, ReactNode } from 'react';
 
-export default function KPICard({ title, amount, trend, icon: Icon, trendLabel, detail }) {
-  const isPositive = trend >= 0;
+interface KPICardProps {
+  title: string;
+  amount: number;
+  trend?: number;
+  icon?: ComponentType<{ size?: number; className?: string }>;
+  trendLabel?: string;
+  detail?: ReactNode;
+}
+
+export default function KPICard({ title, amount, trend, icon: Icon, trendLabel, detail }: KPICardProps) {
+  const isPositive = (trend ?? 0) >= 0;
   
   return (
     <div className="glass-card kpi-card">

@@ -1,5 +1,12 @@
+import type { ReactNode } from 'react';
 
-const Tooltip = ({ text, children, position = 'top' }) => {
+interface TooltipProps {
+  text: string;
+  children: ReactNode;
+  position?: 'top' | 'right' | 'bottom' | 'left';
+}
+
+const Tooltip = ({ text, children, position = 'top' }: TooltipProps) => {
   // We use tooltip-wrapper and tooltip-text already defined in index.css
   return (
     <div className="tooltip-wrapper">

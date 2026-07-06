@@ -1,13 +1,24 @@
 import { useEffect, useRef } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import { X } from 'lucide-react';
 import Button from './Button';
 import './Modal.css';
 
-const Modal = ({ isOpen, onClose, title, children, footer, maxWidth = '520px', className = '' }) => {
-  const modalRef = useRef(null);
+interface ModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  title?: string;
+  children: ReactNode;
+  footer?: ReactNode;
+  maxWidth?: string;
+  className?: string;
+}
+
+const Modal = ({ isOpen, onClose, title, children, footer, maxWidth = '520px', className = '' }: ModalProps) => {
+  const modalRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const handleEsc = (e) => {
+    const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         onClose();
       }
@@ -26,7 +37,7 @@ const Modal = ({ isOpen, onClose, title, children, footer, maxWidth = '520px', c
 
   if (!isOpen) return null;
 
-  const handleOverlayClick = (e) => {
+  const handleOverlayClick = (e: MouseEvent<HTMLDivElement>) => {
     if (e.target === e.currentTarget) {
       onClose();
     }
