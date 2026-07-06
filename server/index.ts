@@ -21,6 +21,23 @@ seedDatabase();
 
 const defaultPort = Number(process.env.PORT || 4177);
 
+function shouldOpenBrowser(args = process.argv.slice(2)) {
+  return args.includes('--open');
+}
+
+function openBrowser(url: string) {
+  const command = process.platform === 'darwin'
+    ? ['open', url]
+    : process.platform === 'win32'
+      ? ['cmd', '/c', 'start', '', url]
+      : ['xdg-open', url];
+
+  Bun.spawn(command, {
+    stdout: 'ignore',
+    stderr: 'ignore',
+  });
+}
+
 function json(data: unknown, status = 200) {
   return Response.json(data, { status });
 }
@@ -96,5 +113,7 @@ export function createServer(options: { port?: number } = {}) {
 
 if (import.meta.main) {
   const server = createServer();
-  console.log(`EasyMoney Bun server listening on http://localhost:${server.port}`);
+  const url = `http://localhost:${server.port}`;
+  console.log(`EasyMoney Bun server listening on ${url}`);
+  if (shouldOpenBrowser()) openBrowser(url);
 }
