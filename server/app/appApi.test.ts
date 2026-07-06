@@ -340,7 +340,7 @@ test('app accounts endpoint returns domain-shaped accounts', async () => {
     type: 'checking',
     currentBalance: 1234.56,
     currency: 'USD',
-    accountHolder: 'Alex',
+    accountHolder: 'Example Owner',
     updatedAt: '2026-06-14T12:00:00.000Z',
   }));
   insertRow('ledgerBalances', {
@@ -370,7 +370,7 @@ test('app accounts endpoint returns domain-shaped accounts', async () => {
         latestBalanceMonth: '2026-06',
         isClosed: false,
         currency: 'USD',
-        accountHolder: 'Alex',
+        accountHolder: 'Example Owner',
         status: 'active',
         archivedAt: null,
         updatedAt: '2026-06-14T12:00:00.000Z',
@@ -2317,7 +2317,7 @@ test('investment report endpoints expose money-style ledger reports', async () =
     name: 'Brokerage',
     institution: 'Vanguard',
     type: 'investment',
-    accountHolder: 'Alex',
+    accountHolder: 'Example Owner',
     currentBalance: 0,
   }));
   insertRow('ledgerTransactions', {
@@ -2374,7 +2374,7 @@ test('investment report endpoints expose money-style ledger reports', async () =
     name: 'Brokerage',
     institution: 'Vanguard',
     type: 'investment',
-    account_holder: 'Alex',
+    account_holder: 'Example Owner',
   }));
   expect(netWorth.rows).toContainEqual(expect.objectContaining({
     month: '2026-01',
@@ -3686,7 +3686,7 @@ test('app imports commit creates accounts from explicit source account mapping d
         institution: 'Bank of America',
         type: 'savings',
         currency: 'USD',
-        accountHolder: 'Alex',
+        accountHolder: 'Example Owner',
       },
     }],
   });
@@ -3702,7 +3702,7 @@ test('app imports commit creates accounts from explicit source account mapping d
   expect(account).toMatchObject({
     institution: 'Bank of America',
     type: 'savings',
-    accountHolder: 'Alex',
+    accountHolder: 'Example Owner',
     status: 'active',
   });
   expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(preview.accountMappings[0].sourceAccountId)).toMatchObject({

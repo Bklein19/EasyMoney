@@ -34,7 +34,7 @@ test('money parser adapter translates money activity output to app import output
             description: 'Buy VTI',
             account: 'Brokerage-XXXX1234',
             institution: 'Vanguard',
-            account_holder: 'Alex',
+            account_holder: 'Example Owner',
             category: 'activity',
             raw: { row: 'raw activity row' },
           },
@@ -108,7 +108,7 @@ test('money parser adapter translates money activity output to app import output
       description: 'Buy VTI',
       institution: 'Vanguard',
       account: 'Brokerage-XXXX1234',
-      accountHolder: 'Alex',
+      accountHolder: 'Example Owner',
       sourceRole: 'activity',
       raw: {
         moneyId: 'tx-1',
@@ -406,7 +406,7 @@ test('import parser registry resolves raw files with stored content-hash prefixe
 
 test('import parser registry resolves Wells Fargo statements imported from folders', () => {
   const parser = resolveImportParser({
-    fileName: 'wells-fargo-statements/checking-8858/wells-fargo-checking-8858-2019-01-28.pdf',
+    fileName: 'wells-fargo-statements/checking-1234/wells-fargo-checking-1234-2019-01-28.pdf',
     headers: [],
     sample: 'Wells Fargo Everyday Checking Ending balance on 1/28 $2,564.53',
   });
@@ -417,7 +417,7 @@ test('import parser registry resolves Wells Fargo statements imported from folde
 test('Wells Fargo checking statement parser infers signs from running balances', () => {
   const result = parseWellsFargoStatementText([
     'Wells Fargo Everyday Checking',
-    'Account number: 000000008858',
+    'Account number: 1234',
     'Beginning balance on 10/26 $13,830.50',
     'Transaction history',
     '10/27 Mineraltree, Inc Quickbooks 191027 xxxxx2885 Example, Alex C 1,500.00',
@@ -427,7 +427,7 @@ test('Wells Fargo checking statement parser infers signs from running balances',
     '11/10 National Grid NE Utilitypay Nov 21 04424212798 Alex Example 8.62 13,039.25',
     'Totals',
     'Ending balance on 11/24 $13,039.25',
-  ].join('\n'), 'wells-fargo-statements/checking-8858/wells-fargo-checking-8858-2021-11-24.pdf');
+  ].join('\n'), 'wells-fargo-statements/checking-1234/wells-fargo-checking-1234-2021-11-24.pdf');
 
   expect(result.transactions.map(transaction => ({
     date: transaction.date,
@@ -456,7 +456,7 @@ test('Wells Fargo checking statement parser infers signs from running balances',
   }]);
   expect(result.balances).toEqual([{
     date: '2021-11-24',
-    account: 'Checking - 8858',
+    account: 'Checking - 1234',
     institution: 'Wells Fargo',
     balance_cents: 1303925,
   }]);
@@ -465,7 +465,7 @@ test('Wells Fargo checking statement parser infers signs from running balances',
 test('Wells Fargo checking statement parser keeps wrapped payroll rows with amount on following line', () => {
   const result = parseWellsFargoStatementText([
     'Wells Fargo Everyday Checking',
-    'Account number: 000000008858',
+    'Account number: 1234',
     'Beginning balance on 11/27 $5,000.00',
     'Transaction history',
     'Date',
@@ -487,7 +487,7 @@ test('Wells Fargo checking statement parser keeps wrapped payroll rows with amou
     '11/29 Applecard Gsbank Payment 112824 62110504 Alex Example 19.24 8,761.78',
     'Totals',
     'Ending balance on 12/24 $8,761.78',
-  ].join('\n'), 'wells-fargo-statements/checking-8858/wells-fargo-checking-8858-2024-12-24.pdf');
+  ].join('\n'), 'wells-fargo-statements/checking-1234/wells-fargo-checking-1234-2024-12-24.pdf');
 
   expect(result.transactions.map(transaction => ({
     date: transaction.date,
@@ -515,7 +515,7 @@ test('Wells Fargo checking statement parser keeps wrapped payroll rows with amou
 test('Wells Fargo checking statement parser reconciles wrapped deposits before the next ending balance', () => {
   const result = parseWellsFargoStatementText([
     'Wells Fargo Everyday Checking',
-    'Account number: 000000008858',
+    'Account number: 1234',
     'Beginning balance on 4/24 $5,614.75',
     'Transaction history',
     'Date',
@@ -531,12 +531,12 @@ test('Wells Fargo checking statement parser reconciles wrapped deposits before t
     'Registry Payout CA S346145301728387 Card 1736',
     '450.00',
     '5/26 eDeposit IN Branch 05/26/26 05:03:12 PM 1234 Example',
-    'Village Dr Example City CA 1736',
+    'Example Branch City ST 0000',
     '4,939.94',
     '5/26 Robinhood Card 3333333333 260526 Alex Example 574.28 10,430.41',
     'Totals',
     'Ending balance on 5/26 $10,430.41',
-  ].join('\n'), 'wells-fargo-statements/checking-8858/wells-fargo-checking-8858-2026-05-26.pdf');
+  ].join('\n'), 'wells-fargo-statements/checking-1234/wells-fargo-checking-1234-2026-05-26.pdf');
 
   expect(result.transactions.map(transaction => ({
     date: transaction.date,
@@ -549,7 +549,7 @@ test('Wells Fargo checking statement parser reconciles wrapped deposits before t
   }, {
     date: '2026-05-26',
     amount_cents: 493994,
-    description: 'eDeposit IN Branch 05/26/26 05:03:12 PM 1234 Example Village Dr Example City CA 1736',
+    description: 'eDeposit IN Branch 05/26/26 05:03:12 PM 1234 Example Example Branch City ST 0000',
   }, {
     date: '2026-05-26',
     amount_cents: -57428,
@@ -596,7 +596,7 @@ test('Robinhood statement parser extracts account activity and closing portfolio
   expect(result.covered_to).toBe('2026-05-31');
   expect(result.balances).toEqual([{
     date: '2026-05-31',
-    account: 'Robinhood Individual - 9769',
+    account: 'Robinhood Individual - 2222',
     institution: 'Robinhood',
     balance_cents: 40618435,
   }]);
@@ -612,7 +612,7 @@ test('Robinhood statement parser extracts account activity and closing portfolio
       date: '2026-05-05',
       amount_cents: -1040004,
       description: 'BTO AAPL 01/21/2028 Call $200.00',
-      account: 'Robinhood Individual - 9769',
+      account: 'Robinhood Individual - 2222',
       action: 'BTO',
       symbol: 'AAPL',
     },
@@ -620,7 +620,7 @@ test('Robinhood statement parser extracts account activity and closing portfolio
       date: '2026-05-05',
       amount_cents: 2419945,
       description: 'STC AMD 01/15/2027 Call $115.00',
-      account: 'Robinhood Individual - 9769',
+      account: 'Robinhood Individual - 2222',
       action: 'STC',
       symbol: 'AMD',
     },
@@ -628,7 +628,7 @@ test('Robinhood statement parser extracts account activity and closing portfolio
       date: '2026-05-05',
       amount_cents: -815600,
       description: 'Buy iShares 0-3 Month Treasury Bond',
-      account: 'Robinhood Individual - 9769',
+      account: 'Robinhood Individual - 2222',
       action: 'Buy',
       symbol: 'SGOV',
     },
@@ -636,7 +636,7 @@ test('Robinhood statement parser extracts account activity and closing portfolio
       date: '2026-05-13',
       amount_cents: 900000,
       description: 'ACH ACH Deposit',
-      account: 'Robinhood Individual - 9769',
+      account: 'Robinhood Individual - 2222',
       action: 'ACH',
       symbol: null,
     },
@@ -644,7 +644,7 @@ test('Robinhood statement parser extracts account activity and closing portfolio
       date: '2026-05-29',
       amount_cents: 119,
       description: 'INT Interest Payment',
-      account: 'Robinhood Individual - 9769',
+      account: 'Robinhood Individual - 2222',
       action: 'INT',
       symbol: null,
     },
@@ -672,12 +672,12 @@ test('Robinhood statement parser preserves separate retirement accounts in conso
 
   expect(result.balances).toEqual([{
     date: '2026-05-31',
-    account: 'Robinhood Traditional IRA - 3407',
+    account: 'Robinhood Traditional IRA - 4444',
     institution: 'Robinhood',
     balance_cents: 9459654,
   }, {
     date: '2026-05-31',
-    account: 'Robinhood Roth IRA - 8978',
+    account: 'Robinhood Roth IRA - 6666',
     institution: 'Robinhood',
     balance_cents: 21674008,
   }]);
@@ -688,22 +688,22 @@ test('Robinhood statement parser preserves separate retirement accounts in conso
     symbol: transaction.raw.symbol,
   }))).toEqual([{
     amount_cents: -11708,
-    account: 'Robinhood Traditional IRA - 3407',
+    account: 'Robinhood Traditional IRA - 4444',
     action: 'Buy',
     symbol: 'SPY',
   }, {
     amount_cents: 1754958,
-    account: 'Robinhood Traditional IRA - 3407',
+    account: 'Robinhood Traditional IRA - 4444',
     action: 'STC',
     symbol: 'GOOGL',
   }, {
     amount_cents: 28507,
-    account: 'Robinhood Roth IRA - 8978',
+    account: 'Robinhood Roth IRA - 6666',
     action: 'Sell',
     symbol: 'SNOW',
   }, {
     amount_cents: -861610,
-    account: 'Robinhood Roth IRA - 8978',
+    account: 'Robinhood Roth IRA - 6666',
     action: 'Buy',
     symbol: 'SPY',
   }]);
@@ -720,9 +720,9 @@ test('Robinhood statement parser normalizes personal account holder headings to 
     'INTC 02/07/2025 Put $20.00 INTC Margin STO 01/03/2025 1 $2.50000 $249.92',
   ].join('\n'));
 
-  expect(result.balances[0]?.account).toBe('Robinhood Individual - 9769');
+  expect(result.balances[0]?.account).toBe('Robinhood Individual - 2222');
   expect(result.balances[0]?.account_holder).toBe('Alex Example');
-  expect(result.transactions[0]?.account).toBe('Robinhood Individual - 9769');
+  expect(result.transactions[0]?.account).toBe('Robinhood Individual - 2222');
   expect(result.transactions[0]?.account_holder).toBe('Alex Example');
 });
 
@@ -923,7 +923,7 @@ test('Robinhood statement parser handles older Roth IRA statement layouts', () =
   expect(result.covered_to).toBe('2024-04-30');
   expect(result.balances).toEqual([{
     date: '2024-04-30',
-    account: 'Robinhood Roth IRA - 8978',
+    account: 'Robinhood Roth IRA - 6666',
     institution: 'Robinhood',
     balance_cents: 3565305,
   }]);
@@ -939,7 +939,7 @@ test('Robinhood statement parser handles older Roth IRA statement layouts', () =
     date: '2024-04-22',
     amount_cents: 2122,
     description: 'ACATI ACAT IN control_num = 20241070049362, firm_id = 0226, acct_num = 444555666',
-    account: 'Robinhood Roth IRA - 8978',
+    account: 'Robinhood Roth IRA - 6666',
     action: 'ACATI',
     symbol: null,
     accountType: 'Cash',
@@ -947,7 +947,7 @@ test('Robinhood statement parser handles older Roth IRA statement layouts', () =
     date: '2024-04-22',
     amount_cents: 108271,
     description: 'MTCH Interest on Contribution (IRA Match)',
-    account: 'Robinhood Roth IRA - 8978',
+    account: 'Robinhood Roth IRA - 6666',
     action: 'MTCH',
     symbol: null,
     accountType: 'Cash',
@@ -955,7 +955,7 @@ test('Robinhood statement parser handles older Roth IRA statement layouts', () =
     date: '2024-04-22',
     amount_cents: -110393,
     description: 'Buy SPDR S&P 500 ETF',
-    account: 'Robinhood Roth IRA - 8978',
+    account: 'Robinhood Roth IRA - 6666',
     action: 'Buy',
     symbol: 'SPY',
     accountType: 'Cash',
@@ -986,7 +986,7 @@ test('Robinhood statement parser extracts direct rollover contribution rows', ()
     date: '2024-05-23',
     amount_cents: 2168584,
     description: 'DRFRO Direct Rollover Check Received as of 2024-05-22',
-    account: 'Robinhood Roth IRA - 8978',
+    account: 'Robinhood Roth IRA - 6666',
     action: 'DRFRO',
     symbol: null,
     accountType: 'Cash',

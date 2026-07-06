@@ -37,9 +37,10 @@ function parseAccount(text: string): string {
   const number = text.match(/Account (?:Number|#):\s*(\d{3})-(\d{6})/i);
   if (!number) throw new Error("Could not find Fidelity portfolio account number");
   const digits = `${number[1]}${number[2]}`;
-  const label = text.match(/Account Summary\s+ALEX EXAMPLE\s+-\s+([A-Z ]+?)\s+Account Value/i)?.[1] ||
-    text.match(/ALEX EXAMPLE\s+-\s+([A-Z ]+?)(?:\s+Account Value|\s+This Period|\n)/i)?.[1] ||
-    text.match(/FIDELITY\s+([A-Z ]+?)\s+ALEX EXAMPLE/i)?.[1] ||
+  const label =
+    text.match(/Account Summary\s*\n?\s*[A-Z][A-Z -]+?\s+-\s+([A-Z ]+?)(?:\s+Account Value|\s+This Period|\n)/i)?.[1] ||
+    text.match(/(?:^|\n)\s*[A-Z][A-Z -]+?\s+-\s+([A-Z ]+?)(?:\s+Account Value|\s+This Period|\n)/i)?.[1] ||
+    text.match(/FIDELITY\s+([A-Z ]+?)\s+[A-Z][A-Z -]+(?:\n|$)/i)?.[1] ||
     "Portfolio Account";
   const cleanedLabel = label.replace(/account\s*summary/i, "").trim();
   return `${titleCase(cleanedLabel)} ${digits}`;

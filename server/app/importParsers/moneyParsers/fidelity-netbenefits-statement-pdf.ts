@@ -8,7 +8,7 @@ export const meta: ParserMeta = {
   kind: "statement",
   priority: 50,
   matches: ({ filename, sample }) =>
-    /^\d{4}-\d{2}-[A-Za-z]+-ExampleCo-401k-Fidelity-NetBenefits-Statement\.pdf$/i.test(filename) ||
+    /^\d{4}-\d{2}-[A-Za-z]+-.+-401k-Fidelity-NetBenefits-Statement\.pdf$/i.test(filename) ||
     (/\.pdf$/i.test(filename) &&
       /Fidelity NetBenefits|Retirement Savings Statement|Statement Details/i.test(sample) &&
       /Statement Period:\s*\d{2}\/\d{2}\/\d{4}\s+to\s+\d{2}\/\d{2}\/\d{4}/i.test(sample) &&

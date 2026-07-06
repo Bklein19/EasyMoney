@@ -6,7 +6,7 @@ export const meta: ParserMeta = {
   institution: "Fidelity",
   kind: "statement",
   priority: 50,
-  matches: ({ filename }) => /^fidelity-401k-examplepayroll-\d{4}-\d{2}\.html$/.test(filename),
+  matches: ({ filename }) => /^fidelity-401k-[a-z0-9-]+-\d{4}-\d{2}\.html$/i.test(filename),
 };
 
 const ACCOUNT = "Fidelity 401(k)";

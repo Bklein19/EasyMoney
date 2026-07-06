@@ -135,7 +135,7 @@ function isExternalIncome(transaction: { amount_cents: number; description: stri
   if (isInternalMoneyMove(transaction.description)) return false;
 
   const d = transaction.description.toLowerCase();
-  if (/401\(k\) contributions|rsu vest|espp purchase|direct deposit|payroll|salary|examplepayroll|example university uni/.test(d)) {
+  if (/401\(k\) contributions|rsu vest|espp purchase|direct deposit|payroll|salary|university/.test(d)) {
     return true;
   }
   if (/interest|dividend|cap gain/.test(d)) return true;
@@ -160,8 +160,8 @@ function incomeSourceLabel(description: string) {
   if (/401\(k\) contributions/.test(d)) return '401(k) contributions';
   if (/rsu vest/.test(d)) return 'RSU vesting';
   if (/espp purchase/.test(d)) return 'ESPP purchase';
-  if (/examplepayroll/.test(d)) return 'Example Payroll payroll';
-  if (/example university uni/.test(d)) return 'Example University';
+  if (/payroll/.test(d)) return 'Payroll';
+  if (/university/.test(d)) return 'University';
   if (/interest/.test(d)) return 'Interest';
   if (/dividend|cap gain/.test(d)) return 'Dividends';
   if (/\bdeposit\b/.test(d)) return 'Deposits';
