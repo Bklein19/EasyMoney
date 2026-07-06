@@ -269,32 +269,6 @@ export const routes = wrapRoutes({
     },
   },
 
-  '/api/migrate': {
-    POST: async (request) => {
-      const db = getDb();
-      const hasTransactions = (db.prepare('SELECT COUNT(*) AS count FROM transactions').get() as { count: number }).count > 0;
-      const hasAccounts = (db.prepare('SELECT COUNT(*) AS count FROM accounts').get() as { count: number }).count > 0;
-      if (hasTransactions || hasAccounts) {
-        return json({ skipped: true });
-      }
-
-      const payload = await bodyJson(request);
-      const migrate = db.transaction(() => {
-        for (const table of ['sourceBalances', 'sourceTransactions', 'sourceAccounts', 'sourceFiles', 'importRows', 'importFiles', 'transactionCategoryUndoOperations', 'transactionAnnotations', 'transactions', 'accountAliases', 'accounts', 'categories', 'budgets', 'balanceSnapshots', 'categorizationRules', 'importProfiles']) {
-          db.prepare(`DELETE FROM ${table}`).run();
-        }
-        for (const table of ['accounts', 'accountAliases', 'categories', 'budgets', 'balanceSnapshots', 'categorizationRules', 'importProfiles', 'importFiles', 'importRows', 'sourceFiles', 'sourceAccounts', 'sourceTransactions', 'sourceBalances', 'transactions', 'transactionAnnotations', 'transactionCategoryUndoOperations']) {
-          if (Array.isArray(payload[table]) && payload[table].length) {
-            insertRows(table, payload[table], true);
-          }
-        }
-      });
-      migrate();
-      seedDatabase();
-      return json({ ok: true });
-    },
-  },
-
   '/api/:table': {
     GET: (request) => {
       const table = request.params.table;
