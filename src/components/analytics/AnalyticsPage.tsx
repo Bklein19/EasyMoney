@@ -154,7 +154,7 @@ function isDateRange(value: string): value is DateRange {
 }
 
 export default function AnalyticsPage() {
-  const [dateRange, setDateRange] = useState<DateRange>(DATE_RANGES.THIS_MONTH);
+  const [dateRange, setDateRange] = useState<DateRange>(DATE_RANGES.ALL_TIME);
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
   const [accountId, setAccountId] = useState('');
