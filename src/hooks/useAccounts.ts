@@ -2,13 +2,15 @@ import { useQuery } from '@tanstack/react-query';
 import { queryClient, trpc, trpcClient } from '../api/trpc';
 import type { AccountSummary } from '../../server/app/types.ts';
 
-type AccountMetadataChanges = {
+export type AccountMetadataChanges = {
   name?: unknown;
   institution?: unknown;
   type?: unknown;
   currency?: unknown;
   accountHolder?: unknown;
 };
+
+export type AccountRow = ReturnType<typeof fromAppAccount>;
 
 export function useAccounts(options: { includeArchived?: boolean } = {}) {
   const includeArchived = Boolean(options.includeArchived);

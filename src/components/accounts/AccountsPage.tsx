@@ -1,17 +1,45 @@
-// @ts-nocheck
 import { Fragment, useMemo, useState } from 'react';
+import type { FormEvent } from 'react';
 import { Archive, Check, ChevronRight, RotateCcw } from 'lucide-react';
 import { useAccounts } from '../../hooks/useAccounts';
+import type { AccountMetadataChanges, AccountRow } from '../../hooks/useAccounts';
 import { formatCurrency, formatDate, getAccountTypeLabel } from '../../utils/formatters';
 import './AccountsPage.css';
 
 const ACCOUNT_TYPES = ['checking', 'savings', 'credit-card', 'investment', 'cash', 'other'];
 const CURRENCIES = ['USD'];
 
-const displayType = (type) => getAccountTypeLabel(type === 'credit-card' ? 'credit' : type);
+type AccountDraft = {
+  name: string;
+  institution: string;
+  type: string;
+  currency: string;
+  accountHolder: string;
+};
 
-function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }) {
-  const [draft, setDraft] = useState({
+type AccountDraftField = keyof AccountDraft;
+
+interface AccountDetailsProps {
+  account: AccountRow;
+  onSave: (changes: AccountMetadataChanges) => void | Promise<void>;
+  onArchiveToggle: () => void;
+  isSaving: boolean;
+  error?: string;
+}
+
+type ErrorByAccountId = Record<number, string>;
+
+const displayType = (type: string | null | undefined) => {
+  const normalizedType = type === 'credit-card' ? 'credit' : type || 'other';
+  return getAccountTypeLabel(normalizedType);
+};
+
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback;
+}
+
+function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }: AccountDetailsProps) {
+  const [draft, setDraft] = useState<AccountDraft>({
     name: account.name || '',
     institution: account.institution || '',
     type: account.type || 'other',
@@ -27,11 +55,11 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }) {
     draft.currency !== (account.currency || 'USD') ||
     draft.accountHolder.trim() !== (account.accountHolder || '');
 
-  const updateDraft = (field, value) => {
+  const updateDraft = (field: AccountDraftField, value: string) => {
     setDraft(current => ({ ...current, [field]: value }));
   };
 
-  const handleSubmit = (event) => {
+  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     onSave({
       name: draft.name.trim(),
@@ -146,9 +174,9 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }) {
 
 export default function AccountsPage() {
   const { accounts, updateAccount, archiveAccount, unarchiveAccount, isLoading } = useAccounts({ includeArchived: true });
-  const [expandedAccountId, setExpandedAccountId] = useState(null);
-  const [savingAccountId, setSavingAccountId] = useState(null);
-  const [errorByAccountId, setErrorByAccountId] = useState({});
+  const [expandedAccountId, setExpandedAccountId] = useState<number | null>(null);
+  const [savingAccountId, setSavingAccountId] = useState<number | null>(null);
+  const [errorByAccountId, setErrorByAccountId] = useState<ErrorByAccountId>({});
 
   const activeAccounts = useMemo(
     () => accounts.filter(account => account.status !== 'archived'),
@@ -159,24 +187,24 @@ export default function AccountsPage() {
     [activeAccounts]
   );
 
-  const setAccountError = (accountId, message) => {
+  const setAccountError = (accountId: number, message: string) => {
     setErrorByAccountId(current => ({ ...current, [accountId]: message }));
   };
 
-  const saveAccount = async (account, changes) => {
+  const saveAccount = async (account: AccountRow, changes: AccountMetadataChanges) => {
     setSavingAccountId(account.id);
     setAccountError(account.id, '');
 
     try {
       await updateAccount(account.id, changes);
     } catch (saveError) {
-      setAccountError(account.id, saveError?.message || 'Could not update account.');
+      setAccountError(account.id, errorMessage(saveError, 'Could not update account.'));
     } finally {
       setSavingAccountId(null);
     }
   };
 
-  const toggleArchive = async (account) => {
+  const toggleArchive = async (account: AccountRow) => {
     const isArchived = account.status === 'archived';
     const confirmed = window.confirm(isArchived
       ? `Unarchive ${account.name}? It will be available for imports and reports again.`
@@ -193,7 +221,7 @@ export default function AccountsPage() {
         await archiveAccount(account.id);
       }
     } catch (archiveError) {
-      setAccountError(account.id, archiveError?.message || 'Could not update archive status.');
+      setAccountError(account.id, errorMessage(archiveError, 'Could not update archive status.'));
     } finally {
       setSavingAccountId(null);
     }
