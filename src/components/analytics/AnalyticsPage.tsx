@@ -1,5 +1,5 @@
-// @ts-nocheck
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import type { ChangeEvent, FormEvent, UIEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { addMonths, endOfDay, endOfMonth, endOfWeek, endOfYear, format, parseISO, startOfMonth, startOfWeek, startOfYear, subMonths, subWeeks } from 'date-fns';
 import { Calendar, ChevronLeft, ChevronRight, HelpCircle, Landmark, Maximize2, RotateCcw, Search, X } from 'lucide-react';
@@ -17,6 +17,9 @@ import InvestmentTrends from './InvestmentTrends';
 import Tooltip from '../shared/Tooltip';
 import Modal from '../shared/Modal';
 import GroupedCategorySelect, { isUncategorized } from '../shared/GroupedCategorySelect';
+import type { AnalyticsGroupMode, CategoryFilterMode } from '../../../server/app/analytics.ts';
+import type { CategorySummary, TransactionListItem } from '../../../server/app/types.ts';
+import type { AnalyticsPeriodRow } from './PeriodClickOverlay';
 
 import './Analytics.css';
 
@@ -27,7 +30,7 @@ const DATE_RANGES = {
   THIS_YEAR: 'This Year',
   CUSTOM: 'Custom',
   ALL_TIME: 'All Time'
-};
+} as const;
 
 const CASH_FLOW_GROUPS = {
   AUTO: 'Auto',
@@ -35,16 +38,96 @@ const CASH_FLOW_GROUPS = {
   WEEK: 'Weekly',
   MONTH: 'Monthly',
   YEAR: 'Yearly'
-};
+} as const;
 
-const toDateInput = (date) => format(date, 'yyyy-MM-dd');
 const DRILLDOWN_PAGE_SIZE = 20;
 const CATEGORY_FILTER_MODES = {
   INCLUDE: 'include',
   EXCLUDE: 'exclude'
-};
+} as const;
 
-function toUiTransaction(transaction) {
+type DateRange = typeof DATE_RANGES[keyof typeof DATE_RANGES];
+type CategoryFilterModeValue = typeof CATEGORY_FILTER_MODES[keyof typeof CATEGORY_FILTER_MODES];
+type CategoryFilterIdsByMode = Record<CategoryFilterModeValue, string[]>;
+type DrilldownSort = 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc';
+type ExpandedChart = 'incomeExpense' | 'spendingTrends' | null;
+
+interface UiTransaction extends TransactionListItem {
+  accountId: number | null;
+  categoryId: number | null;
+}
+
+interface AnalyticsSummary {
+  income: number;
+  expenses: number;
+  internalMovement: number;
+  investments: number;
+  net: number;
+}
+
+interface CashFlowRow extends AnalyticsPeriodRow {
+  key: string;
+  label: string;
+  startDate: string;
+  endDate: string;
+  income: number;
+  expenses: number;
+  net: number;
+  categoryAmounts: Record<string, number>;
+  transactionIds: number[];
+}
+
+interface SpendingCategoryRow {
+  id: string | number;
+  name: string;
+  amount: number;
+  color?: string | null;
+  transactionIds?: Array<string | number>;
+}
+
+interface MerchantAnalyticsRow {
+  normalized: string;
+  name: string;
+  amount: number;
+  count: number;
+  transactionIds: number[];
+}
+
+interface InvestmentPeriodRow extends AnalyticsPeriodRow {
+  key: string;
+  label: string;
+  amount: number;
+  transactionIds: number[];
+  displayLabel?: string;
+}
+
+interface AnalyticsReport {
+  summary: AnalyticsSummary;
+  cashFlow: CashFlowRow[];
+  spendingByCategory: SpendingCategoryRow[];
+  topMerchants: MerchantAnalyticsRow[];
+  incomeStreams: MerchantAnalyticsRow[];
+  investments: InvestmentPeriodRow[];
+  transactions: TransactionListItem[];
+  analysisTransactions: TransactionListItem[];
+}
+
+interface DrilldownState {
+  type: 'category' | 'merchant' | 'incomeStream' | 'period' | 'investmentPeriod';
+  id?: string;
+  title: string;
+  ids: Set<string | number>;
+  aliases?: string[];
+  scrollIntoView?: boolean;
+}
+
+interface AddCategoryFilterOptions {
+  resetSelection?: boolean;
+}
+
+const toDateInput = (date: Date) => format(date, 'yyyy-MM-dd');
+
+function toUiTransaction(transaction: TransactionListItem): UiTransaction {
   return {
     ...transaction,
     accountId: transaction.account?.id ?? null,
@@ -52,34 +135,46 @@ function toUiTransaction(transaction) {
   };
 }
 
-function getMonthSpan(startDate, endDate) {
+function getMonthSpan(startDate: string, endDate: string) {
   const start = parseISO(startDate);
   const end = parseISO(endDate);
   return Math.max(1, ((end.getFullYear() - start.getFullYear()) * 12) + end.getMonth() - start.getMonth() + 1);
 }
 
+function isCategoryFilterMode(value: string): value is CategoryFilterModeValue {
+  return value === CATEGORY_FILTER_MODES.INCLUDE || value === CATEGORY_FILTER_MODES.EXCLUDE;
+}
+
+function isAnalyticsGroupMode(value: string): value is AnalyticsGroupMode {
+  return Object.values(CASH_FLOW_GROUPS).includes(value as AnalyticsGroupMode);
+}
+
+function isDateRange(value: string): value is DateRange {
+  return Object.values(DATE_RANGES).includes(value as DateRange);
+}
+
 export default function AnalyticsPage() {
-  const [dateRange, setDateRange] = useState(DATE_RANGES.THIS_MONTH);
+  const [dateRange, setDateRange] = useState<DateRange>(DATE_RANGES.THIS_MONTH);
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
   const [accountId, setAccountId] = useState('');
-  const [categoryFilterIdsByMode, setCategoryFilterIdsByMode] = useState({
+  const [categoryFilterIdsByMode, setCategoryFilterIdsByMode] = useState<CategoryFilterIdsByMode>({
     [CATEGORY_FILTER_MODES.INCLUDE]: [],
     [CATEGORY_FILTER_MODES.EXCLUDE]: []
   });
-  const [categoryFilterMode, setCategoryFilterMode] = useState(CATEGORY_FILTER_MODES.INCLUDE);
+  const [categoryFilterMode, setCategoryFilterMode] = useState<CategoryFilterModeValue>(CATEGORY_FILTER_MODES.INCLUDE);
   const [pendingCategoryFilterId, setPendingCategoryFilterId] = useState('');
-  const [cashFlowGroup, setCashFlowGroup] = useState(CASH_FLOW_GROUPS.AUTO);
-  const [drilldown, setDrilldown] = useState(null);
+  const [cashFlowGroup, setCashFlowGroup] = useState<AnalyticsGroupMode>(CASH_FLOW_GROUPS.AUTO);
+  const [drilldown, setDrilldown] = useState<DrilldownState | null>(null);
   const [drilldownSearch, setDrilldownSearch] = useState('');
-  const [drilldownSort, setDrilldownSort] = useState('date_desc');
+  const [drilldownSort, setDrilldownSort] = useState<DrilldownSort>('date_desc');
   const [isCreatingDrilldownCategory, setIsCreatingDrilldownCategory] = useState(false);
   const [newDrilldownCategoryName, setNewDrilldownCategoryName] = useState('');
-  const [pendingDrilldownCategoryValue, setPendingDrilldownCategoryValue] = useState(null);
+  const [pendingDrilldownCategoryValue, setPendingDrilldownCategoryValue] = useState<string | null>(null);
   const [drilldownVisibleCount, setDrilldownVisibleCount] = useState(DRILLDOWN_PAGE_SIZE);
-  const [expandedChart, setExpandedChart] = useState(null);
+  const [expandedChart, setExpandedChart] = useState<ExpandedChart>(null);
   const [showTotalSpendTrend, setShowTotalSpendTrend] = useState(false);
-  const drilldownRef = useRef(null);
+  const drilldownRef = useRef<HTMLDivElement | null>(null);
   
   const { startDate, endDate } = useMemo(() => {
     const today = new Date();
@@ -116,13 +211,13 @@ export default function AnalyticsPage() {
   const analyticsInput = useMemo(() => ({
     startDate,
     endDate,
-    accountId,
+    accountId: accountId || null,
     categoryFilterIds,
-    categoryFilterMode,
+    categoryFilterMode: categoryFilterMode as CategoryFilterMode,
     groupMode: cashFlowGroup,
   }), [accountId, cashFlowGroup, categoryFilterIds, categoryFilterMode, endDate, startDate]);
   const analyticsReportQuery = useQuery(trpc.analytics.report.queryOptions(analyticsInput));
-  const analyticsReport = analyticsReportQuery.data;
+  const analyticsReport = analyticsReportQuery.data as AnalyticsReport | undefined;
   const reportTransactions = useMemo(
     () => (analyticsReport?.transactions ?? []).map(toUiTransaction),
     [analyticsReport?.transactions]
@@ -167,7 +262,7 @@ export default function AnalyticsPage() {
 
   // Create a fast map for category lookup
   const categoryMap = useMemo(() => {
-    const map = {};
+    const map: Record<string, CategorySummary> = {};
     deferredCategories.forEach(c => { map[c.id] = c; });
     return map;
   }, [deferredCategories]);
@@ -208,7 +303,7 @@ export default function AnalyticsPage() {
     const query = drilldownSearch.trim().toLowerCase();
     const searched = query
       ? drilldownTransactions.filter(transaction => {
-        const categoryName = categoryMap[transaction.categoryId]?.name || 'Uncategorized';
+        const categoryName = transaction.categoryId ? categoryMap[String(transaction.categoryId)]?.name || 'Uncategorized' : 'Uncategorized';
         return [
           transaction.merchant,
           transaction.description,
@@ -258,14 +353,14 @@ export default function AnalyticsPage() {
     drilldownRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [drilldown]);
 
-  const confirmLargeDrilldownChange = (count, categoryName) => {
+  const confirmLargeDrilldownChange = (count: number, categoryName: string) => {
     if (count <= 50) return true;
     return window.confirm(
       `This will set the category for ${count} visible drilldown transactions to "${categoryName}". This is a bulk edit and cannot be automatically undone.\n\nContinue?`
     );
   };
 
-  const handleBulkCategoryChange = async (categoryId) => {
+  const handleBulkCategoryChange = async (categoryId: string | number | null) => {
     const nextCategoryId = categoryId ? Number(categoryId) : null;
     await trpcClient.transactions.categorize.mutate({
       transactionIds: visibleDrilldownTransactions.map(transaction => transaction.id),
@@ -302,7 +397,7 @@ export default function AnalyticsPage() {
     setNewDrilldownCategoryName('');
   };
 
-  const handleCreateDrilldownCategory = async (event) => {
+  const handleCreateDrilldownCategory = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
     const name = newDrilldownCategoryName.trim();
@@ -323,7 +418,7 @@ export default function AnalyticsPage() {
     resetDrilldownCategoryCreate();
   };
 
-  const openDrilldown = (nextDrilldown) => {
+  const openDrilldown = (nextDrilldown: DrilldownState) => {
     setDrilldownSearch('');
     setDrilldownSort('date_desc');
     setPendingDrilldownCategoryValue(null);
@@ -331,8 +426,8 @@ export default function AnalyticsPage() {
     setDrilldown(nextDrilldown);
   };
 
-  const handlePeriodSelect = (period) => {
-    if (period.startDate && period.endDate) {
+  const handlePeriodSelect = (period: AnalyticsPeriodRow) => {
+    if (typeof period.startDate === 'string' && typeof period.endDate === 'string') {
       setCustomStartDate(period.startDate);
       setCustomEndDate(period.endDate);
       setDateRange(DATE_RANGES.CUSTOM);
@@ -350,7 +445,7 @@ export default function AnalyticsPage() {
     setDrilldownVisibleCount(DRILLDOWN_PAGE_SIZE);
   };
 
-  const handleDrilldownScroll = (event) => {
+  const handleDrilldownScroll = (event: UIEvent<HTMLDivElement>) => {
     if (!hasMoreDrilldownTransactions) return;
 
     const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
@@ -361,7 +456,7 @@ export default function AnalyticsPage() {
     }
   };
 
-  const handleDateRangeChange = (nextRange) => {
+  const handleDateRangeChange = (nextRange: DateRange) => {
     if (nextRange === DATE_RANGES.CUSTOM && !customStartDate && !customEndDate) {
       const today = new Date();
       setCustomStartDate(toDateInput(startOfMonth(today)));
@@ -372,7 +467,7 @@ export default function AnalyticsPage() {
     resetAnalyticsSelection();
   };
 
-  const addCategoryFilter = (categoryId, mode = categoryFilterMode, options = {}) => {
+  const addCategoryFilter = (categoryId: string, mode: CategoryFilterModeValue = categoryFilterMode, options: AddCategoryFilterOptions = {}) => {
     if (!categoryId) return;
     setCategoryFilterMode(mode);
     setCategoryFilterIdsByMode(previous => {
@@ -386,7 +481,7 @@ export default function AnalyticsPage() {
     if (options.resetSelection !== false) resetAnalyticsSelection();
   };
 
-  const includeCategoryFromChart = (category) => {
+  const includeCategoryFromChart = (category: SpendingCategoryRow) => {
     const categoryId = String(category.id);
     addCategoryFilter(categoryId, CATEGORY_FILTER_MODES.INCLUDE, { resetSelection: false });
     openDrilldown({
@@ -398,11 +493,11 @@ export default function AnalyticsPage() {
     });
   };
 
-  const excludeCategoryFromChart = (categoryId) => {
+  const excludeCategoryFromChart = (categoryId: string) => {
     addCategoryFilter(categoryId, CATEGORY_FILTER_MODES.EXCLUDE);
   };
 
-  const removeCategoryFilter = (categoryId) => {
+  const removeCategoryFilter = (categoryId: string) => {
     setCategoryFilterIdsByMode(previous => ({
       ...previous,
       [categoryFilterMode]: (previous[categoryFilterMode] || []).filter(id => id !== categoryId)
@@ -419,18 +514,18 @@ export default function AnalyticsPage() {
     resetAnalyticsSelection();
   };
 
-  const handleCategoryFilterModeChange = (nextMode) => {
+  const handleCategoryFilterModeChange = (nextMode: CategoryFilterModeValue) => {
     setCategoryFilterMode(nextMode);
     setPendingCategoryFilterId('');
     resetAnalyticsSelection();
   };
 
-  const getCategoryFilterLabel = (categoryId) => {
+  const getCategoryFilterLabel = (categoryId: string) => {
     if (categoryId === 'uncategorized') return 'Uncategorized';
     return categories.find(category => String(category.id) === categoryId)?.name || 'Unknown category';
   };
 
-  const handleShiftMonthWindow = (direction) => {
+  const handleShiftMonthWindow = (direction: number) => {
     if (!startDate || !endDate) return;
 
     const spanMonths = getMonthSpan(startDate, endDate);
@@ -455,11 +550,12 @@ export default function AnalyticsPage() {
     return `${format(parseISO(startDate), 'MMM d, yyyy')} - ${format(parseISO(endDate), 'MMM d, yyyy')}`;
   }, [startDate, endDate]);
 
-  const handleInvestmentPeriodSelect = (period) => {
+  const handleInvestmentPeriodSelect = (period: AnalyticsPeriodRow) => {
+    const investmentPeriod = period as InvestmentPeriodRow;
     openDrilldown({
       type: 'investmentPeriod',
-      title: `${period.displayLabel} Investments`,
-      ids: new Set(period.transactionIds)
+      title: `${investmentPeriod.displayLabel || investmentPeriod.label} Investments`,
+      ids: new Set(investmentPeriod.transactionIds)
     });
   };
 
@@ -488,7 +584,9 @@ export default function AnalyticsPage() {
           <select
             className="input input--sm"
             value={categoryFilterMode}
-            onChange={(event) => handleCategoryFilterModeChange(event.target.value)}
+            onChange={(event) => {
+              if (isCategoryFilterMode(event.target.value)) handleCategoryFilterModeChange(event.target.value);
+            }}
             aria-label="Category filter mode"
           >
             <option value={CATEGORY_FILTER_MODES.INCLUDE}>Include categories</option>
@@ -547,7 +645,9 @@ export default function AnalyticsPage() {
         <select
           className="input input--sm"
           value={dateRange}
-          onChange={(e) => handleDateRangeChange(e.target.value)}
+          onChange={(e) => {
+            if (isDateRange(e.target.value)) handleDateRangeChange(e.target.value);
+          }}
         >
           {Object.values(DATE_RANGES).map(range => (
             <option key={range} value={range}>{range}</option>
@@ -620,7 +720,9 @@ export default function AnalyticsPage() {
         <select
           className="input input--sm"
           value={cashFlowGroup}
-          onChange={(e) => setCashFlowGroup(e.target.value)}
+          onChange={(e) => {
+            if (isAnalyticsGroupMode(e.target.value)) setCashFlowGroup(e.target.value);
+          }}
         >
           {Object.values(CASH_FLOW_GROUPS).map(group => (
             <option key={group} value={group}>{group}</option>
@@ -830,12 +932,12 @@ export default function AnalyticsPage() {
                   {formatCurrency(drilldownFilteredTotal, true)}
                 </strong>
               </div>
-              {drilldown.aliases?.length > 1 && (
+              {(drilldown.aliases?.length ?? 0) > 1 && (
                 <div className="drilldown-aliases">
-                  {drilldown.aliases.slice(0, 6).map(alias => (
+                  {(drilldown.aliases ?? []).slice(0, 6).map(alias => (
                     <span key={alias}>{alias}</span>
                   ))}
-                  {drilldown.aliases.length > 6 && <span>+{drilldown.aliases.length - 6} more</span>}
+                  {(drilldown.aliases?.length ?? 0) > 6 && <span>+{(drilldown.aliases?.length ?? 0) - 6} more</span>}
                 </div>
               )}
             </div>
@@ -919,7 +1021,10 @@ export default function AnalyticsPage() {
               className="input input--sm drilldown-sort"
               value={drilldownSort}
               onChange={(event) => {
-                setDrilldownSort(event.target.value);
+                const value = event.target.value;
+                if (value === 'date_desc' || value === 'date_asc' || value === 'amount_desc' || value === 'amount_asc') {
+                  setDrilldownSort(value);
+                }
                 setDrilldownVisibleCount(DRILLDOWN_PAGE_SIZE);
               }}
             >
@@ -934,7 +1039,7 @@ export default function AnalyticsPage() {
               <div key={transaction.id} className="drilldown-row">
                 <span>{formatDate(transaction.date, 'medium')}</span>
                 <strong className="truncate">{transaction.merchant || transaction.description}</strong>
-                <span>{categoryMap[transaction.categoryId]?.name || 'Uncategorized'}</span>
+                <span>{transaction.categoryId ? categoryMap[String(transaction.categoryId)]?.name || 'Uncategorized' : 'Uncategorized'}</span>
                 <span className={`amount ${getAmountClass(transaction.amount)}`}>{formatCurrency(transaction.amount, true)}</span>
               </div>
             ))}

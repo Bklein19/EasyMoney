@@ -7,7 +7,7 @@ import { usePersistentStackMap } from '../../hooks/usePersistentStackMap';
 import Tooltip from '../shared/Tooltip';
 
 interface IncomeStreamsProps {
-  rows?: MerchantGroup[];
+  rows?: Array<Omit<MerchantGroup, 'aliases'> & { aliases?: string[] }>;
   onSelectStream?: (stream: StackedMerchantGroup) => void;
 }
 

@@ -7,7 +7,7 @@ import { usePersistentStackMap } from '../../hooks/usePersistentStackMap';
 import Tooltip from '../shared/Tooltip';
 
 interface TopMerchantsProps {
-  rows?: MerchantGroup[];
+  rows?: Array<Omit<MerchantGroup, 'aliases'> & { aliases?: string[] }>;
   onSelectMerchant?: (merchant: StackedMerchantGroup) => void;
 }
 

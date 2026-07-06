@@ -10,6 +10,8 @@ export interface CategorySpendingRow {
   id: string | number;
   name: string;
   amount: number;
+  color?: string | null;
+  transactionIds?: Array<string | number>;
 }
 
 interface SpendingByCategoryProps {
