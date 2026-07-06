@@ -1,7 +1,31 @@
-// @ts-nocheck
 import { Customized } from 'recharts';
 
-function OverlayRects({ data = [], onSelectPeriod, offset, width, height }) {
+export interface AnalyticsPeriodRow {
+  timeKey: string;
+  [key: string]: unknown;
+}
+
+interface ChartOffset {
+  left?: number;
+  top?: number;
+  width?: number;
+  height?: number;
+}
+
+interface OverlayRectsProps {
+  data?: AnalyticsPeriodRow[];
+  onSelectPeriod?: (period: AnalyticsPeriodRow) => void;
+  offset?: ChartOffset;
+  width?: number;
+  height?: number;
+}
+
+interface PeriodClickOverlayProps {
+  data: AnalyticsPeriodRow[];
+  onSelectPeriod?: (period: AnalyticsPeriodRow) => void;
+}
+
+function OverlayRects({ data = [], onSelectPeriod, offset, width, height }: OverlayRectsProps) {
   if (!data.length || !onSelectPeriod) return null;
 
   const left = offset?.left ?? 0;
@@ -30,10 +54,10 @@ function OverlayRects({ data = [], onSelectPeriod, offset, width, height }) {
   );
 }
 
-export default function PeriodClickOverlay({ data, onSelectPeriod }) {
+export default function PeriodClickOverlay({ data, onSelectPeriod }: PeriodClickOverlayProps) {
   return (
     <Customized
-      component={(props) => (
+      component={(props: OverlayRectsProps) => (
         <OverlayRects
           {...props}
           data={data}

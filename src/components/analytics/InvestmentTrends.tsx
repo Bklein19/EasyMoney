@@ -1,4 +1,3 @@
-// @ts-nocheck
 import {
   Bar,
   BarChart,
@@ -8,14 +7,48 @@ import {
   XAxis,
   YAxis
 } from 'recharts';
+import type { AnalyticsPeriodRow } from './PeriodClickOverlay';
 
-const formatCurrency = (val) => new Intl.NumberFormat('en-US', {
+interface InvestmentTrendRow {
+  key: string;
+  label: string;
+  amount: number;
+}
+
+interface InvestmentTrendChartRow extends InvestmentTrendRow, AnalyticsPeriodRow {
+  displayLabel: string;
+  Investments: number;
+}
+
+interface InvestmentTrendsProps {
+  rows?: InvestmentTrendRow[];
+  onSelectPeriod?: (period: AnalyticsPeriodRow) => void;
+}
+
+interface TooltipPayloadEntry {
+  color?: string;
+  value: number;
+  payload: InvestmentTrendChartRow;
+}
+
+interface TooltipProps {
+  active?: boolean;
+  payload?: TooltipPayloadEntry[];
+}
+
+function getActivePeriodPayload(state: unknown) {
+  if (!state || typeof state !== 'object') return null;
+  const activePayload = (state as { activePayload?: Array<{ payload?: AnalyticsPeriodRow }> }).activePayload;
+  return activePayload?.[0]?.payload ?? null;
+}
+
+const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', {
   style: 'currency',
   currency: 'USD',
   maximumFractionDigits: 0
 }).format(val);
 
-const CustomTooltip = ({ active, payload }) => {
+const CustomTooltip = ({ active, payload }: TooltipProps) => {
   if (active && payload && payload.length) {
     return (
       <div className="custom-tooltip">
@@ -30,7 +63,7 @@ const CustomTooltip = ({ active, payload }) => {
   return null;
 };
 
-export default function InvestmentTrends({ rows = [], onSelectPeriod }) {
+export default function InvestmentTrends({ rows = [], onSelectPeriod }: InvestmentTrendsProps) {
   const data = rows.map(row => ({
     ...row,
     timeKey: row.key,
@@ -53,9 +86,10 @@ export default function InvestmentTrends({ rows = [], onSelectPeriod }) {
         <BarChart
           data={data}
           margin={{ top: 10, right: 10, left: 12, bottom: 0 }}
-          onClick={(state) => {
-            if (state?.activePayload?.[0]?.payload && onSelectPeriod) {
-              onSelectPeriod(state.activePayload[0].payload);
+          onClick={(state: unknown) => {
+            const period = getActivePeriodPayload(state);
+            if (period && onSelectPeriod) {
+              onSelectPeriod(period);
             }
           }}
         >

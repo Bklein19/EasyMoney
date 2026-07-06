@@ -1,15 +1,25 @@
-// @ts-nocheck
 import { useMemo, useState } from 'react';
+import type { DragEvent, FormEvent, KeyboardEvent, MouseEvent } from 'react';
 import { Check, GripVertical, HelpCircle, Pencil, RotateCcw, X } from 'lucide-react';
 import { applyManualStacks } from '../../utils/merchantNormalizer';
+import type { MerchantGroup, StackedMerchantGroup } from '../../utils/merchantNormalizer';
 import { usePersistentStackMap } from '../../hooks/usePersistentStackMap';
 import Tooltip from '../shared/Tooltip';
 
-export default function IncomeStreams({ rows = [], onSelectStream }) {
+interface IncomeStreamsProps {
+  rows?: MerchantGroup[];
+  onSelectStream?: (stream: StackedMerchantGroup) => void;
+}
+
+function containsRelatedTarget(currentTarget: EventTarget & Element, relatedTarget: EventTarget | null) {
+  return relatedTarget instanceof Node && currentTarget.contains(relatedTarget);
+}
+
+export default function IncomeStreams({ rows = [], onSelectStream }: IncomeStreamsProps) {
   const { stackMap, labelMap, stackGroup, undoStack, renameStack } = usePersistentStackMap('vaultview:incomeStacks');
-  const [draggingKey, setDraggingKey] = useState(null);
-  const [dropTargetKey, setDropTargetKey] = useState(null);
-  const [editingKey, setEditingKey] = useState(null);
+  const [draggingKey, setDraggingKey] = useState<string | null>(null);
+  const [dropTargetKey, setDropTargetKey] = useState<string | null>(null);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const data = useMemo(() => {
     const streams = applyManualStacks(rows.map(row => ({
@@ -31,22 +41,22 @@ export default function IncomeStreams({ rows = [], onSelectStream }) {
     );
   }
 
-  const formatCurrency = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
+  const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
   const isDragging = Boolean(draggingKey);
 
-  const beginRename = (event, stream) => {
+  const beginRename = (event: MouseEvent, stream: StackedMerchantGroup) => {
     event.stopPropagation();
     setEditingKey(stream.normalized);
     setEditingName(stream.customName || stream.name);
   };
 
-  const cancelRename = (event) => {
+  const cancelRename = (event: MouseEvent) => {
     event.stopPropagation();
     setEditingKey(null);
     setEditingName('');
   };
 
-  const saveRename = (event, stream) => {
+  const saveRename = (event: FormEvent, stream: StackedMerchantGroup) => {
     event.preventDefault();
     event.stopPropagation();
     renameStack(stream.normalized, editingName);
@@ -101,8 +111,8 @@ export default function IncomeStreams({ rows = [], onSelectStream }) {
               event.dataTransfer.dropEffect = 'move';
               setDropTargetKey(stream.normalized);
             }}
-            onDragLeave={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget)) {
+            onDragLeave={(event: DragEvent<HTMLDivElement>) => {
+              if (!containsRelatedTarget(event.currentTarget, event.relatedTarget)) {
                 setDropTargetKey(null);
               }
             }}
@@ -189,7 +199,7 @@ export default function IncomeStreams({ rows = [], onSelectStream }) {
                   event.stopPropagation();
                   undoStack(stream.normalized);
                 }}
-                onKeyDown={(event) => {
+                onKeyDown={(event: KeyboardEvent<HTMLSpanElement>) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
                     event.stopPropagation();

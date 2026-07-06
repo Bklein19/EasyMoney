@@ -1,4 +1,3 @@
-// @ts-nocheck
 import {
   LineChart,
   Line,
@@ -9,7 +8,7 @@ import {
   Tooltip,
   ResponsiveContainer
 } from 'recharts';
-import PeriodClickOverlay from './PeriodClickOverlay';
+import PeriodClickOverlay, { type AnalyticsPeriodRow } from './PeriodClickOverlay';
 
 const COLORS = [
   '#f97316', '#22c55e', '#6366f1', '#3b82f6', '#ec4899', 
@@ -18,9 +17,47 @@ const COLORS = [
 const TOTAL_SPEND_KEY = 'Total Spend';
 const TOTAL_SPEND_COLOR = '#f8fafc';
 
-const formatCurrency = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val);
+interface SpendingTrendRow {
+  key: string;
+  label: string;
+  expenses: number;
+  categoryAmounts?: Record<string, number>;
+}
 
-const CustomTooltip = ({ active, payload, showTotalSpend }) => {
+interface SpendingTrendChartRow extends SpendingTrendRow, AnalyticsPeriodRow {
+  displayLabel: string;
+  [TOTAL_SPEND_KEY]: number;
+}
+
+interface SpendingTrendsProps {
+  rows?: SpendingTrendRow[];
+  showTotalSpend?: boolean;
+  onSelectPeriod?: (period: AnalyticsPeriodRow) => void;
+}
+
+interface TooltipPayloadEntry {
+  color?: string;
+  dataKey?: string;
+  name?: string;
+  value: number;
+  payload: SpendingTrendChartRow;
+}
+
+interface TooltipProps {
+  active?: boolean;
+  payload?: TooltipPayloadEntry[];
+  showTotalSpend?: boolean;
+}
+
+function getActivePeriodPayload(state: unknown) {
+  if (!state || typeof state !== 'object') return null;
+  const activePayload = (state as { activePayload?: Array<{ payload?: AnalyticsPeriodRow }> }).activePayload;
+  return activePayload?.[0]?.payload ?? null;
+}
+
+const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val);
+
+const CustomTooltip = ({ active, payload, showTotalSpend }: TooltipProps) => {
   if (active && payload && payload.length) {
     const totalPayload = payload.find(p => p.dataKey === TOTAL_SPEND_KEY);
     const activePayloads = payload
@@ -52,10 +89,10 @@ export default function SpendingTrends({
   rows = [],
   showTotalSpend = true,
   onSelectPeriod
-}) {
+}: SpendingTrendsProps) {
   const activeCategories = Array.from(new Set(rows.flatMap(row => Object.keys(row.categoryAmounts ?? {}))));
   const data = rows.map(row => {
-    const item = {
+    const item: SpendingTrendChartRow = {
       ...row,
       timeKey: row.key,
       displayLabel: row.label,
@@ -83,9 +120,10 @@ export default function SpendingTrends({
           data={data}
           margin={{ top: 10, right: 18, left: 12, bottom: 0 }}
           style={{ cursor: 'pointer' }}
-          onClick={(state) => {
-            if (state?.activePayload?.[0]?.payload && onSelectPeriod) {
-              onSelectPeriod(state.activePayload[0].payload);
+          onClick={(state: unknown) => {
+            const period = getActivePeriodPayload(state);
+            if (period && onSelectPeriod) {
+              onSelectPeriod(period);
             }
           }}
         >

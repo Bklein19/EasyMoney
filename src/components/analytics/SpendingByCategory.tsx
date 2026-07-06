@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { X } from 'lucide-react';
 
 // A palette of nice colors from index.css for categories if they don't have a specific color
@@ -7,13 +6,25 @@ const COLORS = [
   '#ef4444', '#a855f7', '#eab308', '#14b8a6', '#06b6d4'
 ];
 
-const formatCurrency = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val);
+export interface CategorySpendingRow {
+  id: string | number;
+  name: string;
+  amount: number;
+}
+
+interface SpendingByCategoryProps {
+  rows?: CategorySpendingRow[];
+  onSelectCategory?: (category: CategorySpendingRow) => void;
+  onExcludeCategory?: (category: CategorySpendingRow) => void;
+}
+
+const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val);
 
 export default function SpendingByCategory({
   rows = [],
   onSelectCategory,
   onExcludeCategory
-}) {
+}: SpendingByCategoryProps) {
   const data = rows;
 
   if (data.length === 0) {
