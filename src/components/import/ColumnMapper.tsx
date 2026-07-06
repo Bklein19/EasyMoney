@@ -1,9 +1,30 @@
-// @ts-nocheck
 import { useState } from 'react';
+import type { ChangeEvent, FormEvent } from 'react';
 import { ArrowRight, Settings } from 'lucide-react';
 import './ColumnMapper.css';
 
-const DEFAULT_MAPPING = {
+export interface CsvColumnMapping {
+  statementType: 'bank' | 'credit_card';
+  dateColumn: string;
+  descriptionColumn: string;
+  merchantColumn: string;
+  categoryColumn: string;
+  splitAmount: boolean;
+  amountColumn: string;
+  debitColumn: string;
+  creditColumn: string;
+  negativeIsDebit: boolean;
+  positiveIsCharge: boolean;
+}
+
+interface ColumnMapperProps {
+  headers: string[];
+  initialMapping?: Partial<CsvColumnMapping>;
+  onComplete: (mapping: CsvColumnMapping) => void;
+  onCancel: () => void;
+}
+
+const DEFAULT_MAPPING: CsvColumnMapping = {
   statementType: 'bank',
   dateColumn: '',
   descriptionColumn: '',
@@ -17,21 +38,24 @@ const DEFAULT_MAPPING = {
   positiveIsCharge: true
 };
 
-export default function ColumnMapper({ headers, initialMapping = {}, onComplete, onCancel }) {
+export default function ColumnMapper({ headers, initialMapping = {}, onComplete, onCancel }: ColumnMapperProps) {
   const [mapping, setMapping] = useState({
     ...DEFAULT_MAPPING,
     ...initialMapping
   });
 
-  const handleChange = (e) => {
-    const { name, value, type, checked } = e.target;
+  const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value, type } = e.target;
+    const nextValue = type === 'checkbox' && e.target instanceof HTMLInputElement
+      ? e.target.checked
+      : value;
     setMapping(prev => ({
       ...prev,
-      [name]: type === 'checkbox' ? checked : value
+      [name]: nextValue
     }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!mapping.dateColumn || !mapping.descriptionColumn) {
       alert("Date and Description columns are required.");
