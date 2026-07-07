@@ -183,10 +183,8 @@ export function AccountPicker({
               onClick={event => selectAccount(account.id, event)}
             >
               <span className="account-chip-name">{account.name}</span>
-              {account.account_holder ? (
+              {account.account_holder?.trim() && (
                 <span className="account-chip-holder">{account.account_holder}</span>
-              ) : (
-                <span className="account-chip-meta">{account.institution || account.type}</span>
               )}
             </button>
           ))}
