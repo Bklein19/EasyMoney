@@ -173,6 +173,11 @@
   color: var(--text-muted);
 }
 
+.data-freshness__status.closed {
+  background: var(--bg-subtle-hover);
+  color: var(--text-tertiary);
+}
+
 .data-freshness__downloads {
   display: flex;
   flex-wrap: wrap;
@@ -188,6 +193,11 @@
   background: var(--bg-base);
   font-size: var(--text-xs);
   font-weight: 650;
+  white-space: nowrap;
+}
+
+.data-freshness__actions {
+  text-align: right;
   white-space: nowrap;
 }
 

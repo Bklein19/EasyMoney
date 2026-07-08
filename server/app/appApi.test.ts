@@ -468,6 +468,16 @@ test('trpc accounts mutations update metadata and archive state', async () => {
   expect(await trpcClient.accounts.list.query()).toMatchObject({
     accounts: [expect.objectContaining({ id: accountId, status: 'active' })],
   });
+
+  await trpcClient.accounts.markClosed.mutate({ id: accountId });
+  expect(await trpcClient.accounts.list.query()).toMatchObject({
+    accounts: [expect.objectContaining({ id: accountId, status: 'closed', isClosed: true })],
+  });
+
+  await trpcClient.accounts.unarchive.mutate({ id: accountId });
+  expect(await trpcClient.accounts.list.query()).toMatchObject({
+    accounts: [expect.objectContaining({ id: accountId, status: 'active' })],
+  });
 });
 
 test('app account archive hides defaults without deleting source links or annotations', async () => {
@@ -3046,6 +3056,13 @@ test('app data freshness reports latest source fact dates by account', async () 
     type: 'savings',
     currentBalance: 0,
   }));
+  const closedId = Number(insertRow('accounts', {
+    name: 'Closed Brokerage',
+    institution: 'Vanguard',
+    type: 'investment',
+    status: 'closed',
+    currentBalance: 0,
+  }));
   insertRow('accounts', {
     name: 'Archived Account',
     institution: 'Bank of America',
@@ -3139,12 +3156,14 @@ test('app data freshness reports latest source fact dates by account', async () 
   const checking = body.accounts.find((account: { accountId: number }) => account.accountId === checkingId);
   const staleCard = body.accounts.find((account: { accountId: number }) => account.accountId === staleCardId);
   const noData = body.accounts.find((account: { accountId: number }) => account.accountId === noDataId);
+  const closed = body.accounts.find((account: { accountId: number }) => account.accountId === closedId);
 
   expect(body.summary).toMatchObject({
-    totalAccounts: 3,
+    totalAccounts: 4,
     currentAccounts: 1,
     staleAccounts: 1,
     noDataAccounts: 1,
+    closedAccounts: 1,
   });
   expect(checking).toMatchObject({
     latestTransactionDate: '2026-06-20',
@@ -3163,6 +3182,11 @@ test('app data freshness reports latest source fact dates by account', async () 
   expect(noData).toMatchObject({
     latestFactDate: null,
     status: 'no-data',
+  });
+  expect(closed).toMatchObject({
+    latestFactDate: null,
+    status: 'closed',
+    accountStatus: 'closed',
   });
   expect(body.catchUp).toMatchObject({
     generatedAt: '2026-07-01',
@@ -3215,13 +3239,15 @@ test('app data freshness reports latest source fact dates by account', async () 
     totalItems: 2,
   });
   expect(catchUp.items.map((item: { accountId: number }) => item.accountId).sort()).toEqual([noDataId, staleCardId].sort());
+  expect(catchUp.items.map((item: { accountId: number }) => item.accountId)).not.toContain(closedId);
 
   const trpcReport = await trpcClient.dataFreshness.report.query({ today: '2026-07-01' });
   expect(trpcReport.summary).toMatchObject({
-    totalAccounts: 3,
+    totalAccounts: 4,
     currentAccounts: 1,
     staleAccounts: 1,
     noDataAccounts: 1,
+    closedAccounts: 1,
   });
   const trpcCatchUp = await trpcClient.dataFreshness.catchUp.query({ today: '2026-07-01' });
   expect(trpcCatchUp).toMatchObject({

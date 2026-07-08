@@ -1,6 +1,6 @@
 import { initTRPC } from '@trpc/server';
 import { z } from 'zod';
-import { archiveAccount, listAccounts, unarchiveAccount, updateAccountMetadata } from './accounts.ts';
+import { archiveAccount, closeAccount, listAccounts, unarchiveAccount, updateAccountMetadata } from './accounts.ts';
 import { getAnalyticsReport } from './analytics.ts';
 import { getBudgetingReport } from './budgetingReport.ts';
 import {
@@ -91,6 +91,10 @@ export const appRouter = t.router({
     archive: t.procedure
       .input(z.object({ id: z.union([z.string(), z.number()]) }))
       .mutation(({ input }) => archiveAccount(input.id)),
+
+    markClosed: t.procedure
+      .input(z.object({ id: z.union([z.string(), z.number()]) }))
+      .mutation(({ input }) => closeAccount(input.id)),
 
     unarchive: t.procedure
       .input(z.object({ id: z.union([z.string(), z.number()]) }))

@@ -1,10 +1,10 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, CheckCircle2, CircleDashed, Clock3 } from 'lucide-react';
-import { trpc } from '../../api/trpc';
+import { AlertTriangle, CheckCircle2, CircleDashed, Clock3, Lock } from 'lucide-react';
+import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import { formatDate } from '../../utils/formatters';
 
-type FreshnessStatus = 'current' | 'due' | 'stale' | 'no-data';
+type FreshnessStatus = 'current' | 'due' | 'stale' | 'no-data' | 'closed';
 
 interface FreshnessAccount {
   accountId: number;
@@ -35,6 +35,7 @@ interface FreshnessReport {
     dueAccounts: number;
     staleAccounts: number;
     noDataAccounts: number;
+    closedAccounts: number;
   };
   accounts: FreshnessAccount[];
 }
@@ -44,6 +45,7 @@ const STATUS_LABELS: Record<FreshnessStatus, string> = {
   due: 'Due',
   stale: 'Stale',
   'no-data': 'No data',
+  closed: 'Closed',
 };
 
 const STATUS_ICONS = {
@@ -51,6 +53,7 @@ const STATUS_ICONS = {
   due: Clock3,
   stale: AlertTriangle,
   'no-data': CircleDashed,
+  closed: Lock,
 };
 
 function formatFreshnessDate(value: string | null) {
@@ -66,7 +69,7 @@ function formatAge(account: FreshnessAccount) {
 }
 
 function accountSort(a: FreshnessAccount, b: FreshnessAccount) {
-  const rank: Record<FreshnessStatus, number> = { stale: 0, 'no-data': 1, due: 2, current: 3 };
+  const rank: Record<FreshnessStatus, number> = { stale: 0, 'no-data': 1, due: 2, current: 3, closed: 4 };
   return rank[a.status] - rank[b.status] ||
     (b.daysSinceLatestFact ?? Number.POSITIVE_INFINITY) - (a.daysSinceLatestFact ?? Number.POSITIVE_INFINITY) ||
     (a.institution || '').localeCompare(b.institution || '') ||
@@ -86,6 +89,18 @@ export default function DataFreshnessPanel() {
     (report?.summary.dueAccounts || 0) +
     (report?.summary.noDataAccounts || 0);
 
+  const setAccountStatus = async (account: FreshnessAccount) => {
+    if (account.status === 'closed') {
+      await trpcClient.accounts.unarchive.mutate({ id: account.accountId });
+    } else {
+      await trpcClient.accounts.markClosed.mutate({ id: account.accountId });
+    }
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: trpc.dataFreshness.report.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: trpc.accounts.list.queryKey() }),
+    ]);
+  };
+
   return (
     <section className="data-freshness" aria-label="Data freshness">
       <div className="data-freshness__header">
@@ -103,6 +118,7 @@ export default function DataFreshnessPanel() {
             <span><strong>{report.summary.dueAccounts}</strong> due</span>
             <span><strong>{report.summary.staleAccounts}</strong> stale</span>
             <span><strong>{report.summary.noDataAccounts}</strong> no data</span>
+            <span><strong>{report.summary.closedAccounts}</strong> closed</span>
           </div>
         )}
       </div>
@@ -120,6 +136,7 @@ export default function DataFreshnessPanel() {
                 <th>Latest data</th>
                 <th>Last import</th>
                 <th>Download</th>
+                <th aria-label="Actions" />
               </tr>
             </thead>
             <tbody>
@@ -147,10 +164,21 @@ export default function DataFreshnessPanel() {
                     </td>
                     <td>
                       <div className="data-freshness__downloads">
-                        {account.suggestedDownloads.length > 0
+                        {account.status === 'closed'
+                          ? <span>No catch-up needed</span>
+                          : account.suggestedDownloads.length > 0
                           ? account.suggestedDownloads.map(download => <span key={download}>{download}</span>)
                           : <span>Custom CSV</span>}
                       </div>
+                    </td>
+                    <td className="data-freshness__actions">
+                      <button
+                        className="btn btn--secondary btn--sm"
+                        type="button"
+                        onClick={() => void setAccountStatus(account)}
+                      >
+                        {account.status === 'closed' ? 'Reopen' : 'Mark closed'}
+                      </button>
                     </td>
                   </tr>
                 );

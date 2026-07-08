@@ -35,7 +35,7 @@ function toAccountSummary(row: AccountRow, aliases: AccountAliasSummary[]): Acco
     type: row.type,
     balance: row.balanceCents === null ? 0 : row.balanceCents / 100,
     latestBalanceMonth: row.latestBalanceMonth,
-    isClosed: status !== 'archived' && row.balanceCents === 0 && row.latestBalanceMonth !== null,
+    isClosed: status === 'closed' || (status !== 'archived' && row.balanceCents === 0 && row.latestBalanceMonth !== null),
     currency: row.currency ?? 'USD',
     accountHolder: row.accountHolder,
     status,
@@ -179,6 +179,20 @@ export function archiveAccount(id: number | string) {
         updatedAt = @now
     WHERE id = @id
   `).run({ id: accountId, now });
+  return { ok: true, accountId };
+}
+
+export function closeAccount(id: number | string) {
+  const accountId = Number(id);
+  if (!Number.isFinite(accountId)) throw new Error('Invalid account id');
+  assertAccountExists(accountId);
+  getDb().prepare(`
+    UPDATE accounts
+    SET status = 'closed',
+        archivedAt = NULL,
+        updatedAt = @now
+    WHERE id = @id
+  `).run({ id: accountId, now: new Date().toISOString() });
   return { ok: true, accountId };
 }
 

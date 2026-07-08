@@ -19,7 +19,7 @@ interface DataFreshnessRow {
   latestImportedAt: string | null;
 }
 
-type DataFreshnessStatus = 'current' | 'due' | 'stale' | 'no-data';
+type DataFreshnessStatus = 'current' | 'due' | 'stale' | 'no-data' | 'closed';
 
 interface DataFreshnessAccount {
   accountId: number;
@@ -69,6 +69,11 @@ function statusFor(daysSinceLatestFact: number | null): DataFreshnessStatus {
   if (daysSinceLatestFact > STALE_AFTER_DAYS) return 'stale';
   if (daysSinceLatestFact > DUE_AFTER_DAYS) return 'due';
   return 'current';
+}
+
+function freshnessStatusFor(accountStatus: string | null, daysSinceLatestFact: number | null): DataFreshnessStatus {
+  if (accountStatus === 'closed') return 'closed';
+  return statusFor(daysSinceLatestFact);
 }
 
 function supportedDownloadsFor(institution: string | null, accountType: string) {
@@ -140,7 +145,7 @@ function downloadWindowFor(account: DataFreshnessAccount, today: string) {
 
 function buildCatchUpPlan(accounts: DataFreshnessAccount[], today: string) {
   const items = accounts
-    .filter(account => account.status !== 'current')
+    .filter(account => account.status !== 'current' && account.status !== 'closed')
     .map(account => ({
       id: `account-${account.accountId}`,
       accountId: account.accountId,
@@ -283,13 +288,14 @@ export function getDataFreshnessReport(options: { today?: string } = {}) {
   const accounts = rows.map(row => {
     const latestFactDate = maxDate(row.latestTransactionDate, row.latestBalanceDate);
     const daysSinceLatestFact = daysBetween(latestFactDate, today);
-    const status = statusFor(daysSinceLatestFact);
+    const accountStatus = row.accountStatus || 'active';
+    const status = freshnessStatusFor(accountStatus, daysSinceLatestFact);
     return {
       accountId: row.accountId,
       accountName: row.accountName,
       institution: row.institution,
       accountType: row.accountType,
-      accountStatus: row.accountStatus || 'active',
+      accountStatus,
       latestTransactionDate: row.latestTransactionDate,
       latestBalanceDate: row.latestBalanceDate,
       latestFactDate,
@@ -312,8 +318,9 @@ export function getDataFreshnessReport(options: { today?: string } = {}) {
       dueAccounts: current.dueAccounts + (account.status === 'due' ? 1 : 0),
       staleAccounts: current.staleAccounts + (account.status === 'stale' ? 1 : 0),
       noDataAccounts: current.noDataAccounts + (account.status === 'no-data' ? 1 : 0),
+      closedAccounts: current.closedAccounts + (account.status === 'closed' ? 1 : 0),
     }),
-    { totalAccounts: 0, currentAccounts: 0, dueAccounts: 0, staleAccounts: 0, noDataAccounts: 0 }
+    { totalAccounts: 0, currentAccounts: 0, dueAccounts: 0, staleAccounts: 0, noDataAccounts: 0, closedAccounts: 0 }
   );
 
   return {
