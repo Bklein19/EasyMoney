@@ -129,6 +129,14 @@ export default function DataFreshnessPanel() {
       {report && (
         <div className="data-freshness__table-wrap">
           <table className="data-freshness__table">
+            <colgroup>
+              <col className="data-freshness__col-account" />
+              <col className="data-freshness__col-status" />
+              <col className="data-freshness__col-latest" />
+              <col className="data-freshness__col-import" />
+              <col className="data-freshness__col-download" />
+              <col className="data-freshness__col-action" />
+            </colgroup>
             <thead>
               <tr>
                 <th>Account</th>
@@ -163,13 +171,13 @@ export default function DataFreshnessPanel() {
                       <small>{account.latestImportFileName || 'No committed import'}</small>
                     </td>
                     <td>
-                      <div className="data-freshness__downloads">
+                      <span className="data-freshness__download-text">
                         {account.status === 'closed'
-                          ? <span>No catch-up needed</span>
+                          ? 'No catch-up needed'
                           : account.suggestedDownloads.length > 0
-                          ? account.suggestedDownloads.map(download => <span key={download}>{download}</span>)
-                          : <span>Custom CSV</span>}
-                      </div>
+                          ? account.suggestedDownloads.join(', ')
+                          : 'Custom CSV'}
+                      </span>
                     </td>
                     <td className="data-freshness__actions">
                       <button
