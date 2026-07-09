@@ -339,7 +339,8 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
       const accountKey = `account_${accountId}`;
       for (const [period, state] of linkedByPeriod) {
         if (state.periods === 0) continue;
-        const point = byPeriod.get(period) ?? { period, sortKey: state.sortKey };
+        const point: { period: string; sortKey: string } & Record<string, string | number> =
+          byPeriod.get(period) ?? { period, sortKey: state.sortKey };
         if (state.sortKey < String(point.sortKey)) point.sortKey = state.sortKey;
         point[accountKey] = state.linked - 1;
         byPeriod.set(period, point);
