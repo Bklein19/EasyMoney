@@ -10,7 +10,7 @@ EasyMoney is a local-first personal finance app for importing bank, credit card,
 - Rebuild materialized transactions and balances deterministically from committed source facts.
 - Categorize transactions separately from imported facts so notes and categories survive rebuilds.
 - Review accounts, transactions, budgets, net worth, performance, savings rate, and spending analytics.
-- Keep all app data local in SQLite.
+- Keep app data and connection credentials local on the machine.
 
 ## Import Model
 
@@ -51,6 +51,8 @@ Parsers try to extract durable source facts plus account context when the file f
 ## Local Data
 
 EasyMoney stores local app data in `data/easymoney.sqlite`.
+
+Plaid access tokens are stored separately in `data/plaid-items.json` with owner-only file permissions. They are never returned to the frontend or stored in imported source facts.
 
 The `data/` directory is ignored by Git. Do not commit personal financial exports, databases, or generated import files.
 
@@ -96,6 +98,27 @@ OPENAI_API_KEY=sk-...
 
 The Transactions page can save the key to `.env.local` from the local UI if the server starts without one. The app loads `.env.local` on startup and also updates the running local server when you save the key in the UI. It only applies suggestions after you confirm them. Set `OPENAI_CATEGORIZATION_MODEL` to override the default model.
 
+### Plaid proof of concept
+
+The Connections page can connect Plaid in read-only mode and inspect accounts, transactions, investments, and available bank statements. Plaid data is not imported into the EasyMoney source-fact ledger yet.
+
+Start in Sandbox:
+
+```bash
+PLAID_ENV="sandbox"
+PLAID_CLIENT_ID="your-client-id"
+PLAID_SANDBOX_SECRET="your-sandbox-secret"
+PLAID_PRODUCTION_SECRET="your-production-secret"
+```
+
+Put these values in the untracked `.env` file and restart `bun run dev`. Change `PLAID_ENV` to `production` when you are ready to connect real accounts. Production institutions that use OAuth also require an HTTPS redirect registered in the Plaid Dashboard:
+
+```bash
+PLAID_REDIRECT_URI="https://your-registered-host/connections"
+```
+
+Bank/card connections initialize Transactions and request Statements when the institution supports them. Investment connections initialize Investments separately so institutions are not hidden merely because they do not support bank transaction or statement products.
+
 ## Checks
 
 Run the normal acceptance gate before committing:
@@ -119,13 +142,6 @@ bun run build
 bun run start
 ```
 
-`data:freshness` prints machine-readable JSON for account freshness. Use `--catch-up` to print only the programmatic download plan grouped by institution.
-
-The same JSON is available from the local app server:
-
-```text
-GET /api/app/data-freshness
-GET /api/app/data-freshness/catch-up
-```
+`data:freshness` prints machine-readable JSON for account freshness. Use `--catch-up` to print only the programmatic download plan grouped by institution. Application clients use the typed `dataFreshness` tRPC procedures.
 
 `rebuild:ledger` is mainly for tests, migrations, and repair operations. The app should not rebuild the ledger for ordinary categorization edits.

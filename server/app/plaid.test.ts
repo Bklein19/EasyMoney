@@ -34,7 +34,6 @@ function fakeClient(overrides: Partial<PlaidClientLike> = {}) {
   const client: PlaidClientLike = {
     linkTokenCreate: async () => ({ data: { link_token: 'link-token', expiration: '2026-07-10T00:00:00Z' } }),
     itemPublicTokenExchange: async () => ({ data: { item_id: 'item-1', access_token: 'access-secret' } }),
-    itemGet: async () => ({ data: { item: { institution_id: 'ins-1' } } }),
     accountsGet: async () => ({
       data: {
         accounts: [{
@@ -110,6 +109,18 @@ test('bank Link requests transactions and statements without requiring investmen
   expect(capturedRequest.required_if_supported_products).toEqual(['statements']);
   expect(capturedRequest).not.toHaveProperty('optional_products');
   expect(capturedRequest.transactions).toEqual({ days_requested: 730 });
+});
+
+test('sanitizes Plaid SDK errors before they leave the service boundary', async () => {
+  const client = fakeClient({
+    linkTokenCreate: async () => {
+      const error = new Error('Request failed with secret-bearing configuration') as Error & { response?: unknown };
+      error.response = { data: { error_code: 'INVALID_API_KEYS', error_message: 'invalid client_id or secret' } };
+      throw error;
+    },
+  });
+
+  expect(createPlaidLinkToken('bank', client)).rejects.toThrow('invalid client_id or secret (INVALID_API_KEYS)');
 });
 
 test('persists exchanged Items locally but never returns their access token', async () => {

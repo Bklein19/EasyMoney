@@ -10,6 +10,7 @@ import {
   Wallet,
   PiggyBank,
   Landmark,
+  Link2,
   Tags
 } from 'lucide-react';
 import type { LucideProps } from 'lucide-react';
@@ -80,6 +81,7 @@ const Sidebar = ({
     { path: '/performance', label: 'Performance', icon: LineChart },
     { path: '/savings-rate', label: 'Savings Rate', icon: Activity },
     { path: '/retirement', label: 'Retirement', icon: Landmark },
+    { path: '/connections', label: 'Connections', icon: Link2 },
     { path: '/import', label: 'Import', icon: Upload },
   ];
   const showAccountPicker = (

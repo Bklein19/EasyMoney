@@ -3,6 +3,7 @@ import path from 'node:path';
 import {
   Configuration,
   CountryCode,
+  type Holding,
   PlaidApi,
   PlaidEnvironments,
   Products,
@@ -37,7 +38,6 @@ interface PlaidResponse<T> {
 export interface PlaidClientLike {
   linkTokenCreate: (request: Record<string, unknown>) => Promise<PlaidResponse<any>>;
   itemPublicTokenExchange: (request: { public_token: string }) => Promise<PlaidResponse<any>>;
-  itemGet: (request: { access_token: string }) => Promise<PlaidResponse<any>>;
   accountsGet: (request: { access_token: string }) => Promise<PlaidResponse<any>>;
   transactionsSync: (request: Record<string, unknown>) => Promise<PlaidResponse<any>>;
   investmentsHoldingsGet: (request: { access_token: string }) => Promise<PlaidResponse<any>>;
@@ -149,6 +149,14 @@ async function optionalProduct<T>(load: () => Promise<T>) {
   }
 }
 
+async function requiredPlaidRequest<T>(load: () => Promise<T>) {
+  try {
+    return await load();
+  } catch (error) {
+    throw new Error(plaidError(error));
+  }
+}
+
 function publicItem(item: StoredPlaidItem) {
   return {
     itemId: item.itemId,
@@ -189,7 +197,7 @@ export async function createPlaidLinkToken(
   }
   if (process.env.PLAID_REDIRECT_URI) request.redirect_uri = process.env.PLAID_REDIRECT_URI;
 
-  const response = await client.linkTokenCreate(request);
+  const response = await requiredPlaidRequest(() => client.linkTokenCreate(request));
   return {
     linkToken: response.data.link_token as string,
     expiration: response.data.expiration as string,
@@ -206,11 +214,10 @@ export async function exchangePlaidPublicToken(
   },
   client: PlaidClientLike = createClient(),
 ) {
-  const exchanged = await client.itemPublicTokenExchange({ public_token: input.publicToken });
+  const exchanged = await requiredPlaidRequest(() => client.itemPublicTokenExchange({ public_token: input.publicToken }));
   const itemId = String(exchanged.data.item_id);
   const accessToken = String(exchanged.data.access_token);
-  const itemResponse = await client.itemGet({ access_token: accessToken });
-  const institutionId = input.institutionId || itemResponse.data.item?.institution_id || null;
+  const institutionId = input.institutionId || null;
   const store = readStore();
   const item: StoredPlaidItem = {
     itemId,
@@ -283,10 +290,23 @@ function summarizeSecurity(security: Security) {
   };
 }
 
+function summarizeHolding(holding: Holding) {
+  return {
+    accountId: holding.account_id,
+    securityId: holding.security_id,
+    quantity: holding.quantity,
+    costBasis: holding.cost_basis ?? null,
+    institutionValue: holding.institution_value,
+    institutionPrice: holding.institution_price,
+    institutionPriceAsOf: holding.institution_price_as_of || null,
+    isoCurrencyCode: holding.iso_currency_code || null,
+  };
+}
+
 export async function previewPlaidConnection(itemId: string, client: PlaidClientLike = createClient()) {
   const item = itemForCurrentEnvironment(itemId);
   const accessToken = item.accessToken;
-  const accountsResponse = await client.accountsGet({ access_token: accessToken });
+  const accountsResponse = await requiredPlaidRequest(() => client.accountsGet({ access_token: accessToken }));
 
   const transactions = item.kind === 'bank'
     ? await optionalProduct(async () => {
@@ -296,7 +316,9 @@ export async function previewPlaidConnection(itemId: string, client: PlaidClient
         modifiedCount: response.data.modified?.length || 0,
         removedCount: response.data.removed?.length || 0,
         hasMore: Boolean(response.data.has_more),
-        updateStatus: response.data.transactions_update_status || null,
+        updateStatus: response.data.transactions_update_status
+          ? String(response.data.transactions_update_status)
+          : null,
       };
     })
     : { status: 'not-requested' as const, data: null, error: null };
@@ -313,11 +335,11 @@ export async function previewPlaidConnection(itemId: string, client: PlaidClient
         }),
       ]);
       return {
-        holdings: holdingsResponse.data.holdings,
+        holdings: (holdingsResponse.data.holdings as Holding[]).map(summarizeHolding),
         investmentTransactions: (transactionsResponse.data.investment_transactions as InvestmentTransaction[])
           .map(summarizeInvestmentTransaction),
         securities: (holdingsResponse.data.securities as Security[]).map(summarizeSecurity),
-        totalInvestmentTransactions: transactionsResponse.data.total_investment_transactions,
+        totalInvestmentTransactions: Number(transactionsResponse.data.total_investment_transactions || 0),
       };
     })
     : { status: 'not-requested' as const, data: null, error: null };
@@ -325,15 +347,26 @@ export async function previewPlaidConnection(itemId: string, client: PlaidClient
   const statements = item.kind === 'bank'
     ? await optionalProduct(async () => {
       const response = await client.statementsList({ access_token: accessToken });
-      return response.data.accounts.map((account: any) => ({
-        accountId: account.account_id,
-        accountName: account.account_name,
-        accountMask: account.account_mask || null,
-        statements: account.statements.map((statement: any) => ({
-          statementId: statement.statement_id,
-          year: statement.year,
-          month: statement.month,
-          datePosted: statement.date_posted || null,
+      const accounts = response.data.accounts as Array<{
+        account_id: string;
+        account_name: string;
+        account_mask?: string | null;
+        statements: Array<{
+          statement_id: string;
+          year: number;
+          month: number;
+          date_posted?: string | null;
+        }>;
+      }>;
+      return accounts.map(account => ({
+        accountId: String(account.account_id),
+        accountName: String(account.account_name),
+        accountMask: account.account_mask ? String(account.account_mask) : null,
+        statements: account.statements.map(statement => ({
+          statementId: String(statement.statement_id),
+          year: Number(statement.year),
+          month: Number(statement.month),
+          datePosted: statement.date_posted ? String(statement.date_posted) : null,
         })),
       }));
     })
@@ -354,10 +387,10 @@ export async function downloadPlaidStatement(
   client: PlaidClientLike = createClient(),
 ) {
   const item = itemForCurrentEnvironment(itemId);
-  const response = await client.statementsDownload(
+  const response = await requiredPlaidRequest(() => client.statementsDownload(
     { access_token: item.accessToken, statement_id: statementId },
     { responseType: 'arraybuffer' },
-  );
+  ));
   const bytes = Buffer.from(response.data);
   return {
     fileName: `${item.institutionName.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase()}-statement.pdf`,
@@ -368,7 +401,7 @@ export async function downloadPlaidStatement(
 
 export async function disconnectPlaidItem(itemId: string, client: PlaidClientLike = createClient()) {
   const item = itemForCurrentEnvironment(itemId);
-  await client.itemRemove({ access_token: item.accessToken });
+  await requiredPlaidRequest(() => client.itemRemove({ access_token: item.accessToken }));
   const store = readStore();
   store.items = store.items.filter(candidate => candidate.itemId !== itemId);
   writeStore(store);
