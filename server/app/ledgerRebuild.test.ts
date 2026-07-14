@@ -471,6 +471,99 @@ test('source rebuild preserves same-day identical transactions seen multiple tim
   expect(ledger.transactions.map(transaction => transaction.occurrenceIndex).sort()).toEqual([0, 1]);
 });
 
+test('source rebuild reconciles statement posting-date drift without collapsing duplicate occurrences', () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Example Credit Card',
+    institution: 'Example Bank',
+    type: 'credit',
+    currentBalance: 0,
+  }));
+  const activity = insertCommittedSourceFile({
+    fileName: 'credit-card.csv',
+    parserName: 'credit-card-csv',
+    sourceType: 'activity-export',
+    priority: 10,
+    institution: 'Example Bank',
+  });
+  const statement = insertCommittedSourceFile({
+    fileName: 'credit-card-statement.pdf',
+    parserName: 'credit-card-statement-pdf',
+    sourceType: 'statement',
+    priority: 50,
+    institution: 'Example Bank',
+  });
+  const activityAccount = insertSourceAccount(activity.sourceFileId, accountId, 'activity-card');
+  const statementAccount = insertSourceAccount(statement.sourceFileId, accountId, 'statement-card');
+
+  insertSourceTransaction({
+    sourceFileId: activity.sourceFileId,
+    sourceAccountId: activityAccount,
+    stableSourceId: 'activity-pact',
+    date: '2026-06-04T00:00:00.000Z',
+    amountCents: -14370,
+    description: 'WEAR PACT, LLC 800-662-7228 CO',
+    priority: 10,
+  });
+  insertSourceTransaction({
+    sourceFileId: statement.sourceFileId,
+    sourceAccountId: statementAccount,
+    stableSourceId: 'statement-pact',
+    date: '2026-06-05',
+    amountCents: -14370,
+    description: 'WEAR PACT, LLC 800-662-7228 CO',
+    priority: 50,
+  });
+
+  for (const suffix of ['first', 'second']) {
+    insertSourceTransaction({
+      sourceFileId: activity.sourceFileId,
+      sourceAccountId: activityAccount,
+      stableSourceId: `activity-rent-${suffix}`,
+      date: '2026-06-08T00:00:00.000Z',
+      amountCents: -3500,
+      description: 'ZG * RENTAPPLICATION 206-516-2265 WA',
+      priority: 10,
+    });
+    insertSourceTransaction({
+      sourceFileId: statement.sourceFileId,
+      sourceAccountId: statementAccount,
+      stableSourceId: `statement-rent-${suffix}`,
+      date: '2026-06-08',
+      amountCents: -3500,
+      description: 'ZG * RENTAPPLICATION 206-516-2265 WA',
+      priority: 50,
+    });
+  }
+
+  for (const [source, sourceAccountId, stableSourceId, date] of [
+    [activity, activityAccount, 'activity-coffee', '2026-06-15T00:00:00.000Z'],
+    [statement, statementAccount, 'statement-coffee', '2026-06-19'],
+  ] as const) {
+    insertSourceTransaction({
+      sourceFileId: source.sourceFileId,
+      sourceAccountId,
+      stableSourceId,
+      date,
+      amountCents: -500,
+      description: 'EXAMPLE COFFEE',
+      priority: source === activity ? 10 : 50,
+    });
+  }
+
+  const ledger = buildLedgerFromSourceFacts(getDb());
+  const pact = ledger.transactions.filter(transaction => transaction.description.includes('WEAR PACT'));
+  const rent = ledger.transactions.filter(transaction => transaction.description.includes('RENTAPPLICATION'));
+  const coffee = ledger.transactions.filter(transaction => transaction.description === 'EXAMPLE COFFEE');
+
+  expect(pact.map(transaction => transaction.date)).toEqual(['2026-06-04T00:00:00.000Z']);
+  expect(rent).toHaveLength(2);
+  expect(rent.map(transaction => transaction.occurrenceIndex).sort()).toEqual([0, 1]);
+  expect(coffee.map(transaction => transaction.date).sort()).toEqual([
+    '2026-06-15T00:00:00.000Z',
+    '2026-06-19',
+  ]);
+});
+
 test('source rebuild keeps the larger multiplicity from uneven overlapping activity exports', () => {
   const accountId = Number(insertRow('accounts', {
     name: 'WF Checking',

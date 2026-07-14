@@ -93,12 +93,24 @@ function dollarsFromCents(value: number) {
   return Math.round(value) / 100;
 }
 
+function dateDistanceInDays(left: string, right: string) {
+  const leftTime = Date.parse(`${normalizeDate(left)}T00:00:00.000Z`);
+  const rightTime = Date.parse(`${normalizeDate(right)}T00:00:00.000Z`);
+  if (!Number.isFinite(leftTime) || !Number.isFinite(rightTime)) return Number.POSITIVE_INFINITY;
+  return Math.abs(leftTime - rightTime) / 86_400_000;
+}
+
 function isCreditAccount(accountType: string | null | undefined) {
   return accountType === 'credit' || accountType === 'credit_card' || accountType === 'credit-card';
 }
 
 function getBalanceSourceRank(sourceType: string | null | undefined) {
   return sourceType === 'statement' ? 2 : 1;
+}
+
+function getTransactionSourceScore(transaction: { sourceType?: string | null; priority?: number | null }) {
+  const sourceRank = transaction.sourceType === 'activity-export' ? 2 : 1;
+  return sourceRank * 1_000_000 + (transaction.priority ?? 0);
 }
 
 function compareSourceBalances(a: SourceBalanceRow, b: SourceBalanceRow) {
@@ -285,7 +297,7 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
   const bestMonthBucketDetailPriority = new Map<string, number>();
   for (const transaction of sourceUniqueTransactionInputs) {
     if (transaction.sourceRole !== 'activity') continue;
-    const priority = transaction.priority ?? 0;
+    const priority = getTransactionSourceScore(transaction);
     const key = exactKey(transaction);
     if (priority > (bestExactPriority.get(key) ?? -Infinity)) {
       bestExactPriority.set(key, priority);
@@ -299,7 +311,7 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
   }
 
   const dedupedTransactionInputs = sourceUniqueTransactionInputs.filter(transaction => {
-    const priority = transaction.priority ?? 0;
+    const priority = getTransactionSourceScore(transaction);
     if (isStatementSummary(transaction)) {
       const best = bestMonthBucketDetailPriority.get(monthBucketKey(transaction));
       return best === undefined || priority >= best;
@@ -350,6 +362,72 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
     for (const transaction of group) {
       if (!selected.has(transaction)) {
         retainedTransactionInputs.delete(transaction);
+      }
+    }
+  }
+
+  const crossSourceGroups = new Map<string, typeof dedupedTransactionInputs>();
+  for (const transaction of retainedTransactionInputs) {
+    if (
+      transaction.sourceRole !== 'activity' ||
+      !['activity-export', 'statement'].includes(transaction.sourceType || '')
+    ) continue;
+    const key = [
+      transaction.accountId,
+      transaction.amountCents,
+      normalizeText(transaction.originalDescription || transaction.description || transaction.merchant),
+    ].join('\0');
+    const group = crossSourceGroups.get(key);
+    if (group) {
+      group.push(transaction);
+    } else {
+      crossSourceGroups.set(key, [transaction]);
+    }
+  }
+
+  for (const group of crossSourceGroups.values()) {
+    const bySourceFile = new Map<number, typeof group>();
+    for (const transaction of group) {
+      const sourceGroup = bySourceFile.get(transaction.sourceFileId);
+      if (sourceGroup) {
+        sourceGroup.push(transaction);
+      } else {
+        bySourceFile.set(transaction.sourceFileId, [transaction]);
+      }
+    }
+    if (bySourceFile.size <= 1) continue;
+
+    const orderedSourceGroups = [...bySourceFile.entries()].sort(([sourceFileIdA, rowsA], [sourceFileIdB, rowsB]) =>
+      Math.max(...rowsB.map(getTransactionSourceScore)) - Math.max(...rowsA.map(getTransactionSourceScore)) ||
+      rowsB.length - rowsA.length ||
+      sourceFileIdA - sourceFileIdB
+    );
+    const canonical: typeof group = [];
+
+    for (const [, rows] of orderedSourceGroups) {
+      const matchedCanonical = new Set<number>();
+      for (const transaction of [...rows].sort((a, b) =>
+        normalizeDate(a.date).localeCompare(normalizeDate(b.date)) ||
+        getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b))
+      )) {
+        const match = canonical
+          .map((candidate, index) => ({ candidate, index, distance: dateDistanceInDays(candidate.date, transaction.date) }))
+          .filter(({ candidate, index, distance }) =>
+            candidate.sourceType !== transaction.sourceType &&
+            !matchedCanonical.has(index) &&
+            distance <= 3
+          )
+          .sort((a, b) =>
+            a.distance - b.distance ||
+            getTransactionOccurrenceSortKey(a.candidate).localeCompare(getTransactionOccurrenceSortKey(b.candidate))
+          )[0];
+
+        if (match) {
+          matchedCanonical.add(match.index);
+          retainedTransactionInputs.delete(transaction);
+        } else {
+          canonical.push(transaction);
+        }
       }
     }
   }
