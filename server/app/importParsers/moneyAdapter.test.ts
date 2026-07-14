@@ -5,6 +5,8 @@ import path from 'node:path';
 import { resolveImportParser } from './index.ts';
 import { createMoneyParserAdapter } from './moneyAdapter.ts';
 import { parseRobinhoodStatementText } from './moneyParsers/robinhood-statement-pdf.ts';
+import { parseRobinhoodBankingStatementText } from './moneyParsers/robinhood-banking-statement-pdf.ts';
+import { parseRobinhoodCreditCardStatementText } from './moneyParsers/robinhood-credit-card-statement-pdf.ts';
 import { parseNetBenefitsStatementText } from './moneyParsers/fidelity-netbenefits-statement-pdf.ts';
 import { parseFidelityPortfolioStatementText } from './moneyParsers/fidelity-portfolio-statement-pdf.ts';
 import { parseWellsFargoStatementText } from './moneyParsers/wells-fargo-statement-pdf.ts';
@@ -663,6 +665,109 @@ test('Robinhood statement parser extracts account activity and closing portfolio
       symbol: null,
     },
   ]);
+});
+
+test('Robinhood Banking statement parser extracts multiline activity and the ending balance', () => {
+  const result = parseRobinhoodBankingStatementText([
+    'Robinhood Banking',
+    'Joint Checking 4429',
+    'Account Summary',
+    'Total Ending Balance (Jun 30, 2026) $5,460.69',
+    'Account Activity',
+    '6/1/26 Beginning Balance $0.00',
+    '6/5/26 EXAMPLE PAYROLL Credit +$2,893.33 $2,893.33',
+    '6/7/26 Inter-Entity Transfer to Robinhood',
+    'Gold Card Debit -$143.70 $2,749.63',
+    '6/30/26 Interest Payment Credit +$10.26 $5,460.69',
+    '6/30/26 Ending Balance $5,460.69',
+  ].join('\n'));
+
+  expect(result.transactions.map(transaction => ({
+    date: transaction.date,
+    amount_cents: transaction.amount_cents,
+    description: transaction.description,
+  }))).toEqual([{
+    date: '2026-06-05',
+    amount_cents: 289333,
+    description: 'EXAMPLE PAYROLL',
+  }, {
+    date: '2026-06-07',
+    amount_cents: -14370,
+    description: 'Inter-Entity Transfer to Robinhood Gold Card',
+  }, {
+    date: '2026-06-30',
+    amount_cents: 1026,
+    description: 'Interest Payment',
+  }]);
+  expect(result.balances).toEqual([{
+    date: '2026-06-30',
+    account: 'Robinhood Joint Checking - 4429',
+    institution: 'Robinhood',
+    balance_cents: 546069,
+  }]);
+});
+
+test('Robinhood credit card statement parser extracts charges, payments, and a liability balance', () => {
+  const result = parseRobinhoodCreditCardStatementText([
+    'EXAMPLE OWNER Account Number: XXXX XXXX XXXX 8904',
+    'ACCOUNT SUMMARY',
+    'Statement Closing Date June 19, 2026',
+    '= New Balance $96.89',
+    'creditcards@robinhood.com',
+    'TRANSACTIONS',
+    '05/19 05/21 2460316GW0EX6J939 EXAMPLE MARKET SAN DIEGO CA 39.11',
+    '05/22 05/22 7442057GY00XV0XL0 PAYMENT - THANK YOU 574.28-',
+    '06/19 06/19 2405522HSP1MG0NHV EXAMPLE DELIVERY SHERIDAN WY 18.35',
+    '06/19 06/19 INTEREST CHARGE ON PURCHASES 0.00',
+  ].join('\n'));
+
+  expect(result.transactions.map(transaction => ({
+    date: transaction.date,
+    amount_cents: transaction.amount_cents,
+    description: transaction.description,
+  }))).toEqual([{
+    date: '2026-05-19',
+    amount_cents: 3911,
+    description: 'EXAMPLE MARKET SAN DIEGO CA',
+  }, {
+    date: '2026-05-22',
+    amount_cents: -57428,
+    description: 'PAYMENT - THANK YOU',
+  }, {
+    date: '2026-06-19',
+    amount_cents: 1835,
+    description: 'EXAMPLE DELIVERY SHERIDAN WY',
+  }]);
+  expect(result.balances).toEqual([{
+    date: '2026-06-19',
+    account: 'Robinhood Gold Card - 8904',
+    institution: 'Robinhood',
+    balance_cents: -9689,
+  }]);
+});
+
+test.each([
+  ['Robinhood Banking statement', 'robinhood-banking-statement-pdf', [
+    'Robinhood Banking',
+    'Joint Checking 4429',
+    'Account Activity',
+  ].join('\n')],
+  ['Robinhood credit card statement', 'robinhood-credit-card-statement-pdf', [
+    'Account Number: XXXX XXXX XXXX 8904',
+    'Statement Closing Date June 19, 2026',
+    'creditcards@robinhood.com',
+    'TRANSACTIONS',
+  ].join('\n')],
+] as const)('import parser registry resolves %s by PDF content', (_name, expectedId, sample) => {
+  const parser = resolveImportParser({
+    fileName: 'statement.pdf',
+    headers: [],
+    sample,
+  });
+
+  expect(parser?.id).toBe(expectedId);
+  expect(parser?.sourceType).toBe('statement');
+  expect(parser?.priority).toBe(50);
 });
 
 test('Robinhood statement parser preserves separate retirement accounts in consolidated PDFs', () => {

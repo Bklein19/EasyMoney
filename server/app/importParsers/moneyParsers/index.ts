@@ -21,6 +21,8 @@ import { meta as tiaaActivityMeta, default as tiaaActivityParse } from "./tiaa-a
 import { meta as tiaaStatementMeta, default as tiaaStatementParse } from "./tiaa-statement-pdf";
 import { meta as marcusStatementMeta, default as marcusStatementParse } from "./marcus-statement-pdf";
 import { meta as robinhoodStatementMeta, default as robinhoodStatementParse } from "./robinhood-statement-pdf";
+import { meta as robinhoodBankingStatementMeta, default as robinhoodBankingStatementParse } from "./robinhood-banking-statement-pdf";
+import { meta as robinhoodCreditCardStatementMeta, default as robinhoodCreditCardStatementParse } from "./robinhood-credit-card-statement-pdf";
 
 export const PARSERS: ParserModule[] = [
   { meta: msStmtMeta, parse: msStmtParse },
@@ -41,6 +43,8 @@ export const PARSERS: ParserModule[] = [
   { meta: tiaaActivityMeta, parse: tiaaActivityParse },
   { meta: tiaaStatementMeta, parse: tiaaStatementParse },
   { meta: marcusStatementMeta, parse: marcusStatementParse },
+  { meta: robinhoodBankingStatementMeta, parse: robinhoodBankingStatementParse },
+  { meta: robinhoodCreditCardStatementMeta, parse: robinhoodCreditCardStatementParse },
   { meta: robinhoodStatementMeta, parse: robinhoodStatementParse },
 ];
 
