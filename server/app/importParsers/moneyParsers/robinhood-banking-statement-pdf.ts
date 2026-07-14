@@ -56,12 +56,13 @@ function statementBalance(text: string) {
 
 function parseActivity(text: string, account: string): ParseResult["transactions"] {
   const transactions: ParseResult["transactions"] = [];
+  const occurrenceByTransactionId = new Map<string, number>();
   let pending: { date: string; description: string } | null = null;
 
   const addTransaction = (date: string, description: string, category: string, amount: string) => {
     const parsedAmount = cents(amount);
     const amount_cents = /^debit$/i.test(category) ? -Math.abs(parsedAmount) : Math.abs(parsedAmount);
-    transactions.push(makeTx({
+    const transaction = makeTx({
       date: shortDateToIso(date),
       amount_cents,
       description: normalizeWhitespace(description),
@@ -71,7 +72,11 @@ function parseActivity(text: string, account: string): ParseResult["transactions
         source: "robinhood-banking-statement",
         category,
       },
-    }));
+    });
+    const occurrenceIndex = occurrenceByTransactionId.get(transaction.id) ?? 0;
+    occurrenceByTransactionId.set(transaction.id, occurrenceIndex + 1);
+    transaction.id = `${transaction.id}:${occurrenceIndex}`;
+    transactions.push(transaction);
   };
 
   for (const rawLine of text.split(/\r?\n/)) {

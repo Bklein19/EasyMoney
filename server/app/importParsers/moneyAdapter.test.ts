@@ -717,6 +717,8 @@ test('Robinhood credit card statement parser extracts charges, payments, and a l
     'TRANSACTIONS',
     '05/19 05/21 2460316GW0EX6J939 EXAMPLE MARKET SAN DIEGO CA 39.11',
     '05/22 05/22 7442057GY00XV0XL0 PAYMENT - THANK YOU 574.28-',
+    '06/08 06/08 2469216HFBXEX49KK EXAMPLE RENT APPLICATION 35.00',
+    '06/08 06/08 2469216HFBXEX49ZF EXAMPLE RENT APPLICATION 35.00',
     '06/19 06/19 2405522HSP1MG0NHV EXAMPLE DELIVERY SHERIDAN WY 18.35',
     '06/19 06/19 INTEREST CHARGE ON PURCHASES 0.00',
   ].join('\n'));
@@ -734,6 +736,14 @@ test('Robinhood credit card statement parser extracts charges, payments, and a l
     amount_cents: -57428,
     description: 'PAYMENT - THANK YOU',
   }, {
+    date: '2026-06-08',
+    amount_cents: 3500,
+    description: 'EXAMPLE RENT APPLICATION',
+  }, {
+    date: '2026-06-08',
+    amount_cents: 3500,
+    description: 'EXAMPLE RENT APPLICATION',
+  }, {
     date: '2026-06-19',
     amount_cents: 1835,
     description: 'EXAMPLE DELIVERY SHERIDAN WY',
@@ -744,6 +754,7 @@ test('Robinhood credit card statement parser extracts charges, payments, and a l
     institution: 'Robinhood',
     balance_cents: -9689,
   }]);
+  expect(new Set(result.transactions.map(transaction => transaction.id)).size).toBe(result.transactions.length);
 });
 
 test.each([

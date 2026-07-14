@@ -59,7 +59,7 @@ function parseActivity(text: string, account: string, coveredTo: string): ParseR
     const amount_cents = row[7]!.endsWith("-") ? -Math.abs(parsedAmount) : Math.abs(parsedAmount);
     if (amount_cents === 0) continue;
 
-    transactions.push(makeTx({
+    const transaction = makeTx({
       date: transactionDate(row[1]!, row[2]!, coveredTo),
       amount_cents,
       description: normalizeWhitespace(row[6]!),
@@ -72,7 +72,9 @@ function parseActivity(text: string, account: string, coveredTo: string): ParseR
         postDate: `${row[3]}/${row[4]}`,
         reference: row[5],
       },
-    }));
+    });
+    transaction.id = `${transaction.id}:${row[5]}`;
+    transactions.push(transaction);
   }
 
   return transactions;
