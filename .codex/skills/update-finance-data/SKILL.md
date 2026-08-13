@@ -9,8 +9,6 @@ description: "Guide EasyMoney data catch-up runs: plan a safe user-driven tour t
 
 Do not automate bank logins, password entry, MFA, or sensitive account pages unless the user explicitly asks for interactive browser help and remains in control of credentials. Prefer a user-driven download checklist, then assist with file organization, EasyMoney import, and categorization.
 
-Treat information visible after sign-in as private working data. Do not copy account-holder names, balances, full or partial account numbers, transaction descriptions, confirmation numbers, or authenticated URLs into this skill, repository documentation, filenames, commits, or chat summaries. When recording a verified workflow, use generic account kinds and placeholders such as `1234`.
-
 ## Workflow
 
 1. Establish the catch-up window.
@@ -26,7 +24,6 @@ Treat information visible after sign-in as private working data. Do not copy acc
 3. Use the supported-institutions reference.
    - Read `references/supported-institutions.md` before advising what to download.
    - Treat exact website click paths as mutable. If the current site differs, record the updated path in the reference.
-   - Record only stable navigation labels, export options, and parser-relevant behavior. Scrub all data observed in authenticated pages.
 
 4. Import into EasyMoney.
    - Open `/import`.
@@ -60,7 +57,6 @@ Treat information visible after sign-in as private working data. Do not copy acc
 - Prefer filenames containing institution, account kind/last4 when known, and date range.
 - If a parser currently relies on a specific filename pattern, use the pattern in `references/supported-institutions.md`.
 - Never commit real downloaded financial files to the repo.
-- Keep downloaded files outside the repository. Verify their names and locations without printing or documenting their contents.
 
 ## Updating This Skill
 
@@ -71,5 +67,3 @@ When the user completes an institution download flow, add or update that institu
 - Export format and date-range choices.
 - Any filename required by the parser.
 - Any account mapping gotchas observed in EasyMoney preview.
-
-Before committing a skill update, search the diff for names, balances, account identifiers, transaction text, confirmation identifiers, and authenticated query strings. Replace any such values with generic descriptions or placeholders.

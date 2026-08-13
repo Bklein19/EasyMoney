@@ -28,21 +28,6 @@ Notes:
 - Prefer activity CSV for transaction detail.
 - Statements provide balance anchors and may include statement-summary rows when exact transaction detail is unavailable.
 
-Verified website flow:
-1. Open the public Bank of America home page and select `Log in`.
-2. Have the user enter credentials and complete MFA. Resume only after `Accounts Overview` is visible.
-3. Open each checking or savings account from `Personal accounts`.
-4. On the account detail page, keep `Activity` selected and choose `Download` beside the transaction controls.
-5. Export an overlapping custom date range based on EasyMoney's freshness report. Prefer the Bank of America CSV format when offered.
-6. Use the adjacent `Statements & Documents` tab to download missing monthly statements for balance anchors.
-7. Return to `Accounts Overview` and repeat for every deposit account.
-8. Open each credit-card account and download supported missing statements from its statements/documents view. Do not assume a credit-card activity export is parser-compatible without checking the import preview.
-
-Browser notes:
-- The signed-in account detail page exposes stable landmarks including `Activity`, `Statements & Documents`, and `Download`.
-- Account names and suffixes are useful only for matching a download to the correct EasyMoney account during the current run. Do not record their real values in this reference.
-- Save downloads outside the repository in the dated staging folder. Rename staged copies with generic institution, account-kind, placeholder-last4, and date-range components when useful for parser inference.
-
 ## Chase
 
 Supported:
