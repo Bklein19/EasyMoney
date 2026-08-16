@@ -52,9 +52,11 @@ Do not automate bank logins, password entry, MFA, or sensitive account pages unl
 
 ## Browser Automation Contract
 
-- Reusable institution scripts use the pinned Playwright JavaScript API under Bun. Do not introduce Playwright CLI daemons, session registries, Unix-socket discovery, CDP endpoints, or exported browser storage.
+- Reusable institution scripts use the pinned Playwright JavaScript API under Bun. Do not introduce Playwright CLI daemons, session registries, Unix-socket discovery, CDP endpoints, or ad hoc cookie/token export.
 - Launch a headed `chromium.launchPersistentContext` through `scripts/playwrightSession.ts`. Each institution gets a PII-free profile name and a stable platform-specific profile directory outside the repository.
-- The script process owns the browser and controller for the whole run, waits while the user completes login/MFA/CAPTCHA, then closes the browser cleanly. The persistent profile retains authentication between runs.
+- The script process owns the browser and controller for the whole run, waits while the user completes login/MFA/CAPTCHA, then closes the browser cleanly.
+- The helper checkpoints Playwright storage state inside the institution's private profile before closing and restores it on the next run. This preserves session cookies and IndexedDB-backed authentication that Chrome's profile alone may discard, so script iteration should not require another login until the institution expires or revokes the session.
+- Treat browser profiles and `.easymoney-auth-state.json` files as secrets. They live outside the repository, must never be committed, copied between users, or logged, and are owner-readable only on Unix-like systems. They contain session tokens, not usernames or passwords.
 - Prefer `context.request` for authenticated artifact requests once the site contract is verified. Use native Playwright download events when the request contract is unclear or the site requires a browser gesture.
 - Validate file signatures and the matching EasyMoney parser before reporting an artifact as ready. Never log credentials, cookies, tokens, account identifiers, document identifiers, signed URLs, or downloaded contents.
 

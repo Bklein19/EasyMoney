@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 
-import { playwrightProfilePath } from '../.codex/skills/update-finance-data/scripts/playwrightSession.ts';
+import {
+  playwrightAuthStatePath,
+  playwrightProfilePath,
+} from '../.codex/skills/update-finance-data/scripts/playwrightSession.ts';
 
 describe('Playwright session helper', () => {
   test('uses stable platform-specific persistent profile locations', () => {
@@ -19,5 +22,10 @@ describe('Playwright session helper', () => {
       platform: 'linux',
       env: { XDG_STATE_HOME: '/state' },
     })).toBe('/state/easymoney/playwright-profiles/tiaa-catchup');
+  });
+
+  test('keeps auth state inside the private institution profile', () => {
+    expect(playwrightAuthStatePath('/profiles/tiaa-catchup'))
+      .toBe('/profiles/tiaa-catchup/.easymoney-auth-state.json');
   });
 });

@@ -1,6 +1,6 @@
-import { mkdir, stat } from 'node:fs/promises';
+import { chmod, mkdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, posix, resolve, win32 } from 'node:path';
+import { posix, resolve, win32 } from 'node:path';
 
 import { chromium, type BrowserContext, type Page } from 'playwright';
 
@@ -12,6 +12,7 @@ type SessionOptions = {
   name: string;
   startUrl: string;
   profilePath?: string;
+  persistAuthentication?: boolean;
   contextOptions?: NonNullable<Parameters<typeof chromium.launchPersistentContext>[1]>;
   launchArgs?: string[];
 };
@@ -36,15 +37,23 @@ export function playwrightProfilePath(
   return pathApi.join(root, name);
 }
 
-async function pathExists(path: string): Promise<boolean> {
+export function playwrightAuthStatePath(profilePath: string): string {
+  return resolve(profilePath, '.easymoney-auth-state.json');
+}
+
+async function directoryExists(path: string): Promise<boolean> {
   return stat(path).then(info => info.isDirectory()).catch(() => false);
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  return stat(path).then(info => info.isFile()).catch(() => false);
 }
 
 export async function playwrightProfileState(
   name: string,
   profilePath = playwrightProfilePath(name),
 ): Promise<PlaywrightProfileState> {
-  return await pathExists(profilePath) ? 'existing' : 'missing';
+  return await directoryExists(profilePath) ? 'existing' : 'missing';
 }
 
 function isLockedProfileError(error: unknown): boolean {
@@ -57,7 +66,13 @@ export async function withPlaywrightPage<T>(
   operation: (page: Page, context: BrowserContext) => Promise<T>,
 ): Promise<T> {
   const profilePath = resolve(options.profilePath ?? playwrightProfilePath(options.name));
-  await mkdir(dirname(profilePath), { recursive: true });
+  const authStatePath = playwrightAuthStatePath(profilePath);
+  const persistAuthentication = options.persistAuthentication ?? true;
+  await mkdir(profilePath, { recursive: true });
+
+  const savedStorageState = persistAuthentication && await fileExists(authStatePath)
+    ? authStatePath
+    : undefined;
 
   let context: BrowserContext;
   try {
@@ -76,11 +91,19 @@ export async function withPlaywrightPage<T>(
   }
 
   try {
+    if (savedStorageState) await context.setStorageState(savedStorageState);
     const page = context.pages()[0] ?? await context.newPage();
     if (page.url() === 'about:blank') await page.goto(options.startUrl, { waitUntil: 'domcontentloaded' });
     return await operation(page, context);
   } finally {
-    await context.close();
+    try {
+      if (persistAuthentication) {
+        await context.storageState({ path: authStatePath, indexedDB: true });
+        if (process.platform !== 'win32') await chmod(authStatePath, 0o600);
+      }
+    } finally {
+      await context.close();
+    }
   }
 }
 
