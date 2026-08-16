@@ -21,7 +21,7 @@ function cleanDescription(value: string): string {
 
 function filenameAccount(filePath: string): { slug?: string; last4?: string; date?: string } {
   const filename = basename(filePath).replace(/^[0-9a-f]{64}-/, "");
-  const m = filename.match(/wells-fargo-(checking|autograph-visa|platinum-card)-(\d{4})-(\d{4}-\d{2}-\d{2})\.pdf$/i);
+  const m = filename.match(/wells-fargo-(checking|autograph-visa|platinum-card)(?:-(\d{4}))?(?:-statement)?-(\d{4}-\d{2}-\d{2})\.pdf$/i);
   return { slug: m?.[1]?.toLowerCase(), last4: m?.[2], date: m?.[3] };
 }
 

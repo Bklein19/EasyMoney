@@ -64,9 +64,14 @@ function isoDate(value: string): string {
 
 function accountFromFilename(filePath: string): string {
   const filename = basename(filePath);
-  const m = filename.match(/^bofa-(checking|savings)-(\d{4})-/i);
-  if (!m) throw new Error(`Could not infer BofA account from filename: ${filename}`);
-  return m[1]!.toLowerCase() === "checking" ? `Adv Plus Banking - ${m[2]}` : `Advantage Savings - ${m[2]}`;
+  const withLast4 = filename.match(/^bofa-(checking|savings)-(\d{4})-\d{4}-\d{2}-\d{2}-to-/i);
+  if (withLast4) {
+    return withLast4[1]!.toLowerCase() === "checking"
+      ? `Adv Plus Banking - ${withLast4[2]}`
+      : `Advantage Savings - ${withLast4[2]}`;
+  }
+  if (/^bofa-(checking|savings)-\d{4}-\d{2}-\d{2}-to-/i.test(filename)) return "Selected account";
+  throw new Error(`Could not infer BofA account from filename: ${filename}`);
 }
 
 export default async function parse(filePath: string): Promise<ParseResult> {

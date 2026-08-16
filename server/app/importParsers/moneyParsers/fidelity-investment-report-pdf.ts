@@ -7,7 +7,12 @@ export const meta: ParserMeta = {
   institution: "Fidelity",
   kind: "statement",
   priority: 50,
-  matches: ({ filename }) => /^fidelity-Z\d+-\d{4}-\d{2}-\d{2}\.pdf$/.test(filename),
+  matches: ({ filename, sample }) =>
+    /^fidelity-Z\d+-\d{4}-\d{2}-\d{2}\.pdf$/.test(filename) ||
+    (/^fidelity-investment-report-\d{4}-\d{2}\.pdf$/i.test(filename) &&
+      /INVESTMENT REPORT/i.test(sample) &&
+      /Account (?:Number|#):/i.test(sample) &&
+      /(?:Your Account Value|Ending Account Value)/i.test(sample)),
 };
 
 function parseMoneyToCents(s: string): number {

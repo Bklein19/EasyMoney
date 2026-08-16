@@ -64,11 +64,11 @@ function accountLast4(text: string): string {
 }
 
 function filenameLast4(filePath: string): string | undefined {
-  return basename(filePath).match(/^bofa-(?:checking|savings|credit-card)-(\d{4})-/i)?.[1];
+  return basename(filePath).match(/^bofa-(?:checking|savings|credit-card)-(\d{4})-\d{4}-/i)?.[1];
 }
 
 function filenameDepositType(filePath: string): "checking" | "savings" | undefined {
-  return basename(filePath).match(/^bofa-(checking|savings)-\d{4}-/i)?.[1]?.toLowerCase() as
+  return basename(filePath).match(/^bofa-(checking|savings)-(?:\d{4}-)?\d{4}-/i)?.[1]?.toLowerCase() as
     | "checking"
     | "savings"
     | undefined;
@@ -255,7 +255,7 @@ function cardStatementTransactions(text: string, account: string, coveredTo: str
 }
 
 function parseCreditCard(text: string, filePath: string): ParseResult {
-  const last4 = filenameLast4(filePath) ?? accountLast4(text);
+  const last4 = accountLast4(text) ?? filenameLast4(filePath);
   const account = `Customized Cash Rewards Visa Signature - ${last4}`;
 
   const period =
