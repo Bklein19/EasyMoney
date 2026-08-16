@@ -80,6 +80,7 @@ export async function withPlaywrightPage<T>(
       channel: 'chrome',
       headless: false,
       acceptDownloads: true,
+      chromiumSandbox: true,
       ...options.contextOptions,
       args: [...(options.contextOptions?.args ?? []), ...(options.launchArgs ?? [])],
     });
@@ -98,8 +99,12 @@ export async function withPlaywrightPage<T>(
   } finally {
     try {
       if (persistAuthentication) {
-        await context.storageState({ path: authStatePath, indexedDB: true });
-        if (process.platform !== 'win32') await chmod(authStatePath, 0o600);
+        try {
+          await context.storageState({ path: authStatePath, indexedDB: true });
+          if (process.platform !== 'win32') await chmod(authStatePath, 0o600);
+        } catch (error) {
+          if (!isClosedContextError(error)) throw error;
+        }
       }
     } finally {
       await context.close();
@@ -109,6 +114,37 @@ export async function withPlaywrightPage<T>(
 
 function authenticationRequired(value: string): boolean {
   return /authentication-required|auth-required|login-required/i.test(value);
+}
+
+export async function waitForInteractiveAuthentication(page: Page, deadline: number): Promise<void> {
+  let authenticatedSince: number | null = null;
+  while (Date.now() < deadline) {
+    if (page.isClosed()) throw new Error('The browser was closed before authentication completed');
+    const authenticationUrl = /(?:login|logon|sign[-_]?in|authenticate|authorization|oauth|sso|auth\.)/i.test(page.url());
+    const authenticationFields = await page.locator([
+      'input[type="password"]',
+      'input[autocomplete="username"]',
+      'input[autocomplete="current-password"]',
+    ].join(',')).count() > 0;
+
+    if (!authenticationUrl && !authenticationFields) {
+      authenticatedSince ??= Date.now();
+      if (Date.now() - authenticatedSince >= 1_500) return;
+    } else {
+      authenticatedSince = null;
+    }
+    try {
+      await page.waitForTimeout(500);
+    } catch (error) {
+      if (isClosedContextError(error)) throw new Error('The browser was closed before authentication completed');
+      throw error;
+    }
+  }
+  throw new Error('Authentication timed out');
+}
+
+function isClosedContextError(error: unknown): boolean {
+  return /Target page, context or browser has been closed/i.test(String(error instanceof Error ? error.message : error));
 }
 
 export async function runPlaywrightCode(
@@ -125,7 +161,7 @@ export async function runPlaywrightCode(
       console.log(`Authentication required in ${session.name}. Complete login and MFA in the open browser.`);
     }
     while (authenticationRequired(result) && Date.now() < deadline) {
-      await page.waitForTimeout(2_000);
+      await waitForInteractiveAuthentication(page, deadline);
       result = String(await program(page));
     }
     if (authenticationRequired(result)) throw new Error(`Authentication timed out in ${session.name}`);

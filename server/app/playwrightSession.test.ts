@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test';
+import type { Page } from 'playwright';
 
 import {
   playwrightAuthStatePath,
   playwrightProfilePath,
-} from '../.codex/skills/update-finance-data/scripts/playwrightSession.ts';
+  waitForInteractiveAuthentication,
+} from '../../.codex/skills/update-finance-data/scripts/playwrightSession.ts';
 
 describe('Playwright session helper', () => {
   test('uses stable platform-specific persistent profile locations', () => {
@@ -27,5 +29,24 @@ describe('Playwright session helper', () => {
   test('keeps auth state inside the private institution profile', () => {
     expect(playwrightAuthStatePath('/profiles/tiaa-catchup'))
       .toBe('/profiles/tiaa-catchup/.easymoney-auth-state.json');
+  });
+
+  test('waits on the existing login page instead of refreshing it', async () => {
+    let url = 'https://auth.tiaa.org/login';
+    let waits = 0;
+    const page = {
+      isClosed: () => false,
+      url: () => url,
+      locator: () => ({ count: async () => url.includes('/login') ? 1 : 0 }),
+      waitForTimeout: async () => {
+        waits += 1;
+        if (waits === 2) url = 'https://my.tiaa.org/private/participant/home';
+        await Bun.sleep(500);
+      },
+    } as unknown as Page;
+
+    await waitForInteractiveAuthentication(page, Date.now() + 5_000);
+    expect(waits).toBeGreaterThanOrEqual(4);
+    expect(url).toContain('/private/participant/home');
   });
 });
