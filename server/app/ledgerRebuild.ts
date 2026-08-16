@@ -272,7 +272,7 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
     accountId: number;
     date: string;
     amountCents: number;
-  }) => `${transaction.accountId}\0${transaction.date}\0${transaction.amountCents}`;
+  }) => `${transaction.accountId}\0${normalizeDate(transaction.date)}\0${transaction.amountCents}`;
   const monthBucketKey = (transaction: {
     accountId: number;
     date: string;

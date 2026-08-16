@@ -558,7 +558,7 @@ test('source rebuild applies priority dedup while keeping statement-only transfe
     sourceFileId: activity.sourceFileId,
     sourceAccountId: activityAccountId,
     stableSourceId: 'activity-buy',
-    date: '2026-05-16',
+    date: '2026-05-16T07:00:00.000Z',
     amountCents: -100000,
     description: 'Buy VTSAX',
     priority: 100,
