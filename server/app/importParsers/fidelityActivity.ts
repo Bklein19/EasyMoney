@@ -13,7 +13,7 @@ function investmentTransaction(row: Record<string, string>, sourceRowIndex: numb
   const date = parseDate(row['Run Date']?.trim(), ['MM/dd/yyyy', 'M/d/yyyy']);
   const amount = parseAmount(row['Amount ($)']);
   const action = row.Action?.replace(/\s+/g, ' ').trim();
-  if (!date || amount === null || !action) return null;
+  if (!date || amount === null || amount === 0 || !action) return null;
 
   return {
     sourceRowIndex,
@@ -38,7 +38,7 @@ function retirementTransaction(row: Record<string, string>, sourceRowIndex: numb
   const amount = parseAmount(row['Amount ($)']);
   const transactionType = row['Transaction Type']?.replace(/\s+/g, ' ').trim();
   const investment = row.Investment?.replace(/\s+/g, ' ').trim();
-  if (!date || amount === null || !transactionType) return null;
+  if (!date || amount === null || amount === 0 || !transactionType) return null;
 
   return {
     sourceRowIndex,

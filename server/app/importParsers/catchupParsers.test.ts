@@ -29,6 +29,7 @@ test('Fidelity activity parser supports brokerage and retirement exports', () =>
     '\uFEFF',
     'Run Date,Action,Symbol,Description,Type,Price ($),Quantity,Commission ($),Fees ($),Accrued Interest ($),Amount ($),Cash Balance ($),Settlement Date',
     '07/06/2026,JOURNALED TAX WITHHOLDING (Cash),,No Description,Cash,,0,,,,-21.96,1000.00,',
+    '07/06/2026,YOU BOUGHT RSU EXAMPLE (Cash),EX,EXAMPLE INC,Cash,10,2,,,,0,1000.00,',
   ].join('\n');
   expect(fidelityActivityParser.matches({ fileName: 'fidelity-investment-activity.csv', headers: [], sample: brokerage })).toBe(true);
   expect(parseFidelityActivity({ fileName: 'fidelity-investment-activity.csv', headers: [], rows: [], text: brokerage }).transactions[0]).toMatchObject({
@@ -36,6 +37,7 @@ test('Fidelity activity parser supports brokerage and retirement exports', () =>
     account: null,
     institution: 'Fidelity',
   });
+  expect(parseFidelityActivity({ fileName: 'fidelity-investment-activity.csv', headers: [], rows: [], text: brokerage }).transactions.filter(Boolean)).toHaveLength(1);
 
   const retirement = [
     '\uFEFF',
