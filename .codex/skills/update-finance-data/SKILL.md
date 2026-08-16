@@ -50,6 +50,14 @@ Do not automate bank logins, password entry, MFA, or sensitive account pages unl
 - If a site only offers a custom date range, use last-good-import-date minus 7 days through today.
 - If a site offers "since last statement" only, also download the latest full monthly/quarterly statement.
 
+## Browser Automation Contract
+
+- Reusable institution scripts use the pinned Playwright JavaScript API under Bun. Do not introduce Playwright CLI daemons, session registries, Unix-socket discovery, CDP endpoints, or exported browser storage.
+- Launch a headed `chromium.launchPersistentContext` through `scripts/playwrightSession.ts`. Each institution gets a PII-free profile name and a stable platform-specific profile directory outside the repository.
+- The script process owns the browser and controller for the whole run, waits while the user completes login/MFA/CAPTCHA, then closes the browser cleanly. The persistent profile retains authentication between runs.
+- Prefer `context.request` for authenticated artifact requests once the site contract is verified. Use native Playwright download events when the request contract is unclear or the site requires a browser gesture.
+- Validate file signatures and the matching EasyMoney parser before reporting an artifact as ready. Never log credentials, cookies, tokens, account identifiers, document identifiers, signed URLs, or downloaded contents.
+
 ## File Handling
 
 - Supported extensions: `.csv`, `.txt`, `.pdf`, `.html`, `.htm`.

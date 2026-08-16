@@ -3,8 +3,8 @@
 ## Catch-up workflow
 
 The reusable script downloads posted CSV activity plus available statement PDFs
-for the checking account and two credit accounts from a persistent headed
-session:
+for the checking account and two credit accounts through Playwright's
+JavaScript API and a persistent headed profile:
 
 ```sh
 bun .codex/skills/update-finance-data/scripts/wells-fargo.ts \

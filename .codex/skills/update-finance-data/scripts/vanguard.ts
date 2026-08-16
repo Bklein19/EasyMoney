@@ -1,19 +1,16 @@
-import { mkdir, readFile, readdir, stat } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
-import { createConnection } from 'node:net';
 
 import parseVanguardStatement, {
   meta as vanguardStatementMeta,
 } from '../../../../server/app/importParsers/moneyParsers/vanguard-statement-pdf.ts';
+import { runPlaywrightCode } from './playwrightSession.ts';
 
 const LOGIN_URL = 'https://investor.vanguard.com/my-account/log-on';
 const HOME_DIR = Bun.env.HOME;
 if (!HOME_DIR) throw new Error('HOME is required');
 const DEFAULT_OUTPUT_DIR = resolve(HOME_DIR, 'Downloads/easymoney-imports/2026-08-12');
 const DEFAULT_THROUGH = '2026-08-13';
-const REPO_ROOT = resolve(import.meta.dir, '../../../..');
-const PLAYWRIGHT_CLI = ['npx', 'playwright@latest', 'cli'];
 
 type ArtifactKind = 'csv' | 'pdf';
 
@@ -34,11 +31,6 @@ type StatementJob = Artifact & {
   targetPath: string;
 };
 
-type PlaywrightSession = {
-  socketPath: string;
-  browser?: { launchOptions?: { headless?: boolean } };
-};
-
 function option(name: string, fallback: string): string {
   const prefix = `--${name}=`;
   return Bun.argv.find(argument => argument.startsWith(prefix))?.slice(prefix.length) || fallback;
@@ -52,79 +44,6 @@ function assertIsoDate(value: string, label: string): void {
 
 function decode(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes);
-}
-
-function runCli(args: string[], allowFailure = false) {
-  const result = Bun.spawnSync([...PLAYWRIGHT_CLI, ...args], {
-    cwd: REPO_ROOT,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  if (!allowFailure && result.exitCode !== 0) {
-    const error = decode(result.stderr).trim() || decode(result.stdout).trim();
-    throw new Error(error || `playwright-cli exited with ${result.exitCode}`);
-  }
-  return result;
-}
-
-async function findSession(name: string): Promise<PlaywrightSession> {
-  const daemonRoot = join(homedir(), 'Library/Caches/ms-playwright/daemon');
-  const entries = await readdir(daemonRoot, { withFileTypes: true }).catch(() => []);
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const text = await readFile(join(daemonRoot, entry.name, `${name}.session`), 'utf8').catch(() => null);
-    if (text) return JSON.parse(text) as PlaywrightSession;
-  }
-  throw new Error(`The Playwright session ${name} does not exist`);
-}
-
-async function runSessionProgram(session: PlaywrightSession, code: string): Promise<string> {
-  return await new Promise((resolvePromise, rejectPromise) => {
-    const socket = createConnection(session.socketPath);
-    let buffer = '';
-    let settled = false;
-    const finish = (error?: Error, result?: string) => {
-      if (settled) return;
-      settled = true;
-      socket.destroy();
-      if (error) rejectPromise(error);
-      else resolvePromise(result ?? '');
-    };
-
-    socket.setTimeout(120_000, () => finish(new Error('Playwright session command timed out')));
-    socket.on('connect', () => {
-      socket.write(`${JSON.stringify({
-        id: 1,
-        method: 'run',
-        params: {
-          args: { _: ['run-code', code] },
-          cwd: REPO_ROOT,
-          raw: true,
-          json: false,
-        },
-      })}\n`);
-    });
-    socket.on('data', chunk => {
-      buffer += chunk.toString();
-      let newline = buffer.indexOf('\n');
-      while (newline >= 0) {
-        const line = buffer.slice(0, newline);
-        buffer = buffer.slice(newline + 1);
-        newline = buffer.indexOf('\n');
-        if (!line) continue;
-        const message = JSON.parse(line) as {
-          id?: number;
-          error?: string;
-          result?: { text?: string };
-        };
-        if (message.id !== 1) continue;
-        if (message.error) finish(new Error(message.error));
-        else finish(undefined, message.result?.text);
-      }
-    });
-    socket.on('error', error => finish(error));
-    socket.on('close', () => finish(new Error('Playwright session closed before returning a result')));
-  });
 }
 
 function parseSessionJson<T>(result: string): T {
@@ -150,34 +69,10 @@ function parseSessionJson<T>(result: string): T {
       const decoded = JSON.parse(candidate) as string | T;
       return typeof decoded === 'string' ? JSON.parse(decoded) as T : decoded;
     } catch {
-      // The daemon may wrap raw output in CLI status sections.
+      // Browser programs may return a JSON string or a serialized JSON string.
     }
   }
   throw new Error('Playwright session returned no parseable JSON result');
-}
-
-function ensureSession(sessionName: string): boolean {
-  const result = runCli(['list', '--json']);
-  const payload = JSON.parse(decode(result.stdout)) as {
-    browsers?: Array<{
-      name?: string;
-      status?: string;
-      headed?: boolean;
-      persistent?: boolean;
-    }>;
-  };
-  const session = payload.browsers?.find(browser => browser.name === sessionName);
-  if (session?.status === 'open' && session.headed && session.persistent) return true;
-
-  runCli([
-    `-s=${sessionName}`,
-    'open',
-    '--browser=chrome',
-    '--headed',
-    '--persistent',
-    LOGIN_URL,
-  ]);
-  return false;
 }
 
 async function validateCsv(path: string): Promise<void> {
@@ -398,22 +293,20 @@ if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(accountSet)) {
 }
 await mkdir(outputDir, { recursive: true });
 
-const activityJobs: ActivityJob[] = [
+const activityJobs: ActivityJob[] = ([
   {
     accountKind: 'brokerage',
     startDate: '2026-05-25',
     fileName: `vanguard-${accountSet}-brokerage-2026-05-25-to-${through}-activity.csv`,
     kind: 'csv',
-    targetPath: '',
   },
   {
     accountKind: 'roth-ira',
     startDate: '2026-05-25',
     fileName: `vanguard-${accountSet}-roth-ira-2026-05-25-to-${through}-activity.csv`,
     kind: 'csv',
-    targetPath: '',
   },
-].map(job => ({ ...job, targetPath: resolve(outputDir, job.fileName) }));
+] satisfies Array<Omit<ActivityJob, 'targetPath'>>).map(job => ({ ...job, targetPath: resolve(outputDir, job.fileName) }));
 
 const statementJobs: StatementJob[] = [
   ['brokerage', '2026-06-30', `2026-06-30-Brokerage---${accountSet}.pdf`],
@@ -439,15 +332,7 @@ for (const job of statementJobs) {
 }
 
 if (pendingActivity.length || pendingStatements.length) {
-  if (!ensureSession(sessionName)) {
-    console.log(`Complete Vanguard login and MFA in the headed ${sessionName} window, then rerun this command.`);
-    process.exit(2);
-  }
-  const session = await findSession(sessionName);
-  if (session.browser?.launchOptions?.headless !== false) {
-    throw new Error(`The headed persistent Playwright session ${sessionName} is not open`);
-  }
-  const result = await runSessionProgram(session, browserProgram(pendingActivity, pendingStatements));
+  const result = await runPlaywrightCode({ name: sessionName, startUrl: LOGIN_URL }, browserProgram(pendingActivity, pendingStatements));
   const payload = parseSessionJson<{ status?: string }>(result);
   if (payload.status === 'auth-required') {
     console.log(`Complete Vanguard login and MFA in the headed ${sessionName} window, then rerun this command.`);

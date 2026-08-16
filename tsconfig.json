@@ -14,6 +14,7 @@
     "types": ["bun-types"]
   },
   "include": [
+    ".codex/skills/update-finance-data/scripts/**/*.ts",
     "server/index.ts",
     "server/app/**/*.ts",
     "scripts/**/*.ts",

@@ -1,8 +1,8 @@
 # Bank of America
 
-This workflow attaches to the workspace-scoped, headed, persistent Playwright
-session named `finance-catchup`. It never reads or writes browser storage,
-cookies, credentials, or authentication tokens.
+This workflow launches a headed Chrome persistent context through Playwright's
+JavaScript API. The profile is named `finance-catchup`; the script never
+exports cookies, credentials, or authentication tokens.
 
 ## Invocation
 
@@ -22,24 +22,15 @@ Use `--dry-run` to validate already-staged Bank of America files without using
 the browser. Normal runs are resumable and skip every valid existing artifact,
 including statement files already staged under date-suffixed names.
 
-The command must run from the repository root because Playwright CLI sessions
-are workspace-scoped. Open the headed persistent session with:
-
-```bash
-npx playwright@latest cli -s=finance-catchup
-```
-
-The Bun script reads that session's local registry entry and talks directly to
-its Unix socket. This avoids Playwright CLI's command-duration limit and does
-not expose the browser over the network.
+The script owns the browser and controller for the entire run. Authentication
+is retained in EasyMoney's local persistent profile between runs; there is no
+Playwright CLI daemon, session registry, Unix socket, or browser endpoint.
 
 ## Authentication Pause
 
-The script does not open a different browser. If `finance-catchup` is missing,
-not headed, or not authenticated, it exits without downloading anything. Open
-or resume that exact persistent headed session, personally enter credentials,
-complete MFA or CAPTCHA, stop on any authenticated Bank of America page, and
-rerun the same command. Do not save browser state.
+If authentication is required, personally enter credentials and complete MFA
+or CAPTCHA in the browser opened by the still-running script. The workflow
+continues after authentication and closes Chrome when validation completes.
 
 ## Outputs
 
@@ -78,6 +69,6 @@ statements already staged with a date between the month and `-statement.pdf`.
 
 The account selector uses the observed product labels for Advantage Plus
 checking, Advantage Savings, and Customized Cash Rewards. A renamed account or
-a different Bank of America product may require a selector update. Session and
+a different Bank of America product may require a selector update. Live
 account tokens are discovered dynamically inside the authenticated page and are
 never logged, persisted, or documented.

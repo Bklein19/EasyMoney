@@ -12,11 +12,16 @@ bun .codex/skills/update-finance-data/scripts/fidelity.ts \
   --session fidelity-catchup
 ```
 
-The script uses `npx --yes -p @playwright/cli@latest playwright-cli`, a named persistent headed Chrome session, and no cookie or storage-state export. Valid existing outputs are skipped.
+The script uses Playwright's JavaScript API and a local persistent Chrome
+profile named `fidelity-catchup`, with no cookie or storage-state export. The
+Bun process owns the browser for the complete run. Valid existing outputs are
+skipped.
 
 ## Authentication Pause
 
-The script opens Fidelity's public home page and follows the Portfolio control. If Fidelity redirects to sign-in, complete credentials, MFA, and any CAPTCHA directly in the headed `fidelity-catchup` window, then rerun the same command.
+The script opens Fidelity's public home page and follows the Portfolio control.
+If Fidelity redirects to sign-in, complete credentials, MFA, and any CAPTCHA
+directly in the headed browser. The same run waits and continues afterward.
 
 ## Outputs
 
@@ -38,5 +43,5 @@ Each output is PII-free by filename. The script validates extension, minimum siz
 - EasyMoney does not currently have a Fidelity activity CSV parser. Keep the CSVs as source exports; do not treat them as import-ready until a parser exists.
 - No separate Investment Report control was available in the observed Personal documents view. Fidelity listed the monthly files as statements, but the live files parsed successfully with EasyMoney's Fidelity investment-report parser.
 - EasyMoney's automatic investment-report routing still requires a legacy filename containing account digits. The PII-free files therefore need that parser selected explicitly until routing supports the PII-free convention; do not rename them to include account digits.
-- Employer retirement statement generation was available, but it opened a short-lived browser blob instead of a normal download or authenticated PDF response. The CLI could not persist that blob without an OS save dialog, so the reusable script does not claim or automate that PDF.
+- Employer retirement statement generation was available, but it opened a short-lived browser blob instead of a normal download or authenticated PDF response. The reusable script does not yet claim or automate that PDF.
 - Account selection intentionally uses account-class labels and never records account names, numbers, balances, or employer details.

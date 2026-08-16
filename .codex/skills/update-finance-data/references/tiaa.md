@@ -9,7 +9,12 @@ bun .codex/skills/update-finance-data/scripts/tiaa.ts \
   --output-dir=/private/tmp/easymoney-tiaa-catchup
 ```
 
-The script uses the existing `tiaa-catchup` headed persistent session and current `npx playwright@latest cli` for session validation. It never exports cookies, storage state, credentials, tokens, or page contents. Existing parser-valid artifacts are skipped, so interrupted runs can be resumed. Use `--validate-only` to validate staged files without opening the browser.
+The script uses Playwright's JavaScript API with a local persistent Chrome
+profile named `tiaa-catchup`. The Bun process owns the browser and controller
+for the entire run. It never exports cookies, storage state, credentials,
+tokens, or page contents. Existing parser-valid artifacts are skipped, so
+interrupted runs can be resumed. Use `--validate-only` to validate staged files
+without opening the browser.
 
 ## Outputs
 
@@ -20,7 +25,7 @@ CSV files must have the native TIAA header beginning `Date,AccountId,Action,Secu
 
 ## Live Flow
 
-After login, the browser program discovers the current TIAA activity/transaction/history export and statement/document links, then uses authenticated page requests where possible. It does not assume account names or expose account numbers, balances, transaction text, or response contents. Complete authentication, MFA, or CAPTCHA in the headed session if the script reports `Authentication required`.
+After login, the browser program discovers the current TIAA activity/transaction/history export and statement/document links, then uses authenticated page requests where possible. It does not assume account names or expose account numbers, balances, transaction text, or response contents. Complete authentication, MFA, or CAPTCHA in the browser opened by the waiting script if it reports `Authentication required`.
 
 ## Import Readiness And Gaps
 

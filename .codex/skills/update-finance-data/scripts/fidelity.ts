@@ -1,6 +1,8 @@
-import { mkdir, readdir, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
+import type { Page } from "playwright";
 import { fidelityInvestmentReportParser } from "../../../../server/app/importParsers/fidelityInvestmentReport.ts";
+import { withPlaywrightPage } from "./playwrightSession.ts";
 
 type ArtifactKind = "csv" | "pdf";
 
@@ -19,9 +21,6 @@ interface Artifact {
 
 const PUBLIC_HOME = "https://www.fidelity.com/";
 const DEFAULT_OUTPUT = "/private/tmp/easymoney-fidelity-catchup";
-const CLI = ["npx", "--yes", "-p", "@playwright/cli@latest", "playwright-cli"];
-const REPO_ROOT = resolve(import.meta.dir, "../../../..");
-const CONFIG_PATH = "/tmp/easymoney-fidelity-playwright.json";
 const MIN_BYTES = 100;
 
 function usage(): never {
@@ -81,30 +80,11 @@ function sanitizeError(value: string): string {
     .slice(0, 1_000);
 }
 
-async function runCli(args: string[], timeoutMs = 30_000): Promise<string> {
-  const child = Bun.spawn([...CLI, ...args], {
-    cwd: REPO_ROOT,
-    env: process.env,
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const stdoutPromise = new Response(child.stdout).text();
-  const stderrPromise = new Response(child.stderr).text();
-  const timer = setTimeout(() => child.kill(), timeoutMs);
-  const exitCode = await child.exited;
-  clearTimeout(timer);
-  const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
-  if (exitCode !== 0) {
-    throw new Error(sanitizeError(stderr || stdout || `playwright-cli exited ${exitCode}`));
-  }
-  return stdout.trim();
-}
-
-async function inspectArtifact(path: string, kind: ArtifactKind, requireExtension = true): Promise<boolean> {
+async function inspectArtifact(path: string, kind: ArtifactKind): Promise<boolean> {
   try {
     const info = await stat(path);
     if (!info.isFile() || info.size < MIN_BYTES) return false;
-    if (requireExtension && extname(path).toLowerCase() !== `.${kind}`) return false;
+    if (extname(path).toLowerCase() !== `.${kind}`) return false;
     const bytes = new Uint8Array(await Bun.file(path).slice(0, 4_096).arrayBuffer());
     if (kind === "pdf") {
       return new TextDecoder("ascii").decode(bytes.slice(0, 5)) === "%PDF-";
@@ -175,119 +155,56 @@ function artifacts(options: Options): Artifact[] {
   return result;
 }
 
-async function ensureSession(options: Options): Promise<void> {
-  const list = await runCli(["list"]);
-  if (list.includes(`- ${options.session}:`)) return;
-
-  await writeFile(CONFIG_PATH, JSON.stringify({
-    browser: {
-      browserName: "chromium",
-      launchOptions: {
-        channel: "chrome",
-        headless: false,
-        args: ["--disable-http2"],
-        downloadsPath: options.output,
-      },
-      contextOptions: { acceptDownloads: true },
-    },
-  }));
-  await runCli([
-    `-s=${options.session}`,
-    "open",
-    PUBLIC_HOME,
-    "--persistent",
-    `--config=${CONFIG_PATH}`,
-  ]);
+async function clickText(page: Page, label: string): Promise<void> {
+  const target = page.locator('a,button').filter({ hasText: label }).first();
+  if (!await target.count()) throw new Error(`Fidelity control not found: ${label}`);
+  await target.click();
+  await page.waitForTimeout(1_500);
 }
 
-async function clickText(options: Options, label: string): Promise<void> {
-  const expression = `(() => {
-    const target = [...document.querySelectorAll('a,button')]
-      .find(element => (element.textContent || '').replace(/\\s+/g, ' ').trim() === ${JSON.stringify(label)});
-    if (!target) return false;
-    target.click();
-    return true;
-  })()`;
-  const result = await runCli([`-s=${options.session}`, "--raw", "eval", expression]);
-  if (!result.includes("true")) throw new Error(`Fidelity control not found: ${label}`);
-  await Bun.sleep(1_500);
-}
-
-async function openPortfolio(options: Options): Promise<void> {
-  await runCli([`-s=${options.session}`, "--raw", "goto", PUBLIC_HOME]);
-  await clickText(options, "Portfolio");
-  const signedIn = await runCli([
-    `-s=${options.session}`,
-    "--raw",
-    "eval",
-    "!/signin|login/i.test(location.pathname)",
-  ]);
-  if (!signedIn.includes("true")) {
-    console.log(`Authentication required. Complete login and MFA in headed session ${options.session}, then rerun.`);
-    process.exit(2);
+async function openPortfolio(page: Page, options: Options): Promise<void> {
+  await page.goto(PUBLIC_HOME, { waitUntil: 'domcontentloaded' });
+  await clickText(page, "Portfolio");
+  if (/signin|login/i.test(new URL(page.url()).pathname) || await page.locator('input[type=password]').count()) {
+    console.log(`Authentication required. Complete login and MFA in the open ${options.session} browser.`);
+    await page.waitForFunction(
+      () => !/signin|login/i.test(location.pathname) && !document.querySelector('input[type=password]'),
+      undefined,
+      { timeout: 10 * 60_000 },
+    );
+    await page.goto(PUBLIC_HOME, { waitUntil: 'domcontentloaded' });
+    await clickText(page, "Portfolio");
   }
 }
 
-async function openActivity(options: Options): Promise<void> {
-  await openPortfolio(options);
-  await clickText(options, "Activity & Orders");
+async function openActivity(page: Page, options: Options): Promise<void> {
+  await openPortfolio(page, options);
+  await clickText(page, "Activity & Orders");
 }
 
-async function openDocuments(options: Options): Promise<void> {
-  await openPortfolio(options);
-  await clickText(options, "Documents");
+async function openDocuments(page: Page, options: Options): Promise<void> {
+  await openPortfolio(page, options);
+  await clickText(page, "Documents");
 }
 
-async function selectAccount(options: Options, kind: "investment" | "retirement"): Promise<void> {
-  const selectorOpen = await runCli([
-    `-s=${options.session}`,
-    "--raw",
-    "eval",
-    "document.querySelector('#account-selector')?.checkVisibility() === true",
-  ]);
-  if (!selectorOpen.includes("true")) {
-    await runCli([
-      `-s=${options.session}`,
-      "--raw",
-      "click",
-      "button[aria-label=\"account selector\"]:visible",
-    ]);
+async function selectAccount(page: Page, kind: "investment" | "retirement"): Promise<void> {
+  if (!await page.locator('#account-selector:visible').count()) {
+    await page.locator('button[aria-label="account selector"]:visible').click();
   }
-
-  const pattern = kind === "investment" ? "/brokerage|individual|IRA/i" : "/401\\(k\\)|retirement/i";
-  await runCli([
-    `-s=${options.session}`,
-    "--raw",
-    "click",
-    `locator('#account-selector:visible a').filter({ hasText: ${pattern} }).first()`,
-  ]);
+  const pattern = kind === "investment" ? /brokerage|individual|IRA/i : /401\(k\)|retirement/i;
+  await page.locator('#account-selector:visible a').filter({ hasText: pattern }).first().click();
 }
 
-async function setActivityRange(options: Options): Promise<void> {
-  await runCli([
-    `-s=${options.session}`,
-    "--raw",
-    "click",
-    "getByRole('button', { name: /Open time filter/ })",
-  ]);
-  await runCli([
-    `-s=${options.session}`,
-    "--raw",
-    "click",
-    "getByText('Custom', { exact: true })",
-  ]);
-  await runCli([`-s=${options.session}`, "--raw", "fill", "#input-from-date", options.from]);
-  await runCli([`-s=${options.session}`, "--raw", "fill", "#input-to-date", options.to]);
-  await runCli([
-    `-s=${options.session}`,
-    "--raw",
-    "click",
-    "getByRole('button', { name: 'Apply', exact: true })",
-  ]);
+async function setActivityRange(page: Page, options: Options): Promise<void> {
+  await page.getByRole('button', { name: /Open time filter/ }).click();
+  await page.getByText('Custom', { exact: true }).click();
+  await page.locator('#input-from-date').fill(options.from);
+  await page.locator('#input-to-date').fill(options.to);
+  await page.getByRole('button', { name: 'Apply', exact: true }).click();
 }
 
 async function downloadNewArtifact(
-  options: Options,
+  page: Page,
   target: Artifact,
   trigger: () => Promise<void>,
 ): Promise<void> {
@@ -296,36 +213,18 @@ async function downloadNewArtifact(
     return;
   }
 
-  const before = new Set(await readdir(options.output));
-  const startedAt = Date.now();
+  const downloadPromise = page.waitForEvent('download', { timeout: 30_000 });
   await trigger();
-
-  const deadline = Date.now() + 30_000;
-  while (Date.now() < deadline) {
-    const candidates: string[] = [];
-    for (const entry of await readdir(options.output)) {
-      if (before.has(entry) || entry.endsWith(".crdownload")) continue;
-      const path = resolve(options.output, entry);
-      const info = await stat(path).catch(() => null);
-      if (!info?.isFile() || info.mtimeMs < startedAt - 1_000) continue;
-      if (await inspectArtifact(path, target.kind, false)) candidates.push(path);
-    }
-    if (candidates.length === 1) {
-      await rename(candidates[0]!, target.path);
-      await validateArtifact(target);
-      console.log(`saved ${basename(target.path)}`);
-      return;
-    }
-    if (candidates.length > 1) {
-      throw new Error(`Ambiguous ${target.kind.toUpperCase()} downloads; rerun after isolating the staging folder`);
-    }
-    await Bun.sleep(500);
-  }
-  throw new Error(`Fidelity did not produce ${basename(target.path)}`);
+  const download = await downloadPromise;
+  await download.saveAs(target.path);
+  if (await download.failure()) throw new Error(`Fidelity did not produce ${basename(target.path)}`);
+  await validateArtifact(target);
+  console.log(`saved ${basename(target.path)}`);
 }
 
 async function downloadActivity(
   options: Options,
+  page: Page,
   kind: "investment" | "retirement",
   target: Artifact,
 ): Promise<void> {
@@ -333,22 +232,12 @@ async function downloadActivity(
     console.log(`skip ${basename(target.path)}`);
     return;
   }
-  await openActivity(options);
-  await selectAccount(options, kind);
-  await setActivityRange(options);
-  await downloadNewArtifact(options, target, async () => {
-    await runCli([
-      `-s=${options.session}`,
-      "--raw",
-      "click",
-      "getByRole('button', { name: 'Download', exact: true })",
-    ]);
-    await runCli([
-      `-s=${options.session}`,
-      "--raw",
-      "click",
-      "getByRole('button', { name: 'Download as CSV', exact: true })",
-    ]);
+  await openActivity(page, options);
+  await selectAccount(page, kind);
+  await setActivityRange(page, options);
+  await downloadNewArtifact(page, target, async () => {
+    await page.getByRole('button', { name: 'Download', exact: true }).click();
+    await page.getByRole('button', { name: 'Download as CSV', exact: true }).click();
   });
 }
 
@@ -357,7 +246,7 @@ function statementLabel(month: string): string {
   return `${date.toLocaleString("en-US", { month: "long", timeZone: "UTC" })} ${date.getUTCFullYear()}`;
 }
 
-async function downloadStatements(options: Options, targets: Artifact[]): Promise<void> {
+async function downloadStatements(options: Options, page: Page, targets: Artifact[]): Promise<void> {
   const pdfTargets = targets.filter(target => target.kind === "pdf");
   const pending: Artifact[] = [];
   for (const target of pdfTargets) {
@@ -368,18 +257,14 @@ async function downloadStatements(options: Options, targets: Artifact[]): Promis
     return;
   }
 
-  await openDocuments(options);
+  await openDocuments(page, options);
   for (const target of pdfTargets) {
     const month = basename(target.path).match(/\d{4}-\d{2}/)?.[0];
     if (!month) throw new Error(`Missing statement month in ${basename(target.path)}`);
     const label = statementLabel(month);
-    await downloadNewArtifact(options, target, async () => {
-      await runCli([
-        `-s=${options.session}`,
-        "--raw",
-        "click",
-        `locator('a').filter({ hasText: /${label}.*Statement/ }).first().locator('xpath=following::a[@aria-label="Download Document"][1]')`,
-      ]);
+    await downloadNewArtifact(page, target, async () => {
+      await page.locator('a').filter({ hasText: new RegExp(`${label}.*Statement`) }).first()
+        .locator('xpath=following::a[@aria-label="Download Document"][1]').click();
     });
   }
 }
@@ -399,11 +284,18 @@ async function main(): Promise<void> {
   for (const artifact of expected) {
     if (!await inspectArtifact(artifact.path, artifact.kind)) incomplete.push(artifact);
   }
-  if (incomplete.length > 0) await ensureSession(options);
-
-  await downloadActivity(options, "investment", expected[0]!);
-  await downloadActivity(options, "retirement", expected[1]!);
-  await downloadStatements(options, expected);
+  if (incomplete.length > 0) {
+    await withPlaywrightPage({
+      name: options.session,
+      startUrl: PUBLIC_HOME,
+      contextOptions: { downloadsPath: options.output },
+      launchArgs: ['--disable-http2'],
+    }, async page => {
+      await downloadActivity(options, page, "investment", expected[0]!);
+      await downloadActivity(options, page, "retirement", expected[1]!);
+      await downloadStatements(options, page, expected);
+    });
+  }
   for (const artifact of expected) await validateArtifact(artifact);
   console.log(`validated ${expected.length} Fidelity artifacts`);
 }

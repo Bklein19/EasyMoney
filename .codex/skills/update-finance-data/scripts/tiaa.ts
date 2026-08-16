@@ -1,18 +1,14 @@
-import { mkdir, readFile, readdir, stat } from "node:fs/promises";
-import { homedir } from "node:os";
-import { basename, extname, join, resolve } from "node:path";
-import { createConnection } from "node:net";
+import { mkdir, stat } from "node:fs/promises";
+import { basename, extname, resolve } from "node:path";
 
 import parseActivity from "../../../../server/app/importParsers/moneyParsers/tiaa-activity-csv.ts";
 import parseStatement, { meta as statementMeta } from "../../../../server/app/importParsers/moneyParsers/tiaa-statement-pdf.ts";
+import { runPlaywrightCode } from "./playwrightSession.ts";
 
 type Kind = "csv" | "pdf";
 type Artifact = { fileName: string; kind: Kind; path: string };
-type Session = { socketPath: string; browser?: { launchOptions?: { headless?: boolean } } };
-
-const REPO_ROOT = resolve(import.meta.dir, "../../../..");
-const PLAYWRIGHT_CLI = ["npx", "playwright@latest", "cli"];
 const SESSION_NAME = "tiaa-catchup";
+const HOME_URL = "https://my.tiaa.org/private/participant/home";
 const DEFAULT_OUTPUT = "/private/tmp/easymoney-tiaa-catchup";
 const DEFAULT_FROM = "2026-01-01";
 const DEFAULT_TO = new Date().toISOString().slice(0, 10);
@@ -30,50 +26,6 @@ function iso(value: string, label: string): void {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
     throw new Error(`${label} must be YYYY-MM-DD`);
   }
-}
-
-async function findSession(): Promise<Session> {
-  const root = join(homedir(), "Library/Caches/ms-playwright/daemon");
-  for (const daemon of await readdir(root, { withFileTypes: true }).catch(() => [])) {
-    if (!daemon.isDirectory()) continue;
-    const path = join(root, daemon.name, `${SESSION_NAME}.session`);
-    const text = await readFile(path, "utf8").catch(() => null);
-    if (!text) continue;
-    const session = JSON.parse(text) as Session;
-    if (session.browser?.launchOptions?.headless === false && await stat(session.socketPath).then(() => true).catch(() => false)) return session;
-  }
-  throw new Error(`The headed persistent session ${SESSION_NAME} does not exist; start it with ${PLAYWRIGHT_CLI.join(" ")}`);
-}
-
-async function runSession(session: Session, code: string): Promise<string> {
-  return await new Promise((resolvePromise, rejectPromise) => {
-    const socket = createConnection(session.socketPath);
-    let buffer = "";
-    let done = false;
-    const finish = (error?: Error, value = "") => {
-      if (done) return;
-      done = true;
-      socket.destroy();
-      error ? rejectPromise(error) : resolvePromise(value);
-    };
-    socket.setTimeout(120_000, () => finish(new Error("Authenticated browser operation timed out")));
-    socket.on("connect", () => socket.write(`${JSON.stringify({ id: 1, method: "run", params: { args: { _: ["run-code", code] }, cwd: REPO_ROOT, raw: true, json: false } })}\n`));
-    socket.on("data", (chunk) => {
-      buffer += chunk.toString();
-      let newline = buffer.indexOf("\n");
-      while (newline >= 0) {
-        const line = buffer.slice(0, newline);
-        buffer = buffer.slice(newline + 1);
-        newline = buffer.indexOf("\n");
-        if (!line) continue;
-        const message = JSON.parse(line) as { id?: number; error?: string; result?: { text?: string } };
-        if (message.id !== 1) continue;
-        finish(message.error ? new Error(message.error) : undefined, message.result?.text ?? "");
-      }
-    });
-    socket.on("error", (error) => finish(error));
-    socket.on("close", () => finish(new Error("Authenticated browser session closed")));
-  });
 }
 
 function quarterEnds(from: string, to: string): Array<{ date: string; quarter: number; year: number }> {
@@ -301,13 +253,11 @@ await mkdir(output, { recursive: true });
 const expected = artifacts(output, from, to);
 const started = performance.now();
 if (probeOnly) {
-  const session = await findSession();
-  console.log(await runSession(session, contractProbeProgram()));
+  console.log(await runPlaywrightCode({ name: SESSION_NAME, startUrl: HOME_URL }, contractProbeProgram()));
 } else if (!validateOnly) {
   const requested = []; for (const artifact of expected) if (!(await isValid(artifact))) requested.push(artifact);
   if (requested.length) {
-    const session = await findSession();
-    const raw = await runSession(session, browserProgram(requested));
+    const raw = await runPlaywrightCode({ name: SESSION_NAME, startUrl: HOME_URL }, browserProgram(requested));
     if (/authentication-required/.test(raw)) throw new Error(`Authentication required in headed session ${SESSION_NAME}`);
     if (!/complete/.test(raw)) throw new Error(`TIAA browser workflow did not complete: ${sanitizeBrowserError(raw)}`);
   }

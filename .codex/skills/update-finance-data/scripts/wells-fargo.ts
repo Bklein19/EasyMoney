@@ -2,15 +2,15 @@
 
 import { mkdir, readdir, stat, unlink } from 'node:fs/promises';
 import { basename, extname, resolve } from 'node:path';
-import { parse as parseCsv } from 'papaparse';
+import Papa from 'papaparse';
 import { wellsFargoGenericActivityParser } from '../../../../server/app/importParsers/wellsFargoGenericActivity.ts';
 import { pdfToText } from '../../../../server/app/importParsers/moneyParsers/_helpers.ts';
 import { parseWellsFargoStatementText } from '../../../../server/app/importParsers/moneyParsers/wells-fargo-statement-pdf.ts';
 import { wellsFargoStatementParser } from '../../../../server/app/importParsers/wellsFargoStatement.ts';
+import { runPlaywrightCode } from './playwrightSession.ts';
 
-const ROOT = resolve(import.meta.dir, '../../../..');
-const CLI = ['npx', 'playwright@latest', 'cli'];
 const DEFAULT_OUTPUT = '/private/tmp/easymoney-wells-fargo-catchup';
+const LOGIN_URL = 'https://connect.secure.wellsfargo.com/auth/login/present';
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const STATEMENT = /^wells-fargo-(checking|autograph-visa|platinum-card)-statement-(\d{4}-\d{2}-\d{2})\.pdf$/i;
 
@@ -77,10 +77,10 @@ async function validateActivity(artifact: Activity) {
   if (!info.isFile() || info.size < 32) throw new Error(`${basename(artifact.path)} is empty`);
   const text = await Bun.file(artifact.path).text();
   if (text.includes('\0')) throw new Error(`${basename(artifact.path)} contains binary data`);
-  const parsed = parseCsv<Record<string, string>>(text, { header: true, skipEmptyLines: true });
+  const parsed = Papa.parse<Record<string, string>>(text, { header: true, skipEmptyLines: true });
   const headers = parsed.meta.fields ?? [];
   if (!wellsFargoGenericActivityParser.matches({ fileName: basename(artifact.path), headers, sample: text.slice(0, 2048) })) throw new Error(`${basename(artifact.path)} does not match Wells Fargo activity parser`);
-  const result = wellsFargoGenericActivityParser.parse({ fileName: basename(artifact.path), headers, rows: parsed.data, text, filePath: artifact.path });
+  const result = await wellsFargoGenericActivityParser.parse({ fileName: basename(artifact.path), headers, rows: parsed.data, text, filePath: artifact.path });
   const transactions = result.transactions.filter(Boolean).length;
   if (!transactions) throw new Error(`${basename(artifact.path)} has no posted transactions`);
   return { bytes: info.size, transactions };
@@ -92,7 +92,7 @@ async function validateStatement(artifact: Statement) {
   const bytes = new Uint8Array(await Bun.file(artifact.path).slice(0, 5).arrayBuffer());
   if (new TextDecoder('ascii').decode(bytes) !== '%PDF-') throw new Error(`${basename(artifact.path)} is not a PDF`);
   const text = await pdfToText(artifact.path, true);
-  if (!wellsFargoStatementParser.matches({ fileName: basename(artifact.path), sample: text.slice(0, 8192) })) throw new Error(`${basename(artifact.path)} does not match Wells Fargo statement parser`);
+  if (!wellsFargoStatementParser.matches({ fileName: basename(artifact.path), headers: [], sample: text.slice(0, 8192) })) throw new Error(`${basename(artifact.path)} does not match Wells Fargo statement parser`);
   // The persisted name omits account numbers. The parser needs a statement date
   // in its filename, so this normalized path exists only during validation.
   const normalizedPath = `wells-fargo-${artifact.account.kind}-0000-${artifact.date}.pdf`;
@@ -100,13 +100,6 @@ async function validateStatement(artifact: Statement) {
   const accountPattern = artifact.account.kind === 'checking' ? /^Checking - \d{4}$/ : artifact.account.kind === 'autograph-visa' ? /^Autograph Visa - \d{4}$/ : /^Platinum Card - \d{4}$/;
   if (!result.balances.length || result.balances.some(balance => !accountPattern.test(balance.account))) throw new Error(`${basename(artifact.path)} has no matching balance anchor`);
   return { bytes: info.size, transactions: result.transactions.length, balances: result.balances.length };
-}
-
-async function runCli(cliArgs: string[]): Promise<string> {
-  const child = Bun.spawn([...CLI, ...cliArgs], { cwd: ROOT, stdout: 'pipe', stderr: 'pipe' });
-  const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
-  if (exitCode !== 0) throw new Error(safe(stderr || stdout || `Playwright CLI exited ${exitCode}`));
-  return stdout.trim();
 }
 
 function browserProgram(options: Options, activityJobs: Activity[], existing: Statement[]): string {
@@ -234,7 +227,7 @@ async function main(): Promise<void> {
   for (const file of activityFiles) if (await validateActivity(file).then(() => true).catch(() => false)) validActivities.add(file.path);
   const activityJobs = activityFiles.filter(file => !validActivities.has(file.path));
   if (!options.validateOnly) {
-    const result = await runCli([`-s=${options.session}`, 'run-code', browserProgram(options, activityJobs, validStatements)]);
+    const result = await runPlaywrightCode({ name: options.session, startUrl: LOGIN_URL }, browserProgram(options, activityJobs, validStatements));
     if (!/status.*complete/.test(result)) {
       if (/auth-required/.test(result)) throw new Error(`Authentication required in headed session ${options.session}`);
       throw new Error(`Wells Fargo Playwright run did not complete: ${safe(result)}`);

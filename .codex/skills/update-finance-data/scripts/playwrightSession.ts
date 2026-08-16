@@ -1,56 +1,24 @@
 import { mkdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, posix, resolve, win32 } from 'node:path';
+import { dirname, posix, resolve, win32 } from 'node:path';
+
+import { chromium, type BrowserContext, type Page } from 'playwright';
 
 export const PLAYWRIGHT_VERSION = '1.62.1';
-export const PLAYWRIGHT_CLI = ['bunx', `playwright@${PLAYWRIGHT_VERSION}`, 'cli'] as const;
 
-export type PlaywrightSessionState = 'live' | 'stale' | 'missing';
+export type PlaywrightProfileState = 'existing' | 'missing';
 
-export type PlaywrightCliResult = {
-  exitCode: number;
-  stderr: string;
-  stdout: string;
-};
-
-type ListedBrowser = {
-  name?: string;
-  status?: string;
-};
-
-type SessionList = {
-  browsers?: ListedBrowser[];
-  sessions?: ListedBrowser[];
+type SessionOptions = {
+  name: string;
+  startUrl: string;
+  profilePath?: string;
+  contextOptions?: NonNullable<Parameters<typeof chromium.launchPersistentContext>[1]>;
+  launchArgs?: string[];
 };
 
 type RunOptions = {
-  allowFailure?: boolean;
-  cwd?: string;
-  timeoutMs?: number;
+  authenticationTimeoutMs?: number;
 };
-
-type EnsureSessionOptions = {
-  name: string;
-  startUrl: string;
-  cwd?: string;
-  openArgs?: string[];
-  profilePath?: string;
-};
-
-function safeError(value: string): string {
-  return value
-    .replace(/https?:\/\/\S+/g, '[url]')
-    .replace(/\$[\d,]+(?:\.\d{2})?/g, '[amount]')
-    .replace(/\b\d{4,}\b/g, '[number]')
-    .slice(0, 1_000);
-}
-
-export function parsePlaywrightSessionList(value: string): ListedBrowser[] {
-  if (!value.trim()) return [];
-  const payload = JSON.parse(value) as SessionList | ListedBrowser[];
-  if (Array.isArray(payload)) return payload;
-  return payload.browsers ?? payload.sessions ?? [];
-}
 
 export function playwrightProfilePath(
   name: string,
@@ -68,87 +36,76 @@ export function playwrightProfilePath(
   return pathApi.join(root, name);
 }
 
-export async function executePlaywrightCli(
-  args: string[],
-  options: RunOptions = {},
-): Promise<PlaywrightCliResult> {
-  const child = Bun.spawn([...PLAYWRIGHT_CLI, ...args], {
-    cwd: options.cwd ?? process.cwd(),
-    env: process.env,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const stdoutPromise = new Response(child.stdout).text();
-  const stderrPromise = new Response(child.stderr).text();
-  const timer = setTimeout(() => child.kill(), options.timeoutMs ?? 120_000);
-  const exitCode = await child.exited;
-  clearTimeout(timer);
-  const [stdout, stderr] = await Promise.all([stdoutPromise, stderrPromise]);
-  const result = { exitCode, stdout: stdout.trim(), stderr: stderr.trim() };
-  if (!options.allowFailure && exitCode !== 0) {
-    throw new Error(safeError(stderr || stdout || `Playwright CLI exited with ${exitCode}`));
-  }
-  return result;
-}
-
-export async function runPlaywrightCli(args: string[], options: RunOptions = {}): Promise<string> {
-  return (await executePlaywrightCli(args, options)).stdout;
-}
-
 async function pathExists(path: string): Promise<boolean> {
   return stat(path).then(info => info.isDirectory()).catch(() => false);
 }
 
-export async function playwrightSessionState(
+export async function playwrightProfileState(
   name: string,
-  options: { cwd?: string; profilePath?: string } = {},
-): Promise<PlaywrightSessionState> {
-  const listed = parsePlaywrightSessionList(
-    await runPlaywrightCli(['list', '--json'], { cwd: options.cwd, timeoutMs: 30_000 }),
-  );
-  if (listed.some(browser => browser.name === name && browser.status === 'open')) return 'live';
-  return await pathExists(options.profilePath ?? playwrightProfilePath(name)) ? 'stale' : 'missing';
+  profilePath = playwrightProfilePath(name),
+): Promise<PlaywrightProfileState> {
+  return await pathExists(profilePath) ? 'existing' : 'missing';
 }
 
 function isLockedProfileError(error: unknown): boolean {
   const message = String(error instanceof Error ? error.message : error);
-  return /SingletonLock|profile.*(?:in use|locked)|user data directory.*in use/i.test(message);
+  return /SingletonLock|profile.*(?:in use|locked)|user data directory.*in use|ProcessSingleton/i.test(message);
 }
 
-export async function ensurePlaywrightSession(options: EnsureSessionOptions): Promise<{
-  opened: boolean;
-  previousState: PlaywrightSessionState;
-  profilePath: string;
-}> {
+export async function withPlaywrightPage<T>(
+  options: SessionOptions,
+  operation: (page: Page, context: BrowserContext) => Promise<T>,
+): Promise<T> {
   const profilePath = resolve(options.profilePath ?? playwrightProfilePath(options.name));
-  const previousState = await playwrightSessionState(options.name, { cwd: options.cwd, profilePath });
-  if (previousState === 'live') return { opened: false, previousState, profilePath };
-
   await mkdir(dirname(profilePath), { recursive: true });
+
+  let context: BrowserContext;
   try {
-    await runPlaywrightCli([
-      `-s=${options.name}`,
-      'open',
-      options.startUrl,
-      '--browser=chrome',
-      '--headed',
-      '--persistent',
-      `--profile=${profilePath}`,
-      ...(options.openArgs ?? []),
-    ], { cwd: options.cwd, timeoutMs: 60_000 });
+    context = await chromium.launchPersistentContext(profilePath, {
+      channel: 'chrome',
+      headless: false,
+      acceptDownloads: true,
+      ...options.contextOptions,
+      args: [...(options.contextOptions?.args ?? []), ...(options.launchArgs ?? [])],
+    });
   } catch (error) {
     if (isLockedProfileError(error)) {
-      throw new Error(`The ${options.name} browser profile is open without a live Playwright controller. Close that browser window, then rerun.`);
+      throw new Error(`The ${options.name} browser profile is already open. Close that browser window, then rerun.`);
     }
     throw error;
   }
-  return { opened: true, previousState, profilePath };
+
+  try {
+    const page = context.pages()[0] ?? await context.newPage();
+    if (page.url() === 'about:blank') await page.goto(options.startUrl, { waitUntil: 'domcontentloaded' });
+    return await operation(page, context);
+  } finally {
+    await context.close();
+  }
+}
+
+function authenticationRequired(value: string): boolean {
+  return /authentication-required|auth-required|login-required/i.test(value);
 }
 
 export async function runPlaywrightCode(
-  session: string,
+  session: SessionOptions,
   code: string,
   options: RunOptions = {},
 ): Promise<string> {
-  return runPlaywrightCli([`-s=${session}`, '--raw', 'run-code', code], options);
+  return withPlaywrightPage(session, async page => {
+    // Browser programs are repository-owned strings retained from the former CLI runner.
+    const program = Function(`"use strict"; return (${code});`)() as (browserPage: Page) => Promise<unknown>;
+    const deadline = Date.now() + (options.authenticationTimeoutMs ?? 10 * 60_000);
+    let result = String(await program(page));
+    if (authenticationRequired(result)) {
+      console.log(`Authentication required in ${session.name}. Complete login and MFA in the open browser.`);
+    }
+    while (authenticationRequired(result) && Date.now() < deadline) {
+      await page.waitForTimeout(2_000);
+      result = String(await program(page));
+    }
+    if (authenticationRequired(result)) throw new Error(`Authentication timed out in ${session.name}`);
+    return result;
+  });
 }

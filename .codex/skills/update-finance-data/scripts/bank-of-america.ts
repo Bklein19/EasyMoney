@@ -3,7 +3,8 @@
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { mkdir, readFile, readdir, stat } from "node:fs/promises";
-import { createConnection } from "node:net";
+
+import { runPlaywrightCode } from "./playwrightSession.ts";
 
 type Config = {
   outputDir: string;
@@ -22,16 +23,7 @@ type ValidArtifact = {
   size: number;
 };
 
-type PlaywrightSession = {
-  socketPath: string;
-  browser?: {
-    launchOptions?: {
-      headless?: boolean;
-    };
-  };
-};
-
-const repoRoot = resolve(import.meta.dir, "../../../..");
+const loginUrl = "https://secure.bankofamerica.com/myaccounts/signin/signIn.go";
 function parseArgs(args: string[]): Config {
   const config: Config = {
     outputDir: join(
@@ -131,68 +123,6 @@ async function validatedArtifacts(outputDir: string): Promise<ValidArtifact[]> {
     results.push(await validateArtifact(join(outputDir, filename)));
   }
   return results.sort((left, right) => left.filename.localeCompare(right.filename));
-}
-
-async function findSession(name: string): Promise<PlaywrightSession> {
-  const daemonRoot = join(homedir(), "Library/Caches/ms-playwright/daemon");
-  const entries = await readdir(daemonRoot, { withFileTypes: true }).catch(() => []);
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const path = join(daemonRoot, entry.name, `${name}.session`);
-    const text = await readFile(path, "utf8").catch(() => null);
-    if (!text) continue;
-    return JSON.parse(text) as PlaywrightSession;
-  }
-  throw new Error(`The Playwright session ${name} does not exist.`);
-}
-
-async function runSessionProgram(session: PlaywrightSession, code: string): Promise<string> {
-  return await new Promise((resolvePromise, rejectPromise) => {
-    const socket = createConnection(session.socketPath);
-    let buffer = "";
-    let settled = false;
-    const finish = (error?: Error, result?: string) => {
-      if (settled) return;
-      settled = true;
-      socket.destroy();
-      if (error) rejectPromise(error);
-      else resolvePromise(result ?? "");
-    };
-
-    socket.setTimeout(120_000, () => finish(new Error("Playwright session command timed out.")));
-    socket.on("connect", () => {
-      socket.write(`${JSON.stringify({
-        id: 1,
-        method: "run",
-        params: {
-          args: { _: ["run-code", code] },
-          cwd: repoRoot,
-          raw: true,
-          json: false,
-        },
-      })}\n`);
-    });
-    socket.on("data", chunk => {
-      buffer += chunk.toString();
-      let newline = buffer.indexOf("\n");
-      while (newline >= 0) {
-        const line = buffer.slice(0, newline);
-        buffer = buffer.slice(newline + 1);
-        newline = buffer.indexOf("\n");
-        if (!line) continue;
-        const message = JSON.parse(line) as {
-          id?: number;
-          error?: string;
-          result?: { text?: string };
-        };
-        if (message.id !== 1) continue;
-        if (message.error) finish(new Error(message.error));
-        else finish(undefined, message.result?.text);
-      }
-    });
-    socket.on("error", error => finish(error));
-    socket.on("close", () => finish(new Error("Playwright session closed before returning a result.")));
-  });
 }
 
 function completedStatementMonths(
@@ -496,12 +426,7 @@ async function main(): Promise<void> {
   if (config.dryRun)
     return;
 
-  const session = await findSession(config.session);
-  if (session.browser?.launchOptions?.headless !== false) {
-    throw new Error(`The headed persistent Playwright session ${config.session} is not open.`);
-  }
-
-  const result = await runSessionProgram(session, buildBrowserProgram(config, before, config.scope));
+  const result = await runPlaywrightCode({ name: config.session, startUrl: loginUrl }, buildBrowserProgram(config, before, config.scope));
   console.log(result);
   const decoded = JSON.parse(result) as string | { status?: string; action?: string; message?: string };
   const parsed = typeof decoded === "string"

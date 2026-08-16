@@ -1,6 +1,6 @@
 # Vanguard Catch-Up
 
-This workflow was verified against Vanguard's authenticated site on 2026-08-13. It uses the persistent headed Playwright session `vanguard-catchup` and never reads or persists cookies, tokens, credentials, or storage state.
+This workflow was verified against Vanguard's authenticated site on 2026-08-13. It uses Playwright's JavaScript API with a local persistent profile named `vanguard-catchup` and never exports cookies, tokens, credentials, or storage state.
 
 ## Run
 
@@ -18,13 +18,10 @@ bun .codex/skills/update-finance-data/scripts/vanguard.ts \
   --output-dir="$HOME/Downloads/easymoney-imports/2026-08-12"
 ```
 
-The script invokes exactly this browser toolchain:
-
-```bash
-npx playwright@latest cli
-```
-
-It performs the complete download workflow in one `run-code` call. Existing artifacts are skipped only after extension, size, file signature/shape, and statement-parser validation succeed.
+The Bun process owns the headed Chrome context for the complete workflow. There
+is no Playwright CLI daemon or socket. Existing artifacts are skipped only
+after extension, size, file signature/shape, and statement-parser validation
+succeed.
 
 Use a separate PII-free account-set label and persistent session when the same
 EasyMoney database contains more than one Vanguard login:
@@ -43,9 +40,9 @@ name or account number.
 
 ## Authentication Pause
 
-If `vanguard-catchup` is absent, the script opens Vanguard login in a persistent headed Chrome session and exits with status 2. If the session is on a login path, it also exits with status 2.
-
-The user completes login, MFA, and any CAPTCHA in that window, then reruns the same command. Do not enter credentials through Playwright or save browser state.
+If authentication is required, the script keeps its headed Chrome context open
+while the user completes login, MFA, and any CAPTCHA. It then continues the
+same run. Do not enter credentials through automation or export browser state.
 
 ## Verified Outputs
 

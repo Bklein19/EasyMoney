@@ -10,7 +10,12 @@ bun .codex/skills/update-finance-data/scripts/marcus.ts \
   --session marcus-catchup
 ```
 
-The script uses the current `npx playwright@latest cli` toolchain and the existing headed persistent session. It never enters credentials, exports browser state, or prints account data. Existing PDFs are skipped only after the EasyMoney Marcus parser validates the PDF, its statement period, activity rows, and ending balance. A clean run reports elapsed milliseconds.
+The script uses Playwright's JavaScript API with a local persistent Chrome
+profile. The Bun process owns the browser for the complete run. It never enters
+credentials, exports browser state, or prints account data. Existing PDFs are
+skipped only after the EasyMoney Marcus parser validates the PDF, its statement
+period, activity rows, and ending balance. A clean run reports elapsed
+milliseconds.
 
 ## Outputs
 
@@ -26,6 +31,11 @@ The PDFs are parser-ready, but automatic import routing is not currently ready w
 
 ## Authentication And Gaps
 
-If the session reaches a login page, complete authentication and MFA in the headed `marcus-catchup` window, then rerun the same command. The script stops when document controls are unavailable, when a response is not a PDF, or when any requested month cannot be parser-validated. Current site-specific document routing still needs live-session verification when the Playwright session socket is healthy; this implementation intentionally fails closed rather than opening another session or guessing among accounts.
+If Marcus requires authentication, complete login and MFA in the browser opened
+by the script; the same run waits and continues afterward. The script stops
+when document controls are unavailable, when a response is not a PDF, or when
+any requested month cannot be parser-validated. Direct document-request routing
+still needs verification after scheduled maintenance ends. The implementation
+fails closed rather than guessing among accounts.
 
 Use `--validate-only` to validate staged PDFs without browser access. Use `--timing-only` to measure validation of the current staged set.

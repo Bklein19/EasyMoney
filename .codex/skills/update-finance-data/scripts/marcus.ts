@@ -2,6 +2,7 @@ import { basename, join, resolve } from "node:path";
 import { mkdir, stat } from "node:fs/promises";
 
 import parseMarcusStatement, { meta as marcusMeta } from "../../../../server/app/importParsers/moneyParsers/marcus-statement-pdf.ts";
+import { runPlaywrightCode } from "./playwrightSession.ts";
 
 type Options = {
   from: string;
@@ -13,9 +14,8 @@ type Options = {
 };
 
 type Artifact = { path: string; statementDate: string };
-const REPO_ROOT = resolve(import.meta.dir, "../../../..");
 const DEFAULT_OUTPUT = "/private/tmp/easymoney-marcus-catchup";
-const PLAYWRIGHT_CLI = ["npx", "--yes", "playwright@latest", "cli"];
+const LOGIN_URL = "https://www.marcus.com/us/en/login";
 
 function parseArgs(args: string[]): Options {
   const values = new Map<string, string>();
@@ -71,27 +71,6 @@ async function validArtifacts(expected: Artifact[]): Promise<Artifact[]> {
   const valid: Artifact[] = [];
   for (const artifact of expected) { try { await validateArtifact(artifact); valid.push(artifact); } catch {} }
   return valid;
-}
-
-async function runCli(args: string[]): Promise<string> {
-  const child = Bun.spawn([...PLAYWRIGHT_CLI, ...args], { cwd: REPO_ROOT, stdout: "pipe", stderr: "pipe" });
-  const stdout = new Response(child.stdout).text();
-  const stderr = new Response(child.stderr).text();
-  const exitCode = await child.exited;
-  const [out, error] = await Promise.all([stdout, stderr]);
-  if (exitCode !== 0) {
-    const safe = (error || out).replace(/https?:\/\/\S+/g, "<url>").replace(/\b\d{4,}\b/g, "<digits>");
-    throw new Error(safe.trim() || `Playwright CLI exited with ${exitCode}`);
-  }
-  return out.trim();
-}
-
-async function verifySession(name: string): Promise<void> {
-  const payload = JSON.parse(await runCli(["list", "--json"])) as { browsers?: Array<{ name?: string; status?: string; headed?: boolean; persistent?: boolean }> };
-  const session = payload.browsers?.find(browser => browser.name === name);
-  if (!session || session.status !== "open" || !session.headed || !session.persistent) {
-    throw new Error(`Existing headed persistent Playwright session ${name} is unavailable`);
-  }
 }
 
 function browserProgram(pending: Artifact[], options: Options): string {
@@ -152,8 +131,7 @@ async function main(): Promise<void> {
     return;
   }
   if (pending.length) {
-    await verifySession(options.session);
-    const result = await runCli([`-s=${options.session}`, "--raw", "run-code", browserProgram(pending, options)]);
+    const result = await runPlaywrightCode({ name: options.session, startUrl: LOGIN_URL }, browserProgram(pending, options));
     console.log(result.replace(/\b\d{4,}\b/g, "<digits>"));
     if (result.includes('authentication-required')) throw new Error("Interactive authentication is required in the headed session");
     if (result.includes('documents-not-found')) throw new Error("Marcus statement/document controls were not found");

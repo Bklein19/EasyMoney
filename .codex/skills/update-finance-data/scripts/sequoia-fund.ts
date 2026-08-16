@@ -1,16 +1,11 @@
 import { mkdir } from 'node:fs/promises';
 import { basename, extname } from 'node:path';
 
+import { runPlaywrightCode } from './playwrightSession.ts';
+
 const SESSION = 'sequoia-fund-catchup';
 const LOGIN_URL = 'https://secureaccountview.com/BFWeb/clients/sequoiafund/index';
 const OUTPUT_DIR = '/private/tmp/easymoney-sequoia-fund-catchup';
-const PLAYWRIGHT_CLI = [
-  'npx',
-  '--yes',
-  '-p',
-  '@playwright/cli@latest',
-  'playwright-cli',
-];
 
 type Artifact = {
   key: 'activity' | 'statement-2026-03-31' | 'statement-2026-06-30';
@@ -36,45 +31,10 @@ const artifacts: Artifact[] = [
   },
 ];
 
-type CliResult = {
-  exitCode: number;
-  stderr: string;
-  stdout: string;
-};
-
 type BrowserResult = {
   status: 'complete' | 'authentication-required';
   downloaded?: Array<{ key: Artifact['key']; bytes: number }>;
 };
-
-async function runCli(args: string[]): Promise<CliResult> {
-  const subprocess = Bun.spawn([...PLAYWRIGHT_CLI, ...args], {
-    cwd: process.cwd(),
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(subprocess.stdout).text(),
-    new Response(subprocess.stderr).text(),
-    subprocess.exited,
-  ]);
-  return { exitCode, stderr, stdout };
-}
-
-function safeCliError(result: CliResult): string {
-  const output = `${result.stdout}\n${result.stderr}`;
-  const safeMessages = [
-    'Expected exactly one Sequoia investment account',
-    'History filter not found',
-    'Transaction filter not found',
-    'Activity CSV form not found',
-    'Activity response failed CSV validation',
-    'Required statement date is not available',
-    'Statement response failed PDF validation',
-  ];
-  return safeMessages.find((message) => output.includes(message)) ??
-    `playwright-cli exited with code ${result.exitCode}`;
-}
 
 async function isValidArtifact(artifact: Artifact): Promise<boolean> {
   if (extname(artifact.path) !== `.${artifact.kind}`) return false;
@@ -108,7 +68,7 @@ function buildBrowserProgram(requested: Artifact[]): string {
       })),
   };
 
-  // playwright-cli invokes this function with its existing authenticated Page.
+  // The persistent Playwright context invokes this with its authenticated page.
   return `async page => {
     const config = ${JSON.stringify(config)};
     const isLoginPage = async () => page.locator('input[type="password"]').count().then(count => count > 0);
@@ -263,31 +223,7 @@ async function main(): Promise<void> {
   }
 
   if (requested.length) {
-    const sessions = await runCli(['list']);
-    if (sessions.exitCode !== 0) throw new Error('Unable to list Playwright sessions');
-
-    if (!sessions.stdout.includes(SESSION)) {
-      const opened = await runCli([
-        `-s=${SESSION}`,
-        'open',
-        LOGIN_URL,
-        '--persistent',
-        '--headed',
-      ]);
-      if (opened.exitCode !== 0) throw new Error('Unable to open the Sequoia login session');
-    }
-
-    const browserRun = await runCli([
-      `-s=${SESSION}`,
-      '--raw',
-      'run-code',
-      buildBrowserProgram(requested),
-    ]);
-    if (browserRun.exitCode !== 0) {
-      throw new Error(`Sequoia browser workflow failed: ${safeCliError(browserRun)}`);
-    }
-
-    const result = parseBrowserResult(browserRun.stdout);
+    const result = parseBrowserResult(await runPlaywrightCode({ name: SESSION, startUrl: LOGIN_URL }, buildBrowserProgram(requested)));
     if (result.status === 'authentication-required') {
       console.log(`Authentication required in headed session ${SESSION}.`);
       console.log('Complete login, MFA, or CAPTCHA there, then rerun this command.');

@@ -8,11 +8,17 @@ From the EasyMoney repository root:
 bun .codex/skills/update-finance-data/scripts/sequoia-fund.ts
 ```
 
-The script uses `npx --yes -p @playwright/cli@latest playwright-cli` and the persistent headed session `sequoia-fund-catchup`. It skips an existing output only after validating its extension, minimum size, and file signature. Use `--force` to re-download and revalidate every artifact.
+The script uses Playwright's JavaScript API with a persistent headed profile
+named `sequoia-fund-catchup`. The Bun process owns the browser and controller
+for the entire run. It skips an existing output only after validating its
+extension, minimum size, and file signature. Use `--force` to re-download and
+revalidate every artifact.
 
 ## Authentication Pause
 
-If the named session is not running, the script opens it at the Sequoia Fund account login. The user must enter credentials, complete MFA, and solve any CAPTCHA in that headed browser. The script exits with status 2 while authentication is required; rerun the same command after login.
+If authentication is required, the user enters credentials, completes MFA, and
+solves any CAPTCHA in the browser opened by the script. The same process waits
+and continues after authentication.
 
 The workflow does not save or print cookies, tokens, hidden account values, document identifiers, or signed document URLs.
 

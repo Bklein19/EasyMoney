@@ -1,18 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
-import {
-  parsePlaywrightSessionList,
-  playwrightProfilePath,
-} from './playwrightSession.ts';
+import { playwrightProfilePath } from '../.codex/skills/update-finance-data/scripts/playwrightSession.ts';
 
 describe('Playwright session helper', () => {
-  test('parses current CLI browser listings', () => {
-    expect(parsePlaywrightSessionList(JSON.stringify({
-      browsers: [{ name: 'tiaa-catchup', status: 'open' }],
-    }))).toEqual([{ name: 'tiaa-catchup', status: 'open' }]);
-    expect(parsePlaywrightSessionList('')).toEqual([]);
-  });
-
   test('uses stable platform-specific persistent profile locations', () => {
     expect(playwrightProfilePath('tiaa-catchup', {
       home: '/Users/example',
