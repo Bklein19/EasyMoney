@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, CheckCircle2, CircleDashed, Clock3, Lock } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, CircleDashed, Clock3, History, LoaderCircle, Lock, RefreshCw, X } from 'lucide-react';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import { formatDate } from '../../utils/formatters';
 
@@ -77,8 +77,15 @@ function accountSort(a: FreshnessAccount, b: FreshnessAccount) {
 }
 
 export default function DataFreshnessPanel() {
+  const [syncRunId, setSyncRunId] = useState(() => localStorage.getItem('easymoney-active-sync-run') || '');
   const freshnessQuery = useQuery(trpc.dataFreshness.report.queryOptions());
+  const syncQuery = useQuery({
+    ...trpc.dataSync.status.queryOptions({ runId: syncRunId || 'none' }),
+    enabled: Boolean(syncRunId),
+    refetchInterval: query => query.state.data?.status === 'running' ? 750 : false,
+  });
   const report = freshnessQuery.data as FreshnessReport | undefined;
+  const syncJob = syncQuery.data;
   const error = freshnessQuery.error ? freshnessQuery.error.message : '';
 
   const accounts = useMemo(
@@ -88,6 +95,37 @@ export default function DataFreshnessPanel() {
   const needsUpdate = (report?.summary.staleAccounts || 0) +
     (report?.summary.dueAccounts || 0) +
     (report?.summary.noDataAccounts || 0);
+  const hasBankOfAmerica = accounts.some(account =>
+    account.status !== 'closed' && account.institution?.toLowerCase().includes('bank of america')
+  );
+
+  useEffect(() => {
+    if (!syncJob || syncJob.status === 'running') return;
+    void Promise.all([
+      queryClient.invalidateQueries({ queryKey: trpc.dataFreshness.report.queryKey() }),
+      queryClient.invalidateQueries({ queryKey: trpc.imports.history.queryKey() }),
+    ]);
+  }, [syncJob?.status]);
+
+  const startBankOfAmericaSync = async (kind: 'current' | 'backfill') => {
+    const goal = kind === 'current'
+      ? { kind: 'current' as const, overlapDays: 7 }
+      : { kind: 'backfill' as const };
+    const job = await trpcClient.dataSync.start.mutate({ institutionId: 'bank-of-america', goal });
+    localStorage.setItem('easymoney-active-sync-run', job.runId);
+    setSyncRunId(job.runId);
+  };
+
+  const cancelSync = async () => {
+    if (!syncRunId) return;
+    await trpcClient.dataSync.cancel.mutate({ runId: syncRunId });
+    await syncQuery.refetch();
+  };
+
+  const dismissSync = () => {
+    localStorage.removeItem('easymoney-active-sync-run');
+    setSyncRunId('');
+  };
 
   const setAccountStatus = async (account: FreshnessAccount) => {
     if (account.status === 'closed') {
@@ -112,7 +150,19 @@ export default function DataFreshnessPanel() {
               : 'Checking latest imported activity and balances.'}
           </p>
         </div>
-        {report && (
+        {report && <div className="data-freshness__header-actions">
+          {hasBankOfAmerica && syncJob?.status !== 'running' && (
+            <div className="data-freshness__sync-actions">
+              <button className="btn btn--secondary btn--sm" type="button" onClick={() => void startBankOfAmericaSync('backfill')}>
+                <History size={14} />
+                Import history
+              </button>
+              <button className="btn btn--primary btn--sm" type="button" onClick={() => void startBankOfAmericaSync('current')}>
+                <RefreshCw size={14} />
+                Catch up BofA
+              </button>
+            </div>
+          )}
           <div className="data-freshness__summary" aria-label="Freshness summary">
             <span><strong>{report.summary.currentAccounts}</strong> current</span>
             <span><strong>{report.summary.dueAccounts}</strong> due</span>
@@ -120,8 +170,20 @@ export default function DataFreshnessPanel() {
             <span><strong>{report.summary.noDataAccounts}</strong> no data</span>
             <span><strong>{report.summary.closedAccounts}</strong> closed</span>
           </div>
-        )}
+        </div>}
       </div>
+
+      {syncJob && (
+        <div className={`data-freshness__sync-status is-${syncJob.status}`} role="status">
+          {syncJob.status === 'running' && <LoaderCircle className="spin" size={15} />}
+          <span>{syncJob.message}</span>
+          {syncJob.status === 'running' ? (
+            <button className="btn btn--text btn--sm" type="button" onClick={() => void cancelSync()}>Cancel</button>
+          ) : (
+            <button className="icon-btn icon-btn--sm" type="button" aria-label="Dismiss sync status" onClick={dismissSync}><X size={14} /></button>
+          )}
+        </div>
+      )}
 
       {error && <div className="import-history__error">{error}</div>}
       {!report && !error && <div className="empty-state-simple">Loading freshness...</div>}

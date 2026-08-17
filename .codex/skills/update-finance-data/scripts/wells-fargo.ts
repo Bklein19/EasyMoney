@@ -7,7 +7,7 @@ import { wellsFargoGenericActivityParser } from '../../../../server/app/importPa
 import { pdfToText } from '../../../../server/app/importParsers/moneyParsers/_helpers.ts';
 import { parseWellsFargoStatementText } from '../../../../server/app/importParsers/moneyParsers/wells-fargo-statement-pdf.ts';
 import { wellsFargoStatementParser } from '../../../../server/app/importParsers/wellsFargoStatement.ts';
-import { runPlaywrightCode } from './playwrightSession.ts';
+import { runPlaywrightCode } from '../../../../server/app/dataSync/browserSession.ts';
 
 const DEFAULT_OUTPUT = '/private/tmp/easymoney-wells-fargo-catchup';
 const LOGIN_URL = 'https://connect.secure.wellsfargo.com/auth/login/present';

@@ -1,7 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { basename, extname } from 'node:path';
 
-import { runPlaywrightCode } from './playwrightSession.ts';
+import { runPlaywrightCode } from '../../../../server/app/dataSync/browserSession.ts';
 
 const SESSION = 'sequoia-fund-catchup';
 const LOGIN_URL = 'https://secureaccountview.com/BFWeb/clients/sequoiafund/index';

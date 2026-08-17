@@ -2,7 +2,7 @@ import { mkdir, stat } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 import type { Page } from "playwright";
 import { fidelityInvestmentReportParser } from "../../../../server/app/importParsers/fidelityInvestmentReport.ts";
-import { withPlaywrightPage } from "./playwrightSession.ts";
+import { withPlaywrightPage } from "../../../../server/app/dataSync/browserSession.ts";
 
 type ArtifactKind = "csv" | "pdf";
 

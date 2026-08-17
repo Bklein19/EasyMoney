@@ -2,7 +2,7 @@ import { basename, join, resolve } from "node:path";
 import { mkdir, stat } from "node:fs/promises";
 
 import parseMarcusStatement, { meta as marcusMeta } from "../../../../server/app/importParsers/moneyParsers/marcus-statement-pdf.ts";
-import { runPlaywrightCode } from "./playwrightSession.ts";
+import { runPlaywrightCode } from "../../../../server/app/dataSync/browserSession.ts";
 
 type Options = {
   from: string;

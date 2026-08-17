@@ -21,6 +21,7 @@ import {
 } from './categorizationRules.ts';
 import { createCategory, deleteCategory, listCategories, updateCategory } from './categories.ts';
 import { getDataFreshnessReport } from './dataFreshness.ts';
+import { cancelSyncJob, getSyncJob, startSyncJob } from './dataSync/jobs.ts';
 import { commitImport, listImportHistory, previewImport, reimportFile, reimportFiles, unimportFile, unimportFiles } from './imports.ts';
 import { listImportProfiles, upsertImportProfile } from './importProfiles.ts';
 import { getInvestmentNetWorthReport, getSavingsRateReport } from './investmentReports.ts';
@@ -79,6 +80,11 @@ const commitImportInput = z.object({
   accountMappings: z.array(z.unknown()).nullish(),
   importMeta: z.any().nullish(),
 });
+const syncGoalInput = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('current'), overlapDays: z.number().int().min(0).max(31).default(7) }),
+  z.object({ kind: z.literal('backfill'), stopAt: z.string().optional() }),
+  z.object({ kind: z.literal('range'), startDate: z.string(), endDate: z.string() }),
+]);
 
 function bytesFromBase64(value?: string | null) {
   if (!value) return new Uint8Array();
@@ -248,6 +254,23 @@ export const appRouter = t.router({
     catchUp: t.procedure
       .input(z.object({ today: z.string().optional() }).optional())
       .query(({ input }) => getDataFreshnessReport(input ?? {}).catchUp),
+  }),
+
+  dataSync: t.router({
+    start: t.procedure
+      .input(z.object({
+        institutionId: z.literal('bank-of-america'),
+        goal: syncGoalInput,
+      }))
+      .mutation(({ input }) => startSyncJob(input)),
+
+    status: t.procedure
+      .input(z.object({ runId: z.string().min(1) }))
+      .query(({ input }) => getSyncJob(input.runId)),
+
+    cancel: t.procedure
+      .input(z.object({ runId: z.string().min(1) }))
+      .mutation(({ input }) => cancelSyncJob(input.runId)),
   }),
 
   plaid: t.router({

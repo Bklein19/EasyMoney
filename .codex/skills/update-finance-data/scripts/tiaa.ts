@@ -5,7 +5,7 @@ import type { BrowserContext, Locator, Page } from 'playwright';
 
 import parseActivity from '../../../../server/app/importParsers/moneyParsers/tiaa-activity-csv.ts';
 import parseStatement, { meta as statementMeta } from '../../../../server/app/importParsers/moneyParsers/tiaa-statement-pdf.ts';
-import { waitForInteractiveAuthentication, withPlaywrightPage } from './playwrightSession.ts';
+import { waitForInteractiveAuthentication, withPlaywrightPage } from '../../../../server/app/dataSync/browserSession.ts';
 
 type Kind = 'csv' | 'pdf';
 type Artifact = { fileName: string; kind: Kind; path: string };

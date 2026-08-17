@@ -4,7 +4,7 @@ import { basename, extname, join, resolve } from 'node:path';
 import parseVanguardStatement, {
   meta as vanguardStatementMeta,
 } from '../../../../server/app/importParsers/moneyParsers/vanguard-statement-pdf.ts';
-import { runPlaywrightCode } from './playwrightSession.ts';
+import { runPlaywrightCode } from '../../../../server/app/dataSync/browserSession.ts';
 
 const LOGIN_URL = 'https://investor.vanguard.com/my-account/log-on';
 const HOME_DIR = Bun.env.HOME;

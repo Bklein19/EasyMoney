@@ -5,7 +5,7 @@ import {
   playwrightAuthStatePath,
   playwrightProfilePath,
   waitForInteractiveAuthentication,
-} from '../../.codex/skills/update-finance-data/scripts/playwrightSession.ts';
+} from './dataSync/browserSession.ts';
 
 describe('Playwright session helper', () => {
   test('uses stable platform-specific persistent profile locations', () => {
