@@ -7,7 +7,7 @@ import { wellsFargoGenericActivityParser } from '../../../../server/app/importPa
 import { pdfToText } from '../../../../server/app/importParsers/moneyParsers/_helpers.ts';
 import { parseWellsFargoStatementText } from '../../../../server/app/importParsers/moneyParsers/wells-fargo-statement-pdf.ts';
 import { wellsFargoStatementParser } from '../../../../server/app/importParsers/wellsFargoStatement.ts';
-import { runPlaywrightCode } from '../../../../server/app/dataSync/browserSession.ts';
+import { runInstitutionBrowserProgram } from '../../../../server/app/dataSync/browserSession.ts';
 
 const DEFAULT_OUTPUT = '/private/tmp/easymoney-wells-fargo-catchup';
 const LOGIN_URL = 'https://connect.secure.wellsfargo.com/auth/login/present';
@@ -152,7 +152,7 @@ function browserProgram(options: Options, activityJobs: Activity[], existing: St
       return true;
     };
     for (const item of plan) {
-      if (!await openAccount(item)) return JSON.stringify({ status: 'auth-required' });
+      if (!await openAccount(item)) return JSON.stringify({ status: 'login-required' });
       if (item.activityPath) {
         await page.getByRole('button', { name: 'Download Account Activity' }).click();
         await page.waitForLoadState('domcontentloaded').catch(() => {});
@@ -177,7 +177,7 @@ function browserProgram(options: Options, activityJobs: Activity[], existing: St
         await (await downloadPromise).saveAs(item.activityPath);
         output.activities.push(item.kind);
       }
-      if (!await openAccount(item)) return JSON.stringify({ status: 'auth-required' });
+      if (!await openAccount(item)) return JSON.stringify({ status: 'login-required' });
       const statements = page.getByRole('link', { name: 'View Statements', exact: true });
       await statements.first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
       if (await statements.count() !== 1) throw new Error('Wells Fargo statement link unavailable for ' + item.kind);
@@ -227,11 +227,12 @@ async function main(): Promise<void> {
   for (const file of activityFiles) if (await validateActivity(file).then(() => true).catch(() => false)) validActivities.add(file.path);
   const activityJobs = activityFiles.filter(file => !validActivities.has(file.path));
   if (!options.validateOnly) {
-    const result = await runPlaywrightCode({ name: options.session, startUrl: LOGIN_URL }, browserProgram(options, activityJobs, validStatements));
-    if (!/status.*complete/.test(result)) {
-      if (/auth-required/.test(result)) throw new Error(`Authentication required in headed session ${options.session}`);
-      throw new Error(`Wells Fargo Playwright run did not complete: ${safe(result)}`);
-    }
+    const result = await runInstitutionBrowserProgram<{ downloaded: { activities: string[]; statements: string[] } }>(
+      { name: options.session, startUrl: LOGIN_URL },
+      browserProgram(options, activityJobs, validStatements),
+      { completionDescription: 'Wells Fargo downloads are complete.' },
+    );
+    if (result.status === 'error') throw new Error(result.message ?? 'Wells Fargo Playwright run did not complete');
   }
   const finalStatements = await statements(options.output);
   const statementSummaries = [];

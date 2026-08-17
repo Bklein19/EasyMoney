@@ -2,8 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import type { Page } from 'playwright';
 
 import {
+  decodeInstitutionBrowserProgramResult,
   playwrightAuthStatePath,
   playwrightProfilePath,
+  showSyncCompletionChapter,
   waitForInteractiveAuthentication,
 } from './dataSync/browserSession.ts';
 
@@ -48,5 +50,29 @@ describe('Playwright session helper', () => {
     await waitForInteractiveAuthentication(page, Date.now() + 5_000);
     expect(waits).toBeGreaterThanOrEqual(4);
     expect(url).toContain('/private/participant/home');
+  });
+
+  test('decodes the typed institution browser status contract', () => {
+    expect(decodeInstitutionBrowserProgramResult(JSON.stringify({
+      status: 'complete',
+      saved: ['activity.csv'],
+    }))).toEqual({ status: 'complete', saved: ['activity.csv'] });
+    expect(() => decodeInstitutionBrowserProgramResult('{"status":"unknown"}')).toThrow('unknown status');
+  });
+
+  test('shows the shared two-second completion chapter', async () => {
+    const chapters: Array<{ title: string; options: unknown }> = [];
+    const page = {
+      screencast: {
+        showChapter: async (title: string, options: unknown) => chapters.push({ title, options }),
+      },
+    } as unknown as Page;
+
+    await showSyncCompletionChapter(page, { completionDescription: 'Downloads are complete.' });
+
+    expect(chapters).toEqual([{
+      title: 'Done',
+      options: { description: 'Downloads are complete.', duration: 2_000 },
+    }]);
   });
 });

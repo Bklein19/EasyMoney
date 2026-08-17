@@ -4,7 +4,7 @@ import { basename, extname, join, resolve } from 'node:path';
 import parseVanguardStatement, {
   meta as vanguardStatementMeta,
 } from '../../../../server/app/importParsers/moneyParsers/vanguard-statement-pdf.ts';
-import { runPlaywrightCode } from '../../../../server/app/dataSync/browserSession.ts';
+import { runInstitutionBrowserProgram } from '../../../../server/app/dataSync/browserSession.ts';
 
 const LOGIN_URL = 'https://investor.vanguard.com/my-account/log-on';
 const HOME_DIR = Bun.env.HOME;
@@ -44,35 +44,6 @@ function assertIsoDate(value: string, label: string): void {
 
 function decode(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes);
-}
-
-function parseSessionJson<T>(result: string): T {
-  const safeErrors = [
-    'Activity link is unavailable',
-    'Download Center link is unavailable',
-    'Expected exactly two current Vanguard download-account rows',
-    'The requested Vanguard account type is not selectable',
-    'Vanguard CSV export option is unavailable',
-    'Vanguard activity download failed',
-    'Statements link is unavailable',
-    'Multiple Vanguard statement rows matched one target',
-    'A required Vanguard statement row is unavailable',
-    'Vanguard statement download control is unavailable',
-    'Vanguard statement download failed',
-  ];
-  const safeError = safeErrors.find(message => result.includes(message));
-  if (safeError) throw new Error(safeError);
-
-  const candidates = [result.trim(), ...result.split('\n').map(line => line.trim()).reverse()];
-  for (const candidate of candidates) {
-    try {
-      const decoded = JSON.parse(candidate) as string | T;
-      return typeof decoded === 'string' ? JSON.parse(decoded) as T : decoded;
-    } catch {
-      // Browser programs may return a JSON string or a serialized JSON string.
-    }
-  }
-  throw new Error('Playwright session returned no parseable JSON result');
 }
 
 async function validateCsv(path: string): Promise<void> {
@@ -133,7 +104,7 @@ function browserProgram(activityJobs: ActivityJob[], statementJobs: StatementJob
     const statementJobs = ${JSON.stringify(statementJobs)};
 
     const onLoginPath = await page.evaluate(() => /log-on|login|signin/i.test(location.pathname));
-    if (onLoginPath) return JSON.stringify({ status: 'auth-required' });
+    if (onLoginPath) return JSON.stringify({ status: 'login-required' });
 
     const gotoVisibleLink = async (pattern, label) => {
       const links = await page.locator('a').filter({ hasText: pattern }).all();
@@ -332,13 +303,18 @@ for (const job of statementJobs) {
 }
 
 if (pendingActivity.length || pendingStatements.length) {
-  const result = await runPlaywrightCode({ name: sessionName, startUrl: LOGIN_URL }, browserProgram(pendingActivity, pendingStatements));
-  const payload = parseSessionJson<{ status?: string }>(result);
-  if (payload.status === 'auth-required') {
-    console.log(`Complete Vanguard login and MFA in the headed ${sessionName} window, then rerun this command.`);
-    process.exit(2);
-  }
-  if (payload.status !== 'complete') throw new Error('Vanguard workflow did not complete');
+  const result = await runInstitutionBrowserProgram<{
+    downloadedActivity: string[];
+    downloadedStatements: string[];
+    unavailableStatements: string[];
+    liveAccountOptions: number;
+    legacyAccountOptions: number;
+  }>(
+    { name: sessionName, startUrl: LOGIN_URL },
+    browserProgram(pendingActivity, pendingStatements),
+    { completionDescription: 'Vanguard downloads are complete.' },
+  );
+  if (result.status === 'error') throw new Error(result.message ?? 'Vanguard workflow did not complete');
 }
 
 const validatedStatementKinds = new Set<StatementJob['accountKind']>();

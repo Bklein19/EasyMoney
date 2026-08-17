@@ -2,7 +2,7 @@ import { basename, join, resolve } from "node:path";
 import { mkdir, stat } from "node:fs/promises";
 
 import parseMarcusStatement, { meta as marcusMeta } from "../../../../server/app/importParsers/moneyParsers/marcus-statement-pdf.ts";
-import { runPlaywrightCode } from "../../../../server/app/dataSync/browserSession.ts";
+import { runInstitutionBrowserProgram } from "../../../../server/app/dataSync/browserSession.ts";
 
 type Options = {
   from: string;
@@ -78,7 +78,7 @@ function browserProgram(pending: Artifact[], options: Options): string {
     const pending = ${JSON.stringify(pending)};
     const through = ${JSON.stringify(options.to)};
     const isLogin = await page.evaluate(() => /login|signin|logon/i.test(location.pathname) || Boolean(document.querySelector('input[type=password]')));
-    if (isLogin) return JSON.stringify({ status: 'authentication-required' });
+    if (isLogin) return JSON.stringify({ status: 'login-required' });
     const origin = await page.evaluate(() => location.origin);
     await page.goto(origin + '/us/en/documents');
     await page.waitForLoadState('domcontentloaded').catch(() => {});
@@ -101,7 +101,7 @@ function browserProgram(pending: Artifact[], options: Options): string {
       }
       return null;
     };
-    if (!await findAnchor(pending[0].statementDate)) return JSON.stringify({ status: 'documents-not-found', candidates: 0 });
+    if (!await findAnchor(pending[0].statementDate)) return JSON.stringify({ status: 'error', message: 'Marcus statement/document controls were not found' });
     const downloaded = [];
     for (const target of pending) {
       const candidate = await findAnchor(target.statementDate);
@@ -131,10 +131,13 @@ async function main(): Promise<void> {
     return;
   }
   if (pending.length) {
-    const result = await runPlaywrightCode({ name: options.session, startUrl: LOGIN_URL }, browserProgram(pending, options));
-    console.log(result.replace(/\b\d{4,}\b/g, "<digits>"));
-    if (result.includes('authentication-required')) throw new Error("Interactive authentication is required in the headed session");
-    if (result.includes('documents-not-found')) throw new Error("Marcus statement/document controls were not found");
+    const result = await runInstitutionBrowserProgram<{ downloaded: Array<{ month: string }>; available: number; through: string }>(
+      { name: options.session, startUrl: LOGIN_URL },
+      browserProgram(pending, options),
+      { completionDescription: "Marcus downloads are complete." },
+    );
+    console.log(JSON.stringify(result).replace(/\b\d{4,}\b/g, "<digits>"));
+    if (result.status === 'error') throw new Error(result.message ?? "Marcus automation did not complete");
   }
   const after = await validArtifacts(expected);
   if (after.length === 0) throw new Error("Marcus run produced no parser-validated PDFs");

@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 
-import { runPlaywrightCode } from "../browserSession.ts";
+import { runInstitutionBrowserProgram } from "../browserSession.ts";
 
 export type BankOfAmericaSyncConfig = {
   outputDir: string;
@@ -444,11 +444,11 @@ export async function runBankOfAmericaSync(config: BankOfAmericaSyncConfig): Pro
   if (config.dryRun)
     return { saved: [], skipped: before.map(artifact => artifact.filename), artifacts: before };
 
-  const result = await runPlaywrightCode({ name: config.session, startUrl: loginUrl }, buildBrowserProgram(config, before, config.scope));
-  const decoded = JSON.parse(result) as string | { status?: string; action?: string; message?: string; saved?: string[]; skipped?: string[] };
-  const parsed = typeof decoded === "string"
-    ? JSON.parse(decoded) as { status?: string; action?: string; message?: string; saved?: string[]; skipped?: string[] }
-    : decoded;
+  const parsed = await runInstitutionBrowserProgram<{ scope: BankOfAmericaSyncConfig["scope"]; saved: string[]; skipped: string[] }>(
+    { name: config.session, startUrl: loginUrl },
+    buildBrowserProgram(config, before, config.scope),
+    { completionDescription: "Bank of America downloads are complete." },
+  );
   if (parsed.status === "login-required")
     throw new Error(parsed.action ?? "Interactive login is required.");
   if (parsed.status !== "complete")

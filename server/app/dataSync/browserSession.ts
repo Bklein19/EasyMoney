@@ -19,7 +19,14 @@ type SessionOptions = {
 
 type RunOptions = {
   authenticationTimeoutMs?: number;
+  completionDescription: string;
+  completionDurationMs?: number;
 };
+
+export type InstitutionBrowserProgramResult<T extends Record<string, unknown> = Record<string, never>> =
+  | ({ status: 'complete' } & T)
+  | { status: 'login-required'; action?: string }
+  | { status: 'error'; message?: string };
 
 export function playwrightProfilePath(
   name: string,
@@ -112,8 +119,21 @@ export async function withPlaywrightPage<T>(
   }
 }
 
-function authenticationRequired(value: string): boolean {
-  return /authentication-required|auth-required|login-required/i.test(value);
+export function decodeInstitutionBrowserProgramResult<T extends Record<string, unknown>>(
+  value: unknown,
+): InstitutionBrowserProgramResult<T> {
+  let decoded = value;
+  for (let depth = 0; depth < 2 && typeof decoded === 'string'; depth += 1) {
+    decoded = JSON.parse(decoded) as unknown;
+  }
+  if (!decoded || typeof decoded !== 'object' || !('status' in decoded)) {
+    throw new Error('Institution browser program returned an invalid result');
+  }
+  const status = (decoded as { status?: unknown }).status;
+  if (status !== 'complete' && status !== 'login-required' && status !== 'error') {
+    throw new Error(`Institution browser program returned an unknown status: ${String(status)}`);
+  }
+  return decoded as InstitutionBrowserProgramResult<T>;
 }
 
 export async function waitForInteractiveAuthentication(page: Page, deadline: number): Promise<void> {
@@ -147,24 +167,35 @@ function isClosedContextError(error: unknown): boolean {
   return /Target page, context or browser has been closed/i.test(String(error instanceof Error ? error.message : error));
 }
 
-export async function runPlaywrightCode(
+export async function showSyncCompletionChapter(
+  page: Page,
+  options: Pick<RunOptions, 'completionDescription' | 'completionDurationMs'>,
+): Promise<void> {
+  await page.screencast.showChapter('Done', {
+    description: options.completionDescription,
+    duration: options.completionDurationMs ?? 2_000,
+  });
+}
+
+export async function runInstitutionBrowserProgram<T extends Record<string, unknown>>(
   session: SessionOptions,
   code: string,
-  options: RunOptions = {},
-): Promise<string> {
+  options: RunOptions,
+): Promise<InstitutionBrowserProgramResult<T>> {
   return withPlaywrightPage(session, async page => {
     // Browser programs are repository-owned strings retained from the former CLI runner.
     const program = Function(`"use strict"; return (${code});`)() as (browserPage: Page) => Promise<unknown>;
     const deadline = Date.now() + (options.authenticationTimeoutMs ?? 10 * 60_000);
-    let result = String(await program(page));
-    if (authenticationRequired(result)) {
+    let result = decodeInstitutionBrowserProgramResult<T>(await program(page));
+    if (result.status === 'login-required') {
       console.log(`Authentication required in ${session.name}. Complete login and MFA in the open browser.`);
     }
-    while (authenticationRequired(result) && Date.now() < deadline) {
+    while (result.status === 'login-required' && Date.now() < deadline) {
       await waitForInteractiveAuthentication(page, deadline);
-      result = String(await program(page));
+      result = decodeInstitutionBrowserProgramResult<T>(await program(page));
     }
-    if (authenticationRequired(result)) throw new Error(`Authentication timed out in ${session.name}`);
+    if (result.status === 'login-required') throw new Error(`Authentication timed out in ${session.name}`);
+    if (result.status === 'complete') await showSyncCompletionChapter(page, options);
     return result;
   });
 }

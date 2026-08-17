@@ -1,7 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { basename, extname } from 'node:path';
 
-import { runPlaywrightCode } from '../../../../server/app/dataSync/browserSession.ts';
+import { runInstitutionBrowserProgram } from '../../../../server/app/dataSync/browserSession.ts';
 
 const SESSION = 'sequoia-fund-catchup';
 const LOGIN_URL = 'https://secureaccountview.com/BFWeb/clients/sequoiafund/index';
@@ -30,11 +30,6 @@ const artifacts: Artifact[] = [
     path: `${OUTPUT_DIR}/sequoia-fund-2026-06-30.pdf`,
   },
 ];
-
-type BrowserResult = {
-  status: 'complete' | 'authentication-required';
-  downloaded?: Array<{ key: Artifact['key']; bytes: number }>;
-};
 
 async function isValidArtifact(artifact: Artifact): Promise<boolean> {
   if (extname(artifact.path) !== `.${artifact.kind}`) return false;
@@ -90,7 +85,7 @@ function buildBrowserProgram(requested: Artifact[]): string {
     const onAccountSite = await page.evaluate(() => location.hostname === 'secureaccountview.com');
     if (!onAccountSite) await page.goto(config.loginUrl);
     await page.waitForLoadState('domcontentloaded');
-    if (await isLoginPage()) return JSON.stringify({ status: 'authentication-required' });
+    if (await isLoginPage()) return JSON.stringify({ status: 'login-required' });
 
     const origin = await page.evaluate(() => location.origin);
     const downloaded = [];
@@ -98,7 +93,7 @@ function buildBrowserProgram(requested: Artifact[]): string {
     if (config.activity) {
       await page.goto(origin + '/BFWeb/clients/sequoiafund/transactionhistory');
       await page.waitForLoadState('domcontentloaded');
-      if (await isLoginPage()) return JSON.stringify({ status: 'authentication-required' });
+      if (await isLoginPage()) return JSON.stringify({ status: 'login-required' });
 
       await page.waitForFunction(() => {
         const select = document.querySelector('select#fundAccount');
@@ -159,7 +154,7 @@ function buildBrowserProgram(requested: Artifact[]): string {
     if (config.statements.length) {
       await page.goto(origin + '/BFWeb/clients/sequoiafund/viewStatements');
       await page.waitForLoadState('domcontentloaded');
-      if (await isLoginPage()) return JSON.stringify({ status: 'authentication-required' });
+      if (await isLoginPage()) return JSON.stringify({ status: 'login-required' });
 
       for (const statement of config.statements) {
         await page.waitForFunction((date) =>
@@ -201,11 +196,6 @@ function buildBrowserProgram(requested: Artifact[]): string {
   }`;
 }
 
-function parseBrowserResult(stdout: string): BrowserResult {
-  const first = JSON.parse(stdout.trim());
-  return JSON.parse(typeof first === 'string' ? first : JSON.stringify(first));
-}
-
 async function main(): Promise<void> {
   const unknownArgs = process.argv.slice(2).filter((argument) => argument !== '--force');
   if (unknownArgs.length) throw new Error(`Unknown argument: ${unknownArgs[0]}`);
@@ -223,15 +213,14 @@ async function main(): Promise<void> {
   }
 
   if (requested.length) {
-    const result = parseBrowserResult(await runPlaywrightCode({ name: SESSION, startUrl: LOGIN_URL }, buildBrowserProgram(requested)));
-    if (result.status === 'authentication-required') {
-      console.log(`Authentication required in headed session ${SESSION}.`);
-      console.log('Complete login, MFA, or CAPTCHA there, then rerun this command.');
-      process.exitCode = 2;
-      return;
-    }
+    const result = await runInstitutionBrowserProgram<{ downloaded: Array<{ key: Artifact['key']; bytes: number }> }>(
+      { name: SESSION, startUrl: LOGIN_URL },
+      buildBrowserProgram(requested),
+      { completionDescription: 'Sequoia Fund downloads are complete.' },
+    );
+    if (result.status === 'error') throw new Error(result.message ?? 'Sequoia Fund automation did not complete');
 
-    for (const artifact of result.downloaded ?? []) {
+    for (const artifact of result.status === 'complete' ? result.downloaded : []) {
       console.log(`downloaded ${artifact.key} (${artifact.bytes} bytes)`);
     }
   }
