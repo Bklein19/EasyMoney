@@ -1118,6 +1118,6 @@ export function getDb() {
   return db;
 }
 
-export function hashContent(content: string) {
+export function hashContent(content: string | Uint8Array) {
   return crypto.createHash('sha256').update(content).digest('hex');
 }

@@ -23,8 +23,9 @@ export interface SyncRunResult {
   runId: string;
   institutionId: SyncRunRequest['institutionId'];
   downloaded: number;
-  importedTransactions: number;
-  importedBalances: number;
-  skippedDuplicates: number;
+  recordedTransactionFacts: number;
+  recordedBalanceFacts: number;
+  skippedTransactionDuplicates: number;
+  skippedArtifacts: number;
   artifacts: string[];
 }

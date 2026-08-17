@@ -852,7 +852,7 @@ function toPreviewTransaction(transaction: ParsedImportTransaction, importFileId
 
 function saveImportPreview({
   fileName,
-  text,
+  contentHash,
   headers,
   parserName,
   sourceType,
@@ -863,7 +863,7 @@ function saveImportPreview({
   parsedBalances = [],
 }: {
   fileName: string;
-  text: string;
+  contentHash: string;
   headers: string[];
   parserName: string | null;
   sourceType?: string | null;
@@ -877,7 +877,7 @@ function saveImportPreview({
   const headerSignature = getHeaderSignature(headers);
   const importFileId = insertRow('importFiles', {
     fileName,
-    contentHash: hashContent(text),
+    contentHash,
     parserName,
     headerSignature,
     rowCount: rawRows.length,
@@ -890,7 +890,7 @@ function saveImportPreview({
   const sourceFileId = insertRow('sourceFiles', {
     importFileId,
     fileName,
-    contentHash: hashContent(text),
+    contentHash,
     parserName,
     sourceType,
     parserPriority,
@@ -1055,6 +1055,7 @@ function readStagedBalances(importFileId: number, balanceRowIds: number[] | null
 }
 
 export async function previewImport({ fileName, text, fileBytes, customProfile = null }: PreviewImportOptions) {
+  const contentHash = hashImportContent(text, fileBytes);
   let parsed: ReturnType<typeof parseCsv> | null = null;
   let csvParseError: Error | null = null;
   if (isCsvFile(fileName)) {
@@ -1103,7 +1104,7 @@ export async function previewImport({ fileName, text, fileBytes, customProfile =
 
     const preview = saveImportPreview({
       fileName,
-      text,
+      contentHash,
       headers,
       parserName: appParser.id,
       sourceType: appParser.sourceType,
@@ -1138,7 +1139,7 @@ export async function previewImport({ fileName, text, fileBytes, customProfile =
 
   const preview = saveImportPreview({
     fileName,
-    text,
+    contentHash,
     headers,
     parserName: null,
     sourceType: null,
@@ -1157,6 +1158,10 @@ export async function previewImport({ fileName, text, fileBytes, customProfile =
     accountMappings: preview.accountMappings,
     balances: [],
   };
+}
+
+export function hashImportContent(text: string, fileBytes?: Uint8Array) {
+  return hashContent(fileBytes ?? text);
 }
 
 export function materializeImportTransactions({

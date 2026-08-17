@@ -4,6 +4,7 @@ export interface SyncArtifactImportResult {
   importedCount: number;
   importedBalanceCount: number;
   skippedDuplicateCount: number;
+  skippedArtifact?: boolean;
 }
 
 export interface SyncArtifactJob {
@@ -17,19 +18,25 @@ export async function importSyncArtifactBatch(
   report: SyncReporter,
   rebuildLedger: () => unknown | Promise<unknown>,
 ) {
-  let importedTransactions = 0;
-  let importedBalances = 0;
-  let skippedDuplicates = 0;
+  let recordedTransactionFacts = 0;
+  let recordedBalanceFacts = 0;
+  let skippedTransactionDuplicates = 0;
+  let skippedArtifacts = 0;
   let committedArtifacts = 0;
 
   try {
     for (const job of jobs) {
       report({ type: 'artifact', message: `Importing ${job.fileName}` });
       const result = await job.import();
+      if (result.skippedArtifact) {
+        skippedArtifacts += 1;
+        report({ type: 'import', message: `Skipped ${job.fileName}; artifact was already imported` });
+        continue;
+      }
       committedArtifacts += 1;
-      importedTransactions += result.importedCount;
-      importedBalances += result.importedBalanceCount;
-      skippedDuplicates += result.skippedDuplicateCount;
+      recordedTransactionFacts += result.importedCount;
+      recordedBalanceFacts += result.importedBalanceCount;
+      skippedTransactionDuplicates += result.skippedDuplicateCount;
       report({
         type: 'import',
         message: `Imported ${job.fileName}`,
@@ -48,5 +55,5 @@ export async function importSyncArtifactBatch(
     }
   }
 
-  return { importedTransactions, importedBalances, skippedDuplicates };
+  return { recordedTransactionFacts, recordedBalanceFacts, skippedTransactionDuplicates, skippedArtifacts };
 }

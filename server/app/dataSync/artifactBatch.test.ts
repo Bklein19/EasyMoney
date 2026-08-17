@@ -22,7 +22,12 @@ describe('sync artifact batch', () => {
       () => { rebuilds += 1; },
     );
 
-    expect(result).toEqual({ importedTransactions: 7, importedBalances: 2, skippedDuplicates: 4 });
+    expect(result).toEqual({
+      recordedTransactionFacts: 7,
+      recordedBalanceFacts: 2,
+      skippedTransactionDuplicates: 4,
+      skippedArtifacts: 0,
+    });
     expect(rebuilds).toBe(1);
     expect(events.map(event => event.message)).toEqual([
       'Importing one.csv',
@@ -31,6 +36,30 @@ describe('sync artifact batch', () => {
       'Imported two.pdf',
       'Rebuilding ledger from imported source facts',
     ]);
+  });
+
+  test('skips previously imported artifacts without rebuilding', async () => {
+    const events: Array<Omit<SyncEvent, 'runId' | 'timestamp'>> = [];
+    let rebuilds = 0;
+    const duplicate = {
+      ...job('duplicate.csv', 0),
+      import: async () => ({
+        importedCount: 0,
+        importedBalanceCount: 0,
+        skippedDuplicateCount: 0,
+        skippedArtifact: true,
+      }),
+    };
+
+    const result = await importSyncArtifactBatch(
+      [duplicate],
+      event => events.push(event),
+      () => { rebuilds += 1; },
+    );
+
+    expect(result.skippedArtifacts).toBe(1);
+    expect(rebuilds).toBe(0);
+    expect(events.at(-1)?.message).toBe('Skipped duplicate.csv; artifact was already imported');
   });
 
   test('rebuilds committed source facts before propagating a later import failure', async () => {

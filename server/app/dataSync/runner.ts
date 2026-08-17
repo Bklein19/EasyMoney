@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 
 import { getDb } from '../../database.ts';
-import { commitImport, previewImport, rebuildLedgerReadModel } from '../imports.ts';
+import { commitImport, hashImportContent, previewImport, rebuildLedgerReadModel } from '../imports.ts';
 import { importSyncArtifactBatch } from './artifactBatch.ts';
 import {
   runBankOfAmericaSync,
@@ -104,6 +104,21 @@ async function importArtifact(path: string, accountId: number) {
   const fileName = basename(path);
   const fileBytes = new Uint8Array(await readFile(path));
   const text = fileName.toLowerCase().endsWith('.csv') ? new TextDecoder().decode(fileBytes) : '';
+  const contentHash = hashImportContent(text, fileBytes);
+  const existing = getDb().prepare(`
+    SELECT id
+    FROM importFiles
+    WHERE contentHash = ? AND status = 'committed'
+    LIMIT 1
+  `).get(contentHash);
+  if (existing) {
+    return {
+      importedCount: 0,
+      importedBalanceCount: 0,
+      skippedDuplicateCount: 0,
+      skippedArtifact: true,
+    };
+  }
   const preview = await previewImport({ fileName, text, fileBytes });
   const transactionIds = preview.transactions?.map(transaction => Number(transaction.importRowId)).filter(Number.isFinite) ?? [];
   return commitImport({
@@ -153,7 +168,12 @@ export async function runSync(request: SyncRunRequest, report: SyncReporter): Pr
       import: () => importArtifact(join(outputDir, fileName), account.id),
     };
   });
-  const { importedTransactions, importedBalances, skippedDuplicates } = await importSyncArtifactBatch(
+  const {
+    recordedTransactionFacts,
+    recordedBalanceFacts,
+    skippedTransactionDuplicates,
+    skippedArtifacts,
+  } = await importSyncArtifactBatch(
     jobs,
     report,
     rebuildLedgerReadModel,
@@ -163,9 +183,10 @@ export async function runSync(request: SyncRunRequest, report: SyncReporter): Pr
     runId: request.runId,
     institutionId: request.institutionId,
     downloaded: downloaded.saved.length,
-    importedTransactions,
-    importedBalances,
-    skippedDuplicates,
+    recordedTransactionFacts,
+    recordedBalanceFacts,
+    skippedTransactionDuplicates,
+    skippedArtifacts,
     artifacts: downloaded.saved,
   } satisfies SyncRunResult;
   report({ type: 'complete', message: 'Bank of America sync complete', data: result });
