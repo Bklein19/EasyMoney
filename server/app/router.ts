@@ -28,15 +28,6 @@ import { getInvestmentNetWorthReport, getSavingsRateReport } from './investmentR
 import { saveLocalEnvValue } from './localEnv.ts';
 import { getNetWorthReport } from './netWorth.ts';
 import {
-  createPlaidLinkToken,
-  disconnectPlaidItem,
-  downloadPlaidStatement,
-  exchangePlaidPublicToken,
-  getPlaidConfigurationStatus,
-  listPlaidConnections,
-  previewPlaidConnection,
-} from './plaid.ts';
-import {
   categorizeTransactions,
   categorizeTransactionsByQuery,
   getTransactionCategorizationCoverage,
@@ -271,38 +262,6 @@ export const appRouter = t.router({
     cancel: t.procedure
       .input(z.object({ runId: z.string().min(1) }))
       .mutation(({ input }) => cancelSyncJob(input.runId)),
-  }),
-
-  plaid: t.router({
-    status: t.procedure.query(() => ({
-      ...getPlaidConfigurationStatus(),
-      connections: listPlaidConnections(),
-    })),
-
-    createLinkToken: t.procedure
-      .input(z.object({ kind: z.enum(['bank', 'investment']) }))
-      .mutation(({ input }) => createPlaidLinkToken(input.kind)),
-
-    exchangePublicToken: t.procedure
-      .input(z.object({
-        publicToken: z.string().min(1),
-        kind: z.enum(['bank', 'investment']),
-        institutionId: z.string().nullish(),
-        institutionName: z.string().nullish(),
-      }))
-      .mutation(({ input }) => exchangePlaidPublicToken(input)),
-
-    preview: t.procedure
-      .input(z.object({ itemId: z.string().min(1) }))
-      .query(({ input }) => previewPlaidConnection(input.itemId)),
-
-    downloadStatement: t.procedure
-      .input(z.object({ itemId: z.string().min(1), statementId: z.string().min(1) }))
-      .mutation(({ input }) => downloadPlaidStatement(input.itemId, input.statementId)),
-
-    disconnect: t.procedure
-      .input(z.object({ itemId: z.string().min(1) }))
-      .mutation(({ input }) => disconnectPlaidItem(input.itemId)),
   }),
 
   transactions: t.router({
