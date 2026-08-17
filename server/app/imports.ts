@@ -54,6 +54,7 @@ interface CommitImportOptions {
     profileName?: string | null;
     accountMappings?: AccountMappingDecision[] | null;
   } | null;
+  rebuildLedger?: boolean;
 }
 
 export interface ImportHistoryItem {
@@ -1530,6 +1531,7 @@ export function commitImport({
   transactions = [],
   accountMappings = null,
   importMeta = null,
+  rebuildLedger = true,
 }: CommitImportOptions) {
   const result = materializeImportTransactions({
     accountId,
@@ -1568,9 +1570,14 @@ export function commitImport({
     }
   }
 
-  if (importFileHasSourceFacts(importFileId) && !(forceImportRowIds?.length)) {
-    materializeLedger(getDb(), buildLedgerFromSourceFacts(getDb()));
+  if (rebuildLedger && importFileHasSourceFacts(importFileId) && !(forceImportRowIds?.length)) {
+    rebuildLedgerReadModel();
   }
 
   return result;
+}
+
+export function rebuildLedgerReadModel() {
+  const db = getDb();
+  return materializeLedger(db, buildLedgerFromSourceFacts(db));
 }

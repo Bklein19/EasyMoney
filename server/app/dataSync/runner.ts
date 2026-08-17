@@ -3,7 +3,8 @@ import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 
 import { getDb } from '../../database.ts';
-import { commitImport, previewImport } from '../imports.ts';
+import { commitImport, previewImport, rebuildLedgerReadModel } from '../imports.ts';
+import { importSyncArtifactBatch } from './artifactBatch.ts';
 import {
   runBankOfAmericaSync,
   type BankOfAmericaSyncConfig,
@@ -105,6 +106,7 @@ async function importArtifact(path: string, accountId: number) {
     importFileId: preview.importFileId,
     importRowIds: transactionIds,
     balanceRowIds: preview.balanceRowIds ?? null,
+    rebuildLedger: false,
   });
 }
 
@@ -138,27 +140,19 @@ export async function runSync(request: SyncRunRequest, report: SyncReporter): Pr
   const downloaded = await runBankOfAmericaSync(config);
   report({ type: 'phase', message: `Validated ${downloaded.saved.length} new artifact${downloaded.saved.length === 1 ? '' : 's'}` });
 
-  let importedTransactions = 0;
-  let importedBalances = 0;
-  let skippedDuplicates = 0;
-  for (const fileName of downloaded.saved) {
-    report({ type: 'artifact', message: `Importing ${fileName}` });
+  const jobs = downloaded.saved.map(fileName => {
     const account = accountForArtifact(fileName, accounts);
-    const result = await importArtifact(join(outputDir, fileName), account.id);
-    importedTransactions += result.importedCount;
-    importedBalances += result.importedBalanceCount;
-    skippedDuplicates += result.skippedDuplicateCount;
-    report({
-      type: 'import',
-      message: `Imported ${fileName}`,
-      data: {
-        accountId: account.id,
-        transactions: result.importedCount,
-        balances: result.importedBalanceCount,
-        duplicates: result.skippedDuplicateCount,
-      },
-    });
-  }
+    return {
+      fileName,
+      accountId: account.id,
+      import: () => importArtifact(join(outputDir, fileName), account.id),
+    };
+  });
+  const { importedTransactions, importedBalances, skippedDuplicates } = await importSyncArtifactBatch(
+    jobs,
+    report,
+    rebuildLedgerReadModel,
+  );
 
   const result = {
     runId: request.runId,
