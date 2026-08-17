@@ -13,9 +13,11 @@ export type SyncEvent = {
 
 export type SyncReporter = (event: Omit<SyncEvent, 'runId' | 'timestamp'>) => void;
 
+export type SyncInstitutionId = 'bank-of-america' | 'vanguard';
+
 export interface SyncRunRequest {
   runId: string;
-  institutionId: 'bank-of-america';
+  institutionId: SyncInstitutionId;
   goal: SyncGoal;
 }
 

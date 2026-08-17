@@ -250,7 +250,7 @@ export const appRouter = t.router({
   dataSync: t.router({
     start: t.procedure
       .input(z.object({
-        institutionId: z.literal('bank-of-america'),
+        institutionId: z.enum(['bank-of-america', 'vanguard']),
         goal: syncGoalInput,
       }))
       .mutation(({ input }) => startSyncJob(input)),

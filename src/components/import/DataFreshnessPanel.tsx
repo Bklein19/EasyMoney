@@ -98,6 +98,9 @@ export default function DataFreshnessPanel() {
   const hasBankOfAmerica = accounts.some(account =>
     account.status !== 'closed' && account.institution?.toLowerCase().includes('bank of america')
   );
+  const hasVanguard = accounts.some(account =>
+    account.status !== 'closed' && account.institution?.toLowerCase().includes('vanguard')
+  );
 
   useEffect(() => {
     if (!syncJob || syncJob.status === 'running') return;
@@ -107,11 +110,14 @@ export default function DataFreshnessPanel() {
     ]);
   }, [syncJob?.status]);
 
-  const startBankOfAmericaSync = async (kind: 'current' | 'backfill') => {
+  const startInstitutionSync = async (
+    institutionId: 'bank-of-america' | 'vanguard',
+    kind: 'current' | 'backfill',
+  ) => {
     const goal = kind === 'current'
       ? { kind: 'current' as const, overlapDays: 7 }
       : { kind: 'backfill' as const };
-    const job = await trpcClient.dataSync.start.mutate({ institutionId: 'bank-of-america', goal });
+    const job = await trpcClient.dataSync.start.mutate({ institutionId, goal });
     localStorage.setItem('easymoney-active-sync-run', job.runId);
     setSyncRunId(job.runId);
   };
@@ -153,13 +159,25 @@ export default function DataFreshnessPanel() {
         {report && <div className="data-freshness__header-actions">
           {hasBankOfAmerica && syncJob?.status !== 'running' && (
             <div className="data-freshness__sync-actions">
-              <button className="btn btn--secondary btn--sm" type="button" onClick={() => void startBankOfAmericaSync('backfill')}>
+              <button className="btn btn--secondary btn--sm" type="button" onClick={() => void startInstitutionSync('bank-of-america', 'backfill')}>
                 <History size={14} />
-                Import history
+                BofA history
               </button>
-              <button className="btn btn--primary btn--sm" type="button" onClick={() => void startBankOfAmericaSync('current')}>
+              <button className="btn btn--primary btn--sm" type="button" onClick={() => void startInstitutionSync('bank-of-america', 'current')}>
                 <RefreshCw size={14} />
                 Catch up BofA
+              </button>
+            </div>
+          )}
+          {hasVanguard && syncJob?.status !== 'running' && (
+            <div className="data-freshness__sync-actions">
+              <button className="btn btn--secondary btn--sm" type="button" onClick={() => void startInstitutionSync('vanguard', 'backfill')}>
+                <History size={14} />
+                Vanguard history
+              </button>
+              <button className="btn btn--primary btn--sm" type="button" onClick={() => void startInstitutionSync('vanguard', 'current')}>
+                <RefreshCw size={14} />
+                Catch up Vanguard
               </button>
             </div>
           )}

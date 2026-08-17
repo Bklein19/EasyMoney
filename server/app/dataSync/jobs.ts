@@ -2,13 +2,13 @@ import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import { syncApplicationDataRoot } from './runner.ts';
-import type { SyncEvent, SyncGoal } from './types.ts';
+import type { SyncEvent, SyncGoal, SyncInstitutionId } from './types.ts';
 
 export type SyncJobStatus = 'running' | 'complete' | 'failed' | 'cancelled';
 
 export interface SyncJob {
   runId: string;
-  institutionId: 'bank-of-america';
+  institutionId: SyncInstitutionId;
   goal: SyncGoal;
   status: SyncJobStatus;
   message: string;

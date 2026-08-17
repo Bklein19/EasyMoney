@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
 import { parseBankOfAmericaArgs } from './institutions/bankOfAmerica.ts';
-import { goalWindowForCoverage } from './runner.ts';
+import {
+  goalWindowForCoverage,
+  missingMonthlyStatementDates,
+  vanguardProfileIdFromFileNames,
+} from './planning.ts';
 
 describe('data sync planning', () => {
   test('current sync overlaps the latest imported fact', () => {
@@ -64,5 +68,20 @@ describe('data sync planning', () => {
       scope: 'checking',
       dryRun: true,
     });
+  });
+
+  test('Vanguard current sync plans only missing completed statement months', () => {
+    expect(missingMonthlyStatementDates(
+      '2026-05-25',
+      '2026-08-16',
+      ['2026-05-31', '2026-07-31'],
+    )).toEqual(['2026-06-30']);
+  });
+
+  test('Vanguard login profiles are recovered from committed artifact provenance', () => {
+    expect(vanguardProfileIdFromFileNames(['2026-07-31-Brokerage---account-2.pdf'])).toBe('account-2');
+    expect(vanguardProfileIdFromFileNames(['vanguard-roth-ira-current-2026-05-25-to-2026-08-13-activity.csv'])).toBe('current');
+    expect(vanguardProfileIdFromFileNames(['vanguard-brokerage-2026-05-25-to-2026-08-13-activity.csv'])).toBe('current');
+    expect(vanguardProfileIdFromFileNames(['2026-07-31-Trad-IRA---person-derived-label.pdf'])).toBeNull();
   });
 });
