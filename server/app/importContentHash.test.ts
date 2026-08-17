@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { hashImportContent } from './imports.ts';
+import { hashImportContent } from './importContentHash.ts';
 
 describe('import content hashing', () => {
   test('hashes binary artifacts from their bytes rather than empty extracted text', () => {

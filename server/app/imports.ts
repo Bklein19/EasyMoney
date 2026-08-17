@@ -2,7 +2,9 @@ import Papa from 'papaparse';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { getDb, hashContent, insertRow, updateRow } from '../database.ts';
+import { getDb, insertRow, updateRow } from '../database.ts';
+import { hashContent } from '../hash.ts';
+import { hashImportContent } from './importContentHash.ts';
 import type { CommitImportTransaction, ImportAccountMapping, ImportPreviewTransaction, ImportProfile, ParsedImportBalance, ParsedImportTransaction } from './importTypes.ts';
 import { CUSTOM_CSV_PARSER_ID, parseCustomCsv } from './importParsers/customCsv.ts';
 import { mappingFromProfile } from './importParsers/csvMapping.ts';
@@ -1160,9 +1162,7 @@ export async function previewImport({ fileName, text, fileBytes, customProfile =
   };
 }
 
-export function hashImportContent(text: string, fileBytes?: Uint8Array) {
-  return hashContent(fileBytes ?? text);
-}
+export { hashImportContent } from './importContentHash.ts';
 
 export function materializeImportTransactions({
   accountId,

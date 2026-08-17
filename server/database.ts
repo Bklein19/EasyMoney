@@ -1,8 +1,8 @@
 import { Database } from 'bun:sqlite';
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { hashContent } from './hash.ts';
 
 type DatabaseValue = string | number | bigint | boolean | null | Uint8Array | Date;
 type DatabaseParams = DatabaseValue | object | undefined;
@@ -91,6 +91,9 @@ interface IndexListRow extends DatabaseRow {
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+if (process.env.NODE_ENV === 'test' && !process.env.EASYMONEY_DB_PATH) {
+  throw new Error('Tests must set EASYMONEY_DB_PATH before importing the database');
+}
 const dbPath = process.env.EASYMONEY_DB_PATH
   ? path.resolve(process.env.EASYMONEY_DB_PATH)
   : path.resolve(__dirname, '..', 'data', 'easymoney.sqlite');
@@ -1118,6 +1121,4 @@ export function getDb() {
   return db;
 }
 
-export function hashContent(content: string | Uint8Array) {
-  return crypto.createHash('sha256').update(content).digest('hex');
-}
+export { hashContent } from './hash.ts';
