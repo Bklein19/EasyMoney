@@ -24,7 +24,12 @@ function isoDate(value = new Date()) {
 }
 
 function shiftDays(date: string, days: number) {
-  const value = new Date(`${date}T00:00:00Z`);
+  const dateOnly = date.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOnly)) throw new Error(`Invalid source fact date: ${date}`);
+  const value = new Date(`${dateOnly}T00:00:00Z`);
+  if (Number.isNaN(value.getTime()) || value.toISOString().slice(0, 10) !== dateOnly) {
+    throw new Error(`Invalid source fact date: ${date}`);
+  }
   value.setUTCDate(value.getUTCDate() + days);
   return isoDate(value);
 }
