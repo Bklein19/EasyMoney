@@ -1,10 +1,17 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, CheckCircle2, CircleDashed, Clock3, History, LoaderCircle, Lock, RefreshCw, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, CircleDashed, Clock3, History, LoaderCircle, Lock, RefreshCw, X } from 'lucide-react';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import { formatDate } from '../../utils/formatters';
 
 type FreshnessStatus = 'current' | 'due' | 'stale' | 'no-data' | 'closed';
+type SyncInstitutionId = 'bank-of-america' | 'vanguard';
+
+interface SyncInstitution {
+  id: SyncInstitutionId;
+  label: string;
+  matches: (institution: string) => boolean;
+}
 
 interface FreshnessAccount {
   accountId: number;
@@ -56,6 +63,72 @@ const STATUS_ICONS = {
   closed: Lock,
 };
 
+const SYNC_INSTITUTIONS: SyncInstitution[] = [
+  {
+    id: 'bank-of-america',
+    label: 'Bank of America',
+    matches: institution => institution.includes('bank of america'),
+  },
+  {
+    id: 'vanguard',
+    label: 'Vanguard',
+    matches: institution => institution.includes('vanguard'),
+  },
+];
+
+interface SyncActionMenuProps {
+  institutions: SyncInstitution[];
+  kind: 'current' | 'backfill';
+  onSelect: (institutionId: SyncInstitutionId, kind: 'current' | 'backfill') => void;
+}
+
+function SyncActionMenu({ institutions, kind, onSelect }: SyncActionMenuProps) {
+  const detailsRef = useRef<HTMLDetailsElement>(null);
+  const isCurrent = kind === 'current';
+  const Icon = isCurrent ? RefreshCw : History;
+  const label = isCurrent ? 'Catch up' : 'Import history';
+
+  useEffect(() => {
+    const close = (event: PointerEvent) => {
+      if (!detailsRef.current?.contains(event.target as Node)) detailsRef.current?.removeAttribute('open');
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') detailsRef.current?.removeAttribute('open');
+    };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.removeEventListener('pointerdown', close);
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, []);
+
+  return (
+    <details className={`data-freshness__sync-menu ${isCurrent ? 'is-primary' : ''}`} ref={detailsRef}>
+      <summary>
+        <Icon size={14} />
+        {label}
+        <ChevronDown className="data-freshness__sync-chevron" size={14} />
+      </summary>
+      <div className="data-freshness__sync-menu-panel" role="menu" aria-label={`${label} institution`}>
+        {institutions.map(institution => (
+          <button
+            key={institution.id}
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              detailsRef.current?.removeAttribute('open');
+              onSelect(institution.id, kind);
+            }}
+          >
+            {institution.label}
+          </button>
+        ))}
+      </div>
+    </details>
+  );
+}
+
 function formatFreshnessDate(value: string | null) {
   if (!value) return '—';
   return formatDate(value, 'medium');
@@ -95,12 +168,11 @@ export default function DataFreshnessPanel() {
   const needsUpdate = (report?.summary.staleAccounts || 0) +
     (report?.summary.dueAccounts || 0) +
     (report?.summary.noDataAccounts || 0);
-  const hasBankOfAmerica = accounts.some(account =>
-    account.status !== 'closed' && account.institution?.toLowerCase().includes('bank of america')
-  );
-  const hasVanguard = accounts.some(account =>
-    account.status !== 'closed' && account.institution?.toLowerCase().includes('vanguard')
-  );
+  const syncInstitutions = useMemo(() => SYNC_INSTITUTIONS.filter(institution =>
+    accounts.some(account =>
+      account.status !== 'closed' && institution.matches(account.institution?.toLowerCase() ?? '')
+    )
+  ), [accounts]);
 
   useEffect(() => {
     if (!syncJob || syncJob.status === 'running') return;
@@ -111,7 +183,7 @@ export default function DataFreshnessPanel() {
   }, [syncJob?.status]);
 
   const startInstitutionSync = async (
-    institutionId: 'bank-of-america' | 'vanguard',
+    institutionId: SyncInstitutionId,
     kind: 'current' | 'backfill',
   ) => {
     const goal = kind === 'current'
@@ -157,28 +229,18 @@ export default function DataFreshnessPanel() {
           </p>
         </div>
         {report && <div className="data-freshness__header-actions">
-          {hasBankOfAmerica && syncJob?.status !== 'running' && (
+          {syncInstitutions.length > 0 && syncJob?.status !== 'running' && (
             <div className="data-freshness__sync-actions">
-              <button className="btn btn--secondary btn--sm" type="button" onClick={() => void startInstitutionSync('bank-of-america', 'backfill')}>
-                <History size={14} />
-                BofA history
-              </button>
-              <button className="btn btn--primary btn--sm" type="button" onClick={() => void startInstitutionSync('bank-of-america', 'current')}>
-                <RefreshCw size={14} />
-                Catch up BofA
-              </button>
-            </div>
-          )}
-          {hasVanguard && syncJob?.status !== 'running' && (
-            <div className="data-freshness__sync-actions">
-              <button className="btn btn--secondary btn--sm" type="button" onClick={() => void startInstitutionSync('vanguard', 'backfill')}>
-                <History size={14} />
-                Vanguard history
-              </button>
-              <button className="btn btn--primary btn--sm" type="button" onClick={() => void startInstitutionSync('vanguard', 'current')}>
-                <RefreshCw size={14} />
-                Catch up Vanguard
-              </button>
+              <SyncActionMenu
+                institutions={syncInstitutions}
+                kind="backfill"
+                onSelect={(institutionId, kind) => void startInstitutionSync(institutionId, kind)}
+              />
+              <SyncActionMenu
+                institutions={syncInstitutions}
+                kind="current"
+                onSelect={(institutionId, kind) => void startInstitutionSync(institutionId, kind)}
+              />
             </div>
           )}
           <div className="data-freshness__summary" aria-label="Freshness summary">

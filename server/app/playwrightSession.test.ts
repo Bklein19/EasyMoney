@@ -5,6 +5,7 @@ import {
   decodeInstitutionBrowserProgramResult,
   playwrightAuthStatePath,
   playwrightProfilePath,
+  showAuthenticationChapter,
   showSyncCompletionChapter,
   waitForInteractiveAuthentication,
 } from './dataSync/browserSession.ts';
@@ -74,5 +75,20 @@ describe('Playwright session helper', () => {
       title: 'Done',
       options: { description: 'Downloads are complete.', duration: 2_000 },
     }]);
+  });
+
+  test('clears the shared authentication chapter before credential entry', async () => {
+    const events: string[] = [];
+    const page = {
+      screencast: {
+        showChapter: async (title: string) => events.push(`show:${title}`),
+        hideOverlays: async () => events.push('hide'),
+      },
+      waitForTimeout: async (duration: number) => events.push(`wait:${duration}`),
+    } as unknown as Page;
+
+    await showAuthenticationChapter(page, 'Sign in and complete MFA.');
+
+    expect(events).toEqual(['show:Sign in required', 'wait:2000', 'hide']);
   });
 });

@@ -392,8 +392,10 @@ function buildBrowserProgram(
       await page.screencast.showActions({ position: "bottom-right", duration: 700, fontSize: 18 });
       const authenticated = page.url().startsWith("https://secure.bankofamerica.com/") && !await page.locator('input[type="password"]').count();
       if (!authenticated) {
-        await page.screencast.showChapter("Sign in to Bank of America", { description: "Complete login and MFA here. EasyMoney will continue automatically.", duration: 4000 });
-        return JSON.stringify({ status: "login-required", action: \`Sign in and complete MFA in \${plan.session}.\` });
+        return JSON.stringify({
+          status: "login-required",
+          action: "Sign in to Bank of America and complete MFA. EasyMoney will continue automatically.",
+        });
       }
 
       if (!plan.scope || plan.scope === "checking") {

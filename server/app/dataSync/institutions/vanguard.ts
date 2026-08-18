@@ -7,6 +7,12 @@ import parseVanguardStatement, {
 import { runInstitutionBrowserProgram } from '../browserSession.ts';
 
 const LOGIN_URL = 'https://investor.vanguard.com/my-account/log-on';
+const TRANSACTION_HISTORY_URL = 'https://www.vanguard.com/en/investor/portfolio/transactions/history';
+const AUTHENTICATED_PATH_PATTERN = '^/en/investor/portfolio(?:/|$)';
+
+export function isVanguardAuthenticatedPath(pathname: string): boolean {
+  return new RegExp(AUTHENTICATED_PATH_PATTERN, 'i').test(pathname);
+}
 
 export type VanguardAccountKind = 'brokerage' | 'roth-ira' | 'traditional-ira';
 
@@ -138,17 +144,17 @@ function jobsForProfile(config: VanguardSyncConfig, profile: VanguardSyncProfile
 function browserProgram(through: string, activityJobs: ArtifactJob[], statementJobs: ArtifactJob[]) {
   return `async page => {
     const through = ${JSON.stringify(through)};
+    const transactionHistoryUrl = ${JSON.stringify(TRANSACTION_HISTORY_URL)};
+    const authenticatedPath = new RegExp(${JSON.stringify(AUTHENTICATED_PATH_PATTERN)}, 'i');
     const activityJobs = ${JSON.stringify(activityJobs)};
     const statementJobs = ${JSON.stringify(statementJobs)};
 
-    const onLoginPage = async () => /log-on|login|signin/i.test(new URL(page.url()).pathname) ||
-      await page.locator('input[type=password], input[autocomplete=username]').count() > 0;
-    if (await onLoginPage()) {
-      await page.screencast.showChapter('Sign in to Vanguard', {
-        description: 'Complete login and MFA here. EasyMoney will continue automatically.',
-        duration: 4000,
+    const authenticationFields = await page.locator('input[type=password], input[autocomplete=username]').count() > 0;
+    if (!authenticatedPath.test(new URL(page.url()).pathname) || authenticationFields) {
+      return JSON.stringify({
+        status: 'login-required',
+        action: 'Sign in to Vanguard and complete MFA. EasyMoney will continue automatically.',
       });
-      return JSON.stringify({ status: 'login-required' });
     }
 
     const gotoVisibleLink = async (pattern, label) => {
@@ -192,8 +198,32 @@ function browserProgram(through: string, activityJobs: ArtifactJob[], statementJ
         description: 'Downloading current account activity.', duration: 2500,
       });
       if (!(await page.locator('select[name=downloadDateOption]:visible').count())) {
-        if (!(await page.locator('a').filter({ hasText: /Download center/i }).count())) await gotoVisibleLink(/^Activity$/i, 'Activity');
-        await gotoVisibleLink(/Download center/i, 'Download Center');
+        if (!new URL(page.url()).pathname.includes('/portfolio/transactions/history')) {
+          await page.goto(transactionHistoryUrl, { waitUntil: 'domcontentloaded' });
+          await page.waitForTimeout(800);
+        }
+        if (!(await page.locator('select[name=downloadDateOption]:visible').count())) {
+          const controls = await page.locator('a:visible, button:visible').all();
+          let opened = false;
+          for (const control of controls) {
+            const label = [
+              await control.textContent(),
+              await control.getAttribute('aria-label'),
+              await control.getAttribute('title'),
+            ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();
+            if (!/download center|download (?:transactions|activity)|^download$/i.test(label)) continue;
+            await control.click();
+            opened = true;
+            break;
+          }
+          if (!opened) throw new Error('Vanguard activity download control is unavailable');
+          for (let attempt = 0; attempt < 20 && !(await page.locator('select[name=downloadDateOption]:visible').count()); attempt++) {
+            await page.waitForTimeout(500);
+          }
+        }
+      }
+      if (!(await page.locator('select[name=downloadDateOption]:visible').count())) {
+        throw new Error('Vanguard activity download form did not open');
       }
       const boxes = page.locator('input[name=check-box]');
       for (let attempt = 0; attempt < 20 && await boxes.count() === 0; attempt++) await page.waitForTimeout(500);

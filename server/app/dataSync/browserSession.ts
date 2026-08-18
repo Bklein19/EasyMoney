@@ -177,6 +177,15 @@ export async function showSyncCompletionChapter(
   });
 }
 
+export async function showAuthenticationChapter(page: Page, action: string): Promise<void> {
+  await page.screencast.showChapter('Sign in required', {
+    description: action,
+    duration: 2_000,
+  });
+  await page.waitForTimeout(2_000);
+  await page.screencast.hideOverlays();
+}
+
 export async function runInstitutionBrowserProgram<T extends Record<string, unknown>>(
   session: SessionOptions,
   code: string,
@@ -188,6 +197,10 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     const deadline = Date.now() + (options.authenticationTimeoutMs ?? 10 * 60_000);
     let result = decodeInstitutionBrowserProgramResult<T>(await program(page));
     if (result.status === 'login-required') {
+      await showAuthenticationChapter(
+        page,
+        result.action ?? `Complete login and MFA for ${session.name}. EasyMoney will continue automatically.`,
+      );
       console.log(`Authentication required in ${session.name}. Complete login and MFA in the open browser.`);
     }
     while (result.status === 'login-required' && Date.now() < deadline) {
