@@ -4,6 +4,7 @@ import { basename, extname, resolve } from 'node:path';
 import parseVanguardStatement, {
   meta as vanguardStatementMeta,
 } from '../../importParsers/moneyParsers/vanguard-statement-pdf.ts';
+import { parseCsvRows } from '../../importParsers/csvRows.ts';
 import { runInstitutionBrowserProgram } from '../browserSession.ts';
 
 const LOGIN_URL = 'https://investor.vanguard.com/my-account/log-on';
@@ -66,19 +67,36 @@ function validateProfileId(value: string) {
   }
 }
 
-async function validateCsv(path: string) {
+export function vanguardCsvAccountLast4s(text: string): string[] {
+  const accountNumbers = parseCsvRows(text)
+    .filter(row => row[0]?.trim().toLowerCase() !== 'account number')
+    .map(row => row[0]?.replace(/\D/g, '') ?? '')
+    .filter(value => value.length >= 4)
+    .map(value => value.slice(-4));
+  return [...new Set(accountNumbers)];
+}
+
+export function assertVanguardArtifactAccount(expectedLast4: string, actualLast4s: string[]): void {
+  if (actualLast4s.length !== 1 || actualLast4s[0] !== expectedLast4) {
+    throw new Error('Vanguard artifact does not match its planned EasyMoney account');
+  }
+}
+
+async function validateCsv(path: string, expectedLast4: string) {
   const data = await readFile(path);
   if (data.includes(0)) throw new Error(`${basename(path)} contains binary NUL bytes`);
-  const lines = new TextDecoder().decode(data).split(/\r?\n/).filter(Boolean);
+  const text = new TextDecoder().decode(data);
+  const lines = text.split(/\r?\n/).filter(Boolean);
   const headerIndex = lines.findIndex(line => /date/i.test(line) && line.includes(','));
   if (headerIndex < 0) throw new Error(`${basename(path)} has no recognizable activity header`);
   const header = lines[headerIndex]!.toLowerCase();
   if (header.split(',').length < 10 || !['date', 'account', 'transaction', 'amount'].every(token => header.includes(token))) {
     throw new Error(`${basename(path)} does not match the observed Vanguard activity CSV shape`);
   }
+  assertVanguardArtifactAccount(expectedLast4, vanguardCsvAccountLast4s(text));
 }
 
-async function validatePdf(path: string) {
+async function validatePdf(path: string, expectedLast4: string) {
   const data = await readFile(path);
   if (new TextDecoder().decode(data.subarray(0, 5)) !== '%PDF-') {
     throw new Error(`${basename(path)} does not have PDF magic`);
@@ -88,20 +106,23 @@ async function validatePdf(path: string) {
   }
   const parsed = await parseVanguardStatement(path);
   if (parsed.balances.length === 0) throw new Error(`${basename(path)} has no Vanguard statement balance record`);
+  const accounts = [...parsed.transactions, ...parsed.balances].map(record => record.account);
+  const actualLast4s = [...new Set(accounts.map(account => account.match(/(\d{4})(?!.*\d)/)?.[1]).filter((value): value is string => Boolean(value)))];
+  assertVanguardArtifactAccount(expectedLast4, actualLast4s);
 }
 
-async function validateArtifact(path: string, kind: ArtifactKind) {
+async function validateArtifact(path: string, kind: ArtifactKind, expectedLast4: string) {
   if (extname(path).toLowerCase() !== `.${kind}`) throw new Error(`${basename(path)} has the wrong extension`);
   const info = await stat(path);
   const minimum = kind === 'pdf' ? 10_000 : 100;
   if (!info.isFile() || info.size < minimum) throw new Error(`${basename(path)} is smaller than the ${minimum}-byte minimum`);
-  if (kind === 'pdf') await validatePdf(path);
-  else await validateCsv(path);
+  if (kind === 'pdf') await validatePdf(path, expectedLast4);
+  else await validateCsv(path, expectedLast4);
 }
 
-async function isValid(path: string, kind: ArtifactKind) {
+async function isValid(path: string, kind: ArtifactKind, expectedLast4: string) {
   try {
-    await validateArtifact(path, kind);
+    await validateArtifact(path, kind, expectedLast4);
     return true;
   } catch {
     return false;
@@ -314,7 +335,7 @@ function browserProgram(through: string, activityJobs: ArtifactJob[], statementJ
 async function runProfile(config: VanguardSyncConfig, profile: VanguardSyncProfile) {
   const jobs = jobsForProfile(config, profile);
   const pending: ArtifactJob[] = [];
-  for (const job of jobs) if (!(await isValid(job.targetPath, job.kind))) pending.push(job);
+  for (const job of jobs) if (!(await isValid(job.targetPath, job.kind, job.accountLast4))) pending.push(job);
   if (pending.length === 0) return [];
 
   let result;
@@ -339,7 +360,7 @@ async function runProfile(config: VanguardSyncConfig, profile: VanguardSyncProfi
   for (const fileName of result.downloaded) {
     const job = byName.get(fileName);
     if (!job) throw new Error(`Vanguard returned an unplanned artifact: ${fileName}`);
-    await validateArtifact(job.targetPath, job.kind);
+    await validateArtifact(job.targetPath, job.kind, job.accountLast4);
     downloaded.push({ fileName, accountId: job.accountId });
   }
   return downloaded;
