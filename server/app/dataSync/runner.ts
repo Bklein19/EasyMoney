@@ -1,5 +1,4 @@
 import { mkdir, readFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 
 import { getDb } from '../../database.ts';
@@ -20,7 +19,10 @@ import {
   missingMonthlyStatementDates,
   vanguardProfileIdFromFileNames,
 } from './planning.ts';
+import { syncApplicationDataRoot } from './paths.ts';
 import { selectVanguardProfiles, syncTargetsForProfiles } from './targets.ts';
+
+export { syncApplicationDataRoot } from './paths.ts';
 
 interface AccountCoverageRow {
   id: number;
@@ -37,12 +39,6 @@ interface AccountCoverageRow {
 
 function isoDate(value = new Date()) {
   return value.toISOString().slice(0, 10);
-}
-
-export function syncApplicationDataRoot() {
-  if (process.platform === 'darwin') return join(homedir(), 'Library', 'Application Support', 'EasyMoney', 'sync-runs');
-  if (process.platform === 'win32') return join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'EasyMoney', 'sync-runs');
-  return join(process.env.XDG_STATE_HOME ?? join(homedir(), '.local', 'state'), 'easymoney', 'sync-runs');
 }
 
 function institutionCoverage(institutionPattern: string): AccountCoverageRow[] {
