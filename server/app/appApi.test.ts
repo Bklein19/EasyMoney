@@ -3256,6 +3256,41 @@ test('app data freshness reports latest source fact dates by account', async () 
   });
 });
 
+test('Vanguard sync targets survive reversible unimport provenance', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Vanguard',
+    institution: 'Vanguard',
+    type: 'investment',
+    accountHolder: 'Example Holder',
+    currentBalance: 0,
+  }));
+  const sourceFileId = Number(insertRow('sourceFiles', {
+    fileName: '2026-07-31-Brokerage---account-2.pdf',
+    contentHash: 'unimported-vanguard-profile',
+    parserName: 'vanguard-statement',
+    sourceType: 'statement',
+    institution: 'Vanguard',
+    status: 'unimported',
+    createdAt: '2026-08-01T00:00:00.000Z',
+  }));
+  insertRow('sourceAccounts', {
+    sourceFileId,
+    accountId,
+    institution: 'Vanguard',
+    sourceAccountKey: 'brokerage-1234',
+    sourceAccountName: 'Brokerage - 1234',
+    accountHolder: 'Example Holder',
+    createdAt: '2026-08-01T00:00:00.000Z',
+  });
+
+  expect(await trpcClient.dataSync.targets.query()).toContainEqual({
+    id: 'vanguard:account-2',
+    institutionId: 'vanguard',
+    connectionId: 'account-2',
+    label: 'Vanguard (Example Holder)',
+  });
+});
+
 test('app import history can bulk unimport and reimport committed source facts', async () => {
   const accountId = insertRow('accounts', {
     name: 'Chase Sapphire',

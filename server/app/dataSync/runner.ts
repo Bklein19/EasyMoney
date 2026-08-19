@@ -71,7 +71,7 @@ function institutionCoverage(institutionPattern: string): AccountCoverageRow[] {
       (
         SELECT sa2.sourceAccountName
         FROM sourceAccounts sa2
-        JOIN sourceFiles sf2 ON sf2.id = sa2.sourceFileId AND sf2.status = 'committed'
+        JOIN sourceFiles sf2 ON sf2.id = sa2.sourceFileId
         WHERE sa2.accountId = a.id
         ORDER BY COALESCE(sf2.committedAt, sf2.createdAt) DESC, sf2.id DESC
         LIMIT 1
@@ -118,7 +118,7 @@ function vanguardArtifactNames(accountId: number) {
     SELECT sf.fileName
     FROM sourceAccounts sa
     JOIN sourceFiles sf ON sf.id = sa.sourceFileId
-    WHERE sa.accountId = ? AND sf.status = 'committed'
+    WHERE sa.accountId = ?
     ORDER BY COALESCE(sf.committedAt, sf.createdAt) DESC, sf.id DESC
   `).all(accountId) as Array<{ fileName: string }>).map(row => row.fileName);
 }
