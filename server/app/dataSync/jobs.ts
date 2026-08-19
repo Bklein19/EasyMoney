@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 
 import { commitSyncReview, discardSyncReview } from './review.ts';
 import { syncApplicationDataRoot } from './runner.ts';
+import { syncChildProcessOptions } from './subprocess.ts';
 import type { SyncEvent, SyncGoal, SyncInstitutionId, SyncRunResult, SyncRunReview } from './types.ts';
 
 export type SyncJobStatus = 'running' | 'awaiting-confirmation' | 'importing' | 'complete' | 'failed' | 'cancelled';
@@ -159,11 +160,10 @@ export function startSyncJob(input: { institutionId: SyncJob['institutionId']; c
   jobs.set(runId, job);
   void persistJob(job);
 
-  const child = Bun.spawn(commandFor(runId, input.institutionId, input.goal, input.connectionId), {
-    cwd: process.env.EASYMONEY_DESKTOP === '1' ? import.meta.dir : repositoryRoot,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  });
+  const child = Bun.spawn(
+    commandFor(runId, input.institutionId, input.goal, input.connectionId),
+    syncChildProcessOptions(),
+  );
   job.process = child;
 
   const stdout = readLines(child.stdout, line => {
