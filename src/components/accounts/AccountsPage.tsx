@@ -173,7 +173,8 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }: A
 }
 
 export default function AccountsPage() {
-  const { accounts, updateAccount, archiveAccount, unarchiveAccount, isLoading } = useAccounts({ includeArchived: true });
+  const [showArchived, setShowArchived] = useState(false);
+  const { accounts, updateAccount, archiveAccount, unarchiveAccount, isLoading } = useAccounts({ includeArchived: showArchived });
   const [expandedAccountId, setExpandedAccountId] = useState<number | null>(null);
   const [savingAccountId, setSavingAccountId] = useState<number | null>(null);
   const [errorByAccountId, setErrorByAccountId] = useState<ErrorByAccountId>({});
@@ -236,6 +237,17 @@ export default function AccountsPage() {
           </h1>
           <p className="page__subtitle">Manage imported account metadata and archive status.</p>
         </div>
+        <label className="accounts-page__archived-toggle">
+          <input
+            type="checkbox"
+            checked={showArchived}
+            onChange={(event) => {
+              setShowArchived(event.target.checked);
+              if (!event.target.checked) setExpandedAccountId(null);
+            }}
+          />
+          Show archived
+        </label>
       </header>
 
       <div className="accounts-table-wrap">

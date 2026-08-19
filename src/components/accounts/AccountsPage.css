@@ -7,7 +7,26 @@
 }
 
 .accounts-page__header {
+  align-items: flex-end;
   margin-bottom: 0;
+}
+
+.accounts-page__archived-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 32px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.accounts-page__archived-toggle input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent-blue);
 }
 
 .accounts-page__count {
