@@ -1,9 +1,12 @@
 import { expect, test } from 'bun:test';
+import type { Page } from 'playwright';
 
 import {
   assertVanguardArtifactAccount,
+  isVanguardAuthenticatedPage,
   isVanguardAuthenticatedPath,
   vanguardCsvAccountLast4s,
+  vanguardThroughDate,
 } from './vanguard.ts';
 
 test('Vanguard authentication requires a signed-in portfolio route', () => {
@@ -11,6 +14,23 @@ test('Vanguard authentication requires a signed-in portfolio route', () => {
   expect(isVanguardAuthenticatedPath('/en/investor/portfolio/transactions/history')).toBe(true);
   expect(isVanguardAuthenticatedPath('/my-account/log-on')).toBe(false);
   expect(isVanguardAuthenticatedPath('/')).toBe(false);
+});
+
+test('Vanguard authentication recognizes the signed-in download center', async () => {
+  const page = {
+    url: () => 'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofx-welcome',
+    locator: () => ({ count: async () => 0 }),
+    getByRole: () => ({ count: async () => 1 }),
+  } as unknown as Page;
+
+  expect(await isVanguardAuthenticatedPage(page)).toBe(true);
+});
+
+test('Vanguard caps UTC-tomorrow downloads to the local calendar date', () => {
+  const lateEvening = new Date(2026, 7, 18, 23, 30);
+
+  expect(vanguardThroughDate('2026-08-19', lateEvening)).toBe('2026-08-18');
+  expect(vanguardThroughDate('2026-07-01', lateEvening)).toBe('2026-07-01');
 });
 
 test('Vanguard artifacts must match the planned account before import', () => {

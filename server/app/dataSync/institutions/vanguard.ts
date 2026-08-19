@@ -6,13 +6,34 @@ import parseVanguardStatement, {
 } from '../../importParsers/moneyParsers/vanguard-statement-pdf.ts';
 import { parseCsvRows } from '../../importParsers/csvRows.ts';
 import { runInstitutionBrowserProgram } from '../browserSession.ts';
+import type { Page } from 'playwright';
 
 const LOGIN_URL = 'https://investor.vanguard.com/my-account/log-on';
 const TRANSACTION_HISTORY_URL = 'https://www.vanguard.com/en/investor/portfolio/transactions/history';
+const STATEMENTS_URL = 'https://statements.web.vanguard.com/';
 const AUTHENTICATED_PATH_PATTERN = '^/en/investor/portfolio(?:/|$)';
 
 export function isVanguardAuthenticatedPath(pathname: string): boolean {
   return new RegExp(AUTHENTICATED_PATH_PATTERN, 'i').test(pathname);
+}
+
+export async function isVanguardAuthenticatedPage(page: Page): Promise<boolean> {
+  const authenticationFields = await page.locator(
+    'input[type="password"]:visible, input[autocomplete="username"]:visible'
+  ).count() > 0;
+  if (authenticationFields) return false;
+  const url = new URL(page.url());
+  if (isVanguardAuthenticatedPath(url.pathname)) return true;
+  if (!/(?:^|\.)vanguard\.com$/i.test(url.hostname)) return false;
+  return await page.getByRole('link', { name: /^Log off$/i }).count() > 0;
+}
+
+export function vanguardThroughDate(requestedThrough: string, value = new Date()) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  const localToday = `${year}-${month}-${day}`;
+  return requestedThrough < localToday ? requestedThrough : localToday;
 }
 
 export type VanguardAccountKind = 'brokerage' | 'roth-ira' | 'traditional-ira';
@@ -168,31 +189,22 @@ function browserProgram(accountHolder: string, through: string, activityJobs: Ar
     const accountHolder = ${JSON.stringify(accountHolder)};
     const through = ${JSON.stringify(through)};
     const transactionHistoryUrl = ${JSON.stringify(TRANSACTION_HISTORY_URL)};
+    const statementsUrl = ${JSON.stringify(STATEMENTS_URL)};
     const authenticatedPath = new RegExp(${JSON.stringify(AUTHENTICATED_PATH_PATTERN)}, 'i');
     const activityJobs = ${JSON.stringify(activityJobs)};
     const statementJobs = ${JSON.stringify(statementJobs)};
 
-    const authenticationFields = await page.locator('input[type=password], input[autocomplete=username]').count() > 0;
-    if (!authenticatedPath.test(new URL(page.url()).pathname) || authenticationFields) {
+    const authenticationFields = await page.locator('input[type=password]:visible, input[autocomplete=username]:visible').count() > 0;
+    const currentUrl = new URL(page.url());
+    const authenticatedShell = /(?:^|\\.)vanguard\\.com$/i.test(currentUrl.hostname)
+      && await page.getByRole('link', { name: /^Log off$/i }).count() > 0;
+    if ((!authenticatedPath.test(currentUrl.pathname) && !authenticatedShell) || authenticationFields) {
       return JSON.stringify({
         status: 'login-required',
         action: 'Sign in to Vanguard as ' + accountHolder + ' and complete MFA. EasyMoney will continue automatically.',
       });
     }
 
-    const gotoVisibleLink = async (pattern, label) => {
-      const links = await page.locator('a').filter({ hasText: pattern }).all();
-      for (const link of links) {
-        if (!(await link.isVisible())) continue;
-        const href = await link.getAttribute('href');
-        if (!href) continue;
-        await page.goto(href);
-        await page.waitForLoadState('domcontentloaded').catch(() => {});
-        await page.waitForTimeout(500);
-        return;
-      }
-      throw new Error(label + ' link is unavailable');
-    };
     const clickAssociatedLabel = async input => {
       const id = await input.getAttribute('id');
       if (!id) throw new Error('Vanguard form control has no associated label');
@@ -223,26 +235,22 @@ function browserProgram(accountHolder: string, through: string, activityJobs: Ar
       if (!(await page.locator('select[name=downloadDateOption]:visible').count())) {
         if (!new URL(page.url()).pathname.includes('/portfolio/transactions/history')) {
           await page.goto(transactionHistoryUrl, { waitUntil: 'domcontentloaded' });
-          await page.waitForTimeout(800);
         }
         if (!(await page.locator('select[name=downloadDateOption]:visible').count())) {
-          const controls = await page.locator('a:visible, button:visible').all();
-          let opened = false;
-          for (const control of controls) {
-            const label = [
-              await control.textContent(),
-              await control.getAttribute('aria-label'),
-              await control.getAttribute('title'),
-            ].filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim();
-            if (!/download center|download (?:transactions|activity)|^download$/i.test(label)) continue;
-            await control.click();
-            opened = true;
-            break;
-          }
-          if (!opened) throw new Error('Vanguard activity download control is unavailable');
-          for (let attempt = 0; attempt < 20 && !(await page.locator('select[name=downloadDateOption]:visible').count()); attempt++) {
-            await page.waitForTimeout(500);
-          }
+          const downloadControl = page
+            .getByRole('link', { name: /^Download center$/i })
+            .or(page.getByRole('button', { name: /^Download(?: transactions| activity)?$/i }))
+            .first();
+          await downloadControl.waitFor({ state: 'visible', timeout: 30000 }).catch(() => {
+            throw new Error('Vanguard activity download control is unavailable');
+          });
+          await downloadControl.click();
+          await page.locator('select[name=downloadDateOption]:visible').waitFor({
+            state: 'visible',
+            timeout: 30000,
+          }).catch(() => {
+            throw new Error('Vanguard activity download form did not open');
+          });
         }
       }
       if (!(await page.locator('select[name=downloadDateOption]:visible').count())) {
@@ -292,14 +300,15 @@ function browserProgram(accountHolder: string, through: string, activityJobs: Ar
       });
       const statementsReady = await page.locator('tbody tr').count() > 0 && await page.locator('#select-year-id').count() > 0;
       if (!statementsReady) {
-        const buttons = await page.locator('button:visible').all();
-        for (const button of buttons) {
-          const label = (((await button.textContent()) || '') + ' ' + ((await button.getAttribute('aria-label')) || '')).toLowerCase();
-          if (label.includes('statement') && label.includes('document')) { await button.click(); break; }
-        }
-        await gotoVisibleLink(/^Statements$/i, 'Statements');
+        await page.goto(statementsUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
       }
       const yearSelect = page.locator('#select-year-id:visible');
+      await yearSelect.waitFor({ state: 'visible', timeout: 30000 }).catch(() => {
+        throw new Error('Vanguard statement year selector is unavailable');
+      });
+      await page.locator('tbody tr').first().waitFor({ state: 'visible', timeout: 30000 }).catch(() => {
+        throw new Error('Vanguard statement rows are unavailable');
+      });
       for (const job of statementJobs) {
         const year = job.statementDate.slice(0, 4);
         if (await yearSelect.count()) await yearSelect.selectOption({ label: year }).catch(() => yearSelect.selectOption(year));
@@ -350,7 +359,10 @@ async function runProfile(config: VanguardSyncConfig, profile: VanguardSyncProfi
         pending.filter(job => job.kind === 'csv'),
         pending.filter(job => job.kind === 'pdf'),
       ),
-      { completionDescription: `Vanguard ${profile.id} downloads are complete.` },
+      {
+        completionDescription: `Vanguard ${profile.id} downloads are complete.`,
+        isAuthenticated: isVanguardAuthenticatedPage,
+      },
     );
   } catch (error) {
     throw new Error(`Vanguard ${profile.id}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
@@ -370,7 +382,11 @@ async function runProfile(config: VanguardSyncConfig, profile: VanguardSyncProfi
 }
 
 export async function runVanguardSync(config: VanguardSyncConfig) {
-  await mkdir(config.outputDir, { recursive: true });
-  const results = await Promise.all(config.profiles.map(profile => runProfile(config, profile)));
+  const normalizedConfig = {
+    ...config,
+    through: vanguardThroughDate(config.through),
+  };
+  await mkdir(normalizedConfig.outputDir, { recursive: true });
+  const results = await Promise.all(normalizedConfig.profiles.map(profile => runProfile(normalizedConfig, profile)));
   return results.flat();
 }
