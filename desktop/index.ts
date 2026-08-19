@@ -1,12 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import Electrobun, { BrowserView, BrowserWindow, Utils } from 'electrobun/bun';
+import Electrobun, { ApplicationMenu, BrowserView, BrowserWindow, Utils } from 'electrobun/bun';
 import {
   callTRPCProcedure,
   getTRPCErrorFromUnknown,
   getTRPCErrorShape,
 } from '@trpc/server';
 import { migrateLegacyData } from './dataMigration.ts';
+import { macApplicationMenu } from './applicationMenu.ts';
 import type { EasyMoneyDesktopRpc } from './rpc.ts';
 
 const dataDirectory = Utils.paths.userData;
@@ -44,6 +45,10 @@ databaseModule.initDatabase();
 seedModule.seedDatabase();
 
 const { appRouter } = routerModule;
+
+if (process.platform === 'darwin') {
+  ApplicationMenu.setApplicationMenu(macApplicationMenu);
+}
 
 const rpc = BrowserView.defineRPC<EasyMoneyDesktopRpc>({
   maxRequestTime: Infinity,
