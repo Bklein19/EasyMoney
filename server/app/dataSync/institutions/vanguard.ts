@@ -28,6 +28,7 @@ export interface VanguardSyncAccount {
 export interface VanguardSyncProfile {
   id: string;
   session: string;
+  accountHolder: string;
   accounts: VanguardSyncAccount[];
 }
 
@@ -162,8 +163,9 @@ function jobsForProfile(config: VanguardSyncConfig, profile: VanguardSyncProfile
   return jobs;
 }
 
-function browserProgram(through: string, activityJobs: ArtifactJob[], statementJobs: ArtifactJob[]) {
+function browserProgram(accountHolder: string, through: string, activityJobs: ArtifactJob[], statementJobs: ArtifactJob[]) {
   return `async page => {
+    const accountHolder = ${JSON.stringify(accountHolder)};
     const through = ${JSON.stringify(through)};
     const transactionHistoryUrl = ${JSON.stringify(TRANSACTION_HISTORY_URL)};
     const authenticatedPath = new RegExp(${JSON.stringify(AUTHENTICATED_PATH_PATTERN)}, 'i');
@@ -174,7 +176,7 @@ function browserProgram(through: string, activityJobs: ArtifactJob[], statementJ
     if (!authenticatedPath.test(new URL(page.url()).pathname) || authenticationFields) {
       return JSON.stringify({
         status: 'login-required',
-        action: 'Sign in to Vanguard and complete MFA. EasyMoney will continue automatically.',
+        action: 'Sign in to Vanguard as ' + accountHolder + ' and complete MFA. EasyMoney will continue automatically.',
       });
     }
 
@@ -343,6 +345,7 @@ async function runProfile(config: VanguardSyncConfig, profile: VanguardSyncProfi
     result = await runInstitutionBrowserProgram<{ downloaded: string[]; unavailable: string[] }>(
       { name: profile.session, startUrl: LOGIN_URL },
       browserProgram(
+        profile.accountHolder,
         config.through,
         pending.filter(job => job.kind === 'csv'),
         pending.filter(job => job.kind === 'pdf'),

@@ -22,6 +22,7 @@ import {
 import { createCategory, deleteCategory, listCategories, updateCategory } from './categories.ts';
 import { getDataFreshnessReport } from './dataFreshness.ts';
 import { cancelSyncJob, getSyncJob, startSyncJob } from './dataSync/jobs.ts';
+import { listSyncTargets } from './dataSync/runner.ts';
 import { commitImport, listImportHistory, previewImport, reimportFile, reimportFiles, unimportFile, unimportFiles } from './imports.ts';
 import { listImportProfiles, upsertImportProfile } from './importProfiles.ts';
 import { getInvestmentNetWorthReport, getSavingsRateReport } from './investmentReports.ts';
@@ -248,9 +249,12 @@ export const appRouter = t.router({
   }),
 
   dataSync: t.router({
+    targets: t.procedure.query(() => listSyncTargets()),
+
     start: t.procedure
       .input(z.object({
         institutionId: z.enum(['bank-of-america', 'vanguard']),
+        connectionId: z.string().optional(),
         goal: syncGoalInput,
       }))
       .mutation(({ input }) => startSyncJob(input)),

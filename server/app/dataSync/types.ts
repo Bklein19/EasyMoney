@@ -18,7 +18,15 @@ export type SyncInstitutionId = 'bank-of-america' | 'vanguard';
 export interface SyncRunRequest {
   runId: string;
   institutionId: SyncInstitutionId;
+  connectionId?: string;
   goal: SyncGoal;
+}
+
+export interface SyncTarget {
+  id: string;
+  institutionId: SyncInstitutionId;
+  connectionId?: string;
+  label: string;
 }
 
 export interface SyncRunResult {

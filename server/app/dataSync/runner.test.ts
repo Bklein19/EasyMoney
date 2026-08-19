@@ -1,11 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 
 import { parseBankOfAmericaArgs } from './institutions/bankOfAmerica.ts';
+import type { VanguardSyncProfile } from './institutions/vanguard.ts';
 import {
   goalWindowForCoverage,
   missingMonthlyStatementDates,
   vanguardProfileIdFromFileNames,
 } from './planning.ts';
+import { selectVanguardProfiles, syncTargetsForProfiles } from './targets.ts';
+
+const vanguardProfiles: VanguardSyncProfile[] = [
+  { id: 'current', session: 'vanguard-catchup', accountHolder: 'Example One', accounts: [] },
+  { id: 'account-2', session: 'vanguard-account-2-catchup', accountHolder: 'Example Two', accounts: [] },
+];
 
 describe('data sync planning', () => {
   test('current sync overlaps the latest imported fact', () => {
@@ -83,5 +90,19 @@ describe('data sync planning', () => {
     expect(vanguardProfileIdFromFileNames(['vanguard-roth-ira-current-2026-05-25-to-2026-08-13-activity.csv'])).toBe('current');
     expect(vanguardProfileIdFromFileNames(['vanguard-brokerage-2026-05-25-to-2026-08-13-activity.csv'])).toBe('current');
     expect(vanguardProfileIdFromFileNames(['2026-07-31-Trad-IRA---person-derived-label.pdf'])).toBeNull();
+  });
+
+  test('sync targets identify each Vanguard login by account holder', () => {
+    expect(syncTargetsForProfiles(true, vanguardProfiles)).toEqual([
+      { id: 'bank-of-america', institutionId: 'bank-of-america', label: 'BofA' },
+      { id: 'vanguard:current', institutionId: 'vanguard', connectionId: 'current', label: 'Vanguard (Example One)' },
+      { id: 'vanguard:account-2', institutionId: 'vanguard', connectionId: 'account-2', label: 'Vanguard (Example Two)' },
+    ]);
+  });
+
+  test('a connection-specific Vanguard sync selects only that login profile', () => {
+    expect(selectVanguardProfiles(vanguardProfiles, 'account-2')).toEqual([vanguardProfiles[1]]);
+    expect(selectVanguardProfiles(vanguardProfiles)).toEqual(vanguardProfiles);
+    expect(selectVanguardProfiles(vanguardProfiles, 'missing')).toEqual([]);
   });
 });

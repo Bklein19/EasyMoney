@@ -32,7 +32,12 @@ if (institution !== 'bank-of-america' && institution !== 'vanguard') {
   throw new Error('Use --institution bank-of-america or vanguard');
 }
 const runId = valueAfter(args, '--run-id') ?? `sync-${Date.now()}`;
-const request: SyncRunRequest = { runId, institutionId: institution, goal: parseGoal(args) };
+const request: SyncRunRequest = {
+  runId,
+  institutionId: institution,
+  connectionId: valueAfter(args, '--connection'),
+  goal: parseGoal(args),
+};
 const emit = (event: Omit<SyncEvent, 'runId' | 'timestamp'>) => {
   console.log(JSON.stringify({ ...event, runId, timestamp: new Date().toISOString() } satisfies SyncEvent));
 };

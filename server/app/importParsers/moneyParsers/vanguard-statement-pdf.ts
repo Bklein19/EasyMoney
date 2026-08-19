@@ -38,6 +38,20 @@ function parseAmountToCents(value: string): number {
   return negative ? -c : c;
 }
 
+export function parseVanguardAccountHolder(text: string): string | null {
+  const lines = text.split("\n").map(line => line.trim()).filter(Boolean);
+  const accountIndex = lines.findIndex(line =>
+    /(Individual brokerage account|Roth IRA brokerage account|Traditional IRA brokerage account)[—-](?:X{4}\d{4}|\d{4,})/i.test(line)
+  );
+  if (accountIndex <= 0) return null;
+  const candidate = lines[accountIndex - 1]!.replace(/\s+/g, " ").trim();
+  const words = candidate.split(" ");
+  if (words.length < 2 || words.length > 8 || candidate.length > 100) return null;
+  if (!/^[\p{L}][\p{L} .,'’-]+$/u.test(candidate)) return null;
+  if (/vanguard|statement|account|portfolio|services/i.test(candidate)) return null;
+  return candidate;
+}
+
 export default async function parse(filePath: string): Promise<ParseResult> {
   const pdf = await getDocumentProxy(new Uint8Array(await Bun.file(filePath).arrayBuffer()));
   const { text: pageTexts } = await extractText(pdf);
@@ -57,6 +71,7 @@ export default async function parse(filePath: string): Promise<ParseResult> {
     ? `XXXX${accountTypeMatch[2]!.slice(-4)}`
     : null;
   const account = accountSuffix ? `${accountType}-${accountSuffix}` : accountType;
+  const accountHolder = parseVanguardAccountHolder(allText);
   const institution = "Vanguard";
 
   const balances: ParseResult["balances"] = [];
@@ -67,7 +82,13 @@ export default async function parse(filePath: string): Promise<ParseResult> {
     ) ??
     allText.match(/\$(\d[\d,]*\.\d{2})\s+Total account value as of [A-Z][a-z]+ \d{1,2}, \d{4}/);
   if (balanceMatch) {
-    balances.push({ date: statementDate, account, institution, balance_cents: parseAmountToCents(`$${balanceMatch[1]}`) });
+    balances.push({
+      date: statementDate,
+      account,
+      institution,
+      ...(accountHolder ? { account_holder: accountHolder } : {}),
+      balance_cents: parseAmountToCents(`$${balanceMatch[1]}`),
+    });
   }
 
   const transactions: ParseResult["transactions"] = [];
@@ -102,6 +123,7 @@ export default async function parse(filePath: string): Promise<ParseResult> {
           description,
           account,
           institution,
+          ...(accountHolder ? { account_holder: accountHolder } : {}),
           raw: { settlement: m[1], trade: m[2], row },
         })
       );

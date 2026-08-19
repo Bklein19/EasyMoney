@@ -10,6 +10,7 @@ export interface SyncJob {
   runId: string;
   institutionId: SyncInstitutionId;
   goal: SyncGoal;
+  connectionId?: string;
   status: SyncJobStatus;
   message: string;
   startedAt: string;
@@ -64,16 +65,19 @@ async function readLines(stream: ReadableStream<Uint8Array>, onLine: (line: stri
   if (pending.trim()) onLine(pending);
 }
 
-function commandFor(runId: string, institutionId: SyncJob['institutionId'], goal: SyncGoal) {
+function commandFor(runId: string, institutionId: SyncJob['institutionId'], goal: SyncGoal, connectionId?: string) {
   const command = [process.execPath, resolve(repositoryRoot, 'scripts/sync.ts'), '--institution', institutionId, '--run-id', runId, '--goal', goal.kind];
+  if (connectionId) command.push('--connection', connectionId);
   if (goal.kind === 'current') command.push('--overlap-days', String(goal.overlapDays));
   if (goal.kind === 'backfill' && goal.stopAt) command.push('--stop-at', goal.stopAt);
   if (goal.kind === 'range') command.push('--from', goal.startDate, '--to', goal.endDate);
   return command;
 }
 
-export function startSyncJob(input: { institutionId: SyncJob['institutionId']; goal: SyncGoal }): SyncJob {
-  const active = [...jobs.values()].find(job => job.institutionId === input.institutionId && job.status === 'running');
+export function startSyncJob(input: { institutionId: SyncJob['institutionId']; connectionId?: string; goal: SyncGoal }): SyncJob {
+  const active = [...jobs.values()].find(job =>
+    job.institutionId === input.institutionId && job.connectionId === input.connectionId && job.status === 'running'
+  );
   if (active) return publicJob(active);
 
   const runId = `sync-${input.institutionId}-${Date.now()}`;
@@ -81,6 +85,7 @@ export function startSyncJob(input: { institutionId: SyncJob['institutionId']; g
   const job: ManagedSyncJob = {
     runId,
     institutionId: input.institutionId,
+    connectionId: input.connectionId,
     goal: input.goal,
     status: 'running',
     message: 'Starting sync',
@@ -92,7 +97,7 @@ export function startSyncJob(input: { institutionId: SyncJob['institutionId']; g
   jobs.set(runId, job);
   void persistJob(job);
 
-  const child = Bun.spawn(commandFor(runId, input.institutionId, input.goal), {
+  const child = Bun.spawn(commandFor(runId, input.institutionId, input.goal, input.connectionId), {
     cwd: repositoryRoot,
     stdout: 'pipe',
     stderr: 'pipe',

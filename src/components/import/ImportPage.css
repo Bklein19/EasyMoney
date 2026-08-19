@@ -91,12 +91,6 @@
   display: none;
 }
 
-.data-freshness__sync-menu.is-primary summary {
-  border-color: var(--accent-blue);
-  background: var(--accent-blue);
-  color: white;
-}
-
 .data-freshness__sync-chevron {
   margin-left: 0.1rem;
   transition: none;

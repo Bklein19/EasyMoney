@@ -10,6 +10,16 @@ import { parseFidelityPortfolioStatementText } from './moneyParsers/fidelity-por
 import { parseWellsFargoStatementText } from './moneyParsers/wells-fargo-statement-pdf.ts';
 import { parseMerrillCmaStatementText } from './moneyParsers/merrill-cma-statement-pdf.ts';
 import { parseBofaDepositStatementText } from './moneyParsers/bofa-statement-pdf.ts';
+import { parseVanguardAccountHolder } from './moneyParsers/vanguard-statement-pdf.ts';
+
+test('Vanguard statement parser extracts the holder immediately before the account heading', () => {
+  expect(parseVanguardAccountHolder([
+    'Monthly statement',
+    'Example Person',
+    'Roth IRA brokerage account—XXXX1234',
+  ].join('\n'))).toBe('Example Person');
+  expect(parseVanguardAccountHolder('Monthly statement\nRoth IRA brokerage account—XXXX1234')).toBeNull();
+});
 
 test('money parser adapter translates money activity output to app import output', async () => {
   const parser = createMoneyParserAdapter({

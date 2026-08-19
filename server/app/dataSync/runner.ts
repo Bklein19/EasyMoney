@@ -14,12 +14,13 @@ import {
   type VanguardAccountKind,
   type VanguardSyncProfile,
 } from './institutions/vanguard.ts';
-import type { SyncGoal, SyncReporter, SyncRunRequest, SyncRunResult } from './types.ts';
+import type { SyncGoal, SyncReporter, SyncRunRequest, SyncRunResult, SyncTarget } from './types.ts';
 import {
   goalWindowForCoverage,
   missingMonthlyStatementDates,
   vanguardProfileIdFromFileNames,
 } from './planning.ts';
+import { selectVanguardProfiles, syncTargetsForProfiles } from './targets.ts';
 
 interface AccountCoverageRow {
   id: number;
@@ -31,6 +32,7 @@ interface AccountCoverageRow {
   earliestBalanceDate?: string | null;
   balanceDates?: string | null;
   sourceAccountName?: string | null;
+  accountHolder?: string | null;
 }
 
 function isoDate(value = new Date()) {
@@ -60,6 +62,7 @@ function institutionCoverage(institutionPattern: string): AccountCoverageRow[] {
       a.id,
       a.name,
       a.type,
+      a.accountHolder,
       MIN(f.date) AS earliestFactDate,
       MAX(f.date) AS latestFactDate,
       MIN(CASE WHEN f.factType = 'balance' THEN f.date END) AS earliestBalanceDate,
@@ -122,18 +125,21 @@ function vanguardArtifactNames(accountId: number) {
 
 export function planVanguardProfiles(goal: SyncGoal, today: string, report: SyncReporter): VanguardSyncProfile[] {
   const profiles = new Map<string, VanguardSyncProfile>();
+  const invalidProfiles = new Set<string>();
   for (const account of institutionCoverage('%vanguard%')) {
     const profileId = vanguardProfileIdFromFileNames(vanguardArtifactNames(account.id));
     const accountKind = vanguardKind(account);
     const accountLast4 = vanguardLast4(account);
-    if (!profileId || !accountKind || !accountLast4) {
+    const accountHolder = account.accountHolder?.trim() || null;
+    if (!profileId || !accountKind || !accountLast4 || !accountHolder) {
       report({
         type: 'warning',
-        message: `Skipped ${account.name}; it is not associated with a Vanguard login profile and account number`,
+        message: `Skipped ${account.name}; its Vanguard login profile, account number, or account holder is missing`,
         data: { accountId: account.id },
       });
       continue;
     }
+    if (invalidProfiles.has(profileId)) continue;
     const activityWindow = goalWindowForCoverage(goal, account, today);
     const balanceCoverage = {
       latestFactDate: account.latestBalanceDate ?? null,
@@ -145,9 +151,20 @@ export function planVanguardProfiles(goal: SyncGoal, today: string, report: Sync
       statementWindow.endDate,
       (account.balanceDates ?? '').split(',').filter(Boolean),
     );
-    const profile = profiles.get(profileId) ?? {
+    const existingProfile = profiles.get(profileId);
+    if (existingProfile && existingProfile.accountHolder !== accountHolder) {
+      profiles.delete(profileId);
+      invalidProfiles.add(profileId);
+      report({
+        type: 'warning',
+        message: `Skipped Vanguard profile ${profileId}; its accounts have conflicting account holders`,
+      });
+      continue;
+    }
+    const profile = existingProfile ?? {
       id: profileId,
       session: profileId === 'current' ? 'vanguard-catchup' : `vanguard-${profileId}-catchup`,
+      accountHolder,
       accounts: [],
     };
     profile.accounts.push({
@@ -160,6 +177,11 @@ export function planVanguardProfiles(goal: SyncGoal, today: string, report: Sync
     profiles.set(profileId, profile);
   }
   return [...profiles.values()];
+}
+
+export function listSyncTargets(): SyncTarget[] {
+  const profiles = planVanguardProfiles({ kind: 'current', overlapDays: 7 }, isoDate(), () => {});
+  return syncTargetsForProfiles(bankOfAmericaCoverage().length > 0, profiles);
 }
 
 function accountForArtifact(fileName: string, accounts: AccountCoverageRow[]) {
@@ -202,7 +224,11 @@ async function importArtifact(path: string, accountId: number) {
 export async function runSync(request: SyncRunRequest, report: SyncReporter): Promise<SyncRunResult> {
   if (request.institutionId === 'vanguard') {
     const today = isoDate();
-    const profiles = planVanguardProfiles(request.goal, today, report);
+    const plannedProfiles = planVanguardProfiles(request.goal, today, report);
+    const profiles = selectVanguardProfiles(plannedProfiles, request.connectionId);
+    if (request.connectionId && profiles.length === 0) {
+      throw new Error(`Vanguard connection is unavailable: ${request.connectionId}`);
+    }
     if (profiles.length === 0) throw new Error('No active Vanguard accounts are associated with a known login profile');
     const outputDir = join(syncApplicationDataRoot(), request.runId, 'artifacts');
     await mkdir(outputDir, { recursive: true });

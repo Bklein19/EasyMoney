@@ -3582,6 +3582,7 @@ test('app imports commit uses source account mapping overrides', async () => {
     type: 'checking',
     currentBalance: 100,
     currency: 'USD',
+    accountHolder: 'Manual Owner',
   }));
   const preview = await postImportPreview('bofa-checking-1234-2026-01-01-to-2026-01-31.csv', [
     'Description,,Summary Amt.',
@@ -3591,6 +3592,7 @@ test('app imports commit uses source account mapping overrides', async () => {
   ].join('\n'));
 
   const sourceAccountId = preview.accountMappings[0].sourceAccountId;
+  getDb().prepare('UPDATE sourceAccounts SET accountHolder = ? WHERE id = ?').run('Parsed Owner', sourceAccountId);
   const commit = await commitImportForTest( {
     accountId: null,
     importFileId: preview.importFileId,
@@ -3630,6 +3632,9 @@ test('app imports commit uses source account mapping overrides', async () => {
     accountId: number;
   };
   expect(sourceAccount.accountId).toBe(existingAccountId);
+  expect(getDb().prepare('SELECT accountHolder FROM accounts WHERE id = ?').get(existingAccountId)).toEqual({
+    accountHolder: 'Manual Owner',
+  });
 });
 
 test('app import preview reports archived matches and commit requires explicit unarchive decision', async () => {

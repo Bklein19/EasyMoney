@@ -7,10 +7,11 @@ import { formatDate } from '../../utils/formatters';
 type FreshnessStatus = 'current' | 'due' | 'stale' | 'no-data' | 'closed';
 type SyncInstitutionId = 'bank-of-america' | 'vanguard';
 
-interface SyncInstitution {
-  id: SyncInstitutionId;
+interface SyncTarget {
+  id: string;
+  institutionId: SyncInstitutionId;
+  connectionId?: string;
   label: string;
-  matches: (institution: string) => boolean;
 }
 
 interface FreshnessAccount {
@@ -63,30 +64,14 @@ const STATUS_ICONS = {
   closed: Lock,
 };
 
-const SYNC_INSTITUTIONS: SyncInstitution[] = [
-  {
-    id: 'bank-of-america',
-    label: 'Bank of America',
-    matches: institution => institution.includes('bank of america'),
-  },
-  {
-    id: 'vanguard',
-    label: 'Vanguard',
-    matches: institution => institution.includes('vanguard'),
-  },
-];
-
 interface SyncActionMenuProps {
-  institutions: SyncInstitution[];
-  kind: 'current' | 'backfill';
-  onSelect: (institutionId: SyncInstitutionId, kind: 'current' | 'backfill') => void;
+  targets: SyncTarget[];
+  onSelect: (target: SyncTarget) => void;
 }
 
-function SyncActionMenu({ institutions, kind, onSelect }: SyncActionMenuProps) {
+function SyncActionMenu({ targets, onSelect }: SyncActionMenuProps) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
-  const isCurrent = kind === 'current';
-  const Icon = isCurrent ? RefreshCw : History;
-  const label = isCurrent ? 'Catch up' : 'Import history';
+  const label = 'Import history';
 
   useEffect(() => {
     const close = (event: PointerEvent) => {
@@ -104,24 +89,24 @@ function SyncActionMenu({ institutions, kind, onSelect }: SyncActionMenuProps) {
   }, []);
 
   return (
-    <details className={`data-freshness__sync-menu ${isCurrent ? 'is-primary' : ''}`} ref={detailsRef}>
+    <details className="data-freshness__sync-menu" ref={detailsRef}>
       <summary>
-        <Icon size={14} />
+        <History size={14} />
         {label}
         <ChevronDown className="data-freshness__sync-chevron" size={14} />
       </summary>
       <div className="data-freshness__sync-menu-panel" role="menu" aria-label={`${label} institution`}>
-        {institutions.map(institution => (
+        {targets.map(target => (
           <button
-            key={institution.id}
+            key={target.id}
             type="button"
             role="menuitem"
             onClick={() => {
               detailsRef.current?.removeAttribute('open');
-              onSelect(institution.id, kind);
+              onSelect(target);
             }}
           >
-            {institution.label}
+            {target.label}
           </button>
         ))}
       </div>
@@ -152,6 +137,7 @@ function accountSort(a: FreshnessAccount, b: FreshnessAccount) {
 export default function DataFreshnessPanel() {
   const [syncRunId, setSyncRunId] = useState(() => localStorage.getItem('easymoney-active-sync-run') || '');
   const freshnessQuery = useQuery(trpc.dataFreshness.report.queryOptions());
+  const syncTargetsQuery = useQuery(trpc.dataSync.targets.queryOptions());
   const syncQuery = useQuery({
     ...trpc.dataSync.status.queryOptions({ runId: syncRunId || 'none' }),
     enabled: Boolean(syncRunId),
@@ -168,11 +154,7 @@ export default function DataFreshnessPanel() {
   const needsUpdate = (report?.summary.staleAccounts || 0) +
     (report?.summary.dueAccounts || 0) +
     (report?.summary.noDataAccounts || 0);
-  const syncInstitutions = useMemo(() => SYNC_INSTITUTIONS.filter(institution =>
-    accounts.some(account =>
-      account.status !== 'closed' && institution.matches(account.institution?.toLowerCase() ?? '')
-    )
-  ), [accounts]);
+  const syncTargets = (syncTargetsQuery.data ?? []) as SyncTarget[];
 
   useEffect(() => {
     if (!syncJob || syncJob.status === 'running') return;
@@ -183,13 +165,17 @@ export default function DataFreshnessPanel() {
   }, [syncJob?.status]);
 
   const startInstitutionSync = async (
-    institutionId: SyncInstitutionId,
+    target: SyncTarget,
     kind: 'current' | 'backfill',
   ) => {
     const goal = kind === 'current'
       ? { kind: 'current' as const, overlapDays: 7 }
       : { kind: 'backfill' as const };
-    const job = await trpcClient.dataSync.start.mutate({ institutionId, goal });
+    const job = await trpcClient.dataSync.start.mutate({
+      institutionId: target.institutionId,
+      connectionId: target.connectionId,
+      goal,
+    });
     localStorage.setItem('easymoney-active-sync-run', job.runId);
     setSyncRunId(job.runId);
   };
@@ -229,18 +215,23 @@ export default function DataFreshnessPanel() {
           </p>
         </div>
         {report && <div className="data-freshness__header-actions">
-          {syncInstitutions.length > 0 && syncJob?.status !== 'running' && (
+          {syncTargets.length > 0 && syncJob?.status !== 'running' && (
             <div className="data-freshness__sync-actions">
               <SyncActionMenu
-                institutions={syncInstitutions}
-                kind="backfill"
-                onSelect={(institutionId, kind) => void startInstitutionSync(institutionId, kind)}
+                targets={syncTargets}
+                onSelect={target => void startInstitutionSync(target, 'backfill')}
               />
-              <SyncActionMenu
-                institutions={syncInstitutions}
-                kind="current"
-                onSelect={(institutionId, kind) => void startInstitutionSync(institutionId, kind)}
-              />
+              {syncTargets.map(target => (
+                <button
+                  className="btn btn--primary btn--sm"
+                  key={target.id}
+                  type="button"
+                  onClick={() => void startInstitutionSync(target, 'current')}
+                >
+                  <RefreshCw size={14} />
+                  Catch up {target.label}
+                </button>
+              ))}
             </div>
           )}
           <div className="data-freshness__summary" aria-label="Freshness summary">
