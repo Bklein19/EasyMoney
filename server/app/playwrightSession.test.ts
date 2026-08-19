@@ -1,14 +1,25 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Page } from 'playwright';
 
 import {
   decodeInstitutionBrowserProgramResult,
+  institutionBrowserLaunchStrategy,
   playwrightAuthStatePath,
+  playwrightHasSavedAuthentication,
   playwrightProfilePath,
   showAuthenticationChapter,
   showSyncCompletionChapter,
   waitForInteractiveAuthentication,
 } from './dataSync/browserSession.ts';
+
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(temporaryDirectories.splice(0).map(path => rm(path, { recursive: true, force: true })));
+});
 
 describe('Playwright session helper', () => {
   test('uses stable platform-specific persistent profile locations', () => {
@@ -32,6 +43,52 @@ describe('Playwright session helper', () => {
   test('keeps auth state inside the private institution profile', () => {
     expect(playwrightAuthStatePath('/profiles/tiaa-catchup'))
       .toBe('/profiles/tiaa-catchup/.easymoney-auth-state.json');
+  });
+
+  test('detects saved authentication independently from the browser profile', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-session-'));
+    temporaryDirectories.push(root);
+    const profilePath = join(root, 'vanguard-catchup');
+    await mkdir(profilePath, { recursive: true });
+
+    expect(await playwrightHasSavedAuthentication('vanguard-catchup', profilePath)).toBe(false);
+    await writeFile(playwrightAuthStatePath(profilePath), '{}');
+    expect(await playwrightHasSavedAuthentication('vanguard-catchup', profilePath)).toBe(true);
+  });
+
+  test('uses saved authentication headlessly with a headed login fallback', () => {
+    expect(institutionBrowserLaunchStrategy({ hasSavedAuthentication: true })).toEqual({
+      initialHeadless: true,
+      allowHeadedAuthenticationFallback: true,
+    });
+    expect(institutionBrowserLaunchStrategy({ hasSavedAuthentication: false })).toEqual({
+      initialHeadless: false,
+      allowHeadedAuthenticationFallback: false,
+    });
+  });
+
+  test('honors explicit browser visibility choices', () => {
+    expect(institutionBrowserLaunchStrategy({
+      hasSavedAuthentication: true,
+      requestedHeadless: false,
+    })).toEqual({
+      initialHeadless: false,
+      allowHeadedAuthenticationFallback: false,
+    });
+    expect(institutionBrowserLaunchStrategy({
+      hasSavedAuthentication: false,
+      requestedHeadless: true,
+    })).toEqual({
+      initialHeadless: true,
+      allowHeadedAuthenticationFallback: false,
+    });
+    expect(institutionBrowserLaunchStrategy({
+      hasSavedAuthentication: true,
+      persistAuthentication: false,
+    })).toEqual({
+      initialHeadless: false,
+      allowHeadedAuthenticationFallback: false,
+    });
   });
 
   test('waits on the existing login page instead of refreshing it', async () => {

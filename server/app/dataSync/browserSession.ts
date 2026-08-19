@@ -8,6 +8,11 @@ export const PLAYWRIGHT_VERSION = '1.62.1';
 
 export type PlaywrightProfileState = 'existing' | 'missing';
 
+export type InstitutionBrowserLaunchStrategy = {
+  initialHeadless: boolean;
+  allowHeadedAuthenticationFallback: boolean;
+};
+
 type SessionOptions = {
   name: string;
   startUrl: string;
@@ -62,6 +67,32 @@ export async function playwrightProfileState(
   profilePath = playwrightProfilePath(name),
 ): Promise<PlaywrightProfileState> {
   return await directoryExists(profilePath) ? 'existing' : 'missing';
+}
+
+export async function playwrightHasSavedAuthentication(
+  name: string,
+  profilePath = playwrightProfilePath(name),
+): Promise<boolean> {
+  return fileExists(playwrightAuthStatePath(resolve(profilePath)));
+}
+
+export function institutionBrowserLaunchStrategy(options: {
+  hasSavedAuthentication: boolean;
+  persistAuthentication?: boolean;
+  requestedHeadless?: boolean;
+}): InstitutionBrowserLaunchStrategy {
+  if (options.requestedHeadless !== undefined) {
+    return {
+      initialHeadless: options.requestedHeadless,
+      allowHeadedAuthenticationFallback: false,
+    };
+  }
+
+  const initialHeadless = (options.persistAuthentication ?? true) && options.hasSavedAuthentication;
+  return {
+    initialHeadless,
+    allowHeadedAuthenticationFallback: initialHeadless,
+  };
 }
 
 function isLockedProfileError(error: unknown): boolean {
@@ -198,24 +229,52 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
   code: string,
   options: RunOptions,
 ): Promise<InstitutionBrowserProgramResult<T>> {
-  return withPlaywrightPage(session, async page => {
-    // Browser programs are repository-owned strings retained from the former CLI runner.
-    const program = Function(`"use strict"; return (${code});`)() as (browserPage: Page) => Promise<unknown>;
+  // Browser programs are repository-owned strings retained from the former CLI runner.
+  const program = Function(`"use strict"; return (${code});`)() as (browserPage: Page) => Promise<unknown>;
+  const hasSavedAuthentication = (session.persistAuthentication ?? true)
+    ? await playwrightHasSavedAuthentication(session.name, session.profilePath)
+    : false;
+  const launchStrategy = institutionBrowserLaunchStrategy({
+    hasSavedAuthentication,
+    persistAuthentication: session.persistAuthentication,
+    requestedHeadless: session.contextOptions?.headless,
+  });
+
+  const runAttempt = async (headless: boolean, allowInteractiveAuthentication: boolean) => withPlaywrightPage({
+    ...session,
+    contextOptions: {
+      ...session.contextOptions,
+      headless,
+    },
+  }, async page => {
     const deadline = Date.now() + (options.authenticationTimeoutMs ?? 10 * 60_000);
     let result = decodeInstitutionBrowserProgramResult<T>(await program(page));
-    if (result.status === 'login-required') {
+    if (result.status === 'login-required' && allowInteractiveAuthentication) {
       await showAuthenticationChapter(
         page,
         result.action ?? `Complete login and MFA for ${session.name}. EasyMoney will continue automatically.`,
       );
       console.log(`Authentication required in ${session.name}. Complete login and MFA in the open browser.`);
     }
-    while (result.status === 'login-required' && Date.now() < deadline) {
+    while (allowInteractiveAuthentication && result.status === 'login-required' && Date.now() < deadline) {
       await waitForInteractiveAuthentication(page, deadline, options.isAuthenticated);
       result = decodeInstitutionBrowserProgramResult<T>(await program(page));
     }
-    if (result.status === 'login-required') throw new Error(`Authentication timed out in ${session.name}`);
+    if (allowInteractiveAuthentication && result.status === 'login-required') {
+      throw new Error(`Authentication timed out in ${session.name}`);
+    }
     if (result.status === 'complete') await showSyncCompletionChapter(page, options);
     return result;
   });
+
+  const initialResult = await runAttempt(
+    launchStrategy.initialHeadless,
+    !launchStrategy.initialHeadless,
+  );
+  if (initialResult.status !== 'login-required' || !launchStrategy.allowHeadedAuthenticationFallback) {
+    return initialResult;
+  }
+
+  console.log(`Saved authentication for ${session.name} needs attention. Opening the browser for login or MFA.`);
+  return runAttempt(false, true);
 }
