@@ -66,7 +66,11 @@ async function readLines(stream: ReadableStream<Uint8Array>, onLine: (line: stri
 }
 
 function commandFor(runId: string, institutionId: SyncJob['institutionId'], goal: SyncGoal, connectionId?: string) {
-  const command = [process.execPath, resolve(repositoryRoot, 'scripts/sync.ts'), '--institution', institutionId, '--run-id', runId, '--goal', goal.kind];
+  const isDesktop = process.env.EASYMONEY_DESKTOP === '1';
+  const syncScript = isDesktop
+    ? resolve(import.meta.dir, 'sync.js')
+    : resolve(repositoryRoot, 'scripts/sync.ts');
+  const command = [process.execPath, syncScript, '--institution', institutionId, '--run-id', runId, '--goal', goal.kind];
   if (connectionId) command.push('--connection', connectionId);
   if (goal.kind === 'current') command.push('--overlap-days', String(goal.overlapDays));
   if (goal.kind === 'backfill' && goal.stopAt) command.push('--stop-at', goal.stopAt);
@@ -98,7 +102,7 @@ export function startSyncJob(input: { institutionId: SyncJob['institutionId']; c
   void persistJob(job);
 
   const child = Bun.spawn(commandFor(runId, input.institutionId, input.goal, input.connectionId), {
-    cwd: repositoryRoot,
+    cwd: process.env.EASYMONEY_DESKTOP === '1' ? import.meta.dir : repositoryRoot,
     stdout: 'pipe',
     stderr: 'pipe',
   });

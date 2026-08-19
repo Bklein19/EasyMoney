@@ -16,6 +16,7 @@ interface WrappedStatement {
 }
 
 interface WrappedDatabase {
+  close: () => void;
   exec: (sql: string) => void;
   prepare: (sql: string) => WrappedStatement;
   transaction: <Args extends unknown[], Result>(fn: (...args: Args) => Result) => (...args: Args) => Result;
@@ -202,6 +203,7 @@ function wrapStatement(statement: { all: (...params: any[]) => any[]; get: (...p
 }
 
 const db: WrappedDatabase = {
+  close: () => sqlite.close(),
   exec: (sql) => sqlite.exec(sql),
   prepare: (sql) => wrapStatement(sqlite.prepare(normalizeSql(sql))),
   transaction: (fn) => sqlite.transaction(fn),
@@ -1119,6 +1121,10 @@ export function deleteRow(table: string, id: string | number) {
 
 export function getDb() {
   return db;
+}
+
+export function closeDatabase() {
+  db.close();
 }
 
 export { hashContent } from './hash.ts';

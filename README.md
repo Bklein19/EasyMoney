@@ -2,6 +2,23 @@
 
 EasyMoney is a local-first personal finance app for importing bank, credit card, and investment files into a source-fact ledger, then reviewing transactions, accounts, budgets, net worth, performance, savings rate, and analytics from materialized read models.
 
+## Desktop App
+
+EasyMoney is packaged with Electrobun `1.18.1`. Electrobun RPC is used only as the transport between the webview and Bun main process: the existing tRPC router, validation, error shapes, and React Query integration remain unchanged. Browser development keeps the HTTP tRPC transport as a fallback.
+
+The repository uses Bun for installation, scripts, tests, frontend bundling, the Electrobun CLI bootstrap, and the packaged main process. Do not invoke the Electrobun package's `node` shebang directly; the checked-in launcher runs it explicitly with Bun.
+
+```bash
+bun install
+bun run dev              # build and open the Electrobun development app
+bun run dev:web          # optional browser-only development server
+bun run build            # stable Electrobun package and update artifact
+```
+
+Desktop builds use the operating system webview rather than bundling Chromium. The cancellable institution-sync worker is compiled into the application during Electrobun's pre-build hook, so sync jobs do not depend on repository source files after packaging.
+
+Installed builds store their database and local environment file under Electrobun's channel-specific user-data directory. On first launch, an existing `~/src/EasyMoney/data/easymoney.sqlite` database and `~/src/EasyMoney/.env.local` are copied into that directory as a consistent local snapshot; existing desktop data is never overwritten. Set `EASYMONEY_LEGACY_DB_PATH` or `EASYMONEY_LEGACY_ENV_PATH` to migrate from another checkout location.
+
 ## Features
 
 - Import CSV, PDF, TXT, and HTML exports from supported institutions.

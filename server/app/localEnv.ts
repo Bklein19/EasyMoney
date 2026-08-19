@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const ENV_FILE = path.resolve(import.meta.dir, '..', '..', '.env.local');
+const ENV_FILE = process.env.EASYMONEY_ENV_PATH
+  ? path.resolve(process.env.EASYMONEY_ENV_PATH)
+  : path.resolve(import.meta.dir, '..', '..', '.env.local');
 
 function parseEnvFile(text: string) {
   const values = new Map<string, string>();
