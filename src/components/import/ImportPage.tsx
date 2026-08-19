@@ -155,6 +155,11 @@ export default function ImportPage() {
     }
   }, []);
 
+  const refreshAfterCatchUpImport = useCallback(async () => {
+    await invalidateImportDependents();
+    await loadImportHistory();
+  }, [invalidateImportDependents, loadImportHistory]);
+
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
       void loadImportHistory();
@@ -534,7 +539,7 @@ export default function ImportPage() {
 
       {stage === 'upload' && (
         <div className="upload-container">
-          <DataFreshnessPanel />
+          <DataFreshnessPanel onImportComplete={refreshAfterCatchUpImport} />
           <ImportHistory
             imports={importHistory}
             error={historyError}

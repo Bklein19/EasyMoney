@@ -172,6 +172,7 @@ export function listImportHistory(): ImportHistoryItem[] {
     LEFT JOIN sourceAccounts sa ON sa.sourceFileId = sf.id
     LEFT JOIN sourceTransactions st ON st.sourceAccountId = sa.id
     LEFT JOIN ledgerBalances lb ON lb.sourceBalanceId = sb.id
+    WHERE ifs.status IN ('committed', 'unimported')
     GROUP BY ifs.id
     ORDER BY COALESCE(ifs.committedAt, ifs.createdAt) DESC, ifs.id DESC
   `).all() as ImportHistoryItem[];

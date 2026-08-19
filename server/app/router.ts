@@ -21,7 +21,7 @@ import {
 } from './categorizationRules.ts';
 import { createCategory, deleteCategory, listCategories, updateCategory } from './categories.ts';
 import { getDataFreshnessReport } from './dataFreshness.ts';
-import { cancelSyncJob, getSyncJob, startSyncJob } from './dataSync/jobs.ts';
+import { cancelSyncJob, confirmSyncJob, discardSyncJob, getSyncJob, startSyncJob } from './dataSync/jobs.ts';
 import { listSyncTargets } from './dataSync/runner.ts';
 import { commitImport, listImportHistory, previewImport, reimportFile, reimportFiles, unimportFile, unimportFiles } from './imports.ts';
 import { listImportProfiles, upsertImportProfile } from './importProfiles.ts';
@@ -266,6 +266,14 @@ export const appRouter = t.router({
     cancel: t.procedure
       .input(z.object({ runId: z.string().min(1) }))
       .mutation(({ input }) => cancelSyncJob(input.runId)),
+
+    confirm: t.procedure
+      .input(z.object({ runId: z.string().min(1) }))
+      .mutation(({ input }) => confirmSyncJob(input.runId)),
+
+    discard: t.procedure
+      .input(z.object({ runId: z.string().min(1) }))
+      .mutation(({ input }) => discardSyncJob(input.runId)),
   }),
 
   transactions: t.router({

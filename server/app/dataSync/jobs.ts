@@ -1,10 +1,11 @@
-import { chmod, mkdir, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 
+import { commitSyncReview, discardSyncReview } from './review.ts';
 import { syncApplicationDataRoot } from './runner.ts';
-import type { SyncEvent, SyncGoal, SyncInstitutionId } from './types.ts';
+import type { SyncEvent, SyncGoal, SyncInstitutionId, SyncRunResult, SyncRunReview } from './types.ts';
 
-export type SyncJobStatus = 'running' | 'complete' | 'failed' | 'cancelled';
+export type SyncJobStatus = 'running' | 'awaiting-confirmation' | 'importing' | 'complete' | 'failed' | 'cancelled';
 
 export interface SyncJob {
   runId: string;
@@ -16,35 +17,86 @@ export interface SyncJob {
   startedAt: string;
   completedAt: string | null;
   events: SyncEvent[];
+  review: SyncRunReview | null;
+  result: SyncRunResult | null;
+  error: string | null;
 }
 
-type ManagedSyncJob = SyncJob & { process: ReturnType<typeof Bun.spawn> | null };
+type ManagedSyncJob = SyncJob & {
+  process: ReturnType<typeof Bun.spawn> | null;
+  persistence: Promise<void>;
+};
 
 const jobs = new Map<string, ManagedSyncJob>();
 const repositoryRoot = resolve(import.meta.dir, '../../..');
 
 function publicJob(job: ManagedSyncJob): SyncJob {
-  const { process: _process, ...result } = job;
+  const { process: _process, persistence: _persistence, ...result } = job;
   return result;
 }
 
-async function persistJob(job: ManagedSyncJob) {
-  const directory = resolve(syncApplicationDataRoot(), job.runId);
-  const path = resolve(directory, 'run.json');
-  await mkdir(directory, { recursive: true });
-  await writeFile(path, `${JSON.stringify(publicJob(job), null, 2)}\n`);
-  if (process.platform !== 'win32') await chmod(path, 0o600);
+function runFilePath(runId: string) {
+  if (!/^[A-Za-z0-9_-]+$/.test(runId)) throw new Error('Invalid sync run id');
+  return resolve(syncApplicationDataRoot(), runId, 'run.json');
+}
+
+function persistJob(job: ManagedSyncJob) {
+  job.persistence = job.persistence.catch(() => {}).then(async () => {
+    const path = runFilePath(job.runId);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, `${JSON.stringify(publicJob(job), null, 2)}\n`);
+    if (process.platform !== 'win32') await chmod(path, 0o600);
+  });
+  return job.persistence;
+}
+
+async function managedJob(runId: string): Promise<ManagedSyncJob | null> {
+  const current = jobs.get(runId);
+  if (current) return current;
+  try {
+    const saved = JSON.parse(await readFile(runFilePath(runId), 'utf8')) as Partial<SyncJob>;
+    if (saved.runId !== runId || !saved.institutionId || !saved.goal || !saved.status) return null;
+    const job: ManagedSyncJob = {
+      runId,
+      institutionId: saved.institutionId,
+      connectionId: saved.connectionId,
+      goal: saved.goal,
+      status: saved.status,
+      message: saved.message || '',
+      startedAt: saved.startedAt || new Date().toISOString(),
+      completedAt: saved.completedAt || null,
+      events: saved.events || [],
+      review: saved.review || null,
+      result: saved.result || null,
+      error: saved.error || null,
+      process: null,
+      persistence: Promise.resolve(),
+    };
+    jobs.set(runId, job);
+    return job;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
 }
 
 function appendEvent(job: ManagedSyncJob, event: SyncEvent) {
   job.events.push(event);
   if (job.events.length > 200) job.events.splice(0, job.events.length - 200);
   job.message = event.message;
-  if (event.type === 'complete') {
+  if (event.type === 'review') {
+    const review = event.data?.review as SyncRunReview | undefined;
+    if (review) job.review = review;
+    job.status = 'awaiting-confirmation';
+    job.completedAt = null;
+  } else if (event.type === 'complete') {
     job.status = 'complete';
+    job.result = (event.data?.result as SyncRunResult | undefined) || job.result;
+    job.error = null;
     job.completedAt = event.timestamp;
   } else if (event.type === 'error') {
     job.status = 'failed';
+    job.error = event.message;
     job.completedAt = event.timestamp;
   }
   void persistJob(job);
@@ -80,7 +132,9 @@ function commandFor(runId: string, institutionId: SyncJob['institutionId'], goal
 
 export function startSyncJob(input: { institutionId: SyncJob['institutionId']; connectionId?: string; goal: SyncGoal }): SyncJob {
   const active = [...jobs.values()].find(job =>
-    job.institutionId === input.institutionId && job.connectionId === input.connectionId && job.status === 'running'
+    job.institutionId === input.institutionId &&
+    job.connectionId === input.connectionId &&
+    ['running', 'awaiting-confirmation', 'importing'].includes(job.status)
   );
   if (active) return publicJob(active);
 
@@ -96,7 +150,11 @@ export function startSyncJob(input: { institutionId: SyncJob['institutionId']; c
     startedAt,
     completedAt: null,
     events: [],
+    review: null,
+    result: null,
+    error: null,
     process: null,
+    persistence: Promise.resolve(),
   };
   jobs.set(runId, job);
   void persistJob(job);
@@ -108,17 +166,18 @@ export function startSyncJob(input: { institutionId: SyncJob['institutionId']; c
   });
   job.process = child;
 
-  void readLines(child.stdout, line => {
+  const stdout = readLines(child.stdout, line => {
     try {
       appendEvent(job, JSON.parse(line) as SyncEvent);
     } catch {
       appendEvent(job, { runId, timestamp: new Date().toISOString(), type: 'warning', message: line });
     }
   });
-  void readLines(child.stderr, line => {
+  const stderr = readLines(child.stderr, line => {
     appendEvent(job, { runId, timestamp: new Date().toISOString(), type: 'warning', message: line });
   });
-  void child.exited.then(exitCode => {
+  void child.exited.then(async exitCode => {
+    await Promise.allSettled([stdout, stderr]);
     job.process = null;
     if (job.status === 'running') {
       const timestamp = new Date().toISOString();
@@ -134,13 +193,13 @@ export function startSyncJob(input: { institutionId: SyncJob['institutionId']; c
   return publicJob(job);
 }
 
-export function getSyncJob(runId: string): SyncJob | null {
-  const job = jobs.get(runId);
+export async function getSyncJob(runId: string): Promise<SyncJob | null> {
+  const job = await managedJob(runId);
   return job ? publicJob(job) : null;
 }
 
-export function cancelSyncJob(runId: string): SyncJob {
-  const job = jobs.get(runId);
+export async function cancelSyncJob(runId: string): Promise<SyncJob> {
+  const job = await managedJob(runId);
   if (!job) throw new Error('Sync job not found');
   if (job.status === 'running') {
     job.process?.kill();
@@ -148,7 +207,74 @@ export function cancelSyncJob(runId: string): SyncJob {
     job.status = 'cancelled';
     job.message = 'Sync cancelled';
     job.completedAt = new Date().toISOString();
-    void persistJob(job);
+    await persistJob(job);
   }
+  return publicJob(job);
+}
+
+export async function confirmSyncJob(runId: string): Promise<SyncJob> {
+  const job = await managedJob(runId);
+  if (!job) throw new Error('Sync job not found');
+  if (job.status === 'complete') return publicJob(job);
+  if (job.status !== 'awaiting-confirmation' || !job.review) {
+    throw new Error('Sync job is not awaiting confirmation');
+  }
+
+  job.status = 'importing';
+  job.message = 'Importing confirmed data';
+  job.error = null;
+  await persistJob(job);
+  const report = (event: Omit<SyncEvent, 'runId' | 'timestamp'>) => appendEvent(job, {
+    ...event,
+    runId,
+    timestamp: new Date().toISOString(),
+  });
+
+  try {
+    const result = await commitSyncReview(job.review, report);
+    appendEvent(job, {
+      runId,
+      timestamp: new Date().toISOString(),
+      type: 'complete',
+      message: 'Import complete',
+      data: { result },
+    });
+    await persistJob(job);
+    return publicJob(job);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    job.status = 'awaiting-confirmation';
+    job.error = message;
+    appendEvent(job, {
+      runId,
+      timestamp: new Date().toISOString(),
+      type: 'warning',
+      message: `Import failed: ${message}`,
+    });
+    await persistJob(job);
+    throw error;
+  }
+}
+
+export async function discardSyncJob(runId: string): Promise<SyncJob> {
+  const job = await managedJob(runId);
+  if (!job) throw new Error('Sync job not found');
+  if (job.status !== 'awaiting-confirmation' || !job.review) {
+    throw new Error('Sync job is not awaiting confirmation');
+  }
+
+  discardSyncReview(job.review);
+  const timestamp = new Date().toISOString();
+  job.status = 'cancelled';
+  job.message = 'Downloaded data discarded';
+  job.completedAt = timestamp;
+  job.error = null;
+  job.events.push({
+    runId,
+    timestamp,
+    type: 'action',
+    message: job.message,
+  });
+  await persistJob(job);
   return publicJob(job);
 }

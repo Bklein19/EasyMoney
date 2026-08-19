@@ -2,18 +2,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, ChevronDown, CircleDashed, Clock3, History, LoaderCircle, Lock, RefreshCw, X } from 'lucide-react';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
-import { formatDate } from '../../utils/formatters';
+import { formatCurrency, formatDate } from '../../utils/formatters';
+import type { SyncArtifactReview, SyncRunReview, SyncTarget } from '../../../server/app/dataSync/types.ts';
 
 type FreshnessStatus = 'current' | 'due' | 'stale' | 'no-data' | 'closed';
-type SyncInstitutionId = 'bank-of-america' | 'vanguard';
-
-interface SyncTarget {
-  id: string;
-  institutionId: SyncInstitutionId;
-  connectionId?: string;
-  label: string;
-}
-
 interface FreshnessAccount {
   accountId: number;
   accountName: string;
@@ -134,8 +126,179 @@ function accountSort(a: FreshnessAccount, b: FreshnessAccount) {
     a.accountName.localeCompare(b.accountName);
 }
 
-export default function DataFreshnessPanel() {
+function artifactCoverage(artifact: SyncArtifactReview) {
+  if (!artifact.coveredFrom && !artifact.coveredTo) return 'No dated facts';
+  if (artifact.coveredFrom === artifact.coveredTo) return formatFreshnessDate(artifact.coveredFrom);
+  return `${formatFreshnessDate(artifact.coveredFrom)} – ${formatFreshnessDate(artifact.coveredTo)}`;
+}
+
+function sourceTypeLabel(value: string | null) {
+  return value ? value.replaceAll('-', ' ') : 'Unknown source type';
+}
+
+function SyncArtifactDetails({ artifact, initiallyOpen }: { artifact: SyncArtifactReview; initiallyOpen: boolean }) {
+  return (
+    <details className="sync-review__artifact" open={initiallyOpen}>
+      <summary>
+        <div className="sync-review__file">
+          <strong>{artifact.fileName}</strong>
+          <small>{artifact.parserName || 'Unknown parser'} · {sourceTypeLabel(artifact.sourceType)}</small>
+        </div>
+        <div className="sync-review__destination">
+          <span>Import to</span>
+          <strong>{artifact.accountName}</strong>
+        </div>
+        <div className="sync-review__coverage">
+          <span>Coverage</span>
+          <strong>{artifactCoverage(artifact)}</strong>
+        </div>
+        <div className="sync-review__counts">
+          <strong>{artifact.transactionCount}</strong> transactions
+          <span>·</span>
+          <strong>{artifact.balanceCount}</strong> balances
+        </div>
+        {artifact.status === 'already-imported' && <span className="sync-review__duplicate">Already imported</span>}
+        <ChevronDown className="sync-review__artifact-chevron" size={16} />
+      </summary>
+
+      <div className="sync-review__artifact-body">
+        {artifact.warnings.length > 0 && (
+          <div className="sync-review__warnings">
+            {artifact.warnings.map(warning => (
+              <p key={warning}><AlertTriangle size={14} />{warning}</p>
+            ))}
+          </div>
+        )}
+
+        <div className="sync-review__claim-grid">
+          <section>
+            <h4>Account claims</h4>
+            {artifact.accountClaims.map(claim => (
+              <div className="sync-review__claim-row" key={claim.sourceAccountId}>
+                <div>
+                  <strong>{claim.accountName || 'Unidentified account'}</strong>
+                  <small>{[claim.accountHolder, claim.institution].filter(Boolean).join(' · ') || 'No holder or institution stated'}</small>
+                </div>
+                <span>{claim.transactionCount} tx · {claim.balanceCount} bal</span>
+              </div>
+            ))}
+          </section>
+
+          <section>
+            <h4>Balance claims</h4>
+            {artifact.balanceClaims.length > 0 ? artifact.balanceClaims.map((claim, index) => (
+              <div className="sync-review__claim-row" key={`${claim.date}-${claim.account}-${index}`}>
+                <div>
+                  <strong>{formatFreshnessDate(claim.date)}</strong>
+                  <small>{claim.account || artifact.accountName}</small>
+                </div>
+                <span className="num">{formatCurrency(claim.balanceCents / 100)}</span>
+              </div>
+            )) : <p className="sync-review__empty-claim">No balances in this artifact.</p>}
+            {artifact.balanceCount > artifact.balanceClaims.length && (
+              <small>Showing {artifact.balanceClaims.length} of {artifact.balanceCount} balances.</small>
+            )}
+          </section>
+        </div>
+
+        {artifact.transactionCount > 0 && (
+          <section className="sync-review__transactions">
+            <div className="sync-review__transactions-header">
+              <h4>Transaction sample</h4>
+              <div>
+                <span>In {formatCurrency(artifact.inflowCents / 100)}</span>
+                <span>Out {formatCurrency(artifact.outflowCents / 100)}</span>
+                <span>Net {formatCurrency(artifact.netAmountCents / 100, true)}</span>
+              </div>
+            </div>
+            <table>
+              <tbody>
+                {artifact.transactionSamples.map((claim, index) => (
+                  <tr key={`${claim.date}-${claim.description}-${claim.amountCents}-${index}`}>
+                    <td>{formatFreshnessDate(claim.date)}</td>
+                    <td>
+                      <strong>{claim.description}</strong>
+                      <small>{claim.account || artifact.accountName}</small>
+                    </td>
+                    <td className="num">{formatCurrency(claim.amountCents / 100, true)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {artifact.transactionCount > artifact.transactionSamples.length && (
+              <small>Showing {artifact.transactionSamples.length} of {artifact.transactionCount} transactions.</small>
+            )}
+          </section>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function SyncReviewPanel({
+  review,
+  isWorking,
+  error,
+  onConfirm,
+  onDiscard,
+}: {
+  review: SyncRunReview;
+  isWorking: boolean;
+  error: string;
+  onConfirm: () => void;
+  onDiscard: () => void;
+}) {
+  const transactionCount = review.artifacts.reduce((sum, artifact) => sum + artifact.transactionCount, 0);
+  const balanceCount = review.artifacts.reduce((sum, artifact) => sum + artifact.balanceCount, 0);
+  return (
+    <section className="sync-review" aria-label="Review downloaded data">
+      <div className="sync-review__header">
+        <div>
+          <h3>Review downloaded data</h3>
+          <p>Nothing changes in your ledger until you confirm.</p>
+        </div>
+        <div className="sync-review__totals">
+          <span><strong>{review.artifacts.length}</strong> files</span>
+          <span><strong>{transactionCount}</strong> transactions</span>
+          <span><strong>{balanceCount}</strong> balances</span>
+        </div>
+        <div className="sync-review__actions">
+          <button className="btn btn--secondary btn--sm" type="button" disabled={isWorking} onClick={onDiscard}>Discard</button>
+          <button className="btn btn--primary btn--sm" type="button" disabled={isWorking} onClick={onConfirm}>
+            {isWorking && <LoaderCircle className="spin" size={14} />}
+            {review.readyToImport > 0 ? 'Confirm import' : 'Finish'}
+          </button>
+        </div>
+      </div>
+      {review.alreadyImported > 0 && (
+        <p className="sync-review__note">
+          {review.alreadyImported} downloaded file{review.alreadyImported === 1 ? ' is' : 's are'} already in the ledger and will be skipped.
+        </p>
+      )}
+      {error && <p className="sync-review__error">{error}</p>}
+      <div className="sync-review__artifacts">
+        {review.artifacts.length > 0
+          ? review.artifacts.map((artifact, index) => (
+              <SyncArtifactDetails
+                artifact={artifact}
+                initiallyOpen={review.artifacts.length === 1 || artifact.warnings.length > 0 || index === 0}
+                key={`${artifact.importFileId}-${artifact.fileName}`}
+              />
+            ))
+          : <p className="sync-review__empty-claim">No files were downloaded. Confirm to finish this catch-up without importing anything.</p>}
+      </div>
+    </section>
+  );
+}
+
+interface DataFreshnessPanelProps {
+  onImportComplete?: () => Promise<void> | void;
+}
+
+export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPanelProps) {
   const [syncRunId, setSyncRunId] = useState(() => localStorage.getItem('easymoney-active-sync-run') || '');
+  const [syncAction, setSyncAction] = useState<'confirm' | 'discard' | ''>('');
+  const [syncActionError, setSyncActionError] = useState('');
   const freshnessQuery = useQuery(trpc.dataFreshness.report.queryOptions());
   const syncTargetsQuery = useQuery(trpc.dataSync.targets.queryOptions());
   const syncQuery = useQuery({
@@ -155,9 +318,10 @@ export default function DataFreshnessPanel() {
     (report?.summary.dueAccounts || 0) +
     (report?.summary.noDataAccounts || 0);
   const syncTargets = (syncTargetsQuery.data ?? []) as SyncTarget[];
+  const syncIsActive = syncJob?.status === 'running' || syncJob?.status === 'importing' || syncJob?.status === 'awaiting-confirmation';
 
   useEffect(() => {
-    if (!syncJob || syncJob.status === 'running') return;
+    if (!syncJob || syncJob.status !== 'complete') return;
     void Promise.all([
       queryClient.invalidateQueries({ queryKey: trpc.dataFreshness.report.queryKey() }),
       queryClient.invalidateQueries({ queryKey: trpc.imports.history.queryKey() }),
@@ -171,6 +335,7 @@ export default function DataFreshnessPanel() {
     const goal = kind === 'current'
       ? { kind: 'current' as const, overlapDays: 7 }
       : { kind: 'backfill' as const };
+    setSyncActionError('');
     const job = await trpcClient.dataSync.start.mutate({
       institutionId: target.institutionId,
       connectionId: target.connectionId,
@@ -189,6 +354,36 @@ export default function DataFreshnessPanel() {
   const dismissSync = () => {
     localStorage.removeItem('easymoney-active-sync-run');
     setSyncRunId('');
+  };
+
+  const confirmSync = async () => {
+    if (!syncRunId) return;
+    setSyncAction('confirm');
+    setSyncActionError('');
+    try {
+      await trpcClient.dataSync.confirm.mutate({ runId: syncRunId });
+      await onImportComplete?.();
+      await syncQuery.refetch();
+    } catch (actionError) {
+      setSyncActionError(actionError instanceof Error ? actionError.message : 'Import failed');
+      await syncQuery.refetch();
+    } finally {
+      setSyncAction('');
+    }
+  };
+
+  const discardSync = async () => {
+    if (!syncRunId) return;
+    setSyncAction('discard');
+    setSyncActionError('');
+    try {
+      await trpcClient.dataSync.discard.mutate({ runId: syncRunId });
+      await syncQuery.refetch();
+    } catch (actionError) {
+      setSyncActionError(actionError instanceof Error ? actionError.message : 'Could not discard downloaded data');
+    } finally {
+      setSyncAction('');
+    }
   };
 
   const setAccountStatus = async (account: FreshnessAccount) => {
@@ -215,7 +410,7 @@ export default function DataFreshnessPanel() {
           </p>
         </div>
         {report && <div className="data-freshness__header-actions">
-          {syncTargets.length > 0 && syncJob?.status !== 'running' && (
+          {syncTargets.length > 0 && !syncIsActive && (
             <div className="data-freshness__sync-actions">
               <SyncActionMenu
                 targets={syncTargets}
@@ -244,16 +439,26 @@ export default function DataFreshnessPanel() {
         </div>}
       </div>
 
-      {syncJob && (
+      {syncJob && syncJob.status !== 'awaiting-confirmation' && (
         <div className={`data-freshness__sync-status is-${syncJob.status}`} role="status">
-          {syncJob.status === 'running' && <LoaderCircle className="spin" size={15} />}
+          {(syncJob.status === 'running' || syncJob.status === 'importing') && <LoaderCircle className="spin" size={15} />}
           <span>{syncJob.message}</span>
           {syncJob.status === 'running' ? (
             <button className="btn btn--text btn--sm" type="button" onClick={() => void cancelSync()}>Cancel</button>
-          ) : (
+          ) : syncJob.status === 'importing' ? null : (
             <button className="icon-btn icon-btn--sm" type="button" aria-label="Dismiss sync status" onClick={dismissSync}><X size={14} /></button>
           )}
         </div>
+      )}
+
+      {syncJob?.status === 'awaiting-confirmation' && syncJob.review && (
+        <SyncReviewPanel
+          review={syncJob.review}
+          isWorking={Boolean(syncAction)}
+          error={syncActionError || syncJob.error || ''}
+          onConfirm={() => void confirmSync()}
+          onDiscard={() => void discardSync()}
+        />
       )}
 
       {error && <div className="import-history__error">{error}</div>}

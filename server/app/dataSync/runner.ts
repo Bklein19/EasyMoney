@@ -1,9 +1,7 @@
-import { mkdir, readFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 
 import { getDb } from '../../database.ts';
-import { commitImport, hashImportContent, previewImport, rebuildLedgerReadModel } from '../imports.ts';
-import { importSyncArtifactBatch } from './artifactBatch.ts';
 import {
   runBankOfAmericaSync,
   type BankOfAmericaSyncConfig,
@@ -13,14 +11,16 @@ import {
   type VanguardAccountKind,
   type VanguardSyncProfile,
 } from './institutions/vanguard.ts';
-import type { SyncGoal, SyncReporter, SyncRunRequest, SyncRunResult, SyncTarget } from './types.ts';
+import type { SyncGoal, SyncReporter, SyncRunRequest, SyncTarget } from './types.ts';
 import {
   goalWindowForCoverage,
   missingMonthlyStatementDates,
   vanguardProfileIdFromFileNames,
 } from './planning.ts';
 import { syncApplicationDataRoot } from './paths.ts';
+import { stageSyncArtifact } from './review.ts';
 import { selectVanguardProfiles, syncTargetsForProfiles } from './targets.ts';
+import type { SyncArtifactReview, SyncRunReview } from './types.ts';
 
 export { syncApplicationDataRoot } from './paths.ts';
 
@@ -187,37 +187,45 @@ function accountForArtifact(fileName: string, accounts: AccountCoverageRow[]) {
   throw new Error(`Cannot resolve an account for ${fileName}.`);
 }
 
-async function importArtifact(path: string, accountId: number) {
-  const fileName = basename(path);
-  const fileBytes = new Uint8Array(await readFile(path));
-  const text = fileName.toLowerCase().endsWith('.csv') ? new TextDecoder().decode(fileBytes) : '';
-  const contentHash = hashImportContent(text, fileBytes);
-  const existing = getDb().prepare(`
-    SELECT id
-    FROM importFiles
-    WHERE contentHash = ? AND status = 'committed'
-    LIMIT 1
-  `).get(contentHash);
-  if (existing) {
-    return {
-      importedCount: 0,
-      importedBalanceCount: 0,
-      skippedDuplicateCount: 0,
-      skippedArtifact: true,
-    };
+async function stageArtifacts(
+  request: SyncRunRequest,
+  artifacts: Array<{ fileName: string; accountId: number }>,
+  outputDir: string,
+  report: SyncReporter,
+): Promise<SyncRunReview> {
+  const reviews: SyncArtifactReview[] = [];
+  for (const artifact of artifacts) {
+    report({ type: 'artifact', message: `Reviewing ${artifact.fileName}` });
+    const review = await stageSyncArtifact({
+      path: join(outputDir, artifact.fileName),
+      fileName: artifact.fileName,
+      accountId: artifact.accountId,
+    });
+    reviews.push(review);
+    report({
+      type: 'artifact',
+      message: review.status === 'already-imported'
+        ? `${artifact.fileName} was already imported`
+        : `Parsed ${artifact.fileName}`,
+      data: {
+        transactions: review.transactionCount,
+        balances: review.balanceCount,
+        coveredFrom: review.coveredFrom,
+        coveredTo: review.coveredTo,
+      },
+    });
   }
-  const preview = await previewImport({ fileName, text, fileBytes });
-  const transactionIds = preview.transactions?.map(transaction => Number(transaction.importRowId)).filter(Number.isFinite) ?? [];
-  return commitImport({
-    accountId,
-    importFileId: preview.importFileId,
-    importRowIds: transactionIds,
-    balanceRowIds: preview.balanceRowIds ?? null,
-    rebuildLedger: false,
-  });
+  return {
+    runId: request.runId,
+    institutionId: request.institutionId,
+    downloaded: artifacts.length,
+    readyToImport: reviews.filter(review => review.status === 'ready').length,
+    alreadyImported: reviews.filter(review => review.status === 'already-imported').length,
+    artifacts: reviews,
+  };
 }
 
-export async function runSync(request: SyncRunRequest, report: SyncReporter): Promise<SyncRunResult> {
+export async function runSync(request: SyncRunRequest, report: SyncReporter): Promise<SyncRunReview> {
   if (request.institutionId === 'vanguard') {
     const today = isoDate();
     const plannedProfiles = planVanguardProfiles(request.goal, today, report);
@@ -235,24 +243,9 @@ export async function runSync(request: SyncRunRequest, report: SyncReporter): Pr
     });
     const downloaded = await runVanguardSync({ outputDir, through: today, profiles });
     report({ type: 'phase', message: `Validated ${downloaded.length} new artifact${downloaded.length === 1 ? '' : 's'}` });
-    const imported = await importSyncArtifactBatch(
-      downloaded.map(artifact => ({
-        fileName: artifact.fileName,
-        accountId: artifact.accountId,
-        import: () => importArtifact(join(outputDir, artifact.fileName), artifact.accountId),
-      })),
-      report,
-      rebuildLedgerReadModel,
-    );
-    const result = {
-      runId: request.runId,
-      institutionId: request.institutionId,
-      downloaded: downloaded.length,
-      ...imported,
-      artifacts: downloaded.map(artifact => artifact.fileName),
-    } satisfies SyncRunResult;
-    report({ type: 'complete', message: 'Vanguard sync complete', data: result });
-    return result;
+    const review = await stageArtifacts(request, downloaded, outputDir, report);
+    report({ type: 'review', message: 'Vanguard downloads are ready to review', data: { review } });
+    return review;
   }
   if (request.institutionId !== 'bank-of-america') throw new Error(`Unsupported institution: ${request.institutionId}`);
   const accounts = bankOfAmericaCoverage();
@@ -283,35 +276,14 @@ export async function runSync(request: SyncRunRequest, report: SyncReporter): Pr
   const downloaded = await runBankOfAmericaSync(config);
   report({ type: 'phase', message: `Validated ${downloaded.saved.length} new artifact${downloaded.saved.length === 1 ? '' : 's'}` });
 
-  const jobs = downloaded.saved.map(fileName => {
+  const artifacts = downloaded.saved.map(fileName => {
     const account = accountForArtifact(fileName, accounts);
     return {
       fileName,
       accountId: account.id,
-      import: () => importArtifact(join(outputDir, fileName), account.id),
     };
   });
-  const {
-    recordedTransactionFacts,
-    recordedBalanceFacts,
-    skippedTransactionDuplicates,
-    skippedArtifacts,
-  } = await importSyncArtifactBatch(
-    jobs,
-    report,
-    rebuildLedgerReadModel,
-  );
-
-  const result = {
-    runId: request.runId,
-    institutionId: request.institutionId,
-    downloaded: downloaded.saved.length,
-    recordedTransactionFacts,
-    recordedBalanceFacts,
-    skippedTransactionDuplicates,
-    skippedArtifacts,
-    artifacts: downloaded.saved,
-  } satisfies SyncRunResult;
-  report({ type: 'complete', message: 'Bank of America sync complete', data: result });
-  return result;
+  const review = await stageArtifacts(request, artifacts, outputDir, report);
+  report({ type: 'review', message: 'Bank of America downloads are ready to review', data: { review } });
+  return review;
 }

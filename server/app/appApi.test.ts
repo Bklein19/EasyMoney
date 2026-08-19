@@ -7,10 +7,12 @@ import path from 'node:path';
 import type { AppRouter } from './router.ts';
 
 process.env.EASYMONEY_DB_PATH = path.join(os.tmpdir(), `easymoney-app-api-${process.pid}.sqlite`);
+process.env.EASYMONEY_SYNC_ROOT = path.join(os.tmpdir(), `easymoney-sync-runs-${process.pid}`);
 
 const { createServer } = await import('../index.ts');
 const { getDb, initDatabase, insertRow } = await import('../database.ts');
 const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
+const { stageSyncArtifact } = await import('./dataSync/review.ts');
 const { upsertTransactionAnnotation } = await import('./transactionAnnotations.ts');
 const {
   groupTransactionsForAiCategorization,
@@ -94,6 +96,31 @@ function csvFromRows(rows: string[]) {
     'Transaction Date,Post Date,Description,Category,Type,Amount',
     ...rows,
   ].join('\n');
+}
+
+async function saveAwaitingSyncReview(review: {
+  runId: string;
+  institutionId: 'bank-of-america' | 'vanguard';
+  downloaded: number;
+  readyToImport: number;
+  alreadyImported: number;
+  artifacts: unknown[];
+}) {
+  const directory = path.join(process.env.EASYMONEY_SYNC_ROOT!, review.runId);
+  await fs.promises.mkdir(directory, { recursive: true });
+  await fs.promises.writeFile(path.join(directory, 'run.json'), `${JSON.stringify({
+    runId: review.runId,
+    institutionId: review.institutionId,
+    goal: { kind: 'current', overlapDays: 7 },
+    status: 'awaiting-confirmation',
+    message: 'Downloads are ready to review',
+    startedAt: '2026-08-19T00:00:00.000Z',
+    completedAt: null,
+    events: [],
+    review,
+    result: null,
+    error: null,
+  }, null, 2)}\n`);
 }
 
 function snapshotAccountTransactions(accountId: number) {
@@ -3289,6 +3316,136 @@ test('Vanguard sync targets survive reversible unimport provenance', async () =>
     connectionId: 'account-2',
     label: 'Vanguard (Example Holder)',
   });
+});
+
+test('institution catch-up stages reviewable claims before explicit confirmation', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Primary Checking',
+    institution: 'Bank of America',
+    type: 'checking',
+    currentBalance: 0,
+    currency: 'USD',
+    status: 'active',
+  }));
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-sync-review-'));
+  const fileName = 'bofa-checking-1234-2026-01-01-to-2026-01-31.csv';
+  const filePath = path.join(directory, fileName);
+  await fs.promises.writeFile(filePath, [
+    'Description,,Summary Amt.',
+    'Opening Balance,,1000.00',
+    'Date,Description,Amount,Running Bal.',
+    '01/05/2026,EXAMPLE PAYROLL,2500.00,3500.00',
+    '01/06/2026,EXAMPLE UTILITY,-125.50,3374.50',
+  ].join('\n'));
+
+  try {
+    const artifact = await stageSyncArtifact({ path: filePath, accountId });
+    expect(artifact).toMatchObject({
+      fileName,
+      status: 'ready',
+      accountId,
+      accountName: 'Primary Checking',
+      parserName: 'bofa-activity-csv',
+      coveredFrom: '2026-01-05',
+      coveredTo: '2026-01-06',
+      transactionCount: 2,
+      balanceCount: 2,
+      inflowCents: 250000,
+      outflowCents: 12550,
+      netAmountCents: 237450,
+    });
+    expect(artifact.accountClaims).toEqual([expect.objectContaining({
+      accountName: 'Adv Plus Banking - 1234',
+      transactionCount: 2,
+      balanceCount: 2,
+    })]);
+    expect(artifact.transactionSamples).toHaveLength(2);
+    expect(artifact.balanceClaims).toHaveLength(2);
+    expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(artifact.importFileId))
+      .toEqual({ status: 'previewed' });
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
+    expect((await listImportHistoryForTest()).imports).toHaveLength(0);
+
+    const review = {
+      runId: 'sync-test-review',
+      institutionId: 'bank-of-america' as const,
+      downloaded: 1,
+      readyToImport: 1,
+      alreadyImported: 0,
+      artifacts: [artifact],
+    };
+    await saveAwaitingSyncReview(review);
+    const persistedJob = await trpcClient.dataSync.status.query({ runId: review.runId });
+    expect(persistedJob).toMatchObject({
+      status: 'awaiting-confirmation',
+      review: { readyToImport: 1 },
+    });
+    const confirmedJob = await trpcClient.dataSync.confirm.mutate({ runId: review.runId });
+    expect(confirmedJob).toMatchObject({
+      status: 'complete',
+      result: {
+        recordedTransactionFacts: 2,
+        recordedBalanceFacts: 2,
+        skippedArtifacts: 0,
+      },
+    });
+    expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(artifact.importFileId))
+      .toEqual({ status: 'committed' });
+    expect(getDb().prepare('SELECT DISTINCT accountId FROM sourceAccounts').all()).toEqual([{ accountId }]);
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM accounts').get()).toEqual({ count: 1 });
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 2 });
+    expect((await listImportHistoryForTest()).imports).toHaveLength(1);
+
+    const duplicate = await stageSyncArtifact({ path: filePath, accountId });
+    expect(duplicate.status).toBe('already-imported');
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM importFiles').get()).toEqual({ count: 1 });
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('discarding an institution catch-up leaves staged facts out of the ledger and history', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Primary Checking',
+    institution: 'Bank of America',
+    type: 'checking',
+    currentBalance: 0,
+    currency: 'USD',
+    status: 'active',
+  }));
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-sync-discard-'));
+  const fileName = 'bofa-checking-1234-2026-02-01-to-2026-02-28.csv';
+  const filePath = path.join(directory, fileName);
+  await fs.promises.writeFile(filePath, [
+    'Description,,Summary Amt.',
+    'Opening Balance,,1000.00',
+    'Date,Description,Amount,Running Bal.',
+    '02/05/2026,EXAMPLE PAYROLL,2500.00,3500.00',
+  ].join('\n'));
+
+  try {
+    const artifact = await stageSyncArtifact({ path: filePath, accountId });
+    const review = {
+      runId: 'sync-test-discard',
+      institutionId: 'bank-of-america' as const,
+      downloaded: 1,
+      readyToImport: 1,
+      alreadyImported: 0,
+      artifacts: [artifact],
+    };
+    await saveAwaitingSyncReview(review);
+    const discardedJob = await trpcClient.dataSync.discard.mutate({ runId: review.runId });
+    expect(discardedJob.status).toBe('cancelled');
+
+    expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(artifact.importFileId))
+      .toEqual({ status: 'discarded' });
+    expect(getDb().prepare('SELECT status FROM sourceFiles WHERE importFileId = ?').get(artifact.importFileId))
+      .toEqual({ status: 'discarded' });
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
+    expect((await listImportHistoryForTest()).imports).toHaveLength(0);
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
 });
 
 test('app import history can bulk unimport and reimport committed source facts', async () => {

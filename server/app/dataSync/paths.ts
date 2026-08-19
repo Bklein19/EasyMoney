@@ -9,6 +9,8 @@ export function syncApplicationDataRoot(
   const env = options.env ?? process.env;
   const pathApi = platform === 'win32' ? win32 : posix;
 
+  if (env.EASYMONEY_SYNC_ROOT) return pathApi.resolve(env.EASYMONEY_SYNC_ROOT);
+
   if (platform === 'darwin') {
     return pathApi.join(home, 'Library', 'Application Support', 'EasyMoney', 'sync-runs');
   }
