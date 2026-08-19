@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import type { Page } from 'playwright';
 
-import { parseBankOfAmericaArgs } from './institutions/bankOfAmerica.ts';
+import { isBankOfAmericaAuthenticatedPage, parseBankOfAmericaArgs } from './institutions/bankOfAmerica.ts';
 import type { VanguardSyncProfile } from './institutions/vanguard.ts';
 import {
   goalWindowForCoverage,
@@ -75,6 +76,16 @@ describe('data sync planning', () => {
       scope: 'checking',
       dryRun: true,
     });
+  });
+
+  test('BofA recognizes Accounts Overview even when the URL remains signIn.go', async () => {
+    const page = {
+      url: () => 'https://secure.bankofamerica.com/myaccounts/signin/signIn.go',
+      title: async () => 'Bank of America | Online Banking | Accounts Overview',
+      locator: () => ({ count: async () => 0 }),
+    } as unknown as Page;
+
+    expect(await isBankOfAmericaAuthenticatedPage(page)).toBe(true);
   });
 
   test('Vanguard current sync plans only missing completed statement months', () => {

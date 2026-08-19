@@ -53,6 +53,28 @@ describe('Playwright session helper', () => {
     expect(url).toContain('/private/participant/home');
   });
 
+  test('supports institution authentication on a URL that still looks like a login page', async () => {
+    let waits = 0;
+    const page = {
+      isClosed: () => false,
+      url: () => 'https://secure.bankofamerica.com/myaccounts/signin/signIn.go',
+      title: async () => 'Bank of America | Online Banking | Accounts Overview',
+      locator: () => ({ count: async () => 0 }),
+      waitForTimeout: async () => {
+        waits += 1;
+        await Bun.sleep(500);
+      },
+    } as unknown as Page;
+
+    await waitForInteractiveAuthentication(
+      page,
+      Date.now() + 5_000,
+      async currentPage => (await currentPage.title()).includes('Accounts Overview'),
+    );
+
+    expect(waits).toBeGreaterThanOrEqual(3);
+  });
+
   test('decodes the typed institution browser status contract', () => {
     expect(decodeInstitutionBrowserProgramResult(JSON.stringify({
       status: 'complete',

@@ -19,6 +19,7 @@ type SessionOptions = {
 
 type RunOptions = {
   authenticationTimeoutMs?: number;
+  isAuthenticated?: (page: Page) => boolean | Promise<boolean>;
   completionDescription: string;
   completionDurationMs?: number;
 };
@@ -136,18 +137,24 @@ export function decodeInstitutionBrowserProgramResult<T extends Record<string, u
   return decoded as InstitutionBrowserProgramResult<T>;
 }
 
-export async function waitForInteractiveAuthentication(page: Page, deadline: number): Promise<void> {
+export async function waitForInteractiveAuthentication(
+  page: Page,
+  deadline: number,
+  isAuthenticated?: (page: Page) => boolean | Promise<boolean>,
+): Promise<void> {
   let authenticatedSince: number | null = null;
   while (Date.now() < deadline) {
     if (page.isClosed()) throw new Error('The browser was closed before authentication completed');
-    const authenticationUrl = /(?:login|logon|sign[-_]?in|authenticate|authorization|oauth|sso|auth\.)/i.test(page.url());
-    const authenticationFields = await page.locator([
-      'input[type="password"]',
-      'input[autocomplete="username"]',
-      'input[autocomplete="current-password"]',
-    ].join(',')).count() > 0;
+    const authenticated = isAuthenticated
+      ? await isAuthenticated(page)
+      : !/(?:login|logon|sign[-_]?in|authenticate|authorization|oauth|sso|auth\.)/i.test(page.url()) &&
+        await page.locator([
+          'input[type="password"]',
+          'input[autocomplete="username"]',
+          'input[autocomplete="current-password"]',
+        ].join(',')).count() === 0;
 
-    if (!authenticationUrl && !authenticationFields) {
+    if (authenticated) {
       authenticatedSince ??= Date.now();
       if (Date.now() - authenticatedSince >= 1_500) return;
     } else {
@@ -204,7 +211,7 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
       console.log(`Authentication required in ${session.name}. Complete login and MFA in the open browser.`);
     }
     while (result.status === 'login-required' && Date.now() < deadline) {
-      await waitForInteractiveAuthentication(page, deadline);
+      await waitForInteractiveAuthentication(page, deadline, options.isAuthenticated);
       result = decodeInstitutionBrowserProgramResult<T>(await program(page));
     }
     if (result.status === 'login-required') throw new Error(`Authentication timed out in ${session.name}`);

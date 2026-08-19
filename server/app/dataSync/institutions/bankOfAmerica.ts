@@ -5,6 +5,7 @@ import { basename, join, resolve } from "node:path";
 import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 
 import { runInstitutionBrowserProgram } from "../browserSession.ts";
+import type { Page } from "playwright";
 
 export type BankOfAmericaSyncConfig = {
   outputDir: string;
@@ -27,6 +28,19 @@ type ValidArtifact = {
 };
 
 const loginUrl = "https://secure.bankofamerica.com/myaccounts/signin/signIn.go";
+
+export async function isBankOfAmericaAuthenticatedPage(page: Page): Promise<boolean> {
+  let hostname: string;
+  try {
+    hostname = new URL(page.url()).hostname;
+  } catch {
+    return false;
+  }
+  if (hostname !== "secure.bankofamerica.com") return false;
+  if (!/Accounts Overview/i.test(await page.title())) return false;
+  return await page.locator('input[type="password"]:visible').count() === 0;
+}
+
 export function parseBankOfAmericaArgs(args: string[]): BankOfAmericaSyncConfig {
   const today = new Date().toISOString().slice(0, 10);
   const config: BankOfAmericaSyncConfig = {
@@ -228,31 +242,40 @@ function buildBrowserProgram(
     };
     const goToOverview = async () => {
       if ((await page.title()).includes("Accounts Overview")) return;
-      await page.goto("https://secure.bankofamerica.com/myaccounts/signin/signIn.go");
-      await page.waitForFunction(() => document.title.includes("Accounts Overview"), null, { timeout: 15000 });
+      await page.goto("https://secure.bankofamerica.com/myaccounts/signin/signIn.go", {
+        waitUntil: "domcontentloaded",
+        timeout: 30000,
+      });
+      await page.waitForFunction(
+        () => document.title.includes("Accounts Overview"),
+        null,
+        { timeout: 30000 },
+      ).catch(() => {
+        throw new Error("Timed out returning to Accounts Overview");
+      });
     };
     const selectAccount = async (kind, pattern) => {
       await goToOverview();
-      await page.waitForFunction(source => {
-        const matcher = new RegExp(source, "i");
-        return [...document.querySelectorAll("a")].some(element => {
-          const box = element.getBoundingClientRect();
-          return box.width > 0 && matcher.test((element.innerText || "").trim());
-        });
-      }, pattern, { timeout: 15000 });
-      await page.evaluate(({ kind, source }) => {
-        const matcher = new RegExp(source, "i");
-        const link = [...document.querySelectorAll("a")].find(element => {
-          const box = element.getBoundingClientRect();
-          let path = "";
-          try { path = new URL(element.href, location.href).pathname; } catch {}
-          return box.width > 0 && path === "/myaccounts/brain/redirect.go" && matcher.test((element.innerText || "").trim());
-        });
-        if (!link) throw new Error(\`\${kind} account link was not found\`);
-        link.setAttribute("data-codex-bofa-account", kind);
-      }, { kind, source: pattern });
-      await pointerClick(page.locator(\`[data-codex-bofa-account="\${kind}"]\`));
-      await page.waitForFunction(() => !document.title.includes("Accounts Overview"), null, { timeout: 15000 });
+      const accountLink = page
+        .locator('a[href*="/myaccounts/brain/redirect.go"]')
+        .filter({ hasText: new RegExp(pattern, "i") })
+        .first();
+      await accountLink.waitFor({ state: "visible", timeout: 30000 }).catch(() => {
+        throw new Error(\`Timed out waiting for the \${kind} account on Accounts Overview\`);
+      });
+      const accountHref = await accountLink.getAttribute("href");
+      if (!accountHref) throw new Error(\`The \${kind} account link has no destination\`);
+      await page.goto(new URL(accountHref, page.url()).toString(), {
+        waitUntil: "domcontentloaded",
+        timeout: 30000,
+      });
+      await page.waitForFunction(
+        () => !document.title.includes("Accounts Overview"),
+        null,
+        { timeout: 30000 },
+      ).catch(() => {
+        throw new Error(\`Timed out opening the \${kind} account\`);
+      });
     };
     const downloadDepositActivity = async (from, to, filename) => {
       await page.locator("a.download-transactions").click();
@@ -300,13 +323,16 @@ function buildBrowserProgram(
     const downloadStatements = async (account, from, to, productPattern, skipMonths) => {
       const button = page.getByRole("button", { name: "Statements", exact: true }).first();
       await button.waitFor({ state: "visible" });
-      if (await button.getAttribute("aria-expanded") === "true") await pointerClick(button);
-      const responsePromise = page.waitForResponse(response =>
-        response.url().includes("/gatherDocuments") && response.request().method() === "POST",
-        { timeout: 15000 },
-      );
-      await pointerClick(button);
-      const response = await responsePromise;
+      if (await button.getAttribute("aria-expanded") === "true") await button.click();
+      const [response] = await Promise.all([
+        page.waitForResponse(response =>
+          response.url().includes("/gatherDocuments") && response.request().method() === "POST",
+          { timeout: 30000 },
+        ).catch(() => {
+          throw new Error(\`Timed out loading \${account} statements\`);
+        }),
+        button.click(),
+      ]);
       const body = await response.json();
       const documents = Array.isArray(body.documentList) ? body.documentList : [];
       for (const statement of documents) {
@@ -449,7 +475,10 @@ export async function runBankOfAmericaSync(config: BankOfAmericaSyncConfig): Pro
   const parsed = await runInstitutionBrowserProgram<{ scope: BankOfAmericaSyncConfig["scope"]; saved: string[]; skipped: string[] }>(
     { name: config.session, startUrl: loginUrl },
     buildBrowserProgram(config, before, config.scope),
-    { completionDescription: "Bank of America downloads are complete." },
+    {
+      completionDescription: "Bank of America downloads are complete.",
+      isAuthenticated: isBankOfAmericaAuthenticatedPage,
+    },
   );
   if (parsed.status === "login-required")
     throw new Error(parsed.action ?? "Interactive login is required.");
