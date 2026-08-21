@@ -54,7 +54,7 @@ try {
     for (const [fileName, type] of entries) {
       await icon.addFromPng(fs.readFileSync(path.join(iconDirectory, fileName)), [type], true);
     }
-    writeIfChanged(path.join(outdir, 'AppIcon.icns'), icon.encode());
+    writeIfChanged(path.join(root, 'assets', 'AppIcon.icns'), icon.encode());
   }
 } finally {
   fs.rmSync(temporaryOutdir, { recursive: true, force: true });

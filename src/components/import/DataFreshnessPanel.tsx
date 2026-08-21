@@ -63,7 +63,7 @@ interface SyncActionMenuProps {
 
 function SyncActionMenu({ targets, onSelect }: SyncActionMenuProps) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
-  const label = 'Import history';
+  const label = 'Import older data';
 
   useEffect(() => {
     const close = (event: PointerEvent) => {

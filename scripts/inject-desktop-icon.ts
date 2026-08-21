@@ -11,7 +11,7 @@ if (process.env.ELECTROBUN_OS === 'macos') {
 
   if (!bundle) throw new Error('Electrobun did not provide a macOS bundle path');
 
-  const source = path.resolve(import.meta.dir, '..', 'desktop-dist', 'AppIcon.icns');
+  const source = path.resolve(import.meta.dir, '..', 'assets', 'AppIcon.icns');
   const destination = path.join(bundle, 'Contents', 'Resources', 'AppIcon.icns');
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   fs.copyFileSync(source, destination);
