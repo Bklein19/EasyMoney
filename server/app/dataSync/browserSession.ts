@@ -148,8 +148,26 @@ export async function withPlaywrightPage<T>(
         }
       }
     } finally {
-      await context.close();
+      const closed = await closeBrowserContext(context);
+      if (!closed) console.warn(`Timed out closing the ${options.name} browser context after Chrome exited.`);
     }
+  }
+}
+
+export async function closeBrowserContext(
+  context: Pick<BrowserContext, 'close'>,
+  timeoutMs = 5_000,
+): Promise<boolean> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      context.close().then(() => true),
+      new Promise<false>(resolveTimeout => {
+        timeout = setTimeout(() => resolveTimeout(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }
 

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { Page } from 'playwright';
 
 import {
+  closeBrowserContext,
   decodeInstitutionBrowserProgramResult,
   institutionBrowserLaunchStrategy,
   playwrightAuthStatePath,
@@ -179,5 +180,17 @@ describe('Playwright session helper', () => {
     await showAuthenticationChapter(page, 'Sign in and complete MFA.');
 
     expect(events).toEqual(['show:Sign in required', 'wait:2000', 'hide']);
+  });
+
+  test('does not hang when Chrome closes without settling context cleanup', async () => {
+    const context = {
+      close: () => new Promise<void>(() => {}),
+    };
+
+    const startedAt = performance.now();
+    const closed = await closeBrowserContext(context, 10);
+
+    expect(closed).toBe(false);
+    expect(performance.now() - startedAt).toBeLessThan(250);
   });
 });

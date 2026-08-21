@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { initDatabase } from '../server/database.ts';
+import { closeDatabase, initDatabase } from '../server/database.ts';
 import { loadLocalEnv } from '../server/app/localEnv.ts';
 import { runSync } from '../server/app/dataSync/runner.ts';
 import type { SyncEvent, SyncGoal, SyncRunRequest } from '../server/app/dataSync/types.ts';
@@ -42,9 +42,17 @@ const emit = (event: Omit<SyncEvent, 'runId' | 'timestamp'>) => {
   console.log(JSON.stringify({ ...event, runId, timestamp: new Date().toISOString() } satisfies SyncEvent));
 };
 
+let exitCode = 0;
 try {
   await runSync(request, emit);
 } catch (error) {
   emit({ type: 'error', message: error instanceof Error ? error.message : String(error) });
-  process.exitCode = 1;
+  exitCode = 1;
+} finally {
+  closeDatabase();
 }
+
+await new Promise<void>((resolveFlush, rejectFlush) => {
+  process.stdout.write('', error => error ? rejectFlush(error) : resolveFlush());
+});
+process.exit(exitCode);

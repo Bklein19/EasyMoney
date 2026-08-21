@@ -393,8 +393,13 @@ function buildBrowserProgram(
       const currentFilename = \`bofa-credit-card-current-to-\${plan.accounts.card.through}.csv\`;
       const existing = new Set(plan.accounts.card.existingActivity);
       const openPanel = async () => {
-        const period = page.locator("#select_transaction");
-        if (!await period.isVisible()) await page.locator("a[name=download_transactions_top]").click();
+        let period = page.locator("#select_transaction:visible").first();
+        if (!await period.isVisible()) {
+          const trigger = page.locator('a[name="download_transactions_top"]:visible').first();
+          await trigger.waitFor({ state: "visible" });
+          await trigger.click();
+          period = page.locator("#select_transaction:visible").first();
+        }
         await period.waitFor({ state: "visible" });
         return period;
       };
@@ -411,12 +416,17 @@ function buildBrowserProgram(
           skipped.push(job.filename);
           continue;
         }
+        reportProgress(\`Downloading Bank of America card activity: \${job.label}\`);
         const select = await openPanel();
         await select.selectOption({ label: job.label });
-        await page.locator("#select_filetype").selectOption({ label: "Microsoft Excel Format" });
+        await page.locator("#select_filetype:visible").first().selectOption({ label: "Microsoft Excel Format" });
         await saveFetchedDownload(job.filename, () => page.evaluate(async filename => {
-          const period = document.querySelector("#select_transaction");
-          const fileType = document.querySelector("#select_filetype");
+          const visible = element => {
+            const style = getComputedStyle(element);
+            return style.display !== "none" && style.visibility !== "hidden" && element.getClientRects().length > 0;
+          };
+          const period = [...document.querySelectorAll("#select_transaction")].find(visible);
+          const fileType = [...document.querySelectorAll("#select_filetype")].find(visible);
           if (!(period instanceof HTMLSelectElement) || !(fileType instanceof HTMLSelectElement))
             throw new Error("Credit-card download controls were not found");
           const target = period.value + fileType.value;
@@ -474,7 +484,7 @@ function buildBrowserProgram(
         reportProgress("Downloading Bank of America credit-card statements");
         await page.screencast.showChapter("Updating card statements", { description: "Downloading available statement PDFs." });
         await selectAccount("credit-card", "Customized Cash Rewards Visa Signature -|Credit Card -");
-        await page.locator("a[name=statements_and_documents]").click();
+        await page.locator('a[name="statements_and_documents"]:visible').first().click();
         await page.waitForFunction(() => document.title.includes("Statements"), null, { timeout: 15000 });
         await downloadStatements("credit-card", plan.accounts.card.from, plan.accounts.card.through, "Customized Cash Rewards|Credit Card", plan.accounts.card.skipStatementMonths);
       }
