@@ -26,6 +26,7 @@ type RunOptions = {
   authenticationTimeoutMs?: number;
   isAuthenticated?: (page: Page) => boolean | Promise<boolean>;
   waitUntilAuthenticated?: (page: Page, timeoutMs: number) => Promise<void>;
+  onProgress?: (message: string) => void;
   completionDescription: string;
   completionDurationMs?: number;
 };
@@ -248,7 +249,11 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
   options: RunOptions,
 ): Promise<InstitutionBrowserProgramResult<T>> {
   // Browser programs are repository-owned strings retained from the former CLI runner.
-  const program = Function(`"use strict"; return (${code});`)() as (browserPage: Page) => Promise<unknown>;
+  const program = Function(`"use strict"; return (${code});`)() as (
+    browserPage: Page,
+    reportProgress: (message: string) => void,
+  ) => Promise<unknown>;
+  const reportProgress = options.onProgress ?? (() => {});
   const hasSavedAuthentication = (session.persistAuthentication ?? true)
     ? await playwrightHasSavedAuthentication(session.name, session.profilePath)
     : false;
@@ -266,7 +271,7 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     },
   }, async page => {
     const deadline = Date.now() + (options.authenticationTimeoutMs ?? 10 * 60_000);
-    let result = decodeInstitutionBrowserProgramResult<T>(await program(page));
+    let result = decodeInstitutionBrowserProgramResult<T>(await program(page, reportProgress));
     if (result.status === 'login-required' && allowInteractiveAuthentication) {
       await showAuthenticationChapter(
         page,
@@ -276,7 +281,8 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     }
     while (allowInteractiveAuthentication && result.status === 'login-required' && Date.now() < deadline) {
       await waitForInteractiveAuthentication(page, deadline, options);
-      result = decodeInstitutionBrowserProgramResult<T>(await program(page));
+      reportProgress('Authentication complete. Continuing downloads.');
+      result = decodeInstitutionBrowserProgramResult<T>(await program(page, reportProgress));
     }
     if (allowInteractiveAuthentication && result.status === 'login-required') {
       throw new Error(`Authentication timed out in ${session.name}`);

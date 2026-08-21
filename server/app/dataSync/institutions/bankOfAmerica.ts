@@ -220,7 +220,7 @@ function buildBrowserProgram(
     },
   };
 
-  return `async page => {
+  return `async (page, reportProgress) => {
     const plan = ${JSON.stringify(plan)};
     const saved = [];
     const skipped = [];
@@ -445,6 +445,7 @@ function buildBrowserProgram(
       }
 
       if (!plan.scope || plan.scope === "checking") {
+        reportProgress("Downloading Bank of America checking activity and statements");
         await page.screencast.showChapter("Updating checking", { description: "Downloading activity and available statements." });
         await selectAccount("checking", "Adv Plus Banking -|Checking -");
         if (plan.accounts.checking.downloadActivity)
@@ -454,6 +455,7 @@ function buildBrowserProgram(
         await downloadStatements("checking", plan.accounts.checking.from, plan.accounts.checking.through, "Adv Plus Banking|Checking", plan.accounts.checking.skipStatementMonths);
       }
       if (!plan.scope || plan.scope === "savings") {
+        reportProgress("Downloading Bank of America savings activity and statements");
         await page.screencast.showChapter("Updating savings", { description: "Downloading activity and available statements." });
         await selectAccount("savings", "Advantage Savings -|Savings -");
         if (plan.accounts.savings.downloadActivity)
@@ -463,11 +465,13 @@ function buildBrowserProgram(
         await downloadStatements("savings", plan.accounts.savings.from, plan.accounts.savings.through, "Advantage Savings|Savings", plan.accounts.savings.skipStatementMonths);
       }
       if (!plan.scope || plan.scope === "card-activity") {
+        reportProgress("Downloading Bank of America credit-card activity");
         await page.screencast.showChapter("Updating card activity", { description: "Downloading available transaction periods." });
         await selectAccount("credit-card", "Customized Cash Rewards Visa Signature -|Credit Card -");
         await downloadCardActivity();
       }
       if (!plan.scope || plan.scope === "card-statements") {
+        reportProgress("Downloading Bank of America credit-card statements");
         await page.screencast.showChapter("Updating card statements", { description: "Downloading available statement PDFs." });
         await selectAccount("credit-card", "Customized Cash Rewards Visa Signature -|Credit Card -");
         await page.locator("a[name=statements_and_documents]").click();
@@ -482,7 +486,10 @@ function buildBrowserProgram(
   }`;
 }
 
-export async function runBankOfAmericaSync(config: BankOfAmericaSyncConfig): Promise<{
+export async function runBankOfAmericaSync(
+  config: BankOfAmericaSyncConfig,
+  onProgress: (message: string) => void = () => {},
+): Promise<{
   saved: string[];
   skipped: string[];
   artifacts: ValidArtifact[];
@@ -499,6 +506,7 @@ export async function runBankOfAmericaSync(config: BankOfAmericaSyncConfig): Pro
       completionDescription: "Bank of America downloads are complete.",
       isAuthenticated: isBankOfAmericaAuthenticatedPage,
       waitUntilAuthenticated: waitUntilBankOfAmericaAuthenticated,
+      onProgress,
     },
   );
   if (parsed.status === "login-required")

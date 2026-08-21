@@ -273,7 +273,9 @@ export async function runSync(request: SyncRunRequest, report: SyncReporter): Pr
     scope: null,
     dryRun: false,
   };
-  const downloaded = await runBankOfAmericaSync(config);
+  const downloaded = await runBankOfAmericaSync(config, message => {
+    report({ type: 'action', message });
+  });
   report({ type: 'phase', message: `Validated ${downloaded.saved.length} new artifact${downloaded.saved.length === 1 ? '' : 's'}` });
 
   const artifacts = downloaded.saved.map(fileName => {
