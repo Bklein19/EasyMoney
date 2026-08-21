@@ -16,6 +16,7 @@ const buildArgs = [
   './dist',
   '--target',
   'browser',
+  '--react-compiler',
 ];
 
 if (isProduction) buildArgs.push('--production');

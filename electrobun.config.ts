@@ -14,6 +14,7 @@ export default {
     views: {
       mainview: {
         entrypoint: 'src/main.tsx',
+        reactCompiler: true,
       },
     },
     copy: {
