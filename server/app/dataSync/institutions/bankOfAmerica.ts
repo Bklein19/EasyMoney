@@ -5,6 +5,7 @@ import { basename, join, resolve } from "node:path";
 import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 
 import { runInstitutionBrowserProgram } from "../browserSession.ts";
+import { parseCsvRows } from "../../importParsers/csvRows.ts";
 import type { Page } from "playwright";
 
 export type BankOfAmericaSyncConfig = {
@@ -155,6 +156,11 @@ async function validatedArtifacts(outputDir: string): Promise<ValidArtifact[]> {
     results.push(await validateArtifact(join(outputDir, filename)));
   }
   return results.sort((left, right) => left.filename.localeCompare(right.filename));
+}
+
+export function hasBankOfAmericaCreditCardActivity(text: string): boolean {
+  const rows = parseCsvRows(text);
+  return rows.slice(1).some(row => row.some(value => value.trim().length > 0));
 }
 
 function completedStatementMonths(
@@ -501,5 +507,17 @@ export async function runBankOfAmericaSync(config: BankOfAmericaSyncConfig): Pro
     throw new Error(parsed.message ?? "Bank of America automation did not complete.");
 
   const after = await validatedArtifacts(config.outputDir);
-  return { saved: parsed.saved ?? [], skipped: parsed.skipped ?? [], artifacts: after };
+  const saved: string[] = [];
+  const skipped = [...(parsed.skipped ?? [])];
+  for (const filename of parsed.saved ?? []) {
+    if (/^bofa-credit-card-.*\.csv$/i.test(filename)) {
+      const text = await readFile(join(config.outputDir, filename), "utf8");
+      if (!hasBankOfAmericaCreditCardActivity(text)) {
+        skipped.push(`${filename} (no activity)`);
+        continue;
+      }
+    }
+    saved.push(filename);
+  }
+  return { saved, skipped, artifacts: after };
 }

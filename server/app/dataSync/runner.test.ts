@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import type { Page } from 'playwright';
 
-import { isBankOfAmericaAuthenticatedPage, parseBankOfAmericaArgs } from './institutions/bankOfAmerica.ts';
+import {
+  hasBankOfAmericaCreditCardActivity,
+  isBankOfAmericaAuthenticatedPage,
+  parseBankOfAmericaArgs,
+} from './institutions/bankOfAmerica.ts';
 import type { VanguardSyncProfile } from './institutions/vanguard.ts';
 import {
   goalWindowForCoverage,
@@ -86,6 +90,12 @@ describe('data sync planning', () => {
     } as unknown as Page;
 
     expect(await isBankOfAmericaAuthenticatedPage(page)).toBe(true);
+  });
+
+  test('BofA treats a header-only credit card export as no new activity', () => {
+    const header = 'Posted Date,Reference Number,Payee,Address,Amount\r\n';
+    expect(hasBankOfAmericaCreditCardActivity(header)).toBe(false);
+    expect(hasBankOfAmericaCreditCardActivity(`${header}08/20/2026,1,EXAMPLE SHOP,,\"-12.34\"\r\n`)).toBe(true);
   });
 
   test('Vanguard current sync plans only missing completed statement months', () => {
