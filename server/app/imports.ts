@@ -73,7 +73,17 @@ export interface ImportHistoryItem {
   transactionCount: number;
   balanceCount: number;
   unresolvedSourceAccountCount: number;
+  sourceKind: ImportHistorySourceKind;
+  accounts: ImportHistoryAccount[];
 }
+
+export interface ImportHistoryAccount {
+  id: number | null;
+  name: string | null;
+  accountHolder: string | null;
+}
+
+export type ImportHistorySourceKind = 'statements' | 'activity' | 'balances' | 'other';
 
 interface MaterializeImportTransactionsOptions {
   accountId?: number | null;
@@ -145,8 +155,56 @@ function importFileHasSourceFacts(importFileId: number | null | undefined) {
   return row.count > 0;
 }
 
+function importHistorySourceKind(sourceType: string | null): ImportHistorySourceKind {
+  const normalized = sourceType?.trim().toLowerCase() || '';
+  if (normalized.includes('statement')) return 'statements';
+  if (
+    normalized.includes('activity') ||
+    normalized.includes('transaction') ||
+    normalized.includes('transfer')
+  ) return 'activity';
+  if (normalized.includes('balance')) return 'balances';
+  return 'other';
+}
+
+interface ImportHistoryRow extends Omit<ImportHistoryItem, 'sourceKind' | 'accounts'> {}
+
+interface ImportHistoryAccountRow {
+  importFileId: number;
+  sourceAccountId: number;
+  sourceAccountKey: string;
+  accountId: number | null;
+  accountName: string | null;
+  accountHolder: string | null;
+}
+
 export function listImportHistory(): ImportHistoryItem[] {
-  return getDb().prepare(`
+  const db = getDb();
+  const rows = db.prepare(`
+    WITH transactionCounts AS (
+      SELECT importFileId, COUNT(*) AS transactionCount
+      FROM ledgerTransactions
+      WHERE importFileId IS NOT NULL
+      GROUP BY importFileId
+    ),
+    balanceCounts AS (
+      SELECT sf.importFileId, COUNT(DISTINCT lb.id) AS balanceCount
+      FROM sourceFiles sf
+      JOIN sourceBalances sb ON sb.sourceFileId = sf.id
+      JOIN ledgerBalances lb ON lb.sourceBalanceId = sb.id
+      GROUP BY sf.importFileId
+    ),
+    unresolvedAccountCounts AS (
+      SELECT sf.importFileId, COUNT(*) AS unresolvedSourceAccountCount
+      FROM sourceFiles sf
+      JOIN sourceAccounts sa ON sa.sourceFileId = sf.id
+      WHERE sa.accountId IS NULL
+        AND (
+          EXISTS (SELECT 1 FROM sourceTransactions st WHERE st.sourceAccountId = sa.id)
+          OR EXISTS (SELECT 1 FROM sourceBalances sb WHERE sb.sourceAccountId = sa.id)
+        )
+      GROUP BY sf.importFileId
+    )
     SELECT
       ifs.id,
       ifs.fileName,
@@ -158,24 +216,58 @@ export function listImportHistory(): ImportHistoryItem[] {
       ifs.importBatchId,
       ifs.createdAt,
       ifs.committedAt,
-      COUNT(DISTINCT lt.id) AS transactionCount,
-      COUNT(DISTINCT lb.id) AS balanceCount,
-      COUNT(DISTINCT CASE
-        WHEN sa.accountId IS NULL AND (st.id IS NOT NULL OR sb.id IS NOT NULL) THEN sa.id
-        ELSE NULL
-      END) AS unresolvedSourceAccountCount
+      COALESCE(tc.transactionCount, 0) AS transactionCount,
+      COALESCE(bc.balanceCount, 0) AS balanceCount,
+      COALESCE(uac.unresolvedSourceAccountCount, 0) AS unresolvedSourceAccountCount
     FROM importFiles ifs
-    LEFT JOIN ledgerTransactions lt ON lt.importFileId = ifs.id
-    LEFT JOIN importRows irb ON irb.importFileId = ifs.id AND irb.rowType = 'balance'
-    LEFT JOIN sourceBalances sb ON sb.importRowId = irb.id
-    LEFT JOIN sourceFiles sf ON sf.importFileId = ifs.id
-    LEFT JOIN sourceAccounts sa ON sa.sourceFileId = sf.id
-    LEFT JOIN sourceTransactions st ON st.sourceAccountId = sa.id
-    LEFT JOIN ledgerBalances lb ON lb.sourceBalanceId = sb.id
+    LEFT JOIN transactionCounts tc ON tc.importFileId = ifs.id
+    LEFT JOIN balanceCounts bc ON bc.importFileId = ifs.id
+    LEFT JOIN unresolvedAccountCounts uac ON uac.importFileId = ifs.id
     WHERE ifs.status IN ('committed', 'unimported')
-    GROUP BY ifs.id
     ORDER BY COALESCE(ifs.committedAt, ifs.createdAt) DESC, ifs.id DESC
-  `).all() as ImportHistoryItem[];
+  `).all() as ImportHistoryRow[];
+
+  const accountRows = db.prepare(`
+    SELECT
+      sf.importFileId,
+      sa.id AS sourceAccountId,
+      sa.sourceAccountKey,
+      a.id AS accountId,
+      COALESCE(NULLIF(TRIM(a.name), ''), NULLIF(TRIM(sa.sourceAccountName), '')) AS accountName,
+      COALESCE(NULLIF(TRIM(a.accountHolder), ''), NULLIF(TRIM(sa.accountHolder), '')) AS accountHolder
+    FROM sourceFiles sf
+    JOIN importFiles ifs ON ifs.id = sf.importFileId
+    JOIN sourceAccounts sa ON sa.sourceFileId = sf.id
+    LEFT JOIN accounts a ON a.id = sa.accountId
+    WHERE ifs.status IN ('committed', 'unimported')
+    ORDER BY sf.importFileId, accountHolder, accountName, sa.id
+  `).all() as ImportHistoryAccountRow[];
+
+  const accountsByImport = new Map<number, ImportHistoryAccount[]>();
+  const accountKeysByImport = new Map<number, Set<string>>();
+  for (const row of accountRows) {
+    const key = row.accountId === null
+      ? `source:${row.sourceAccountId}:${row.sourceAccountKey}`
+      : `account:${row.accountId}`;
+    const seen = accountKeysByImport.get(row.importFileId) ?? new Set<string>();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    accountKeysByImport.set(row.importFileId, seen);
+
+    const accounts = accountsByImport.get(row.importFileId) ?? [];
+    accounts.push({
+      id: row.accountId,
+      name: row.accountName,
+      accountHolder: row.accountHolder,
+    });
+    accountsByImport.set(row.importFileId, accounts);
+  }
+
+  return rows.map(row => ({
+    ...row,
+    sourceKind: importHistorySourceKind(row.sourceType),
+    accounts: accountsByImport.get(row.id) ?? [],
+  }));
 }
 
 export function unimportFile(importFileId: number | string) {

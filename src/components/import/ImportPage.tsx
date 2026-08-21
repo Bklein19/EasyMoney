@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, RotateCcw, Search, Trash2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { AlertTriangle, ChevronRight, FileText, Folder, LoaderCircle, RotateCcw, Search, Trash2 } from 'lucide-react';
 import { useCSVImport, type ImportPreviewResult } from '../../hooks/useCSVImport';
 import { buildCustomProfile, mappingFromProfile } from '../../utils/csvMapping';
 import { useImportProfiles } from '../../hooks/useImportProfiles';
@@ -10,24 +10,16 @@ import ColumnMapper, { type CsvColumnMapping } from './ColumnMapper';
 import ImportPreview from './ImportPreview';
 import BankDetector from './BankDetector';
 import DataFreshnessPanel from './DataFreshnessPanel';
+import {
+  filterImportHistory,
+  groupImportHistory,
+  type ImportHistoryItem,
+  type ImportHistorySummary,
+} from './importHistoryTree';
 import './ImportPage.css';
 
 type ImportStage = 'upload' | 'mapping' | 'preview' | 'batch' | 'success';
 type BulkAction = 'unimport' | 'reimport' | null;
-
-interface ImportHistoryItem {
-  id: number;
-  fileName: string;
-  institution?: string | null;
-  parserName?: string | null;
-  sourceType?: string | null;
-  status?: string | null;
-  createdAt?: string | null;
-  committedAt?: string | null;
-  transactionCount?: number | null;
-  balanceCount?: number | null;
-  unresolvedSourceAccountCount?: number | null;
-}
 
 interface BatchState {
   status: 'running' | 'cancelled' | 'error';
@@ -73,6 +65,7 @@ interface BatchImportProgressProps {
 interface ImportHistoryProps {
   imports: ImportHistoryItem[];
   error: string;
+  loading: boolean;
   unimportingId: number | null;
   reimportingId: number | null;
   bulkAction: BulkAction;
@@ -128,6 +121,7 @@ export default function ImportPage() {
   const [batchState, setBatchState] = useState<BatchState | null>(null);
   const [importHistory, setImportHistory] = useState<ImportHistoryItem[]>([]);
   const [historyError, setHistoryError] = useState('');
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [unimportingId, setUnimportingId] = useState<number | null>(null);
   const [reimportingId, setReimportingId] = useState<number | null>(null);
   const [historyBulkAction, setHistoryBulkAction] = useState<BulkAction>(null);
@@ -147,11 +141,14 @@ export default function ImportPage() {
 
   const loadImportHistory = useCallback(async () => {
     setHistoryError('');
+    setHistoryLoading(true);
     try {
       const result = await trpcClient.imports.history.query();
       setImportHistory(result.imports || []);
     } catch (loadError) {
       setHistoryError(errorMessage(loadError, 'Could not load import history.'));
+    } finally {
+      setHistoryLoading(false);
     }
   }, []);
 
@@ -543,6 +540,7 @@ export default function ImportPage() {
           <ImportHistory
             imports={importHistory}
             error={historyError}
+            loading={historyLoading}
             unimportingId={unimportingId}
             reimportingId={reimportingId}
             bulkAction={historyBulkAction}
@@ -725,9 +723,77 @@ function BatchImportProgress({ state, message, onCancel, onReset }: BatchImportP
   );
 }
 
+interface ImportHistoryFolderProps {
+  id: string;
+  label: string;
+  summary: ImportHistorySummary;
+  depth: 0 | 1 | 2;
+  forceOpen: boolean;
+  renderChildren: () => ReactNode;
+}
+
+function formatFileCount(count: number) {
+  return `${count.toLocaleString()} ${count === 1 ? 'file' : 'files'}`;
+}
+
+function formatImportDate(value: string | null | undefined) {
+  return value ? new Date(value).toLocaleString() : '—';
+}
+
+function formatGroupStatus(summary: ImportHistorySummary) {
+  if (summary.importedCount === summary.fileCount) return 'Imported';
+  if (summary.unimportedCount === summary.fileCount) return 'Unimported';
+  return `${summary.importedCount.toLocaleString()} imported`;
+}
+
+function formatImportStatus(status: string | null) {
+  if (status === 'committed') return 'Imported';
+  if (status === 'unimported') return 'Unimported';
+  return status || 'Previewed';
+}
+
+function ImportHistoryFolder({
+  id,
+  label,
+  summary,
+  depth,
+  forceOpen,
+  renderChildren,
+}: ImportHistoryFolderProps) {
+  const [expanded, setExpanded] = useState(false);
+  const open = forceOpen || expanded;
+
+  return (
+    <details
+      className={`import-history__folder import-history__depth-${depth}`}
+      open={open}
+      onToggle={event => {
+        if (!forceOpen) setExpanded(event.currentTarget.open);
+      }}
+      data-folder-id={id}
+    >
+      <summary className="import-history__tree-row import-history__folder-row">
+        <span className="import-history__tree-name">
+          <ChevronRight className="import-history__chevron" size={16} aria-hidden="true" />
+          <Folder className="import-history__folder-icon" size={16} aria-hidden="true" />
+          <strong>{label}</strong>
+          <small>{formatFileCount(summary.fileCount)}</small>
+        </span>
+        <span className="import-history__group-status">{formatGroupStatus(summary)}</span>
+        <span className="num">{summary.transactionCount.toLocaleString()}</span>
+        <span className="num">{summary.balanceCount.toLocaleString()}</span>
+        <span className="import-history__date">{formatImportDate(summary.latestAt)}</span>
+        <span aria-hidden="true" />
+      </summary>
+      {open && <div className="import-history__folder-children">{renderChildren()}</div>}
+    </details>
+  );
+}
+
 function ImportHistory({
   imports,
   error,
+  loading,
   unimportingId,
   reimportingId,
   bulkAction,
@@ -737,19 +803,12 @@ function ImportHistory({
   onBulkReimport,
 }: ImportHistoryProps) {
   const [searchTerm, setSearchTerm] = useState('');
-  const normalizedSearch = searchTerm.trim().toLowerCase();
-  const filteredImports = useMemo(() => {
-    if (!normalizedSearch) return imports;
-    return imports.filter(item => [
-      item.fileName,
-      item.institution,
-      item.parserName,
-      item.sourceType,
-      item.status,
-      item.createdAt,
-      item.committedAt,
-    ].filter(Boolean).join(' ').toLowerCase().includes(normalizedSearch));
-  }, [imports, normalizedSearch]);
+  const normalizedSearch = searchTerm.trim();
+  const filteredImports = useMemo(
+    () => filterImportHistory(imports, normalizedSearch),
+    [imports, normalizedSearch],
+  );
+  const groups = useMemo(() => groupImportHistory(filteredImports), [filteredImports]);
   const committedImports = filteredImports.filter(item => item.status === 'committed');
   const reimportableImports = filteredImports.filter(item =>
     item.status === 'unimported' && item.unresolvedSourceAccountCount === 0
@@ -757,12 +816,9 @@ function ImportHistory({
   const hasSearch = normalizedSearch.length > 0;
 
   return (
-    <section className="import-history">
+    <section className="import-history" aria-busy={loading}>
       <div className="import-history__header">
-        <div>
-          <h3>Import History</h3>
-          <p>Remove a prior import if you need to test the file again.</p>
-        </div>
+        <h3>Import History</h3>
       </div>
 
       <div className="import-history__toolbar">
@@ -799,81 +855,110 @@ function ImportHistory({
 
       {error && <div className="import-history__error">{error}</div>}
 
-      {imports.length === 0 ? (
+      {loading && imports.length === 0 ? (
+        <div className="import-history__empty import-history__loading">
+          <LoaderCircle size={16} aria-hidden="true" />
+          Loading import history...
+        </div>
+      ) : imports.length === 0 ? (
         <div className="import-history__empty">No imports yet.</div>
       ) : filteredImports.length === 0 ? (
-        <div className="import-history__empty">No imports match {searchTerm}.</div>
+        <div className="import-history__empty">No imports match "{searchTerm}".</div>
       ) : (
-        <div className="import-history__table-wrap">
+        <div className="import-history__tree-wrap">
           {hasSearch && (
             <div className="import-history__result-count">
-              Showing {filteredImports.length} of {imports.length} imports
+              Showing {filteredImports.length.toLocaleString()} of {imports.length.toLocaleString()} files
             </div>
           )}
-          <table className="import-history__table">
-            <thead>
-              <tr>
-                <th>File</th>
-                <th>Source</th>
-                <th>Status</th>
-                <th className="num">Transactions</th>
-                <th className="num">Balances</th>
-                <th>Imported</th>
-                <th aria-label="Actions" />
-              </tr>
-            </thead>
-            <tbody>
-              {filteredImports.map(item => {
-                const committed = item.status === 'committed';
-                const unimported = item.status === 'unimported';
-                const unresolvedSourceAccountCount = item.unresolvedSourceAccountCount ?? 0;
-                const date = item.committedAt || item.createdAt;
-                return (
-                  <tr className="import-history__row" key={item.id}>
-                    <td className="import-history__file">
-                      <strong title={item.fileName}>{item.fileName}</strong>
-                    </td>
-                    <td className="import-history__source">
-                      <span>{item.institution || item.parserName || 'Unknown format'}</span>
-                      {item.sourceType && <small>{item.sourceType}</small>}
-                    </td>
-                    <td>
-                      <span className={`import-history__status ${committed ? 'committed' : ''}`}>
-                        {item.status || 'previewed'}
-                      </span>
-                    </td>
-                    <td className="num">{item.transactionCount || 0}</td>
-                    <td className="num">{item.balanceCount || 0}</td>
-                    <td className="import-history__date">{date ? new Date(date).toLocaleString() : '—'}</td>
-                    <td className="import-history__actions">
-                      {committed && (
-                        <button
-                          type="button"
-                          className="icon-btn delete-btn"
-                          title="Unimport file"
-                          onClick={() => onUnimport(item)}
-                          disabled={bulkAction !== null || unimportingId === item.id}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      )}
-                      {unimported && (
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          title={unresolvedSourceAccountCount > 0 ? 'Resolve source accounts before reimporting' : 'Reimport file'}
-                          onClick={() => onReimport(item)}
-                          disabled={bulkAction !== null || reimportingId === item.id || unresolvedSourceAccountCount > 0}
-                        >
-                          <RotateCcw size={16} />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="import-history__tree">
+            <div className="import-history__tree-row import-history__tree-header" aria-hidden="true">
+              <span>Owner / account / file</span>
+              <span>Status</span>
+              <span className="num">Transactions</span>
+              <span className="num">Balances</span>
+              <span>Imported</span>
+              <span />
+            </div>
+            {groups.map(holder => (
+              <ImportHistoryFolder
+                key={holder.id}
+                id={holder.id}
+                label={holder.label}
+                summary={holder.summary}
+                depth={0}
+                forceOpen={hasSearch}
+                renderChildren={() => holder.accounts.map(account => (
+                  <ImportHistoryFolder
+                    key={account.id}
+                    id={account.id}
+                    label={account.label}
+                    summary={account.summary}
+                    depth={1}
+                    forceOpen={hasSearch}
+                    renderChildren={() => account.sources.map(source => (
+                      <ImportHistoryFolder
+                        key={source.id}
+                        id={source.id}
+                        label={source.label}
+                        summary={source.summary}
+                        depth={2}
+                        forceOpen={hasSearch}
+                        renderChildren={() => source.imports.map(item => {
+                          const committed = item.status === 'committed';
+                          const unimported = item.status === 'unimported';
+                          const date = item.committedAt || item.createdAt;
+                          return (
+                            <div className="import-history__tree-row import-history__file-row" key={item.id}>
+                              <span className="import-history__tree-name import-history__file">
+                                <FileText size={15} aria-hidden="true" />
+                                <span>
+                                  <strong title={item.fileName}>{item.fileName}</strong>
+                                  <small>{item.institution || 'Unknown source'}</small>
+                                </span>
+                              </span>
+                              <span>
+                                <span className={`import-history__status ${committed ? 'committed' : ''}`}>
+                                  {formatImportStatus(item.status)}
+                                </span>
+                              </span>
+                              <span className="num">{(item.transactionCount || 0).toLocaleString()}</span>
+                              <span className="num">{(item.balanceCount || 0).toLocaleString()}</span>
+                              <span className="import-history__date">{formatImportDate(date)}</span>
+                              <span className="import-history__actions">
+                                {committed && (
+                                  <button
+                                    type="button"
+                                    className="icon-btn delete-btn"
+                                    title="Unimport file"
+                                    onClick={() => onUnimport(item)}
+                                    disabled={bulkAction !== null || unimportingId === item.id}
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                )}
+                                {unimported && (
+                                  <button
+                                    type="button"
+                                    className="icon-btn"
+                                    title={item.unresolvedSourceAccountCount > 0 ? 'Resolve source accounts before reimporting' : 'Reimport file'}
+                                    onClick={() => onReimport(item)}
+                                    disabled={bulkAction !== null || reimportingId === item.id || item.unresolvedSourceAccountCount > 0}
+                                  >
+                                    <RotateCcw size={16} />
+                                  </button>
+                                )}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      />
+                    ))}
+                  />
+                ))}
+              />
+            ))}
+          </div>
         </div>
       )}
     </section>

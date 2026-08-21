@@ -2991,6 +2991,7 @@ test('app import history lists committed files and can unimport one', async () =
     institution: 'Chase',
     type: 'credit',
     currentBalance: 100,
+    accountHolder: 'Example Owner',
   });
   const preview = await postImportPreview('chase-credit-card-demo.csv', csv);
 
@@ -3019,6 +3020,12 @@ test('app import history lists committed files and can unimport one', async () =
       fileName: string;
       status: string;
       transactionCount: number;
+      sourceKind: string;
+      accounts: Array<{
+        id: number | null;
+        name: string | null;
+        accountHolder: string | null;
+      }>;
     }>;
   };
   expect(history.imports[0]).toMatchObject({
@@ -3026,6 +3033,12 @@ test('app import history lists committed files and can unimport one', async () =
     fileName: 'chase-credit-card-demo.csv',
     status: 'committed',
     transactionCount: 10,
+    sourceKind: 'activity',
+    accounts: [{
+      id: accountId,
+      name: 'Chase Sapphire',
+      accountHolder: 'Example Owner',
+    }],
   });
 
   await caller.imports.unimport({ importFileId: preview.importFileId });
@@ -3052,6 +3065,66 @@ test('app import history lists committed files and can unimport one', async () =
   expect(getDb().prepare('SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId = ?').get(annotatedTransaction.ledgerTransactionId)).toMatchObject({
     notes: 'keep this user note',
   });
+});
+
+test('app import history returns each consolidated file once with deduplicated account metadata', async () => {
+  const csv = fs.readFileSync(path.resolve(import.meta.dir, '..', '..', 'sample-imports', 'chase-credit-card-demo.csv'), 'utf8');
+  const primaryAccountId = insertRow('accounts', {
+    name: 'Primary Card',
+    institution: 'Chase',
+    type: 'credit',
+    currentBalance: 100,
+    accountHolder: 'Example Owner',
+  });
+  const secondaryAccountId = insertRow('accounts', {
+    name: 'Household Card',
+    institution: 'Chase',
+    type: 'credit',
+    currentBalance: 50,
+    accountHolder: 'Another Owner',
+  });
+  const preview = await postImportPreview('consolidated-cards.csv', csv);
+
+  await commitImportForTest({
+    accountId: primaryAccountId,
+    importFileId: preview.importFileId,
+    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+  });
+
+  const sourceFile = getDb().prepare('SELECT id FROM sourceFiles WHERE importFileId = ?').get(preview.importFileId) as {
+    id: number;
+  };
+  insertRow('sourceAccounts', {
+    sourceFileId: sourceFile.id,
+    accountId: primaryAccountId,
+    institution: 'Chase',
+    sourceAccountKey: 'primary-alias',
+    sourceAccountName: 'Primary Card Alias',
+    accountHolder: 'Parsed Owner',
+  });
+  insertRow('sourceAccounts', {
+    sourceFileId: sourceFile.id,
+    accountId: secondaryAccountId,
+    institution: 'Chase',
+    sourceAccountKey: 'secondary',
+    sourceAccountName: 'Household Card',
+    accountHolder: 'Another Owner',
+  });
+
+  const history = await caller.imports.history();
+  expect(history.imports).toHaveLength(1);
+  expect(history.imports[0]?.accounts).toEqual([
+    {
+      id: secondaryAccountId,
+      name: 'Household Card',
+      accountHolder: 'Another Owner',
+    },
+    {
+      id: primaryAccountId,
+      name: 'Primary Card',
+      accountHolder: 'Example Owner',
+    },
+  ]);
 });
 
 test('app data freshness reports latest source fact dates by account', async () => {
