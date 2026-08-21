@@ -41,6 +41,20 @@ export async function isBankOfAmericaAuthenticatedPage(page: Page): Promise<bool
   return await page.locator('input[type="password"]:visible').count() === 0;
 }
 
+export async function waitUntilBankOfAmericaAuthenticated(page: Page, timeoutMs: number): Promise<void> {
+  await page.waitForFunction(() => {
+    const passwordField = document.querySelector('input[type="password"]');
+    const passwordFieldIsVisible = passwordField
+      ? getComputedStyle(passwordField).display !== 'none' &&
+        getComputedStyle(passwordField).visibility !== 'hidden' &&
+        passwordField.getClientRects().length > 0
+      : false;
+    return location.hostname === 'secure.bankofamerica.com' &&
+      /Accounts Overview/i.test(document.title) &&
+      !passwordFieldIsVisible;
+  }, undefined, { timeout: timeoutMs });
+}
+
 export function parseBankOfAmericaArgs(args: string[]): BankOfAmericaSyncConfig {
   const today = new Date().toISOString().slice(0, 10);
   const config: BankOfAmericaSyncConfig = {
@@ -478,6 +492,7 @@ export async function runBankOfAmericaSync(config: BankOfAmericaSyncConfig): Pro
     {
       completionDescription: "Bank of America downloads are complete.",
       isAuthenticated: isBankOfAmericaAuthenticatedPage,
+      waitUntilAuthenticated: waitUntilBankOfAmericaAuthenticated,
     },
   );
   if (parsed.status === "login-required")

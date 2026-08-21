@@ -25,6 +25,7 @@ type SessionOptions = {
 type RunOptions = {
   authenticationTimeoutMs?: number;
   isAuthenticated?: (page: Page) => boolean | Promise<boolean>;
+  waitUntilAuthenticated?: (page: Page, timeoutMs: number) => Promise<void>;
   completionDescription: string;
   completionDurationMs?: number;
 };
@@ -168,37 +169,54 @@ export function decodeInstitutionBrowserProgramResult<T extends Record<string, u
   return decoded as InstitutionBrowserProgramResult<T>;
 }
 
+const authenticationFieldSelector = [
+  'input[type="password"]',
+  'input[autocomplete="username"]',
+  'input[autocomplete="current-password"]',
+].join(',');
+
+async function hasDefaultAuthentication(page: Page): Promise<boolean> {
+  return !/(?:login|logon|sign[-_]?in|authenticate|authorization|oauth|sso|auth\.)/i.test(page.url()) &&
+    await page.locator(authenticationFieldSelector).count() === 0;
+}
+
+async function waitUntilDefaultAuthentication(page: Page, timeoutMs: number): Promise<void> {
+  await page.waitForFunction((selector: string) => {
+    const loginLikeUrl = /(?:login|logon|sign[-_]?in|authenticate|authorization|oauth|sso|auth\.)/i.test(location.href);
+    const hasVisibleAuthenticationField = Array.from(document.querySelectorAll(selector)).some(element => {
+      const style = getComputedStyle(element);
+      return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
+    });
+    return !loginLikeUrl && !hasVisibleAuthenticationField;
+  }, authenticationFieldSelector, { timeout: timeoutMs });
+}
+
 export async function waitForInteractiveAuthentication(
   page: Page,
   deadline: number,
-  isAuthenticated?: (page: Page) => boolean | Promise<boolean>,
+  options: Pick<RunOptions, 'isAuthenticated' | 'waitUntilAuthenticated'> = {},
 ): Promise<void> {
-  let authenticatedSince: number | null = null;
-  while (Date.now() < deadline) {
-    if (page.isClosed()) throw new Error('The browser was closed before authentication completed');
-    const authenticated = isAuthenticated
-      ? await isAuthenticated(page)
-      : !/(?:login|logon|sign[-_]?in|authenticate|authorization|oauth|sso|auth\.)/i.test(page.url()) &&
-        await page.locator([
-          'input[type="password"]',
-          'input[autocomplete="username"]',
-          'input[autocomplete="current-password"]',
-        ].join(',')).count() === 0;
+  const isAuthenticated = options.isAuthenticated ?? hasDefaultAuthentication;
+  const waitUntilAuthenticated = options.waitUntilAuthenticated ?? waitUntilDefaultAuthentication;
 
-    if (authenticated) {
-      authenticatedSince ??= Date.now();
-      if (Date.now() - authenticatedSince >= 1_500) return;
-    } else {
-      authenticatedSince = null;
-    }
-    try {
-      await page.waitForTimeout(500);
-    } catch (error) {
-      if (isClosedContextError(error)) throw new Error('The browser was closed before authentication completed');
-      throw error;
-    }
+  if (page.isClosed()) throw new Error('The browser was closed before authentication completed');
+  if (await isAuthenticated(page)) return;
+
+  const timeoutMs = deadline - Date.now();
+  if (timeoutMs <= 0) throw new Error('Authentication timed out');
+
+  try {
+    await waitUntilAuthenticated(page, timeoutMs);
+  } catch (error) {
+    if (isClosedContextError(error)) throw new Error('The browser was closed before authentication completed');
+    if (error instanceof Error && error.name === 'TimeoutError') throw new Error('Authentication timed out');
+    throw error;
   }
-  throw new Error('Authentication timed out');
+
+  if (page.isClosed()) throw new Error('The browser was closed before authentication completed');
+  if (!await isAuthenticated(page)) {
+    throw new Error('Authentication state changed without completing sign-in');
+  }
 }
 
 function isClosedContextError(error: unknown): boolean {
@@ -257,7 +275,7 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
       console.log(`Authentication required in ${session.name}. Complete login and MFA in the open browser.`);
     }
     while (allowInteractiveAuthentication && result.status === 'login-required' && Date.now() < deadline) {
-      await waitForInteractiveAuthentication(page, deadline, options.isAuthenticated);
+      await waitForInteractiveAuthentication(page, deadline, options);
       result = decodeInstitutionBrowserProgramResult<T>(await program(page));
     }
     if (allowInteractiveAuthentication && result.status === 'login-required') {

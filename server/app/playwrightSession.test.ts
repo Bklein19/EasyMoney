@@ -93,43 +93,53 @@ describe('Playwright session helper', () => {
 
   test('waits on the existing login page instead of refreshing it', async () => {
     let url = 'https://auth.tiaa.org/login';
-    let waits = 0;
+    const authenticationChanged = Promise.withResolvers<void>();
     const page = {
       isClosed: () => false,
       url: () => url,
       locator: () => ({ count: async () => url.includes('/login') ? 1 : 0 }),
-      waitForTimeout: async () => {
-        waits += 1;
-        if (waits === 2) url = 'https://my.tiaa.org/private/participant/home';
-        await Bun.sleep(500);
-      },
+      waitForFunction: async () => authenticationChanged.promise,
     } as unknown as Page;
 
-    await waitForInteractiveAuthentication(page, Date.now() + 5_000);
-    expect(waits).toBeGreaterThanOrEqual(4);
+    const waiting = waitForInteractiveAuthentication(page, Date.now() + 5_000);
+    let completed = false;
+    void waiting.then(() => { completed = true; }, () => { completed = true; });
+    await Promise.resolve();
+    expect(completed).toBe(false);
+    url = 'https://my.tiaa.org/private/participant/home';
+    authenticationChanged.resolve();
+    await waiting;
+
     expect(url).toContain('/private/participant/home');
   });
 
   test('supports institution authentication on a URL that still looks like a login page', async () => {
-    let waits = 0;
+    let title = 'Bank of America | Online Banking | Sign In';
+    const authenticationChanged = Promise.withResolvers<void>();
     const page = {
       isClosed: () => false,
       url: () => 'https://secure.bankofamerica.com/myaccounts/signin/signIn.go',
-      title: async () => 'Bank of America | Online Banking | Accounts Overview',
+      title: async () => title,
       locator: () => ({ count: async () => 0 }),
-      waitForTimeout: async () => {
-        waits += 1;
-        await Bun.sleep(500);
-      },
     } as unknown as Page;
 
-    await waitForInteractiveAuthentication(
+    const waiting = waitForInteractiveAuthentication(
       page,
       Date.now() + 5_000,
-      async currentPage => (await currentPage.title()).includes('Accounts Overview'),
+      {
+        isAuthenticated: async currentPage => (await currentPage.title()).includes('Accounts Overview'),
+        waitUntilAuthenticated: async () => authenticationChanged.promise,
+      },
     );
+    let completed = false;
+    void waiting.then(() => { completed = true; }, () => { completed = true; });
+    await Promise.resolve();
+    expect(completed).toBe(false);
+    title = 'Bank of America | Online Banking | Accounts Overview';
+    authenticationChanged.resolve();
+    await waiting;
 
-    expect(waits).toBeGreaterThanOrEqual(3);
+    expect(title).toContain('Accounts Overview');
   });
 
   test('decodes the typed institution browser status contract', () => {

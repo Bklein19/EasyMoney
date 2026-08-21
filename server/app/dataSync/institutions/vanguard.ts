@@ -28,6 +28,24 @@ export async function isVanguardAuthenticatedPage(page: Page): Promise<boolean> 
   return await page.getByRole('link', { name: /^Log off$/i }).count() > 0;
 }
 
+export async function waitUntilVanguardAuthenticated(page: Page, timeoutMs: number): Promise<void> {
+  await page.waitForFunction((authenticatedPathPattern: string) => {
+    const isVisible = (element: Element) => {
+      const style = getComputedStyle(element);
+      return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
+    };
+    const hasAuthenticationFields = Array.from(document.querySelectorAll(
+      'input[type="password"], input[autocomplete="username"]'
+    )).some(isVisible);
+    if (hasAuthenticationFields) return false;
+    if (new RegExp(authenticatedPathPattern, 'i').test(location.pathname)) return true;
+    if (!/(?:^|\.)vanguard\.com$/i.test(location.hostname)) return false;
+    return Array.from(document.querySelectorAll('a')).some(link =>
+      /^Log off$/i.test(link.textContent?.trim() ?? '') && isVisible(link)
+    );
+  }, AUTHENTICATED_PATH_PATTERN, { timeout: timeoutMs });
+}
+
 export function vanguardThroughDate(requestedThrough: string, value = new Date()) {
   const year = value.getFullYear();
   const month = String(value.getMonth() + 1).padStart(2, '0');
@@ -362,6 +380,7 @@ async function runProfile(config: VanguardSyncConfig, profile: VanguardSyncProfi
       {
         completionDescription: `Vanguard ${profile.id} downloads are complete.`,
         isAuthenticated: isVanguardAuthenticatedPage,
+        waitUntilAuthenticated: waitUntilVanguardAuthenticated,
       },
     );
   } catch (error) {
