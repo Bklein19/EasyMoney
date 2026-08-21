@@ -1,4 +1,4 @@
-import { hashContent } from '../database.ts';
+import { hashContent } from '../hash.ts';
 
 interface TransactionIdentityInput {
   id?: number | string | null;

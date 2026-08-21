@@ -1,4 +1,5 @@
-import { getDb, hashContent } from '../database.ts';
+import { getDb } from '../database.ts';
+import { hashContent } from '../hash.ts';
 import {
   assignLedgerTransactionIdentities,
   getLedgerTransactionBaseKey,

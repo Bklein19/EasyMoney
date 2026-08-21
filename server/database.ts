@@ -1126,5 +1126,3 @@ export function getDb() {
 export function closeDatabase() {
   db.close();
 }
-
-export { hashContent } from './hash.ts';
