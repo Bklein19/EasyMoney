@@ -1,15 +1,13 @@
-import { afterAll, beforeEach, expect, test } from 'bun:test';
-import { createTRPCClient, httpBatchLink } from '@trpc/client';
+import { beforeEach, expect, test } from 'bun:test';
 import { Buffer } from 'node:buffer';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { AppRouter } from './router.ts';
 
 process.env.EASYMONEY_DB_PATH = path.join(os.tmpdir(), `easymoney-app-api-${process.pid}.sqlite`);
 process.env.EASYMONEY_SYNC_ROOT = path.join(os.tmpdir(), `easymoney-sync-runs-${process.pid}`);
 
-const { createServer } = await import('../index.ts');
+const { appRouter } = await import('./router.ts');
 const { getDb, initDatabase, insertRow } = await import('../database.ts');
 const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
 const { stageSyncArtifact } = await import('./dataSync/review.ts');
@@ -19,15 +17,7 @@ const {
   shouldTreatInvestmentCategoryAsTransfer,
   shouldReviewInvestmentAccountTransferDecision,
 } = await import('./aiCategorization.ts');
-const server = createServer({ port: 0 });
-const TEST_URL = `http://localhost:${server.port}`;
-const trpcClient = createTRPCClient<AppRouter>({
-  links: [httpBatchLink({ url: `${TEST_URL}/api/trpc` })],
-});
-
-afterAll(() => {
-  server.stop();
-});
+const caller = appRouter.createCaller({});
 
 function resetAppTables() {
   const db = getDb();
@@ -63,7 +53,7 @@ function resetAppTables() {
 async function postImportPreview(fileName: string, text: string, profile: unknown = null): Promise<any> {
   const fileBytes = new TextEncoder().encode(text);
   const fileBase64 = Buffer.from(fileBytes).toString('base64');
-  return trpcClient.imports.preview.mutate({
+  return caller.imports.preview({
     fileName,
     text,
     fileBase64,
@@ -79,17 +69,17 @@ async function updateTransactionForTest(
   return { ok: true };
 }
 
-const listAccountsForTest = (input?: { includeArchived?: boolean }): Promise<any> => trpcClient.accounts.list.query(input);
-const listCategoriesForTest = (): Promise<any> => trpcClient.categories.list.query();
-const listTransactionsForTest = (input?: Parameters<typeof trpcClient.transactions.list.query>[0]): Promise<any> =>
-  trpcClient.transactions.list.query(input);
-const netWorthReportForTest = (): Promise<any> => trpcClient.reports.netWorth.query();
-const savingsRateReportForTest = (): Promise<any> => trpcClient.reports.savingsRate.query();
-const listImportHistoryForTest = (): Promise<any> => trpcClient.imports.history.query();
-const dataFreshnessForTest = (today?: string): Promise<any> => trpcClient.dataFreshness.report.query(today ? { today } : undefined);
-const dataCatchUpForTest = (today?: string): Promise<any> => trpcClient.dataFreshness.catchUp.query(today ? { today } : undefined);
-const commitImportForTest = (input: Parameters<typeof trpcClient.imports.commit.mutate>[0]): Promise<any> =>
-  trpcClient.imports.commit.mutate(input);
+const listAccountsForTest = (input?: { includeArchived?: boolean }): Promise<any> => caller.accounts.list(input);
+const listCategoriesForTest = (): Promise<any> => caller.categories.list();
+const listTransactionsForTest = (input?: Parameters<typeof caller.transactions.list>[0]): Promise<any> =>
+  caller.transactions.list(input);
+const netWorthReportForTest = (): Promise<any> => caller.reports.netWorth();
+const savingsRateReportForTest = (): Promise<any> => caller.reports.savingsRate();
+const listImportHistoryForTest = (): Promise<any> => caller.imports.history();
+const dataFreshnessForTest = (today?: string): Promise<any> => caller.dataFreshness.report(today ? { today } : undefined);
+const dataCatchUpForTest = (today?: string): Promise<any> => caller.dataFreshness.catchUp(today ? { today } : undefined);
+const commitImportForTest = (input: Parameters<typeof caller.imports.commit>[0]): Promise<any> =>
+  caller.imports.commit(input);
 
 function csvFromRows(rows: string[]) {
   return [
@@ -452,7 +442,7 @@ test('app accounts endpoint updates account owner metadata', async () => {
     currentBalance: 0,
   }));
 
-  await trpcClient.accounts.updateMetadata.mutate({ id: accountId, changes: { accountHolder: 'Example Owner' } });
+  await caller.accounts.updateMetadata({ id: accountId, changes: { accountHolder: 'Example Owner' } });
   expect(await listAccountsForTest()).toMatchObject({
     accounts: [expect.objectContaining({
       id: accountId,
@@ -460,7 +450,7 @@ test('app accounts endpoint updates account owner metadata', async () => {
     })],
   });
 
-  await trpcClient.accounts.updateMetadata.mutate({ id: accountId, changes: { accountHolder: '' } });
+  await caller.accounts.updateMetadata({ id: accountId, changes: { accountHolder: '' } });
   expect(await listAccountsForTest()).toMatchObject({
     accounts: [expect.objectContaining({
       id: accountId,
@@ -477,32 +467,32 @@ test('trpc accounts mutations update metadata and archive state', async () => {
     currentBalance: 0,
   }));
 
-  await trpcClient.accounts.updateMetadata.mutate({
+  await caller.accounts.updateMetadata({
     id: accountId,
     changes: { name: 'TRPC Cash', accountHolder: 'M' },
   });
-  expect(await trpcClient.accounts.list.query()).toMatchObject({
+  expect(await caller.accounts.list()).toMatchObject({
     accounts: [expect.objectContaining({ id: accountId, name: 'TRPC Cash', accountHolder: 'M' })],
   });
 
-  await trpcClient.accounts.archive.mutate({ id: accountId });
-  expect(await trpcClient.accounts.list.query()).toMatchObject({ accounts: [] });
-  expect(await trpcClient.accounts.list.query({ includeArchived: true })).toMatchObject({
+  await caller.accounts.archive({ id: accountId });
+  expect(await caller.accounts.list()).toMatchObject({ accounts: [] });
+  expect(await caller.accounts.list({ includeArchived: true })).toMatchObject({
     accounts: [expect.objectContaining({ id: accountId, status: 'archived' })],
   });
 
-  await trpcClient.accounts.unarchive.mutate({ id: accountId });
-  expect(await trpcClient.accounts.list.query()).toMatchObject({
+  await caller.accounts.unarchive({ id: accountId });
+  expect(await caller.accounts.list()).toMatchObject({
     accounts: [expect.objectContaining({ id: accountId, status: 'active' })],
   });
 
-  await trpcClient.accounts.markClosed.mutate({ id: accountId });
-  expect(await trpcClient.accounts.list.query()).toMatchObject({
+  await caller.accounts.markClosed({ id: accountId });
+  expect(await caller.accounts.list()).toMatchObject({
     accounts: [expect.objectContaining({ id: accountId, status: 'closed', isClosed: true })],
   });
 
-  await trpcClient.accounts.unarchive.mutate({ id: accountId });
-  expect(await trpcClient.accounts.list.query()).toMatchObject({
+  await caller.accounts.unarchive({ id: accountId });
+  expect(await caller.accounts.list()).toMatchObject({
     accounts: [expect.objectContaining({ id: accountId, status: 'active' })],
   });
 });
@@ -563,7 +553,7 @@ test('app account archive hides defaults without deleting source links or annota
     updatedAt: new Date().toISOString(),
   });
 
-  await trpcClient.accounts.archive.mutate({ id: accountId });
+  await caller.accounts.archive({ id: accountId });
 
   expect(await listAccountsForTest()).toEqual({ accounts: [] });
   const withArchived = await listAccountsForTest({ includeArchived: true }) as { accounts: Array<{ id: number; status: string; archivedAt: string | null }> };
@@ -575,11 +565,11 @@ test('app account archive hides defaults without deleting source links or annota
     notes: 'keep archived note',
   });
 
-  await trpcClient.accounts.unarchive.mutate({ id: accountId });
+  await caller.accounts.unarchive({ id: accountId });
   expect(await listAccountsForTest()).toMatchObject({
     accounts: [expect.objectContaining({ id: accountId, status: 'active', archivedAt: null })],
   });
-  await trpcClient.accounts.updateMetadata.mutate({ id: accountId, changes: { name: 'Archive Restored' } });
+  await caller.accounts.updateMetadata({ id: accountId, changes: { name: 'Archive Restored' } });
   expect(await listAccountsForTest()).toMatchObject({
     accounts: [expect.objectContaining({ name: 'Archive Restored' })],
   });
@@ -631,21 +621,21 @@ test('category delete reassigns annotations to Uncategorized and protects Uncate
   });
   await updateTransactionForTest(transactionId, { categoryId: groceriesId });
 
-  await trpcClient.categories.delete.mutate({ id: groceriesId });
+  await caller.categories.delete({ id: groceriesId });
 
   expect(getDb().prepare('SELECT id FROM categories WHERE id = ?').get(groceriesId)).toBeNull();
   expect(getDb().prepare('SELECT categoryId FROM transactionAnnotations').get()).toEqual({
     categoryId: uncategorizedId,
   });
 
-  await expect(trpcClient.categories.delete.mutate({ id: uncategorizedId })).rejects.toThrow('Uncategorized cannot be deleted.');
+  await expect(caller.categories.delete({ id: uncategorizedId })).rejects.toThrow('Uncategorized cannot be deleted.');
   expect(getDb().prepare('SELECT id FROM categories WHERE id = ?').get(uncategorizedId)).toEqual({
     id: uncategorizedId,
   });
 });
 
 test('trpc categories and categorization rules expose typed crud', async () => {
-  const created = await trpcClient.categories.create.mutate({
+  const created = await caller.categories.create({
     name: 'TRPC Category',
     type: 'expense',
     categoryGroup: 'variable',
@@ -653,12 +643,12 @@ test('trpc categories and categorization rules expose typed crud', async () => {
     color: '#123456',
     icon: 'tag',
   });
-  await trpcClient.categories.update.mutate({
+  await caller.categories.update({
     id: created.id,
     name: 'TRPC Category Updated',
     description: 'Updated through tRPC',
   });
-  expect(await trpcClient.categories.list.query()).toMatchObject({
+  expect(await caller.categories.list()).toMatchObject({
     categories: [expect.objectContaining({
       id: created.id,
       name: 'TRPC Category Updated',
@@ -666,21 +656,21 @@ test('trpc categories and categorization rules expose typed crud', async () => {
     })],
   });
 
-  const rule = await trpcClient.categorizationRules.create.mutate({
+  const rule = await caller.categorizationRules.create({
     categoryId: created.id,
     pattern: 'trpc-rule',
     matchType: 'contains',
     priority: 42,
   });
-  await trpcClient.categorizationRules.update.mutate({ id: rule.id, priority: 84 });
-  expect(await trpcClient.categorizationRules.list.query()).toEqual([
+  await caller.categorizationRules.update({ id: rule.id, priority: 84 });
+  expect(await caller.categorizationRules.list()).toEqual([
     expect.objectContaining({ id: rule.id, categoryId: created.id, pattern: 'trpc-rule', priority: 84 }),
   ]);
-  await trpcClient.categorizationRules.delete.mutate({ id: rule.id });
-  expect(await trpcClient.categorizationRules.list.query()).toEqual([]);
+  await caller.categorizationRules.delete({ id: rule.id });
+  expect(await caller.categorizationRules.list()).toEqual([]);
 
-  await trpcClient.categories.delete.mutate({ id: created.id });
-  expect((await trpcClient.categories.list.query()).categories).toEqual([]);
+  await caller.categories.delete({ id: created.id });
+  expect((await caller.categories.list()).categories).toEqual([]);
 });
 
 test('trpc category delete reassigns annotations to Uncategorized', async () => {
@@ -703,7 +693,7 @@ test('trpc category delete reassigns annotations to Uncategorized', async () => 
     categoryId: diningId,
   });
 
-  await trpcClient.categories.delete.mutate({ id: diningId });
+  await caller.categories.delete({ id: diningId });
   expect(getDb().prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId = ?').get('trpc-category-delete')).toMatchObject({
     categoryId: uncategorizedId,
   });
@@ -972,7 +962,7 @@ test('trpc analytics report aggregates backend-owned cashflow semantics', async 
     type: 'expense',
   });
 
-  const report = await trpcClient.analytics.report.query({
+  const report = await caller.analytics.report({
     startDate: '2026-06-01',
     endDate: '2026-06-30',
     groupMode: 'Monthly',
@@ -1007,7 +997,7 @@ test('trpc analytics report aggregates backend-owned cashflow semantics', async 
     expect.objectContaining({ key: '2026-06', amount: 400 }),
   ]);
 
-  const diningOnly = await trpcClient.analytics.report.query({
+  const diningOnly = await caller.analytics.report({
     categoryFilterIds: [diningId],
     categoryFilterMode: 'include',
   });
@@ -1414,19 +1404,19 @@ test('trpc transactions procedures read and categorize transactions', async () =
     status: 'cleared',
   }));
 
-  const before = await trpcClient.transactions.list.query({ search: 'TRPC Cafe', limit: 1 });
+  const before = await caller.transactions.list({ search: 'TRPC Cafe', limit: 1 });
   expect(before.transactions).toHaveLength(1);
   expect(before.totalCount).toBe(1);
   expect(before.hasMore).toBe(false);
   expect(before.nextOffset).toBeNull();
   expect(before.transactions[0].category).toBeNull();
 
-  await trpcClient.transactions.categorize.mutate({
+  await caller.transactions.categorize({
     transactionIds: [transactionId],
     categoryId,
   });
 
-  const after = await trpcClient.transactions.list.query({ search: 'TRPC Cafe', limit: 1 });
+  const after = await caller.transactions.list({ search: 'TRPC Cafe', limit: 1 });
   expect(after.transactions).toHaveLength(1);
   expect(after.transactions[0].category?.id).toBe(categoryId);
 });
@@ -1459,11 +1449,11 @@ test('trpc transactions categorize matching applies to the full filtered result 
     status: 'cleared',
   });
 
-  const previewPage = await trpcClient.transactions.list.query({ search: 'Bulk Coffee', limit: 1 });
+  const previewPage = await caller.transactions.list({ search: 'Bulk Coffee', limit: 1 });
   expect(previewPage.transactions).toHaveLength(1);
   expect(previewPage.totalCount).toBe(2);
 
-  const result = await trpcClient.transactions.categorizeMatching.mutate({
+  const result = await caller.transactions.categorizeMatching({
     query: { search: 'Bulk Coffee' },
     categoryId,
   });
@@ -1475,24 +1465,24 @@ test('trpc transactions categorize matching applies to the full filtered result 
   });
   expect(typeof result.undoOperation?.id).toBe('number');
 
-  const pendingUndo = await trpcClient.transactions.latestCategoryUndo.query();
+  const pendingUndo = await caller.transactions.latestCategoryUndo();
   expect(pendingUndo).toEqual(result.undoOperation);
 
-  const matching = await trpcClient.transactions.list.query({ search: 'Bulk Coffee' });
+  const matching = await caller.transactions.list({ search: 'Bulk Coffee' });
   expect(matching.transactions).toHaveLength(2);
   expect(matching.transactions.every(transaction => transaction.category?.id === categoryId)).toBe(true);
 
-  const unmatched = await trpcClient.transactions.list.query({ search: 'Unmatched Lunch' });
+  const unmatched = await caller.transactions.list({ search: 'Unmatched Lunch' });
   expect(unmatched.transactions).toHaveLength(1);
   expect(unmatched.transactions[0].category).toBeNull();
 
-  const undo = await trpcClient.transactions.restoreCategories.mutate({
+  const undo = await caller.transactions.restoreCategories({
     undoOperationId: result.undoOperation?.id ?? 0,
   });
   expect(undo).toEqual({ ok: true, count: 2 });
-  expect(await trpcClient.transactions.latestCategoryUndo.query()).toBeNull();
+  expect(await caller.transactions.latestCategoryUndo()).toBeNull();
 
-  const restored = await trpcClient.transactions.list.query({ search: 'Bulk Coffee' });
+  const restored = await caller.transactions.list({ search: 'Bulk Coffee' });
   expect(restored.transactions).toHaveLength(2);
   expect(restored.transactions.every(transaction => transaction.category === null)).toBe(true);
 });
@@ -1544,7 +1534,7 @@ test('trpc transactions categorization coverage summarizes categorized count and
     updatedAt: now,
   });
 
-  const coverage = await trpcClient.transactions.categorizationCoverage.query();
+  const coverage = await caller.transactions.categorizationCoverage();
 
   expect(coverage).toEqual({
     totalCount: 3,
@@ -1561,30 +1551,30 @@ test('trpc transactions categorization coverage summarizes categorized count and
 test('trpc budgets and import profiles expose typed crud', async () => {
   const categoryId = Number(insertRow('categories', { name: 'Food', type: 'expense' }));
 
-  const set = await trpcClient.budgets.set.mutate({ categoryId, month: '2026-06', amount: 450 }) as { id: number };
+  const set = await caller.budgets.set({ categoryId, month: '2026-06', amount: 450 }) as { id: number };
   const budgetId = Number(set.id);
   expect(Number.isFinite(budgetId)).toBe(true);
-  expect(await trpcClient.budgets.list.query({ month: '2026-06' })).toEqual([
+  expect(await caller.budgets.list({ month: '2026-06' })).toEqual([
     expect.objectContaining({ id: budgetId, categoryId, month: '2026-06', amount: 450 }),
   ]);
-  await trpcClient.budgets.delete.mutate({ id: budgetId });
-  expect(await trpcClient.budgets.list.query({ month: '2026-06' })).toEqual([]);
+  await caller.budgets.delete({ id: budgetId });
+  expect(await caller.budgets.list({ month: '2026-06' })).toEqual([]);
 
-  const profile = await trpcClient.importProfiles.upsert.mutate({
+  const profile = await caller.importProfiles.upsert({
     headerSignature: 'trpc-profile',
     profileName: 'TRPC Profile',
     profileJson: JSON.stringify({ name: 'TRPC Profile' }),
     mappingJson: JSON.stringify({ dateColumn: 'Date' }),
     lastAccountId: null,
   });
-  await trpcClient.importProfiles.upsert.mutate({
+  await caller.importProfiles.upsert({
     headerSignature: 'trpc-profile',
     profileName: 'TRPC Profile Updated',
     profileJson: JSON.stringify({ name: 'TRPC Profile Updated' }),
     mappingJson: JSON.stringify({ dateColumn: 'Posted' }),
     lastAccountId: null,
   });
-  expect(await trpcClient.importProfiles.list.query()).toEqual([
+  expect(await caller.importProfiles.list()).toEqual([
     expect.objectContaining({ id: profile.id, headerSignature: 'trpc-profile', profileName: 'TRPC Profile Updated' }),
   ]);
 });
@@ -1609,7 +1599,7 @@ test('trpc budgeting report computes period actuals and variance on the backend'
     name: 'Income',
     type: 'income',
   }));
-  await trpcClient.budgets.set.mutate({ categoryId: diningId, month: '2026-06', amount: 100 });
+  await caller.budgets.set({ categoryId: diningId, month: '2026-06', amount: 100 });
 
   const cafeId = insertRow('transactions', {
     accountId: checkingId,
@@ -1638,7 +1628,7 @@ test('trpc budgeting report computes period actuals and variance on the backend'
     type: 'expense',
   });
 
-  const report = await trpcClient.budgets.report.query({
+  const report = await caller.budgets.report({
     startDate: '2026-06-01',
     endDate: '2026-06-30',
     month: '2026-06',
@@ -1691,7 +1681,7 @@ test('ai categorization apply writes transaction annotations by ledger id', asyn
     updatedAt: new Date().toISOString(),
   });
 
-  const result = await trpcClient.transactions.applyAiCategorization.mutate({
+  const result = await caller.transactions.applyAiCategorization({
     suggestions: [{ transactionId: 'txn_ai_apply', categoryId }],
   });
 
@@ -1710,7 +1700,7 @@ test('ai categorization apply writes transaction annotations by ledger id', asyn
   ).toMatchObject({ categoryId });
 
   expect(result.undoOperation).not.toBeNull();
-  await trpcClient.transactions.restoreCategories.mutate({
+  await caller.transactions.restoreCategories({
     undoOperationId: result.undoOperation!.id,
   });
   expect(
@@ -1744,7 +1734,7 @@ test('ai categorization apply reports skipped already categorized transactions',
     updatedAt: new Date().toISOString(),
   });
 
-  const result = await trpcClient.transactions.applyAiCategorization.mutate({
+  const result = await caller.transactions.applyAiCategorization({
     suggestions: [{ transactionId: 'txn_ai_skip', categoryId: newCategoryId }],
   });
 
@@ -1797,7 +1787,7 @@ test('ai categorization preview excludes explicitly uncategorized transactions',
   });
 
   try {
-    const result = await trpcClient.transactions.aiCategorizationPreview.mutate({ limit: 32 });
+    const result = await caller.transactions.aiCategorizationPreview({ limit: 32 });
 
     expect(result).toMatchObject({
       configured: false,
@@ -1835,7 +1825,7 @@ test('ai categorization auto-apply reports missing server key without categorizi
   });
 
   try {
-    const result = await trpcClient.transactions.autoApplyAiCategorization.mutate({ sort: 'count' });
+    const result = await caller.transactions.autoApplyAiCategorization({ sort: 'count' });
 
     expect(result).toMatchObject({
       configured: false,
@@ -1881,14 +1871,14 @@ test('ai categorization auto-apply job reports progress without blocking on miss
   });
 
   try {
-    const job = await trpcClient.transactions.startAutoApplyAiCategorization.mutate({ sort: 'count' });
+    const job = await caller.transactions.startAutoApplyAiCategorization({ sort: 'count' });
     expect(['queued', 'running']).toContain(job.status);
     expect(job.sort).toBe('count');
 
     let finalJob = job;
     for (let attempt = 0; attempt < 10 && finalJob.status !== 'completed'; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 10));
-      finalJob = await trpcClient.transactions.autoApplyAiCategorizationJob.query({ jobId: job.id });
+      finalJob = await caller.transactions.autoApplyAiCategorizationJob({ jobId: job.id });
     }
 
     expect(finalJob).toMatchObject({
@@ -2058,7 +2048,7 @@ test('ai categorization persists merchant grouping rules for generic processor d
     sourceMerchantKey: 'PROCESSOR DES INST XFER INDN TEST USER CO WEB',
   });
 
-  const rule = await trpcClient.transactions.createMerchantGroupingRule.mutate({
+  const rule = await caller.transactions.createMerchantGroupingRule({
     sourceMerchantKey: combinedGroup!.sourceMerchantKey,
   });
   expect(rule).toMatchObject({
@@ -2156,7 +2146,7 @@ test('ai categorization can split a merchant into individual transaction review 
     transactionIds: ['venmo_dinner', 'venmo_rent'],
   });
 
-  const rule = await trpcClient.transactions.createMerchantGroupingRule.mutate({
+  const rule = await caller.transactions.createMerchantGroupingRule({
     sourceMerchantKey: combinedGroup!.sourceMerchantKey,
     strategy: 'individual_transactions',
   });
@@ -2343,7 +2333,7 @@ test('trpc net worth report is backend-owned and reads ledger balances', async (
     capturedAt: '2026-05-31T00:00:00.000Z',
   });
 
-  const report = await trpcClient.netWorth.report.query();
+  const report = await caller.netWorth.report();
   expect(report.currentNetWorth).toBe(800);
   expect(report.history).toEqual([{ month: '2026-05', netWorth: 800 }]);
   expect(report.percentChange).toBeCloseTo(0);
@@ -2454,7 +2444,7 @@ test('investment report endpoints expose money-style ledger reports', async () =
     is_market_income: true,
   }));
 
-  const trpcNetWorth = await trpcClient.reports.netWorth.query();
+  const trpcNetWorth = await caller.reports.netWorth();
   expect(trpcNetWorth.rows).toContainEqual(expect.objectContaining({
     month: '2026-02',
     account_id: accountId,
@@ -2462,7 +2452,7 @@ test('investment report endpoints expose money-style ledger reports', async () =
     gains_cents: 7000,
     end_balance_cents: 112000,
   }));
-  const trpcSavingsRate = await trpcClient.reports.savingsRate.query();
+  const trpcSavingsRate = await caller.reports.savingsRate();
   expect(trpcSavingsRate.income_sources).toContainEqual(expect.objectContaining({
     label: 'Dividends',
     amount_cents: 5000,
@@ -2772,7 +2762,7 @@ test('app imports preview parses a Chase CSV on the backend', async () => {
 test('trpc imports preview and history use the backend parser path', async () => {
   const csv = fs.readFileSync(path.resolve(import.meta.dir, '..', '..', 'sample-imports', 'chase-credit-card-demo.csv'), 'utf8');
 
-  const preview = await trpcClient.imports.preview.mutate({
+  const preview = await caller.imports.preview({
     fileName: 'chase-credit-card-demo.csv',
     text: csv,
     fileBase64: Buffer.from(csv).toString('base64'),
@@ -2792,7 +2782,7 @@ test('trpc imports preview and history use the backend parser path', async () =>
     type: 'credit',
     currentBalance: 0,
   });
-  const commit = await trpcClient.imports.commit.mutate({
+  const commit = await caller.imports.commit({
     accountId,
     importFileId: preview.importFileId,
     importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
@@ -2809,7 +2799,7 @@ test('trpc imports preview and history use the backend parser path', async () =>
   });
 
   expect(commit.importedCount).toBe(10);
-  expect(await trpcClient.imports.history.query()).toMatchObject({
+  expect(await caller.imports.history()).toMatchObject({
     imports: [expect.objectContaining({ id: preview.importFileId, status: 'committed', transactionCount: 10 })],
   });
 });
@@ -3038,7 +3028,7 @@ test('app import history lists committed files and can unimport one', async () =
     transactionCount: 10,
   });
 
-  await trpcClient.imports.unimport.mutate({ importFileId: preview.importFileId });
+  await caller.imports.unimport({ importFileId: preview.importFileId });
 
   expect(getDb().prepare('SELECT COUNT(*) AS count FROM transactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
   expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
@@ -3049,7 +3039,7 @@ test('app import history lists committed files and can unimport one', async () =
     notes: 'keep this user note',
   });
 
-  const reimport = await trpcClient.imports.reimport.mutate({ importFileId: preview.importFileId });
+  const reimport = await caller.imports.reimport({ importFileId: preview.importFileId });
   expect(reimport).toMatchObject({
     ok: true,
     importFileId: preview.importFileId,
@@ -3268,7 +3258,7 @@ test('app data freshness reports latest source fact dates by account', async () 
   expect(catchUp.items.map((item: { accountId: number }) => item.accountId).sort()).toEqual([noDataId, staleCardId].sort());
   expect(catchUp.items.map((item: { accountId: number }) => item.accountId)).not.toContain(closedId);
 
-  const trpcReport = await trpcClient.dataFreshness.report.query({ today: '2026-07-01' });
+  const trpcReport = await caller.dataFreshness.report({ today: '2026-07-01' });
   expect(trpcReport.summary).toMatchObject({
     totalAccounts: 4,
     currentAccounts: 1,
@@ -3276,7 +3266,7 @@ test('app data freshness reports latest source fact dates by account', async () 
     noDataAccounts: 1,
     closedAccounts: 1,
   });
-  const trpcCatchUp = await trpcClient.dataFreshness.catchUp.query({ today: '2026-07-01' });
+  const trpcCatchUp = await caller.dataFreshness.catchUp({ today: '2026-07-01' });
   expect(trpcCatchUp).toMatchObject({
     generatedAt: '2026-07-01',
     totalItems: 2,
@@ -3310,7 +3300,7 @@ test('Vanguard sync targets survive reversible unimport provenance', async () =>
     createdAt: '2026-08-01T00:00:00.000Z',
   });
 
-  expect(await trpcClient.dataSync.targets.query()).toContainEqual({
+  expect(await caller.dataSync.targets()).toContainEqual({
     id: 'vanguard:account-2',
     institutionId: 'vanguard',
     connectionId: 'account-2',
@@ -3375,12 +3365,12 @@ test('institution catch-up stages reviewable claims before explicit confirmation
       artifacts: [artifact],
     };
     await saveAwaitingSyncReview(review);
-    const persistedJob = await trpcClient.dataSync.status.query({ runId: review.runId });
+    const persistedJob = await caller.dataSync.status({ runId: review.runId });
     expect(persistedJob).toMatchObject({
       status: 'awaiting-confirmation',
       review: { readyToImport: 1 },
     });
-    const confirmedJob = await trpcClient.dataSync.confirm.mutate({ runId: review.runId });
+    const confirmedJob = await caller.dataSync.confirm({ runId: review.runId });
     expect(confirmedJob).toMatchObject({
       status: 'complete',
       result: {
@@ -3434,7 +3424,7 @@ test('discarding an institution catch-up leaves staged facts out of the ledger a
       artifacts: [artifact],
     };
     await saveAwaitingSyncReview(review);
-    const discardedJob = await trpcClient.dataSync.discard.mutate({ runId: review.runId });
+    const discardedJob = await caller.dataSync.discard({ runId: review.runId });
     expect(discardedJob.status).toBe('cancelled');
 
     expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(artifact.importFileId))
@@ -3478,13 +3468,13 @@ test('app import history can bulk unimport and reimport committed source facts',
   expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 2 });
 
   const importFileIds = [firstPreview.importFileId, secondPreview.importFileId];
-  const unimport = await trpcClient.imports.bulkUnimport.mutate({ importFileIds });
+  const unimport = await caller.imports.bulkUnimport({ importFileIds });
   expect(unimport).toMatchObject({ ok: true, count: 2, importFileIds });
   expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
   expect(getDb().prepare("SELECT COUNT(*) AS count FROM importFiles WHERE status = 'unimported'").get()).toMatchObject({ count: 2 });
   expect(getDb().prepare('SELECT COUNT(*) AS count FROM sourceAccounts WHERE accountId = ?').get(accountId)).toMatchObject({ count: 2 });
 
-  const reimport = await trpcClient.imports.bulkReimport.mutate({ importFileIds });
+  const reimport = await caller.imports.bulkReimport({ importFileIds });
   expect(reimport).toMatchObject({ ok: true, count: 2, importFileIds, transactionCount: 2 });
   expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 2 });
   expect(getDb().prepare("SELECT COUNT(*) AS count FROM importFiles WHERE status = 'committed'").get()).toMatchObject({ count: 2 });
