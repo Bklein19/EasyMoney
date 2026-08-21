@@ -3356,6 +3356,13 @@ test('institution catch-up stages reviewable claims before explicit confirmation
     expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
     expect((await listImportHistoryForTest()).imports).toHaveLength(0);
 
+    const repeatedPreview = await stageSyncArtifact({ path: filePath, accountId });
+    expect(repeatedPreview).toMatchObject({
+      importFileId: artifact.importFileId,
+      status: 'ready',
+    });
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM importFiles').get()).toEqual({ count: 1 });
+
     const review = {
       runId: 'sync-test-review',
       institutionId: 'bank-of-america' as const,

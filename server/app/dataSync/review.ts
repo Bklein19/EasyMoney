@@ -190,18 +190,18 @@ export async function stageSyncArtifact(input: StageSyncArtifactInput): Promise<
   const text = /\.(?:csv|txt)$/i.test(fileName) ? new TextDecoder().decode(fileBytes) : '';
   const contentHash = hashImportContent(text, fileBytes);
   const existing = getDb().prepare(`
-    SELECT id
+    SELECT id, status
     FROM importFiles
-    WHERE contentHash = ? AND status = 'committed'
-    ORDER BY committedAt DESC, id DESC
+    WHERE contentHash = ? AND status IN ('committed', 'previewed')
+    ORDER BY status = 'committed' DESC, committedAt DESC, id DESC
     LIMIT 1
-  `).get(contentHash) as { id: number } | undefined;
+  `).get(contentHash) as { id: number; status: 'committed' | 'previewed' } | undefined;
   if (existing) {
     return buildSyncArtifactReview({
       importFileId: existing.id,
       accountId: input.accountId,
       fileName,
-      status: 'already-imported',
+      status: existing.status === 'committed' ? 'already-imported' : 'ready',
     });
   }
 
