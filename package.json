@@ -47,7 +47,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.165.0",
     "@types/ws": "^8.18.1",
-    "bun-types": "^1.4.0-canary.20260519T150915",
+    "bun-types": "^1.4.0",
     "electrobun": "1.18.1",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
