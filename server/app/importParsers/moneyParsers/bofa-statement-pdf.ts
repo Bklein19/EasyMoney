@@ -8,7 +8,7 @@ export const meta: ParserMeta = {
   kind: "statement",
   priority: 50,
   matches: ({ filename, sample }) =>
-    /^bofa-(checking|savings|credit-card)-\d{4}-\d{4}-[a-z]+-statement\.pdf$/i.test(filename) ||
+    /^bofa-(checking|savings|deposit|credit-card)-\d{4}-\d{4}-(?:\d{2}|[a-z]+)-statement\.pdf$/i.test(filename) ||
     (/Bank of America/.test(sample) &&
       (/Your Adv Plus Banking/.test(sample) ||
         /Your Bank of America Advantage Savings/.test(sample) ||
@@ -64,13 +64,14 @@ function accountLast4(text: string): string {
 }
 
 function filenameLast4(filePath: string): string | undefined {
-  return basename(filePath).match(/^bofa-(?:checking|savings|credit-card)-(\d{4})-\d{4}-/i)?.[1];
+  return basename(filePath).match(/^bofa-(?:checking|savings|deposit|credit-card)-(\d{4})-\d{4}-/i)?.[1];
 }
 
-function filenameDepositType(filePath: string): "checking" | "savings" | undefined {
-  return basename(filePath).match(/^bofa-(checking|savings)-(?:\d{4}-)?\d{4}-/i)?.[1]?.toLowerCase() as
+function filenameDepositType(filePath: string): "checking" | "savings" | "deposit" | undefined {
+  return basename(filePath).match(/^bofa-(checking|savings|deposit)-(?:\d{4}-)?\d{4}-/i)?.[1]?.toLowerCase() as
     | "checking"
     | "savings"
+    | "deposit"
     | undefined;
 }
 
@@ -155,7 +156,12 @@ function parseDeposit(text: string, filePath: string): ParseResult {
   const last4 = accountLast4(text);
   const type = filenameDepositType(filePath);
   const isSavings = type === "savings" || (!type && /Your Bank of America Advantage Savings/.test(text));
-  const account = isSavings ? `Advantage Savings - ${last4}` : `Adv Plus Banking - ${last4}`;
+  const isChecking = type === "checking" || (!type && /Your Adv Plus Banking/.test(text));
+  const account = isSavings
+    ? `Advantage Savings - ${last4}`
+    : isChecking
+      ? `Adv Plus Banking - ${last4}`
+      : `Bank of America Deposit - ${last4}`;
 
   const period =
     text.match(/for ([A-Za-z]+) (\d{1,2}), (\d{4}) to ([A-Za-z]+) (\d{1,2}), (\d{4})/) ||

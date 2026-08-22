@@ -8,9 +8,10 @@ import { parseVanguardActivityCsv, vanguardActivityCsvParser } from './vanguardA
 
 test('BofA credit card activity parser preserves charge and payment signs', () => {
   const headers = ['Posted Date', 'Reference Number', 'Payee', 'Address', 'Amount'];
-  expect(bofaCreditCardActivityParser.matches({ fileName: 'bofa-credit-card-current.csv', headers, sample: '' })).toBe(true);
+  const fileName = 'bofa-credit-card-4321-current-to-2026-08-22.csv';
+  expect(bofaCreditCardActivityParser.matches({ fileName, headers, sample: '' })).toBe(true);
   const result = parseBofaCreditCardActivity({
-    fileName: 'bofa-credit-card-current.csv',
+    fileName,
     headers,
     rows: [
       { 'Posted Date': '08/12/2026', 'Reference Number': '100', Payee: 'EXAMPLE MARKET', Address: 'CITY CA', Amount: '-5.55' },
@@ -22,6 +23,7 @@ test('BofA credit card activity parser preserves charge and payment signs', () =
     { amount: -555, kind: undefined },
     { amount: 25000, kind: 'card_payment' },
   ]);
+  expect(result.transactions.every(transaction => transaction?.account === 'Credit Card - 4321')).toBe(true);
 });
 
 test('Fidelity activity parser supports brokerage and retirement exports', () => {

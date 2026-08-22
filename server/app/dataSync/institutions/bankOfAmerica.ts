@@ -2,7 +2,7 @@
 
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { mkdir, readFile, readdir, stat } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 
 import { runInstitutionBrowserProgram } from "../browserSession.ts";
 import { parseCsvRows } from "../../importParsers/csvRows.ts";
@@ -19,14 +19,24 @@ export type BankOfAmericaSyncConfig = {
   cardFrom: string;
   session: string;
   scope: "checking" | "savings" | "card-activity" | "card-statements" | null;
+  accounts?: BankOfAmericaAccountPlan[];
   dryRun: boolean;
 };
 
-export type BankOfAmericaAccountKind = "checking" | "savings" | "credit-card";
+export type BankOfAmericaAccountKind = "checking" | "savings" | "deposit" | "credit-card";
 
-export type BankOfAmericaAccountRequirement = {
+export type BankOfAmericaAccountPlan = {
   kind: BankOfAmericaAccountKind;
-  pattern: string;
+  last4: string;
+  from: string;
+  through: string;
+};
+
+export type BankOfAmericaRemoteAccount = {
+  kind: BankOfAmericaAccountKind;
+  last4: string;
+  label: string;
+  destination: string;
 };
 
 export type BankOfAmericaCardPeriodOption = {
@@ -40,6 +50,21 @@ export type BankOfAmericaCardActivityJob = {
   target: string;
 };
 
+export type BankOfAmericaApiRequest = {
+  url: string;
+  method: "GET" | "POST";
+  multipart?: Record<string, string>;
+  data?: Record<string, string>;
+};
+
+export type BankOfAmericaStatementDocument = {
+  accountDisplayName?: string;
+  adx?: string;
+  date?: string;
+  docDisplayName?: string;
+  docId?: string;
+};
+
 type ValidArtifact = {
   filename: string;
   kind: "csv" | "pdf";
@@ -47,6 +72,11 @@ type ValidArtifact = {
 };
 
 const loginUrl = "https://secure.bankofamerica.com/myaccounts/signin/signIn.go";
+const bankOfAmericaOrigin = "https://secure.bankofamerica.com";
+const depositActivityPath = "/ogateway/addapi/v1/download/form/transaction";
+const statementIndexPath = "/ogateway/dsviewdocuments/omni/statements/v1/gatherDocuments";
+const statementDownloadPath = "/ogateway/dsviewdocuments/omni/statements/v1/docViewDownload";
+const cardActivityPath = "/myaccounts/details/card/download-transactions.go";
 
 const bankOfAmericaMonthNumbers: Record<string, string> = {
   Jan: "01",
@@ -87,15 +117,17 @@ export function bankOfAmericaCardActivityJobs(
   excelFileTypeValue: string,
   from: string,
   through: string,
+  accountLast4?: string,
 ): BankOfAmericaCardActivityJob[] {
   const jobs: BankOfAmericaCardActivityJob[] = [];
+  const prefix = `bofa-credit-card${accountLast4 ? `-${accountLast4}` : ""}`;
   for (const option of options) {
     const label = option.label.trim();
     if (!label || !option.value) continue;
     if (/^Current transactions$/i.test(label)) {
       jobs.push({
         label,
-        filename: `bofa-credit-card-current-to-${through}.csv`,
+        filename: `${prefix}-current-to-${through}.csv`,
         target: option.value + excelFileTypeValue,
       });
       continue;
@@ -104,53 +136,59 @@ export function bankOfAmericaCardActivityJobs(
     if (!date || date < from || date > through) continue;
     jobs.push({
       label,
-      filename: `bofa-credit-card-period-ending-${date}.csv`,
+      filename: `${prefix}-period-ending-${date}.csv`,
       target: option.value + excelFileTypeValue,
     });
   }
-  if (!jobs.some(job => job.filename.startsWith("bofa-credit-card-current-to-"))) {
+  if (!jobs.some(job => job.filename === `${prefix}-current-to-${through}.csv`)) {
     throw new Error("Bank of America did not offer a current credit-card activity period");
   }
   return jobs;
 }
 
-export function bankOfAmericaAccountRequirements(
-  scope: BankOfAmericaSyncConfig["scope"],
-): BankOfAmericaAccountRequirement[] {
-  const requirements: BankOfAmericaAccountRequirement[] = [];
-  if (!scope || scope === "checking") {
-    requirements.push({ kind: "checking", pattern: "Adv Plus Banking -|Checking -" });
-  }
-  if (!scope || scope === "savings") {
-    requirements.push({ kind: "savings", pattern: "Advantage Savings -|Savings -" });
-  }
-  if (!scope || scope === "card-activity" || scope === "card-statements") {
-    requirements.push({
-      kind: "credit-card",
-      pattern: "Customized Cash Rewards Visa Signature -|Credit Card -",
-    });
-  }
-  return requirements;
+function bankOfAmericaRemoteAccountKind(label: string, destination: string): BankOfAmericaAccountKind {
+  const target = new URL(destination).searchParams.get("target") ?? "";
+  const value = `${label} ${target}`;
+  if (/credit|card|visa|mastercard/i.test(value)) return "credit-card";
+  if (/savings|money market/i.test(value)) return "savings";
+  if (/checking|banking/i.test(value)) return "checking";
+  return "deposit";
 }
 
-export async function collectBankOfAmericaAccountDestinations(
-  page: Page,
-  requirements: BankOfAmericaAccountRequirement[],
-): Promise<Partial<Record<BankOfAmericaAccountKind, string>>> {
-  const destinations: Partial<Record<BankOfAmericaAccountKind, string>> = {};
-  for (const { kind, pattern } of requirements) {
-    const accountLink = page
-      .locator('a[href*="/myaccounts/brain/redirect.go"]')
-      .filter({ hasText: new RegExp(pattern, "i") })
-      .first();
-    await accountLink.waitFor({ state: "visible", timeout: 30_000 }).catch(() => {
-      throw new Error(`Timed out waiting for the ${kind} account on the Bank of America account list`);
+export async function discoverBankOfAmericaAccounts(page: Page): Promise<BankOfAmericaRemoteAccount[]> {
+  const links = page.locator('a[href*="/myaccounts/brain/redirect.go"]');
+  await links.first().waitFor({ state: "attached", timeout: 30_000 }).catch(() => {
+    throw new Error("Timed out waiting for Bank of America accounts");
+  });
+  const candidates = await links.evaluateAll((elements, baseUrl) => elements.map(element => ({
+    label: (element.textContent || "").replace(/\s+/g, " ").trim(),
+    destination: new URL(element.getAttribute("href") || "", String(baseUrl)).toString(),
+  })), page.url());
+  const accounts = new Map<string, BankOfAmericaRemoteAccount>();
+  for (const candidate of candidates) {
+    const url = new URL(candidate.destination);
+    if (url.origin !== bankOfAmericaOrigin || url.pathname !== "/myaccounts/brain/redirect.go") continue;
+    const token = url.searchParams.get("adx");
+    if (!token || accounts.has(token)) continue;
+    const last4 = candidate.label.match(/(?:-|ending in|[x*\u2022]{2,})\s*(\d{4})\b/i)?.[1];
+    if (!last4) throw new Error("A Bank of America account did not expose its last four digits");
+    accounts.set(token, {
+      kind: bankOfAmericaRemoteAccountKind(candidate.label, candidate.destination),
+      last4,
+      label: candidate.label,
+      destination: candidate.destination,
     });
-    const accountHref = await accountLink.getAttribute("href");
-    if (!accountHref) throw new Error(`The ${kind} account link has no destination`);
-    destinations[kind] = new URL(accountHref, page.url()).toString();
   }
-  return destinations;
+  if (accounts.size === 0) throw new Error("Bank of America did not expose any downloadable accounts");
+  const identities = new Set<string>();
+  for (const account of accounts.values()) {
+    const identity = `${account.kind}:${account.last4}`;
+    if (identities.has(identity)) {
+      throw new Error(`Multiple Bank of America ${account.kind} accounts end in the same four digits`);
+    }
+    identities.add(identity);
+  }
+  return [...accounts.values()];
 }
 
 export async function openBankOfAmericaAccount(
@@ -270,7 +308,7 @@ async function validateArtifact(path: string): Promise<ValidArtifact> {
     const text = sample.toString("utf8");
     if (sample.includes(0) || !sample.includes(44) || !/[\r\n]/.test(text))
       throw new Error(`${filename}: CSV text magic is invalid`);
-    if (/^bofa-(checking|savings)-/i.test(filename) &&
+    if (/^bofa-(checking|savings|deposit)-/i.test(filename) &&
       (!text.includes("Description,,Summary Amt.") ||
         !text.includes("Date,Description,Amount,Running Bal."))) {
       throw new Error(`${filename}: Bank of America deposit headers are missing`);
@@ -296,22 +334,224 @@ export function hasBankOfAmericaCreditCardActivity(text: string): boolean {
   return rows.slice(1).some(row => row.some(value => value.trim().length > 0));
 }
 
-function completedStatementMonths(
-  files: Set<string>,
-  account: "checking" | "savings" | "credit-card",
-): string[] {
-  const months = new Set<string>();
-  const pattern = new RegExp(
-    `^bofa-${account}-(\\d{4})-(\\d{2})(?:-[a-z0-9-]+)?-statement\\.pdf$`,
-  );
-  for (const filename of files) {
-    const match = filename.match(pattern);
-    if (!match)
-      continue;
-    const month = `${match[1]}-${match[2]}`;
-    months.add(month);
+function bankOfAmericaAccountToken(destination: string): string {
+  const url = new URL(destination);
+  if (url.origin !== bankOfAmericaOrigin || url.pathname !== "/myaccounts/brain/redirect.go") {
+    throw new Error("Bank of America account destination is invalid");
   }
-  return [...months];
+  const token = url.searchParams.get("adx");
+  if (!token) throw new Error("Bank of America account destination has no account token");
+  return token;
+}
+
+function bankOfAmericaDate(value: string): string {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) throw new Error(`Bank of America date is invalid: ${value}`);
+  return `${match[2]}/${match[3]}/${match[1]}`;
+}
+
+function bankOfAmericaStatementYears(from: string, through: string): string[] {
+  const first = Number(from.slice(0, 4));
+  const last = Number(through.slice(0, 4));
+  if (!Number.isInteger(first) || !Number.isInteger(last) || first > last) {
+    throw new Error("Bank of America statement range is invalid");
+  }
+  return Array.from({ length: last - first + 1 }, (_value, index) => String(first + index));
+}
+
+function validatedBankOfAmericaUrl(value: string, allowedPath: string, base = bankOfAmericaOrigin): string {
+  const url = new URL(value, base);
+  if (url.origin !== bankOfAmericaOrigin || url.pathname !== allowedPath) {
+    throw new Error("Bank of America API destination is invalid");
+  }
+  return url.toString();
+}
+
+export function bankOfAmericaDepositActivityRequest(
+  accountDestination: string,
+  from: string,
+  through: string,
+): BankOfAmericaApiRequest {
+  return {
+    url: `${bankOfAmericaOrigin}${depositActivityPath}`,
+    method: "POST",
+    multipart: {
+      "payload.accountToken": bankOfAmericaAccountToken(accountDestination),
+      "payload.locale": "en-us",
+      "payload.txnSearchCriteria.txnPeriod": "custom range",
+      "payload.txnSearchCriteria.startDate": bankOfAmericaDate(from),
+      "payload.txnSearchCriteria.endDate": bankOfAmericaDate(through),
+      "payload.txnSearchCriteria.fileType": "csv",
+    },
+  };
+}
+
+export function bankOfAmericaStatementIndexRequests(
+  accountDestination: string,
+  from: string,
+  through: string,
+): BankOfAmericaApiRequest[] {
+  const accountToken = bankOfAmericaAccountToken(accountDestination);
+  return bankOfAmericaStatementYears(from, through).map(year => ({
+    url: `${bankOfAmericaOrigin}${statementIndexPath}`,
+    method: "POST" as const,
+    data: {
+      adx: accountToken,
+      docCategoryId: "DISPFLD001",
+      lang: "en-US",
+      year,
+    },
+  }));
+}
+
+export function bankOfAmericaStatementDownloadRequest(
+  statement: BankOfAmericaStatementDocument,
+): BankOfAmericaApiRequest {
+  if (!statement.adx || !statement.docId) {
+    throw new Error("Bank of America statement metadata is incomplete");
+  }
+  const params = new URLSearchParams({
+    adx: statement.adx,
+    documentId: statement.docId,
+    adaDocumentFlag: "N",
+    menuFlag: "download",
+    request_locale: "en-US",
+  });
+  return {
+    url: `${bankOfAmericaOrigin}${statementDownloadPath}?${params}`,
+    method: "GET",
+  };
+}
+
+export function bankOfAmericaCardActivityRequest(
+  target: string,
+  accountPageUrl: string,
+): BankOfAmericaApiRequest {
+  return {
+    url: validatedBankOfAmericaUrl(target, cardActivityPath, accountPageUrl),
+    method: "GET",
+  };
+}
+
+async function executeBankOfAmericaRequest(
+  page: Page,
+  request: BankOfAmericaApiRequest,
+) {
+  if (request.multipart) {
+    return page.context().request.fetch(request.url, {
+      method: request.method,
+      multipart: request.multipart,
+    });
+  }
+  if (request.data) {
+    return page.context().request.fetch(request.url, {
+      method: request.method,
+      data: request.data,
+    });
+  }
+  return page.context().request.fetch(request.url, { method: request.method });
+}
+
+async function saveBankOfAmericaArtifact(
+  page: Page,
+  outputDir: string,
+  filename: string,
+  kind: "csv" | "pdf",
+  request: BankOfAmericaApiRequest,
+): Promise<void> {
+  if (basename(filename) !== filename || !/^bofa-[a-z0-9-]+\.(csv|pdf)$/i.test(filename)) {
+    throw new Error("Bank of America artifact filename is invalid");
+  }
+  const response = await executeBankOfAmericaRequest(page, request);
+  if (!response.ok()) {
+    throw new Error(`Bank of America ${kind.toUpperCase()} request failed with status ${response.status()}`);
+  }
+  const contentType = response.headers()["content-type"]?.toLowerCase() ?? "";
+  if (kind === "csv" && !contentType.includes("csv") && !contentType.includes("octet-stream")) {
+    throw new Error("Bank of America activity response was not CSV");
+  }
+  if (kind === "pdf" && !contentType.includes("pdf") && !contentType.includes("octet-stream")) {
+    throw new Error("Bank of America statement response was not PDF");
+  }
+  const body = await response.body();
+  if (body.length < 16) throw new Error(`Bank of America ${kind.toUpperCase()} response was empty`);
+  await writeFile(join(outputDir, filename), body);
+}
+
+async function fetchBankOfAmericaStatements(
+  page: Page,
+  accountDestination: string,
+  from: string,
+  through: string,
+): Promise<BankOfAmericaStatementDocument[]> {
+  const documents = new Map<string, BankOfAmericaStatementDocument>();
+  for (const request of bankOfAmericaStatementIndexRequests(accountDestination, from, through)) {
+    const response = await executeBankOfAmericaRequest(page, request);
+    if (!response.ok()) {
+      throw new Error(`Bank of America statement index failed with status ${response.status()}`);
+    }
+    const contentType = response.headers()["content-type"]?.toLowerCase() ?? "";
+    if (!contentType.includes("json")) throw new Error("Bank of America statement index was not JSON");
+    const body = await response.json() as { documentList?: unknown };
+    if (!Array.isArray(body.documentList)) {
+      throw new Error("Bank of America statement index omitted its document list");
+    }
+    for (const value of body.documentList) {
+      if (!value || typeof value !== "object") continue;
+      const statement = value as BankOfAmericaStatementDocument;
+      if (!statement.adx || !statement.docId) continue;
+      documents.set(`${statement.adx}:${statement.docId}`, statement);
+    }
+  }
+  return [...documents.values()];
+}
+
+async function downloadBankOfAmericaDepositActivity(
+  page: Page,
+  outputDir: string,
+  accountDestination: string,
+  from: string,
+  through: string,
+  filename: string,
+): Promise<void> {
+  await saveBankOfAmericaArtifact(
+    page,
+    outputDir,
+    filename,
+    "csv",
+    bankOfAmericaDepositActivityRequest(accountDestination, from, through),
+  );
+}
+
+async function downloadBankOfAmericaStatement(
+  page: Page,
+  outputDir: string,
+  statement: BankOfAmericaStatementDocument,
+  filename: string,
+): Promise<void> {
+  await saveBankOfAmericaArtifact(
+    page,
+    outputDir,
+    filename,
+    "pdf",
+    bankOfAmericaStatementDownloadRequest(statement),
+  );
+}
+
+async function downloadBankOfAmericaCardActivity(
+  page: Page,
+  outputDir: string,
+  target: string,
+  accountPageUrl: string,
+  filename: string,
+): Promise<void> {
+  await saveBankOfAmericaArtifact(
+    page,
+    outputDir,
+    filename,
+    "csv",
+    bankOfAmericaCardActivityRequest(target, accountPageUrl),
+  );
 }
 
 function buildBrowserProgram(
@@ -319,38 +559,21 @@ function buildBrowserProgram(
   valid: ValidArtifact[],
   scope: BankOfAmericaSyncConfig["scope"],
 ): string {
-  const files = new Set(valid.map((artifact) => artifact.filename));
   const checkingThrough = config.checkingThrough ?? config.through;
   const savingsThrough = config.savingsThrough ?? config.through;
   const cardThrough = config.cardThrough ?? config.through;
-  const checkingActivity = `bofa-checking-${config.checkingFrom}-to-${checkingThrough}.csv`;
-  const savingsActivity = `bofa-savings-${config.savingsFrom}-to-${savingsThrough}.csv`;
   const plan = {
     scope,
-    session: config.session,
-    outputDir: config.outputDir,
-    accountRequirements: bankOfAmericaAccountRequirements(scope),
-    accounts: {
-      checking: {
-        from: config.checkingFrom,
-        through: checkingThrough,
-        activity: checkingActivity,
-        downloadActivity: !files.has(checkingActivity),
-        skipStatementMonths: completedStatementMonths(files, "checking"),
+    existingFiles: valid.map(artifact => artifact.filename),
+    accounts: config.accounts ?? [],
+    defaults: {
+      checking: { from: config.checkingFrom, through: checkingThrough },
+      savings: { from: config.savingsFrom, through: savingsThrough },
+      deposit: {
+        from: config.checkingFrom < config.savingsFrom ? config.checkingFrom : config.savingsFrom,
+        through: checkingThrough > savingsThrough ? checkingThrough : savingsThrough,
       },
-      savings: {
-        from: config.savingsFrom,
-        through: savingsThrough,
-        activity: savingsActivity,
-        downloadActivity: !files.has(savingsActivity),
-        skipStatementMonths: completedStatementMonths(files, "savings"),
-      },
-      card: {
-        from: config.cardFrom,
-        through: cardThrough,
-        skipStatementMonths: completedStatementMonths(files, "credit-card"),
-        existingActivity: [...files].filter((filename) => filename.startsWith("bofa-credit-card-") && filename.endsWith(".csv")),
-      },
+      "credit-card": { from: config.cardFrom, through: cardThrough },
     },
   };
 
@@ -370,144 +593,72 @@ function buildBrowserProgram(
       const short = match[1].slice(0, 3);
       return monthNumbers[short];
     };
-    const pointerClick = async locator => {
-      await locator.scrollIntoViewIfNeeded();
-      const box = await locator.boundingBox();
-      if (!box) throw new Error("Required control is not visible");
-      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    const existingFiles = new Set(plan.existingFiles);
+    const windowFor = account => plan.accounts.find(candidate =>
+      candidate.kind === account.kind && candidate.last4 === account.last4
+    ) || plan.defaults[account.kind];
+    const accountPrefix = account => \`bofa-\${account.kind}-\${account.last4}\`;
+    const accountIsSelected = account => {
+      if (!plan.scope) return true;
+      if (plan.scope === "card-activity" || plan.scope === "card-statements") {
+        return account.kind === "credit-card";
+      }
+      return account.kind === plan.scope;
     };
-    const saveFetchedDownload = async (filename, fetchInPage) => {
-      const promise = page.waitForEvent("download", { timeout: 15000 });
-      const response = await fetchInPage();
-      if (!response.ok) throw new Error(\`Download request failed with status \${response.status}\`);
-      const download = await promise;
-      await download.saveAs(\`\${plan.outputDir}/\${filename}\`);
-      const failure = await download.failure();
-      if (failure) throw new Error("Browser reported a download failure");
+    const wantsActivity = account => !plan.scope ||
+      plan.scope === account.kind ||
+      (plan.scope === "card-activity" && account.kind === "credit-card");
+    const wantsStatements = account => !plan.scope ||
+      plan.scope === account.kind ||
+      (plan.scope === "card-statements" && account.kind === "credit-card");
+    const apiDownloadDepositActivity = async (account, window) => {
+      const filename = \`\${accountPrefix(account)}-\${window.from}-to-\${window.through}.csv\`;
+      if (existingFiles.has(filename)) {
+        skipped.push(filename);
+        return;
+      }
+      reportProgress(\`Downloading Bank of America \${account.kind} activity ending in \${account.last4}\`);
+      await bindings.downloadDepositActivity(
+        page,
+        account.destination,
+        window.from,
+        window.through,
+        filename,
+      );
       saved.push(filename);
     };
-    const closeDownloadDialog = async () => {
-      const close = page.locator("#downloadTxnLayerSpartaUILayer button.spa-ui-layer-close");
-      if (await close.count() && await close.isVisible()) await close.click();
-    };
-    let accountDestinations = {};
-    const selectAccount = async kind => {
-      const destination = accountDestinations[kind];
-      if (!destination) throw new Error(\`The \${kind} account destination was not captured\`);
-      await bindings.openAccount(page, destination);
-    };
-    const downloadDepositActivity = async (from, to, filename) => {
-      await page.locator("a.download-transactions").click();
-      await page.locator('form[action*="/ogateway/addapi/v1/download/form/transaction"]').waitFor({ state: "attached" });
-      await saveFetchedDownload(filename, () => page.evaluate(async ({ from, to, filename }) => {
-        const form = document.querySelector('form[action*="/ogateway/addapi/v1/download/form/transaction"]');
-        if (!(form instanceof HTMLFormElement)) throw new Error("Deposit download form was not found");
-        const body = new FormData(form);
-        body.set("payload.txnSearchCriteria.txnPeriod", "custom range");
-        body.set("payload.txnSearchCriteria.startDate", from.split("-").slice(1).concat(from.slice(0, 4)).join("/"));
-        body.set("payload.txnSearchCriteria.endDate", to.split("-").slice(1).concat(to.slice(0, 4)).join("/"));
-        body.set("payload.txnSearchCriteria.fileType", "csv");
-        const response = await fetch(form.action, { method: form.method || "POST", body, credentials: "include" });
-        const blob = await response.blob();
-        const href = URL.createObjectURL(blob);
-        const anchor = document.createElement("a");
-        anchor.href = href;
-        anchor.download = filename;
-        anchor.click();
-        setTimeout(() => URL.revokeObjectURL(href), 1000);
-        return { ok: response.ok, status: response.status };
-      }, { from, to, filename }));
-      await closeDownloadDialog();
-    };
-    const openDepositStatements = async () => {
-      await closeDownloadDialog();
-      await page.waitForFunction(() => [...document.querySelectorAll("a")].some(element => {
-        const text = (element.innerText || "").trim();
-        const box = element.getBoundingClientRect();
-        return box.width > 0 && (text === "Statements & Docs" || text === "Statements & Documents");
-      }), null, { timeout: 15000 });
-      await page.evaluate(() => {
-        const links = [...document.querySelectorAll("a")].filter(element => {
-          const text = (element.innerText || "").trim();
-          const box = element.getBoundingClientRect();
-          return box.width > 0 && (text === "Statements & Docs" || text === "Statements & Documents");
-        });
-        const link = links.at(-1);
-        if (!link) throw new Error("Statements tab was not found");
-        link.setAttribute("data-codex-bofa-statements", "true");
-      });
-      await page.locator("[data-codex-bofa-statements=true]").click();
-      await page.waitForFunction(() => document.title.includes("Statements and Docs"), null, { timeout: 15000 });
-    };
-    const downloadStatements = async (account, from, to, productPattern, skipMonths) => {
-      const button = page.getByRole("button", { name: "Statements", exact: true }).first();
-      await button.waitFor({ state: "visible" });
-      if (await button.getAttribute("aria-expanded") === "true") await button.click();
-      const [response] = await Promise.all([
-        page.waitForResponse(response =>
-          response.url().includes("/gatherDocuments") && response.request().method() === "POST",
-          { timeout: 30000 },
-        ).catch(() => {
-          throw new Error(\`Timed out loading \${account} statements\`);
-        }),
-        button.click(),
-      ]);
-      const body = await response.json();
-      const documents = Array.isArray(body.documentList) ? body.documentList : [];
+    const apiDownloadStatements = async (account, window) => {
+      const documents = await bindings.fetchStatements(
+        page,
+        account.destination,
+        window.from,
+        window.through,
+      );
       for (const statement of documents) {
-        if (!(new RegExp(productPattern, "i")).test(String(statement.accountDisplayName || ""))) continue;
         const statementDate = String(statement.date || "").slice(0, 10);
         const monthNumber = monthFromText(String(statement.docDisplayName || ""));
-        if (!statementDate || !monthNumber || statementDate < from || statementDate > to) continue;
+        if (!statementDate || !monthNumber || statementDate < window.from || statementDate > window.through) continue;
         const month = statementDate.slice(0, 4) + "-" + monthNumber;
-        if (skipMonths.includes(month)) {
-          skipped.push(\`\${account} statement \${month}\`);
+        const filename = \`\${accountPrefix(account)}-\${month}-statement.pdf\`;
+        if (existingFiles.has(filename)) {
+          skipped.push(filename);
           continue;
         }
-        const filename = \`bofa-\${account}-\${month}-statement.pdf\`;
-        await saveFetchedDownload(filename, () => page.evaluate(async ({ statement, filename }) => {
-          const params = new URLSearchParams({
-            adx: statement.adx,
-            documentId: statement.docId,
-            adaDocumentFlag: "N",
-            menuFlag: "download",
-            request_locale: "en-US",
-          });
-          const downloadResponse = await fetch(
-            "/ogateway/dsviewdocuments/omni/statements/v1/docViewDownload?" + params,
-            { credentials: "include" },
-          );
-          const blob = await downloadResponse.blob();
-          const href = URL.createObjectURL(blob);
-          const anchor = document.createElement("a");
-          anchor.href = href;
-          anchor.download = filename;
-          anchor.click();
-          setTimeout(() => URL.revokeObjectURL(href), 1000);
-          return { ok: downloadResponse.ok, status: downloadResponse.status };
-        }, { statement, filename }));
+        reportProgress(\`Downloading Bank of America statement for account ending in \${account.last4}\`);
+        await bindings.downloadStatement(page, statement, filename);
+        saved.push(filename);
       }
     };
-    const downloadCardActivity = async () => {
-      const existing = new Set(plan.accounts.card.existingActivity);
-      const openPanel = async () => {
-        let period = page.locator("#select_transaction:visible").first();
-        if (!await period.isVisible()) {
-          const trigger = page.locator('a[name="download_transactions_top"]:visible').first();
-          await trigger.waitFor({ state: "visible" });
-          await trigger.click();
-          period = page.locator("#select_transaction:visible").first();
-        }
-        await period.waitFor({ state: "visible" });
-        return period;
-      };
-      const period = await openPanel();
+    const apiDownloadCardActivity = async (account, window) => {
+      await bindings.openAccount(page, account.destination);
+      const period = page.locator("#select_transaction").first();
+      await period.waitFor({ state: "attached" });
       const periodOptions = await period.locator("option").evaluateAll(options => options.map(option => ({
         label: (option.textContent || "").trim(),
         value: option.value,
       })));
-      const fileType = page.locator("#select_filetype:visible").first();
-      await fileType.waitFor({ state: "visible" });
+      const fileType = page.locator("#select_filetype").first();
+      await fileType.waitFor({ state: "attached" });
       const excelFileTypeValue = await fileType.locator("option").evaluateAll(options => {
         const excel = options.find(option => /Microsoft Excel Format/i.test(option.textContent || ""));
         return excel ? excel.value : null;
@@ -516,29 +667,20 @@ function buildBrowserProgram(
       const jobs = bindings.buildCardActivityJobs(
         periodOptions,
         excelFileTypeValue,
-        plan.accounts.card.from,
-        plan.accounts.card.through,
+        window.from,
+        window.through,
+        account.last4,
       );
       for (const job of jobs) {
-        if (existing.has(job.filename)) {
+        if (existingFiles.has(job.filename)) {
           skipped.push(job.filename);
           continue;
         }
         reportProgress(\`Downloading Bank of America card activity: \${job.label}\`);
-        await saveFetchedDownload(job.filename, () => page.evaluate(async ({ target, filename }) => {
-          const response = await fetch(target, { credentials: "include" });
-          const blob = await response.blob();
-          const href = URL.createObjectURL(blob);
-          const anchor = document.createElement("a");
-          anchor.href = href;
-          anchor.download = filename;
-          anchor.click();
-          setTimeout(() => URL.revokeObjectURL(href), 1000);
-          return { ok: response.ok, status: response.status };
-        }, { target: job.target, filename: job.filename }));
+        await bindings.downloadCardActivity(page, job.target, page.url(), job.filename);
+        saved.push(job.filename);
       }
     };
-
     try {
       page.setDefaultTimeout(12000);
       await page.screencast.showActions({ position: "bottom-right", duration: 700, fontSize: 18 });
@@ -550,48 +692,22 @@ function buildBrowserProgram(
         });
       }
 
-      accountDestinations = await bindings.collectAccountDestinations(
-        page,
-        plan.accountRequirements,
-      );
-
-      if (!plan.scope || plan.scope === "checking") {
-        reportProgress("Downloading Bank of America checking activity and statements");
-        await page.screencast.showChapter("Updating checking", { description: "Downloading activity and available statements." });
-        await selectAccount("checking");
-        if (plan.accounts.checking.downloadActivity)
-          await downloadDepositActivity(plan.accounts.checking.from, plan.accounts.checking.through, plan.accounts.checking.activity);
-        else skipped.push(plan.accounts.checking.activity);
-        await openDepositStatements();
-        await downloadStatements("checking", plan.accounts.checking.from, plan.accounts.checking.through, "Adv Plus Banking|Checking", plan.accounts.checking.skipStatementMonths);
-      }
-      if (!plan.scope || plan.scope === "savings") {
-        reportProgress("Downloading Bank of America savings activity and statements");
-        await page.screencast.showChapter("Updating savings", { description: "Downloading activity and available statements." });
-        await selectAccount("savings");
-        if (plan.accounts.savings.downloadActivity)
-          await downloadDepositActivity(plan.accounts.savings.from, plan.accounts.savings.through, plan.accounts.savings.activity);
-        else skipped.push(plan.accounts.savings.activity);
-        await openDepositStatements();
-        await downloadStatements("savings", plan.accounts.savings.from, plan.accounts.savings.through, "Advantage Savings|Savings", plan.accounts.savings.skipStatementMonths);
-      }
-      if (!plan.scope || plan.scope === "card-activity") {
-        reportProgress("Opening the Bank of America credit-card account");
-        await page.screencast.showChapter("Updating card activity", { description: "Downloading available transaction periods." });
-        await selectAccount("credit-card");
-        reportProgress("Reading available Bank of America credit-card activity periods");
-        await downloadCardActivity();
-      }
-      if (!plan.scope || plan.scope === "card-statements") {
-        reportProgress("Opening Bank of America credit-card statements");
-        await page.screencast.showChapter("Updating card statements", { description: "Downloading available statement PDFs." });
-        await selectAccount("credit-card");
-        await page.locator('a[name="statements_and_documents"]:visible').first().click();
-        await page.waitForFunction(() => document.title.includes("Statements"), null, { timeout: 15000 });
-        await downloadStatements("credit-card", plan.accounts.card.from, plan.accounts.card.through, "Customized Cash Rewards|Credit Card", plan.accounts.card.skipStatementMonths);
+      const accounts = (await bindings.discoverAccounts(page)).filter(accountIsSelected);
+      if (accounts.length === 0) throw new Error("Bank of America did not expose any accounts for this sync");
+      reportProgress(\`Discovered \${accounts.length} Bank of America account\${accounts.length === 1 ? "" : "s"}\`);
+      for (const account of accounts) {
+        const window = windowFor(account);
+        await page.screencast.showChapter(\`Updating \${account.kind}\`, {
+          description: \`Downloading data for the account ending in \${account.last4}.\`,
+        });
+        if (wantsActivity(account)) {
+          if (account.kind === "credit-card") await apiDownloadCardActivity(account, window);
+          else await apiDownloadDepositActivity(account, window);
+        }
+        if (wantsStatements(account)) await apiDownloadStatements(account, window);
       }
 
-      return JSON.stringify({ status: "complete", scope: plan.scope, saved, skipped });
+      return JSON.stringify({ status: "complete", scope: plan.scope, saved, skipped, accountCount: accounts.length });
     } catch (error) {
       return JSON.stringify({ status: "error", message: safeError(error), saved, skipped });
     }
@@ -621,7 +737,33 @@ export async function runBankOfAmericaSync(
       onProgress,
       programBindings: {
         buildCardActivityJobs: bankOfAmericaCardActivityJobs,
-        collectAccountDestinations: collectBankOfAmericaAccountDestinations,
+        discoverAccounts: discoverBankOfAmericaAccounts,
+        downloadCardActivity: (
+          page: Page,
+          target: string,
+          accountPageUrl: string,
+          filename: string,
+        ) => downloadBankOfAmericaCardActivity(page, config.outputDir, target, accountPageUrl, filename),
+        downloadDepositActivity: (
+          page: Page,
+          accountDestination: string,
+          from: string,
+          through: string,
+          filename: string,
+        ) => downloadBankOfAmericaDepositActivity(
+          page,
+          config.outputDir,
+          accountDestination,
+          from,
+          through,
+          filename,
+        ),
+        downloadStatement: (
+          page: Page,
+          statement: BankOfAmericaStatementDocument,
+          filename: string,
+        ) => downloadBankOfAmericaStatement(page, config.outputDir, statement, filename),
+        fetchStatements: fetchBankOfAmericaStatements,
         openAccount: openBankOfAmericaAccount,
       },
     },

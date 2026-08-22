@@ -2,9 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import type { Page } from 'playwright';
 
 import {
-  bankOfAmericaAccountRequirements,
+  bankOfAmericaCardActivityRequest,
   bankOfAmericaCardActivityJobs,
-  collectBankOfAmericaAccountDestinations,
+  bankOfAmericaDepositActivityRequest,
+  bankOfAmericaStatementIndexRequests,
+  discoverBankOfAmericaAccounts,
   hasBankOfAmericaCreditCardActivity,
   isBankOfAmericaAuthenticatedPage,
   openBankOfAmericaAccount,
@@ -102,66 +104,98 @@ describe('data sync planning', () => {
     expect(hasBankOfAmericaCreditCardActivity(`${header}08/20/2026,1,EXAMPLE SHOP,,\"-12.34\"\r\n`)).toBe(true);
   });
 
-  test('BofA builds direct credit-card download targets without selecting page controls', () => {
+  test('BofA builds account-specific direct credit-card download targets', () => {
     expect(bankOfAmericaCardActivityJobs([
       { label: 'Select a period', value: '' },
       { label: 'Current transactions', value: '/card/current?' },
       { label: 'Statement Period Ending Aug 15, 2026', value: '/card/august?' },
       { label: 'Statement Period Ending Jul 15, 2026', value: '/card/july?' },
       { label: 'Statement Period Ending Jun 15, 2026', value: '/card/june?' },
-    ], 'format=excel', '2026-07-01', '2026-08-22')).toEqual([
+    ], 'format=excel', '2026-07-01', '2026-08-22', '4321')).toEqual([
       {
         label: 'Current transactions',
-        filename: 'bofa-credit-card-current-to-2026-08-22.csv',
+        filename: 'bofa-credit-card-4321-current-to-2026-08-22.csv',
         target: '/card/current?format=excel',
       },
       {
         label: 'Statement Period Ending Aug 15, 2026',
-        filename: 'bofa-credit-card-period-ending-2026-08-15.csv',
+        filename: 'bofa-credit-card-4321-period-ending-2026-08-15.csv',
         target: '/card/august?format=excel',
       },
       {
         label: 'Statement Period Ending Jul 15, 2026',
-        filename: 'bofa-credit-card-period-ending-2026-07-15.csv',
+        filename: 'bofa-credit-card-4321-period-ending-2026-07-15.csv',
         target: '/card/july?format=excel',
       },
     ]);
   });
 
-  test('BofA captures every required account destination before leaving the overview', async () => {
+  test('BofA discovers every account link and deduplicates responsive-layout copies', async () => {
     const links = [
-      { label: 'Adv Plus Banking - 0000', href: '/myaccounts/brain/redirect.go?kind=checking' },
-      { label: 'Advantage Savings - 0000', href: '/myaccounts/brain/redirect.go?kind=savings' },
-      { label: 'Credit Card - 0000', href: '/myaccounts/brain/redirect.go?kind=card' },
+      { label: 'Adv Plus Banking \u2022\u2022\u2022\u2022 1111', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=checking-a&target=deposit' },
+      { label: 'Advantage Savings - 2222', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=savings-a&target=deposit' },
+      { label: 'Money Market - 3333', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=deposit-a&target=deposit' },
+      { label: 'Travel Rewards Visa - 4444', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=card-a&target=card' },
+      { label: 'Cash Rewards Credit Card - 5555', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=card-b&target=card' },
+      { label: 'Adv Plus Banking \u2022\u2022\u2022\u2022 1111', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=checking-a&target=deposit' },
     ];
-    const waitedFor: string[] = [];
     const page = {
       url: () => 'https://secure.bankofamerica.com/myaccounts/signin/signIn.go',
       locator: () => ({
-        filter: ({ hasText }: { hasText: RegExp }) => ({
-          first: () => {
-            const match = links.find(link => hasText.test(link.label));
-            return {
-              waitFor: async () => {
-                if (!match) throw new Error('missing');
-                waitedFor.push(match.label);
-              },
-              getAttribute: async () => match?.href ?? null,
-            };
-          },
-        }),
+        first: () => ({ waitFor: async () => {} }),
+        evaluateAll: async () => links,
       }),
     } as unknown as Page;
 
-    expect(await collectBankOfAmericaAccountDestinations(
-      page,
-      bankOfAmericaAccountRequirements(null),
-    )).toEqual({
-      checking: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?kind=checking',
-      savings: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?kind=savings',
-      'credit-card': 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?kind=card',
+    const kinds = ['checking', 'savings', 'savings', 'credit-card', 'credit-card'] as const;
+    expect(await discoverBankOfAmericaAccounts(page)).toEqual(links.slice(0, 5).map((link, index) => ({
+      kind: kinds[index],
+      last4: link.label.slice(-4),
+      label: link.label,
+      destination: link.destination,
+    })));
+  });
+
+  test('BofA rejects ambiguous account identities instead of mixing their artifacts', async () => {
+    const links = [
+      { label: 'Travel Rewards Visa - 4444', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=card-a&target=card' },
+      { label: 'Cash Rewards Credit Card - 4444', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=card-b&target=card' },
+    ];
+    const page = {
+      url: () => 'https://secure.bankofamerica.com/myaccounts/signin/signIn.go',
+      locator: () => ({
+        first: () => ({ waitFor: async () => {} }),
+        evaluateAll: async () => links,
+      }),
+    } as unknown as Page;
+
+    await expect(discoverBankOfAmericaAccounts(page)).rejects.toThrow(
+      'Multiple Bank of America credit-card accounts end in the same four digits',
+    );
+  });
+
+  test('BofA constructs authenticated API requests from opaque account links', () => {
+    const destination = 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=opaque-token&target=deposit';
+    expect(bankOfAmericaDepositActivityRequest(destination, '2026-08-01', '2026-08-22')).toMatchObject({
+      url: 'https://secure.bankofamerica.com/ogateway/addapi/v1/download/form/transaction',
+      method: 'POST',
+      multipart: {
+        'payload.accountToken': 'opaque-token',
+        'payload.txnSearchCriteria.startDate': '08/01/2026',
+        'payload.txnSearchCriteria.endDate': '08/22/2026',
+      },
     });
-    expect(waitedFor).toHaveLength(3);
+    expect(bankOfAmericaStatementIndexRequests(destination, '2025-12-01', '2026-08-22')).toEqual([
+      expect.objectContaining({ data: expect.objectContaining({ adx: 'opaque-token', year: '2025' }) }),
+      expect.objectContaining({ data: expect.objectContaining({ adx: 'opaque-token', year: '2026' }) }),
+    ]);
+    expect(bankOfAmericaCardActivityRequest(
+      '/myaccounts/details/card/download-transactions.go?adx=opaque-card',
+      'https://secure.bankofamerica.com/myaccounts/details/card/account-details/',
+    )).toMatchObject({
+      method: 'GET',
+      url: 'https://secure.bankofamerica.com/myaccounts/details/card/download-transactions.go?adx=opaque-card',
+    });
   });
 
   test('BofA opens a captured account destination without returning through sign-in', async () => {

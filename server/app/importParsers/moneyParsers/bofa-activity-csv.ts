@@ -8,7 +8,7 @@ export const meta: ParserMeta = {
   kind: "activity-export",
   priority: 100,
   matches: ({ filename, sample }) =>
-    /^bofa-(checking|savings)-\d{4}-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv$/i.test(filename) ||
+    /^bofa-(checking|savings|deposit)-\d{4}-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv$/i.test(filename) ||
     (sample.startsWith("Description,,Summary Amt.") && /Date,Description,Amount,Running Bal\./.test(sample)),
 };
 
@@ -64,13 +64,16 @@ function isoDate(value: string): string {
 
 function accountFromFilename(filePath: string): string {
   const filename = basename(filePath);
-  const withLast4 = filename.match(/^bofa-(checking|savings)-(\d{4})-\d{4}-\d{2}-\d{2}-to-/i);
+  const withLast4 = filename.match(/^bofa-(checking|savings|deposit)-(\d{4})-\d{4}-\d{2}-\d{2}-to-/i);
   if (withLast4) {
-    return withLast4[1]!.toLowerCase() === "checking"
+    const kind = withLast4[1]!.toLowerCase();
+    return kind === "checking"
       ? `Adv Plus Banking - ${withLast4[2]}`
-      : `Advantage Savings - ${withLast4[2]}`;
+      : kind === "savings"
+        ? `Advantage Savings - ${withLast4[2]}`
+        : `Bank of America Deposit - ${withLast4[2]}`;
   }
-  if (/^bofa-(checking|savings)-\d{4}-\d{2}-\d{2}-to-/i.test(filename)) return "Selected account";
+  if (/^bofa-(checking|savings|deposit)-\d{4}-\d{2}-\d{2}-to-/i.test(filename)) return "Selected account";
   throw new Error(`Could not infer BofA account from filename: ${filename}`);
 }
 

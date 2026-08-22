@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { getDb } from '../../database.ts';
 import {
   runBankOfAmericaSync,
+  type BankOfAmericaAccountKind,
+  type BankOfAmericaAccountPlan,
   type BankOfAmericaSyncConfig,
 } from './institutions/bankOfAmerica.ts';
 import {
@@ -34,6 +36,8 @@ interface AccountCoverageRow {
   earliestBalanceDate?: string | null;
   balanceDates?: string | null;
   sourceAccountName?: string | null;
+  sourceAccountNames?: string | null;
+  accountAliases?: string | null;
   accountHolder?: string | null;
 }
 
@@ -71,7 +75,17 @@ function institutionCoverage(institutionPattern: string): AccountCoverageRow[] {
         WHERE sa2.accountId = a.id
         ORDER BY COALESCE(sf2.committedAt, sf2.createdAt) DESC, sf2.id DESC
         LIMIT 1
-      ) AS sourceAccountName
+      ) AS sourceAccountName,
+      (
+        SELECT GROUP_CONCAT(sa3.sourceAccountName, '|')
+        FROM sourceAccounts sa3
+        WHERE sa3.accountId = a.id AND NULLIF(TRIM(sa3.sourceAccountName), '') IS NOT NULL
+      ) AS sourceAccountNames,
+      (
+        SELECT GROUP_CONCAT(aa.alias, '|')
+        FROM accountAliases aa
+        WHERE aa.accountId = a.id AND NULLIF(TRIM(aa.alias), '') IS NOT NULL
+      ) AS accountAliases
     FROM accounts a
     LEFT JOIN facts f ON f.accountId = a.id
     WHERE LOWER(COALESCE(a.institution, '')) LIKE ?
@@ -85,16 +99,54 @@ function bankOfAmericaCoverage() {
   return institutionCoverage('%bank of america%');
 }
 
-function accountByKind(accounts: AccountCoverageRow[], kind: 'checking' | 'savings' | 'credit') {
-  const matches = accounts.filter(account => {
-    const type = account.type.toLowerCase();
-    const name = account.name.toLowerCase();
-    if (kind === 'checking') return type === 'checking' || name.includes('checking');
-    if (kind === 'savings') return type === 'savings' || name.includes('savings');
-    return type.includes('credit') || name.includes('credit') || name.includes('card');
-  });
-  if (matches.length !== 1) throw new Error(`Expected exactly one active Bank of America ${kind} account, found ${matches.length}.`);
-  return matches[0]!;
+function bankOfAmericaAccountKind(account: AccountCoverageRow): BankOfAmericaAccountKind {
+  const value = `${account.type} ${account.name} ${account.sourceAccountNames ?? ''}`.toLowerCase();
+  if (/credit|card|visa|mastercard/.test(value)) return 'credit-card';
+  if (/savings|money market/.test(value)) return 'savings';
+  if (/checking|banking/.test(value)) return 'checking';
+  return 'deposit';
+}
+
+function bankOfAmericaAccountLast4(account: AccountCoverageRow): string | null {
+  const value = [
+    account.name,
+    account.sourceAccountName,
+    account.sourceAccountNames,
+    account.accountAliases,
+  ].filter(Boolean).join(' ');
+  const matches = [...value.matchAll(/\b(\d{4})\b/g)].map(match => match[1]!);
+  const unique = [...new Set(matches)];
+  return unique.length === 1 ? unique[0]! : null;
+}
+
+function bankOfAmericaAccountPlans(
+  accounts: AccountCoverageRow[],
+  goal: SyncGoal,
+  today: string,
+  report: SyncReporter,
+): BankOfAmericaAccountPlan[] {
+  const plans: BankOfAmericaAccountPlan[] = [];
+  const identities = new Set<string>();
+  for (const account of accounts) {
+    const kind = bankOfAmericaAccountKind(account);
+    const last4 = bankOfAmericaAccountLast4(account);
+    if (!last4) {
+      report({
+        type: 'warning',
+        message: `Skipped planning ${account.name}; its Bank of America account number is missing or ambiguous`,
+        data: { accountId: account.id },
+      });
+      continue;
+    }
+    const identity = `${kind}:${last4}`;
+    if (identities.has(identity)) {
+      throw new Error(`Multiple local Bank of America ${kind} accounts end in ${last4}.`);
+    }
+    identities.add(identity);
+    const window = goalWindowForCoverage(goal, account, today);
+    plans.push({ kind, last4, from: window.startDate, through: window.endDate });
+  }
+  return plans;
 }
 
 function vanguardKind(account: AccountCoverageRow): VanguardAccountKind | null {
@@ -181,10 +233,19 @@ export function listSyncTargets(): SyncTarget[] {
 }
 
 function accountForArtifact(fileName: string, accounts: AccountCoverageRow[]) {
-  if (/^bofa-checking-/i.test(fileName)) return accountByKind(accounts, 'checking');
-  if (/^bofa-savings-/i.test(fileName)) return accountByKind(accounts, 'savings');
-  if (/^bofa-credit-card-/i.test(fileName)) return accountByKind(accounts, 'credit');
-  throw new Error(`Cannot resolve an account for ${fileName}.`);
+  const match = fileName.match(/^bofa-(checking|savings|deposit|credit-card)-(\d{4})-/i);
+  if (!match) throw new Error(`Cannot read the Bank of America account identity from ${fileName}.`);
+  const kind = match[1]!.toLowerCase() as BankOfAmericaAccountKind;
+  const last4 = match[2]!;
+  const exact = accounts.filter(account =>
+    bankOfAmericaAccountKind(account) === kind && bankOfAmericaAccountLast4(account) === last4
+  );
+  if (exact.length === 1) return exact[0]!;
+  const sameNumber = accounts.filter(account => bankOfAmericaAccountLast4(account) === last4);
+  if (sameNumber.length === 1) return sameNumber[0]!;
+  throw new Error(
+    `Expected one local Bank of America ${kind} account ending in ${last4}, found ${exact.length}.`,
+  );
 }
 
 async function stageArtifacts(
@@ -250,25 +311,25 @@ export async function runSync(request: SyncRunRequest, report: SyncReporter): Pr
   if (request.institutionId !== 'bank-of-america') throw new Error(`Unsupported institution: ${request.institutionId}`);
   const accounts = bankOfAmericaCoverage();
   const today = isoDate();
-  const checking = accountByKind(accounts, 'checking');
-  const savings = accountByKind(accounts, 'savings');
-  const credit = accountByKind(accounts, 'credit');
-  const checkingWindow = goalWindowForCoverage(request.goal, checking, today);
-  const savingsWindow = goalWindowForCoverage(request.goal, savings, today);
-  const creditWindow = goalWindowForCoverage(request.goal, credit, today);
+  const fallbackWindow = goalWindowForCoverage(request.goal, {
+    latestFactDate: null,
+    earliestFactDate: null,
+  }, today);
+  const accountPlans = bankOfAmericaAccountPlans(accounts, request.goal, today, report);
   const outputDir = join(syncApplicationDataRoot(), request.runId, 'artifacts');
   await mkdir(outputDir, { recursive: true });
 
   report({ type: 'phase', message: 'Opening Bank of America', data: { goal: request.goal.kind } });
   const config: BankOfAmericaSyncConfig = {
     outputDir,
-    through: checkingWindow.endDate,
-    checkingThrough: checkingWindow.endDate,
-    savingsThrough: savingsWindow.endDate,
-    cardThrough: creditWindow.endDate,
-    checkingFrom: checkingWindow.startDate,
-    savingsFrom: savingsWindow.startDate,
-    cardFrom: creditWindow.startDate,
+    through: fallbackWindow.endDate,
+    checkingThrough: fallbackWindow.endDate,
+    savingsThrough: fallbackWindow.endDate,
+    cardThrough: fallbackWindow.endDate,
+    checkingFrom: fallbackWindow.startDate,
+    savingsFrom: fallbackWindow.startDate,
+    cardFrom: fallbackWindow.startDate,
+    accounts: accountPlans,
     session: 'bank-of-america',
     scope: null,
     dryRun: false,
