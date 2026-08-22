@@ -2,8 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import type { Page } from 'playwright';
 
 import {
+  bankOfAmericaAccountRequirements,
+  collectBankOfAmericaAccountDestinations,
   hasBankOfAmericaCreditCardActivity,
   isBankOfAmericaAuthenticatedPage,
+  openBankOfAmericaAccount,
   parseBankOfAmericaArgs,
 } from './institutions/bankOfAmerica.ts';
 import type { VanguardSyncProfile } from './institutions/vanguard.ts';
@@ -96,6 +99,61 @@ describe('data sync planning', () => {
     const header = 'Posted Date,Reference Number,Payee,Address,Amount\r\n';
     expect(hasBankOfAmericaCreditCardActivity(header)).toBe(false);
     expect(hasBankOfAmericaCreditCardActivity(`${header}08/20/2026,1,EXAMPLE SHOP,,\"-12.34\"\r\n`)).toBe(true);
+  });
+
+  test('BofA captures every required account destination before leaving the overview', async () => {
+    const links = [
+      { label: 'Adv Plus Banking - 0000', href: '/myaccounts/brain/redirect.go?kind=checking' },
+      { label: 'Advantage Savings - 0000', href: '/myaccounts/brain/redirect.go?kind=savings' },
+      { label: 'Credit Card - 0000', href: '/myaccounts/brain/redirect.go?kind=card' },
+    ];
+    const waitedFor: string[] = [];
+    const page = {
+      url: () => 'https://secure.bankofamerica.com/myaccounts/signin/signIn.go',
+      locator: () => ({
+        filter: ({ hasText }: { hasText: RegExp }) => ({
+          first: () => {
+            const match = links.find(link => hasText.test(link.label));
+            return {
+              waitFor: async () => {
+                if (!match) throw new Error('missing');
+                waitedFor.push(match.label);
+              },
+              getAttribute: async () => match?.href ?? null,
+            };
+          },
+        }),
+      }),
+    } as unknown as Page;
+
+    expect(await collectBankOfAmericaAccountDestinations(
+      page,
+      bankOfAmericaAccountRequirements(null),
+    )).toEqual({
+      checking: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?kind=checking',
+      savings: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?kind=savings',
+      'credit-card': 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?kind=card',
+    });
+    expect(waitedFor).toHaveLength(3);
+  });
+
+  test('BofA opens a captured account destination without returning through sign-in', async () => {
+    const navigations: Array<{ destination: string; options: unknown }> = [];
+    const page = {
+      goto: async (destination: string, options: unknown) => {
+        navigations.push({ destination, options });
+      },
+    } as unknown as Page;
+
+    await openBankOfAmericaAccount(
+      page,
+      'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?kind=card',
+    );
+
+    expect(navigations).toEqual([{
+      destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?kind=card',
+      options: { waitUntil: 'domcontentloaded', timeout: 30_000 },
+    }]);
   });
 
   test('Vanguard current sync plans only missing completed statement months', () => {

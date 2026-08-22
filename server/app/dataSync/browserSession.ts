@@ -27,6 +27,7 @@ type RunOptions = {
   isAuthenticated?: (page: Page) => boolean | Promise<boolean>;
   waitUntilAuthenticated?: (page: Page, timeoutMs: number) => Promise<void>;
   onProgress?: (message: string) => void;
+  programBindings?: Record<string, unknown>;
   completionDescription: string;
   completionDurationMs?: number;
 };
@@ -318,6 +319,7 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
   const program = Function(`"use strict"; return (${code});`)() as (
     browserPage: Page,
     reportProgress: (message: string) => void,
+    bindings: Record<string, unknown>,
   ) => Promise<unknown>;
   const reportProgress = options.onProgress ?? (() => {});
   const hasSavedAuthentication = (session.persistAuthentication ?? true)
@@ -335,9 +337,13 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
       ...session.contextOptions,
       headless,
     },
-  }, async page => {
+  }, async (page, context) => {
     const deadline = Date.now() + (options.authenticationTimeoutMs ?? 10 * 60_000);
-    let result = decodeInstitutionBrowserProgramResult<T>(await program(page, reportProgress));
+    let result = decodeInstitutionBrowserProgramResult<T>(await program(
+      page,
+      reportProgress,
+      options.programBindings ?? {},
+    ));
     if (result.status === 'login-required' && allowInteractiveAuthentication) {
       await showAuthenticationChapter(
         page,
@@ -347,8 +353,17 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     }
     while (allowInteractiveAuthentication && result.status === 'login-required' && Date.now() < deadline) {
       await waitForInteractiveAuthentication(page, deadline, options);
+      if (session.persistAuthentication ?? true) {
+        const profilePath = resolve(session.profilePath ?? playwrightProfilePath(session.name));
+        const persisted = await persistBrowserAuthentication(context, playwrightAuthStatePath(profilePath));
+        if (!persisted) console.warn(`Could not checkpoint authentication for ${session.name}.`);
+      }
       reportProgress('Authentication complete. Continuing downloads.');
-      result = decodeInstitutionBrowserProgramResult<T>(await program(page, reportProgress));
+      result = decodeInstitutionBrowserProgramResult<T>(await program(
+        page,
+        reportProgress,
+        options.programBindings ?? {},
+      ));
     }
     if (allowInteractiveAuthentication && result.status === 'login-required') {
       throw new Error(`Authentication timed out in ${session.name}`);

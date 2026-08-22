@@ -22,6 +22,13 @@ export type BankOfAmericaSyncConfig = {
   dryRun: boolean;
 };
 
+export type BankOfAmericaAccountKind = "checking" | "savings" | "credit-card";
+
+export type BankOfAmericaAccountRequirement = {
+  kind: BankOfAmericaAccountKind;
+  pattern: string;
+};
+
 type ValidArtifact = {
   filename: string;
   kind: "csv" | "pdf";
@@ -29,6 +36,55 @@ type ValidArtifact = {
 };
 
 const loginUrl = "https://secure.bankofamerica.com/myaccounts/signin/signIn.go";
+
+export function bankOfAmericaAccountRequirements(
+  scope: BankOfAmericaSyncConfig["scope"],
+): BankOfAmericaAccountRequirement[] {
+  const requirements: BankOfAmericaAccountRequirement[] = [];
+  if (!scope || scope === "checking") {
+    requirements.push({ kind: "checking", pattern: "Adv Plus Banking -|Checking -" });
+  }
+  if (!scope || scope === "savings") {
+    requirements.push({ kind: "savings", pattern: "Advantage Savings -|Savings -" });
+  }
+  if (!scope || scope === "card-activity" || scope === "card-statements") {
+    requirements.push({
+      kind: "credit-card",
+      pattern: "Customized Cash Rewards Visa Signature -|Credit Card -",
+    });
+  }
+  return requirements;
+}
+
+export async function collectBankOfAmericaAccountDestinations(
+  page: Page,
+  requirements: BankOfAmericaAccountRequirement[],
+): Promise<Partial<Record<BankOfAmericaAccountKind, string>>> {
+  const destinations: Partial<Record<BankOfAmericaAccountKind, string>> = {};
+  for (const { kind, pattern } of requirements) {
+    const accountLink = page
+      .locator('a[href*="/myaccounts/brain/redirect.go"]')
+      .filter({ hasText: new RegExp(pattern, "i") })
+      .first();
+    await accountLink.waitFor({ state: "visible", timeout: 30_000 }).catch(() => {
+      throw new Error(`Timed out waiting for the ${kind} account on the Bank of America account list`);
+    });
+    const accountHref = await accountLink.getAttribute("href");
+    if (!accountHref) throw new Error(`The ${kind} account link has no destination`);
+    destinations[kind] = new URL(accountHref, page.url()).toString();
+  }
+  return destinations;
+}
+
+export async function openBankOfAmericaAccount(
+  page: Page,
+  destination: string,
+): Promise<void> {
+  await page.goto(destination, {
+    waitUntil: "domcontentloaded",
+    timeout: 30_000,
+  });
+}
 
 export async function isBankOfAmericaAuthenticatedPage(page: Page): Promise<boolean> {
   let hostname: string;
@@ -196,6 +252,7 @@ function buildBrowserProgram(
     scope,
     session: config.session,
     outputDir: config.outputDir,
+    accountRequirements: bankOfAmericaAccountRequirements(scope),
     accounts: {
       checking: {
         from: config.checkingFrom,
@@ -220,7 +277,7 @@ function buildBrowserProgram(
     },
   };
 
-  return `async (page, reportProgress) => {
+  return `async (page, reportProgress, bindings) => {
     const plan = ${JSON.stringify(plan)};
     const saved = [];
     const skipped = [];
@@ -260,42 +317,11 @@ function buildBrowserProgram(
       const close = page.locator("#downloadTxnLayerSpartaUILayer button.spa-ui-layer-close");
       if (await close.count() && await close.isVisible()) await close.click();
     };
-    const goToOverview = async () => {
-      if ((await page.title()).includes("Accounts Overview")) return;
-      await page.goto("https://secure.bankofamerica.com/myaccounts/signin/signIn.go", {
-        waitUntil: "domcontentloaded",
-        timeout: 30000,
-      });
-      await page.waitForFunction(
-        () => document.title.includes("Accounts Overview"),
-        null,
-        { timeout: 30000 },
-      ).catch(() => {
-        throw new Error("Timed out returning to Accounts Overview");
-      });
-    };
-    const selectAccount = async (kind, pattern) => {
-      await goToOverview();
-      const accountLink = page
-        .locator('a[href*="/myaccounts/brain/redirect.go"]')
-        .filter({ hasText: new RegExp(pattern, "i") })
-        .first();
-      await accountLink.waitFor({ state: "visible", timeout: 30000 }).catch(() => {
-        throw new Error(\`Timed out waiting for the \${kind} account on Accounts Overview\`);
-      });
-      const accountHref = await accountLink.getAttribute("href");
-      if (!accountHref) throw new Error(\`The \${kind} account link has no destination\`);
-      await page.goto(new URL(accountHref, page.url()).toString(), {
-        waitUntil: "domcontentloaded",
-        timeout: 30000,
-      });
-      await page.waitForFunction(
-        () => !document.title.includes("Accounts Overview"),
-        null,
-        { timeout: 30000 },
-      ).catch(() => {
-        throw new Error(\`Timed out opening the \${kind} account\`);
-      });
+    let accountDestinations = {};
+    const selectAccount = async kind => {
+      const destination = accountDestinations[kind];
+      if (!destination) throw new Error(\`The \${kind} account destination was not captured\`);
+      await bindings.openAccount(page, destination);
     };
     const downloadDepositActivity = async (from, to, filename) => {
       await page.locator("a.download-transactions").click();
@@ -454,10 +480,15 @@ function buildBrowserProgram(
         });
       }
 
+      accountDestinations = await bindings.collectAccountDestinations(
+        page,
+        plan.accountRequirements,
+      );
+
       if (!plan.scope || plan.scope === "checking") {
         reportProgress("Downloading Bank of America checking activity and statements");
         await page.screencast.showChapter("Updating checking", { description: "Downloading activity and available statements." });
-        await selectAccount("checking", "Adv Plus Banking -|Checking -");
+        await selectAccount("checking");
         if (plan.accounts.checking.downloadActivity)
           await downloadDepositActivity(plan.accounts.checking.from, plan.accounts.checking.through, plan.accounts.checking.activity);
         else skipped.push(plan.accounts.checking.activity);
@@ -467,7 +498,7 @@ function buildBrowserProgram(
       if (!plan.scope || plan.scope === "savings") {
         reportProgress("Downloading Bank of America savings activity and statements");
         await page.screencast.showChapter("Updating savings", { description: "Downloading activity and available statements." });
-        await selectAccount("savings", "Advantage Savings -|Savings -");
+        await selectAccount("savings");
         if (plan.accounts.savings.downloadActivity)
           await downloadDepositActivity(plan.accounts.savings.from, plan.accounts.savings.through, plan.accounts.savings.activity);
         else skipped.push(plan.accounts.savings.activity);
@@ -477,14 +508,14 @@ function buildBrowserProgram(
       if (!plan.scope || plan.scope === "card-activity") {
         reportProgress("Opening the Bank of America credit-card account");
         await page.screencast.showChapter("Updating card activity", { description: "Downloading available transaction periods." });
-        await selectAccount("credit-card", "Customized Cash Rewards Visa Signature -|Credit Card -");
+        await selectAccount("credit-card");
         reportProgress("Reading available Bank of America credit-card activity periods");
         await downloadCardActivity();
       }
       if (!plan.scope || plan.scope === "card-statements") {
         reportProgress("Opening Bank of America credit-card statements");
         await page.screencast.showChapter("Updating card statements", { description: "Downloading available statement PDFs." });
-        await selectAccount("credit-card", "Customized Cash Rewards Visa Signature -|Credit Card -");
+        await selectAccount("credit-card");
         await page.locator('a[name="statements_and_documents"]:visible').first().click();
         await page.waitForFunction(() => document.title.includes("Statements"), null, { timeout: 15000 });
         await downloadStatements("credit-card", plan.accounts.card.from, plan.accounts.card.through, "Customized Cash Rewards|Credit Card", plan.accounts.card.skipStatementMonths);
@@ -518,6 +549,10 @@ export async function runBankOfAmericaSync(
       isAuthenticated: isBankOfAmericaAuthenticatedPage,
       waitUntilAuthenticated: waitUntilBankOfAmericaAuthenticated,
       onProgress,
+      programBindings: {
+        collectAccountDestinations: collectBankOfAmericaAccountDestinations,
+        openAccount: openBankOfAmericaAccount,
+      },
     },
   );
   if (parsed.status === "login-required")
