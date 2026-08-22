@@ -475,13 +475,14 @@ function buildBrowserProgram(
         await downloadStatements("savings", plan.accounts.savings.from, plan.accounts.savings.through, "Advantage Savings|Savings", plan.accounts.savings.skipStatementMonths);
       }
       if (!plan.scope || plan.scope === "card-activity") {
-        reportProgress("Downloading Bank of America credit-card activity");
+        reportProgress("Opening the Bank of America credit-card account");
         await page.screencast.showChapter("Updating card activity", { description: "Downloading available transaction periods." });
         await selectAccount("credit-card", "Customized Cash Rewards Visa Signature -|Credit Card -");
+        reportProgress("Reading available Bank of America credit-card activity periods");
         await downloadCardActivity();
       }
       if (!plan.scope || plan.scope === "card-statements") {
-        reportProgress("Downloading Bank of America credit-card statements");
+        reportProgress("Opening Bank of America credit-card statements");
         await page.screencast.showChapter("Updating card statements", { description: "Downloading available statement PDFs." });
         await selectAccount("credit-card", "Customized Cash Rewards Visa Signature -|Credit Card -");
         await page.locator('a[name="statements_and_documents"]:visible').first().click();

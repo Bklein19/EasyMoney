@@ -2,6 +2,7 @@ import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
 import { commitSyncReview, discardSyncReview } from './review.ts';
+import { markInterruptedSyncJob } from './jobState.ts';
 import { syncApplicationDataRoot } from './runner.ts';
 import { syncChildProcessOptions } from './subprocess.ts';
 import type { SyncEvent, SyncGoal, SyncInstitutionId, SyncRunResult, SyncRunReview } from './types.ts';
@@ -74,6 +75,7 @@ async function managedJob(runId: string): Promise<ManagedSyncJob | null> {
       persistence: Promise.resolve(),
     };
     jobs.set(runId, job);
+    if (markInterruptedSyncJob(job)) await persistJob(job);
     return job;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;

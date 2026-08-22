@@ -136,21 +136,45 @@ export async function withPlaywrightPage<T>(
     if (savedStorageState) await context.setStorageState(savedStorageState);
     const page = context.pages()[0] ?? await context.newPage();
     if (page.url() === 'about:blank') await page.goto(options.startUrl, { waitUntil: 'domcontentloaded' });
-    return await operation(page, context);
+    return await runWhileBrowserOpen(context, () => operation(page, context));
   } finally {
     try {
       if (persistAuthentication) {
-        try {
-          await context.storageState({ path: authStatePath, indexedDB: true });
-          if (process.platform !== 'win32') await chmod(authStatePath, 0o600);
-        } catch (error) {
-          if (!isClosedContextError(error)) throw error;
-        }
+        const persisted = await persistBrowserAuthentication(context, authStatePath);
+        if (!persisted) console.warn(`Could not finish saving authentication for ${options.name}.`);
       }
     } finally {
       const closed = await closeBrowserContext(context);
       if (!closed) console.warn(`Timed out closing the ${options.name} browser context after Chrome exited.`);
     }
+  }
+}
+
+export async function persistBrowserAuthentication(
+  context: Pick<BrowserContext, 'storageState'>,
+  authStatePath: string,
+  timeoutMs = 5_000,
+): Promise<boolean> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const persisted = await Promise.race([
+      Promise.resolve()
+        .then(() => context.storageState({ path: authStatePath, indexedDB: true }))
+        .then(() => true),
+      new Promise<false>(resolveTimeout => {
+        timeout = setTimeout(() => resolveTimeout(false), timeoutMs);
+      }),
+    ]);
+    if (!persisted) return false;
+    if (process.platform !== 'win32') await chmod(authStatePath, 0o600);
+    return true;
+  } catch (error) {
+    if (!isClosedContextError(error)) {
+      console.warn('Browser authentication state could not be saved.');
+    }
+    return false;
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }
 
@@ -168,6 +192,30 @@ export async function closeBrowserContext(
     ]);
   } finally {
     if (timeout) clearTimeout(timeout);
+  }
+}
+
+export async function runWhileBrowserOpen<T>(
+  context: Pick<BrowserContext, 'once' | 'off'>,
+  operation: () => Promise<T>,
+): Promise<T> {
+  let rejectClosed: ((error: Error) => void) | undefined;
+  const handleClose = () => rejectClosed?.(
+    new Error('Browser closed before the institution sync completed'),
+  );
+  const browserClosed = new Promise<never>((_resolve, reject) => {
+    rejectClosed = reject;
+    context.once('close', handleClose);
+  });
+
+  try {
+    return await Promise.race([
+      Promise.resolve().then(operation),
+      browserClosed,
+    ]);
+  } finally {
+    rejectClosed = undefined;
+    context.off('close', handleClose);
   }
 }
 

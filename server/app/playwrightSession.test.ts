@@ -8,9 +8,11 @@ import {
   closeBrowserContext,
   decodeInstitutionBrowserProgramResult,
   institutionBrowserLaunchStrategy,
+  persistBrowserAuthentication,
   playwrightAuthStatePath,
   playwrightHasSavedAuthentication,
   playwrightProfilePath,
+  runWhileBrowserOpen,
   showAuthenticationChapter,
   showSyncCompletionChapter,
   waitForInteractiveAuthentication,
@@ -192,5 +194,44 @@ describe('Playwright session helper', () => {
 
     expect(closed).toBe(false);
     expect(performance.now() - startedAt).toBeLessThan(250);
+  });
+
+  test('does not hang saving authentication after Chrome exits', async () => {
+    const context = {
+      storageState: () => new Promise<never>(() => {}),
+    };
+
+    const startedAt = performance.now();
+    const persisted = await persistBrowserAuthentication(
+      context as never,
+      '/tmp/easymoney-auth-state-that-should-not-be-written.json',
+      10,
+    );
+
+    expect(persisted).toBe(false);
+    expect(performance.now() - startedAt).toBeLessThan(250);
+  });
+
+  test('rejects the active institution step when Chrome exits', async () => {
+    let closeListener: (() => void) | undefined;
+    const context = {
+      once: (event: string, listener: () => void) => {
+        expect(event).toBe('close');
+        closeListener = listener;
+      },
+      off: (event: string, listener: () => void) => {
+        expect(event).toBe('close');
+        if (closeListener === listener) closeListener = undefined;
+      },
+    };
+
+    const running = runWhileBrowserOpen(
+      context as never,
+      () => new Promise<never>(() => {}),
+    );
+    closeListener?.();
+
+    await expect(running).rejects.toThrow('Browser closed before the institution sync completed');
+    expect(closeListener).toBeUndefined();
   });
 });
