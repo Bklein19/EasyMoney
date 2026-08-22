@@ -29,6 +29,17 @@ export type BankOfAmericaAccountRequirement = {
   pattern: string;
 };
 
+export type BankOfAmericaCardPeriodOption = {
+  label: string;
+  value: string;
+};
+
+export type BankOfAmericaCardActivityJob = {
+  label: string;
+  filename: string;
+  target: string;
+};
+
 type ValidArtifact = {
   filename: string;
   kind: "csv" | "pdf";
@@ -36,6 +47,72 @@ type ValidArtifact = {
 };
 
 const loginUrl = "https://secure.bankofamerica.com/myaccounts/signin/signIn.go";
+
+const bankOfAmericaMonthNumbers: Record<string, string> = {
+  Jan: "01",
+  January: "01",
+  Feb: "02",
+  February: "02",
+  Mar: "03",
+  March: "03",
+  Apr: "04",
+  April: "04",
+  May: "05",
+  Jun: "06",
+  June: "06",
+  Jul: "07",
+  July: "07",
+  Aug: "08",
+  August: "08",
+  Sep: "09",
+  September: "09",
+  Oct: "10",
+  October: "10",
+  Nov: "11",
+  November: "11",
+  Dec: "12",
+  December: "12",
+};
+
+function dateFromBankOfAmericaPeriodLabel(label: string): string | null {
+  const match = label.match(
+    /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2}),\s+(\d{4})\b/,
+  );
+  if (!match) return null;
+  return `${match[3]}-${bankOfAmericaMonthNumbers[match[1]]}-${match[2].padStart(2, "0")}`;
+}
+
+export function bankOfAmericaCardActivityJobs(
+  options: BankOfAmericaCardPeriodOption[],
+  excelFileTypeValue: string,
+  from: string,
+  through: string,
+): BankOfAmericaCardActivityJob[] {
+  const jobs: BankOfAmericaCardActivityJob[] = [];
+  for (const option of options) {
+    const label = option.label.trim();
+    if (!label || !option.value) continue;
+    if (/^Current transactions$/i.test(label)) {
+      jobs.push({
+        label,
+        filename: `bofa-credit-card-current-to-${through}.csv`,
+        target: option.value + excelFileTypeValue,
+      });
+      continue;
+    }
+    const date = dateFromBankOfAmericaPeriodLabel(label);
+    if (!date || date < from || date > through) continue;
+    jobs.push({
+      label,
+      filename: `bofa-credit-card-period-ending-${date}.csv`,
+      target: option.value + excelFileTypeValue,
+    });
+  }
+  if (!jobs.some(job => job.filename.startsWith("bofa-credit-card-current-to-"))) {
+    throw new Error("Bank of America did not offer a current credit-card activity period");
+  }
+  return jobs;
+}
 
 export function bankOfAmericaAccountRequirements(
   scope: BankOfAmericaSyncConfig["scope"],
@@ -287,10 +364,6 @@ function buildBrowserProgram(
       .replace(/https?:\\/\\/\\S+/g, "<redacted-url>")
       .replace(/\\b[a-f0-9]{20,}\\b/gi, "<redacted-id>")
       .replace(/\\b\\d{4,}\\b/g, "<digits>");
-    const dateFromText = text => {
-      const match = text.match(/\\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\s+(\\d{1,2}),\\s+(\\d{4})\\b/);
-      return match ? \`\${match[3]}-\${monthNumbers[match[1]]}-\${match[2].padStart(2, "0")}\` : null;
-    };
     const monthFromText = text => {
       const match = text.match(/\\b(January|February|March|April|May|June|July|August|September|October|November|December) Statement\\b/);
       if (!match) return null;
@@ -416,7 +489,6 @@ function buildBrowserProgram(
       }
     };
     const downloadCardActivity = async () => {
-      const currentFilename = \`bofa-credit-card-current-to-\${plan.accounts.card.through}.csv\`;
       const existing = new Set(plan.accounts.card.existingActivity);
       const openPanel = async () => {
         let period = page.locator("#select_transaction:visible").first();
@@ -430,32 +502,30 @@ function buildBrowserProgram(
         return period;
       };
       const period = await openPanel();
-      const labels = await period.locator("option").allTextContents();
-      const jobs = [{ label: "Current transactions", filename: currentFilename }];
-      for (const label of labels) {
-        const date = dateFromText(label);
-        if (!date || date < plan.accounts.card.from || date > plan.accounts.card.through) continue;
-        jobs.push({ label: label.trim(), filename: \`bofa-credit-card-period-ending-\${date}.csv\` });
-      }
+      const periodOptions = await period.locator("option").evaluateAll(options => options.map(option => ({
+        label: (option.textContent || "").trim(),
+        value: option.value,
+      })));
+      const fileType = page.locator("#select_filetype:visible").first();
+      await fileType.waitFor({ state: "visible" });
+      const excelFileTypeValue = await fileType.locator("option").evaluateAll(options => {
+        const excel = options.find(option => /Microsoft Excel Format/i.test(option.textContent || ""));
+        return excel ? excel.value : null;
+      });
+      if (!excelFileTypeValue) throw new Error("Bank of America Excel download format was not found");
+      const jobs = bindings.buildCardActivityJobs(
+        periodOptions,
+        excelFileTypeValue,
+        plan.accounts.card.from,
+        plan.accounts.card.through,
+      );
       for (const job of jobs) {
         if (existing.has(job.filename)) {
           skipped.push(job.filename);
           continue;
         }
         reportProgress(\`Downloading Bank of America card activity: \${job.label}\`);
-        const select = await openPanel();
-        await select.selectOption({ label: job.label });
-        await page.locator("#select_filetype:visible").first().selectOption({ label: "Microsoft Excel Format" });
-        await saveFetchedDownload(job.filename, () => page.evaluate(async filename => {
-          const visible = element => {
-            const style = getComputedStyle(element);
-            return style.display !== "none" && style.visibility !== "hidden" && element.getClientRects().length > 0;
-          };
-          const period = [...document.querySelectorAll("#select_transaction")].find(visible);
-          const fileType = [...document.querySelectorAll("#select_filetype")].find(visible);
-          if (!(period instanceof HTMLSelectElement) || !(fileType instanceof HTMLSelectElement))
-            throw new Error("Credit-card download controls were not found");
-          const target = period.value + fileType.value;
+        await saveFetchedDownload(job.filename, () => page.evaluate(async ({ target, filename }) => {
           const response = await fetch(target, { credentials: "include" });
           const blob = await response.blob();
           const href = URL.createObjectURL(blob);
@@ -465,7 +535,7 @@ function buildBrowserProgram(
           anchor.click();
           setTimeout(() => URL.revokeObjectURL(href), 1000);
           return { ok: response.ok, status: response.status };
-        }, job.filename));
+        }, { target: job.target, filename: job.filename }));
       }
     };
 
@@ -550,6 +620,7 @@ export async function runBankOfAmericaSync(
       waitUntilAuthenticated: waitUntilBankOfAmericaAuthenticated,
       onProgress,
       programBindings: {
+        buildCardActivityJobs: bankOfAmericaCardActivityJobs,
         collectAccountDestinations: collectBankOfAmericaAccountDestinations,
         openAccount: openBankOfAmericaAccount,
       },

@@ -3,6 +3,7 @@ import type { Page } from 'playwright';
 
 import {
   bankOfAmericaAccountRequirements,
+  bankOfAmericaCardActivityJobs,
   collectBankOfAmericaAccountDestinations,
   hasBankOfAmericaCreditCardActivity,
   isBankOfAmericaAuthenticatedPage,
@@ -99,6 +100,32 @@ describe('data sync planning', () => {
     const header = 'Posted Date,Reference Number,Payee,Address,Amount\r\n';
     expect(hasBankOfAmericaCreditCardActivity(header)).toBe(false);
     expect(hasBankOfAmericaCreditCardActivity(`${header}08/20/2026,1,EXAMPLE SHOP,,\"-12.34\"\r\n`)).toBe(true);
+  });
+
+  test('BofA builds direct credit-card download targets without selecting page controls', () => {
+    expect(bankOfAmericaCardActivityJobs([
+      { label: 'Select a period', value: '' },
+      { label: 'Current transactions', value: '/card/current?' },
+      { label: 'Statement Period Ending Aug 15, 2026', value: '/card/august?' },
+      { label: 'Statement Period Ending Jul 15, 2026', value: '/card/july?' },
+      { label: 'Statement Period Ending Jun 15, 2026', value: '/card/june?' },
+    ], 'format=excel', '2026-07-01', '2026-08-22')).toEqual([
+      {
+        label: 'Current transactions',
+        filename: 'bofa-credit-card-current-to-2026-08-22.csv',
+        target: '/card/current?format=excel',
+      },
+      {
+        label: 'Statement Period Ending Aug 15, 2026',
+        filename: 'bofa-credit-card-period-ending-2026-08-15.csv',
+        target: '/card/august?format=excel',
+      },
+      {
+        label: 'Statement Period Ending Jul 15, 2026',
+        filename: 'bofa-credit-card-period-ending-2026-07-15.csv',
+        target: '/card/july?format=excel',
+      },
+    ]);
   });
 
   test('BofA captures every required account destination before leaving the overview', async () => {
