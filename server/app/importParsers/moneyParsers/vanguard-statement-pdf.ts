@@ -8,7 +8,7 @@ export const meta: ParserMeta = {
   kind: "statement",
   priority: 50,
   matches: ({ filename, sample }) =>
-    /^\d{4}-\d{2}-\d{2}-(Brokerage|Roth-IRA|Trad-IRA)---.+\.pdf$/.test(filename) ||
+    /^\d{4}-\d{2}-\d{2}-(Brokerage|Roth-IRA|Trad-IRA)(?:-\d{4})?---.+\.pdf$/.test(filename) ||
     /^vanguard-\d{4}-\d{4}-\d{2}-\d{2}-statement\.pdf$/.test(filename) ||
     // Generically-named statements (statement-4.pdf etc.) — disambiguate by content.
     (/^statement-\d+\.pdf$/.test(filename) && /Vanguard Brokerage Services/.test(sample)),
