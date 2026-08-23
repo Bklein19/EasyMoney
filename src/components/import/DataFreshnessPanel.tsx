@@ -57,13 +57,16 @@ const STATUS_ICONS = {
 };
 
 interface SyncActionMenuProps {
+  icon: 'history' | 'refresh';
+  label: string;
+  primary?: boolean;
   targets: SyncTarget[];
   onSelect: (target: SyncTarget) => void;
 }
 
-function SyncActionMenu({ targets, onSelect }: SyncActionMenuProps) {
+function SyncActionMenu({ icon, label, primary = false, targets, onSelect }: SyncActionMenuProps) {
   const detailsRef = useRef<HTMLDetailsElement>(null);
-  const label = 'Import older data';
+  const MenuIcon = icon === 'history' ? History : RefreshCw;
 
   useEffect(() => {
     const close = (event: PointerEvent) => {
@@ -81,9 +84,9 @@ function SyncActionMenu({ targets, onSelect }: SyncActionMenuProps) {
   }, []);
 
   return (
-    <details className="data-freshness__sync-menu" ref={detailsRef}>
+    <details className={`data-freshness__sync-menu${primary ? ' is-primary' : ''}`} ref={detailsRef}>
       <summary>
-        <History size={14} />
+        <MenuIcon size={14} />
         {label}
         <ChevronDown className="data-freshness__sync-chevron" size={14} />
       </summary>
@@ -413,20 +416,18 @@ export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPa
           {syncTargets.length > 0 && !syncIsActive && (
             <div className="data-freshness__sync-actions">
               <SyncActionMenu
+                icon="history"
+                label="Import older data"
                 targets={syncTargets}
                 onSelect={target => void startInstitutionSync(target, 'backfill')}
               />
-              {syncTargets.map(target => (
-                <button
-                  className="btn btn--primary btn--sm"
-                  key={target.id}
-                  type="button"
-                  onClick={() => void startInstitutionSync(target, 'current')}
-                >
-                  <RefreshCw size={14} />
-                  Catch up {target.label}
-                </button>
-              ))}
+              <SyncActionMenu
+                icon="refresh"
+                label="Catch up"
+                primary
+                targets={syncTargets}
+                onSelect={target => void startInstitutionSync(target, 'current')}
+              />
             </div>
           )}
           <div className="data-freshness__summary" aria-label="Freshness summary">

@@ -91,6 +91,18 @@
   display: none;
 }
 
+.data-freshness__sync-menu.is-primary summary {
+  border-color: transparent;
+  background: var(--accent-fill);
+  color: white;
+  box-shadow: var(--shadow-glow-blue);
+}
+
+.data-freshness__sync-menu.is-primary summary:hover {
+  background: var(--accent-fill-hover);
+  box-shadow: var(--shadow-md);
+}
+
 .data-freshness__sync-chevron {
   margin-left: 0.1rem;
   transition: none;
