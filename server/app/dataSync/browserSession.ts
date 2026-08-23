@@ -1,6 +1,6 @@
-import { chmod, mkdir, stat } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { posix, resolve, win32 } from 'node:path';
+import { dirname, join, posix, resolve, win32 } from 'node:path';
 
 import { chromium, type BrowserContext, type Page } from 'playwright';
 
@@ -18,6 +18,7 @@ type SessionOptions = {
   startUrl: string;
   profilePath?: string;
   persistAuthentication?: boolean;
+  onInteractiveBrowserWait?: (message: string) => void;
   contextOptions?: NonNullable<Parameters<typeof chromium.launchPersistentContext>[1]>;
   launchArgs?: string[];
 };
@@ -55,6 +56,121 @@ export function playwrightProfilePath(
 
 export function playwrightAuthStatePath(profilePath: string): string {
   return resolve(profilePath, '.easymoney-auth-state.json');
+}
+
+type InteractiveBrowserLeaseOptions = {
+  profilePath: string;
+  sessionName: string;
+  timeoutMs?: number;
+  staleAfterMs?: number;
+  pollIntervalMs?: number;
+  onWait?: (message: string) => void;
+};
+
+type InteractiveBrowserLeaseOwner = {
+  token: string;
+  pid: number;
+  sessionName: string;
+  startedAt: string;
+};
+
+const interactiveBrowserLockName = '.interactive-browser.lock';
+
+function interactiveBrowserLockPath(profilePath: string): string {
+  return join(dirname(resolve(profilePath)), interactiveBrowserLockName);
+}
+
+function fileSystemErrorCode(error: unknown): string | null {
+  return error && typeof error === 'object' && 'code' in error
+    ? String((error as { code?: unknown }).code)
+    : null;
+}
+
+async function interactiveBrowserLeaseMatches(lockPath: string, token: string): Promise<boolean> {
+  try {
+    const owner = JSON.parse(await readFile(join(lockPath, 'owner.json'), 'utf8')) as Partial<InteractiveBrowserLeaseOwner>;
+    return owner.token === token;
+  } catch {
+    return false;
+  }
+}
+
+export async function withInteractiveBrowserLease<T>(
+  options: InteractiveBrowserLeaseOptions,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const lockPath = interactiveBrowserLockPath(options.profilePath);
+  const timeoutMs = options.timeoutMs ?? 15 * 60_000;
+  const staleAfterMs = options.staleAfterMs ?? 2 * 60_000;
+  const pollIntervalMs = options.pollIntervalMs ?? 250;
+  const deadline = Date.now() + timeoutMs;
+  const token = crypto.randomUUID();
+  let reportedWait = false;
+
+  await mkdir(dirname(lockPath), { recursive: true });
+
+  while (true) {
+    try {
+      await mkdir(lockPath);
+      const owner: InteractiveBrowserLeaseOwner = {
+        token,
+        pid: process.pid,
+        sessionName: options.sessionName,
+        startedAt: new Date().toISOString(),
+      };
+      try {
+        await writeFile(join(lockPath, 'owner.json'), JSON.stringify(owner), { mode: 0o600 });
+      } catch (error) {
+        await rm(lockPath, { recursive: true, force: true });
+        throw error;
+      }
+      break;
+    } catch (error) {
+      if (fileSystemErrorCode(error) !== 'EEXIST') throw error;
+      const lockStat = await stat(lockPath).catch(() => null);
+      if (!lockStat) continue;
+      if (Date.now() - lockStat.mtimeMs > staleAfterMs) {
+        const cleanupLockPath = `${lockPath}.cleanup`;
+        let ownsCleanupLock = false;
+        try {
+          await mkdir(cleanupLockPath);
+          ownsCleanupLock = true;
+          const currentLockStat = await stat(lockPath).catch(() => null);
+          if (currentLockStat && Date.now() - currentLockStat.mtimeMs > staleAfterMs) {
+            await rm(lockPath, { recursive: true, force: true });
+          }
+        } catch (cleanupError) {
+          if (fileSystemErrorCode(cleanupError) !== 'EEXIST') throw cleanupError;
+        } finally {
+          if (ownsCleanupLock) await rm(cleanupLockPath, { recursive: true, force: true });
+        }
+        continue;
+      }
+      if (!reportedWait) {
+        reportedWait = true;
+        options.onWait?.('Waiting for another institution sign-in to finish');
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting to open the ${options.sessionName} sign-in browser`);
+      }
+      await Bun.sleep(Math.min(pollIntervalMs, Math.max(1, deadline - Date.now())));
+    }
+  }
+
+  const heartbeat = setInterval(() => {
+    void interactiveBrowserLeaseMatches(lockPath, token).then(matches => {
+      if (matches) return utimes(lockPath, new Date(), new Date());
+    }).catch(() => {});
+  }, Math.max(1_000, Math.floor(staleAfterMs / 3)));
+
+  try {
+    return await operation();
+  } finally {
+    clearInterval(heartbeat);
+    if (await interactiveBrowserLeaseMatches(lockPath, token)) {
+      await rm(lockPath, { recursive: true, force: true });
+    }
+  }
 }
 
 async function directoryExists(path: string): Promise<boolean> {
@@ -108,9 +224,26 @@ export async function withPlaywrightPage<T>(
   operation: (page: Page, context: BrowserContext) => Promise<T>,
 ): Promise<T> {
   const profilePath = resolve(options.profilePath ?? playwrightProfilePath(options.name));
+  await mkdir(profilePath, { recursive: true });
+
+  if (options.contextOptions?.headless !== true) {
+    return withInteractiveBrowserLease({
+      profilePath,
+      sessionName: options.name,
+      onWait: options.onInteractiveBrowserWait,
+    }, () => launchPlaywrightPage({ ...options, profilePath }, operation));
+  }
+
+  return launchPlaywrightPage({ ...options, profilePath }, operation);
+}
+
+async function launchPlaywrightPage<T>(
+  options: SessionOptions & { profilePath: string },
+  operation: (page: Page, context: BrowserContext) => Promise<T>,
+): Promise<T> {
+  const profilePath = options.profilePath;
   const authStatePath = playwrightAuthStatePath(profilePath);
   const persistAuthentication = options.persistAuthentication ?? true;
-  await mkdir(profilePath, { recursive: true });
 
   const savedStorageState = persistAuthentication && await fileExists(authStatePath)
     ? authStatePath
@@ -120,7 +253,7 @@ export async function withPlaywrightPage<T>(
   try {
     context = await chromium.launchPersistentContext(profilePath, {
       channel: 'chrome',
-      headless: false,
+      headless: options.contextOptions?.headless ?? false,
       acceptDownloads: true,
       chromiumSandbox: true,
       ...options.contextOptions,
@@ -333,6 +466,7 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
 
   const runAttempt = async (headless: boolean, allowInteractiveAuthentication: boolean) => withPlaywrightPage({
     ...session,
+    onInteractiveBrowserWait: reportProgress,
     contextOptions: {
       ...session.contextOptions,
       headless,

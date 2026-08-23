@@ -16,6 +16,7 @@ import {
   showAuthenticationChapter,
   showSyncCompletionChapter,
   waitForInteractiveAuthentication,
+  withInteractiveBrowserLease,
 } from './dataSync/browserSession.ts';
 
 const temporaryDirectories: string[] = [];
@@ -68,6 +69,43 @@ describe('Playwright session helper', () => {
       initialHeadless: false,
       allowHeadedAuthenticationFallback: false,
     });
+  });
+
+  test('serializes interactive sign-in browsers across institution profiles', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-lease-'));
+    temporaryDirectories.push(root);
+    const firstEntered = Promise.withResolvers<void>();
+    const releaseFirst = Promise.withResolvers<void>();
+    const secondWaiting = Promise.withResolvers<void>();
+    let secondEntered = false;
+
+    const first = withInteractiveBrowserLease({
+      profilePath: join(root, 'fidelity-catchup'),
+      sessionName: 'fidelity-catchup',
+      pollIntervalMs: 5,
+    }, async () => {
+      firstEntered.resolve();
+      await releaseFirst.promise;
+      return 'fidelity';
+    });
+    await firstEntered.promise;
+
+    const second = withInteractiveBrowserLease({
+      profilePath: join(root, 'wells-fargo-catchup'),
+      sessionName: 'wells-fargo-catchup',
+      pollIntervalMs: 5,
+      onWait: () => secondWaiting.resolve(),
+    }, async () => {
+      secondEntered = true;
+      return 'wells-fargo';
+    });
+    await secondWaiting.promise;
+    expect(secondEntered).toBe(false);
+
+    releaseFirst.resolve();
+    expect(await first).toBe('fidelity');
+    expect(await second).toBe('wells-fargo');
+    expect(secondEntered).toBe(true);
   });
 
   test('honors explicit browser visibility choices', () => {
