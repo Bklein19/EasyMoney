@@ -1,93 +1,72 @@
-import { mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readFile, stat } from 'node:fs/promises';
+import { basename, dirname, resolve } from 'node:path';
 
 import type { SyncConnector } from './connector.ts';
-import { loadSyncAccountCoverage } from './coverage.ts';
-import { syncApplicationDataRoot } from './paths.ts';
-import { getSyncConnector, syncConnectors } from './registry.ts';
-import { stageSyncArtifact } from './review.ts';
-import type {
-  SyncArtifactReview,
-  SyncInstitutionId,
-  SyncReporter,
-  SyncRunRequest,
-  SyncRunReview,
-  SyncTarget,
+import { getSyncConnector } from './registry.ts';
+import {
+  SYNC_WORKER_PROTOCOL_VERSION,
+  type SyncArtifactManifest,
+  type SyncArtifactManifestEntry,
+  type SyncExecutionPlan,
+  type SyncReporter,
 } from './types.ts';
 
-function isoDate(value = new Date()): string {
-  return value.toISOString().slice(0, 10);
-}
+type ConnectorResolver = (
+  institutionId: SyncExecutionPlan['institutionId'],
+) => SyncConnector<SyncExecutionPlan['institutionId']>;
 
-export function listSyncTargets(): SyncTarget[] {
-  const context = {
-    today: isoDate(),
-    accounts: loadSyncAccountCoverage(),
-  };
-  const connectors: readonly SyncConnector<SyncInstitutionId>[] = syncConnectors;
-  return connectors.flatMap(connector => connector.listTargets(context).map(target => ({
-    id: target.connectionId ? `${connector.id}:${target.connectionId}` : connector.id,
-    institutionId: connector.id,
-    ...(target.connectionId ? { connectionId: target.connectionId } : {}),
-    label: target.label,
-  })));
-}
-
-async function stageArtifacts(
-  request: SyncRunRequest,
-  artifacts: Array<{ fileName: string; accountId: number }>,
-  outputDir: string,
-  report: SyncReporter,
-): Promise<SyncRunReview> {
-  const reviews: SyncArtifactReview[] = [];
-  for (const artifact of artifacts) {
-    report({ type: 'artifact', message: `Reviewing ${artifact.fileName}` });
-    const review = await stageSyncArtifact({
-      path: join(outputDir, artifact.fileName),
-      fileName: artifact.fileName,
-      accountId: artifact.accountId,
-    });
-    reviews.push(review);
-    report({
-      type: 'artifact',
-      message: review.status === 'already-imported'
-        ? `${artifact.fileName} was already imported`
-        : `Parsed ${artifact.fileName}`,
-      data: {
-        transactions: review.transactionCount,
-        balances: review.balanceCount,
-        coveredFrom: review.coveredFrom,
-        coveredTo: review.coveredTo,
-      },
-    });
+function artifactPath(outputDir: string, fileName: string): string {
+  if (!fileName || basename(fileName) !== fileName || fileName === '.' || fileName === '..') {
+    throw new Error('Connector returned an unsafe artifact file name');
   }
+  const outputRoot = resolve(outputDir);
+  const path = resolve(outputRoot, fileName);
+  if (dirname(path) !== outputRoot) throw new Error('Connector artifact escaped its output directory');
+  return path;
+}
+
+async function manifestEntry(
+  plan: SyncExecutionPlan,
+  artifact: { fileName: string; accountId: number },
+): Promise<SyncArtifactManifestEntry> {
+  if (!plan.accounts.some(account => account.id === artifact.accountId)) {
+    throw new Error('Connector routed an artifact to an account outside its execution plan');
+  }
+  const path = artifactPath(plan.outputDir, artifact.fileName);
+  const file = await stat(path);
+  if (!file.isFile()) throw new Error(`Downloaded artifact is not a file: ${artifact.fileName}`);
+  const bytes = await readFile(path);
+  const sha256 = new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
   return {
-    runId: request.runId,
-    institutionId: request.institutionId,
-    downloaded: artifacts.length,
-    readyToImport: reviews.filter(review => review.status === 'ready').length,
-    alreadyImported: reviews.filter(review => review.status === 'already-imported').length,
-    artifacts: reviews,
+    ...artifact,
+    sizeBytes: bytes.byteLength,
+    sha256,
   };
 }
 
-export async function runSync(request: SyncRunRequest, report: SyncReporter): Promise<SyncRunReview> {
-  const connector = getSyncConnector(request.institutionId);
-  const outputDir = join(syncApplicationDataRoot(), request.runId, 'artifacts');
-  await mkdir(outputDir, { recursive: true });
+export async function runSyncExecutionPlan(
+  plan: SyncExecutionPlan,
+  report: SyncReporter,
+  resolveConnector: ConnectorResolver = getSyncConnector,
+): Promise<SyncArtifactManifest> {
+  await mkdir(plan.outputDir, { recursive: true, mode: 0o700 });
+  const connector = resolveConnector(plan.institutionId);
   const artifacts = await connector.run({
-    today: isoDate(),
-    accounts: loadSyncAccountCoverage(),
-    goal: request.goal,
-    connectionId: request.connectionId,
-    outputDir,
+    today: plan.today,
+    accounts: plan.accounts,
+    goal: plan.goal,
+    connectionId: plan.connectionId,
+    outputDir: plan.outputDir,
     report,
   });
-  const review = await stageArtifacts(request, artifacts, outputDir, report);
-  report({
-    type: 'review',
-    message: `${connector.label} downloads are ready to review`,
-    data: { review },
-  });
-  return review;
+  const fileNames = artifacts.map(artifact => artifact.fileName);
+  if (new Set(fileNames).size !== fileNames.length) {
+    throw new Error('Connector returned the same artifact more than once');
+  }
+  return {
+    protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+    runId: plan.runId,
+    institutionId: plan.institutionId,
+    artifacts: await Promise.all(artifacts.map(artifact => manifestEntry(plan, artifact))),
+  };
 }

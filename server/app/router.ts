@@ -23,7 +23,7 @@ import { createCategory, deleteCategory, listCategories, updateCategory } from '
 import { getDataFreshnessReport } from './dataFreshness.ts';
 import { cancelSyncJob, confirmSyncJob, discardSyncJob, getSyncJob, startSyncJob } from './dataSync/jobs.ts';
 import { isSyncInstitutionId } from './dataSync/registry.ts';
-import { listSyncTargets } from './dataSync/runner.ts';
+import { listSyncTargets } from './dataSync/executionPlan.ts';
 import type { SyncInstitutionId } from './dataSync/types.ts';
 import { commitImport, listImportHistory, previewImport, reimportFile, reimportFiles, unimportFile, unimportFiles } from './imports.ts';
 import { listImportProfiles, upsertImportProfile } from './importProfiles.ts';

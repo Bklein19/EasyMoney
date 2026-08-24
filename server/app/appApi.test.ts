@@ -11,6 +11,8 @@ const { appRouter } = await import('./router.ts');
 const { getDb, initDatabase, insertRow } = await import('../database.ts');
 const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
 const { stageSyncArtifact } = await import('./dataSync/review.ts');
+const { stageSyncArtifactManifest } = await import('./dataSync/staging.ts');
+const { SYNC_WORKER_PROTOCOL_VERSION } = await import('./dataSync/types.ts');
 const { upsertTransactionAnnotation } = await import('./transactionAnnotations.ts');
 const {
   groupTransactionsForAiCategorization,
@@ -3470,6 +3472,56 @@ test('institution catch-up stages reviewable claims before explicit confirmation
     const duplicate = await stageSyncArtifact({ path: filePath, accountId });
     expect(duplicate.status).toBe('already-imported');
     expect(getDb().prepare('SELECT COUNT(*) AS count FROM importFiles').get()).toEqual({ count: 1 });
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('institution catch-up discards a partially staged manifest when a later artifact fails', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Synthetic Checking',
+    institution: 'Bank of America',
+    type: 'checking',
+    currentBalance: 0,
+    currency: 'USD',
+    status: 'active',
+  }));
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-sync-partial-'));
+  const fileName = 'bofa-checking-1234-2026-03-01-to-2026-03-31.csv';
+  const fileBytes = new TextEncoder().encode([
+    'Description,,Summary Amt.',
+    'Opening Balance,,1000.00',
+    'Date,Description,Amount,Running Bal.',
+    '03/05/2026,SYNTHETIC PAYROLL,2500.00,3500.00',
+  ].join('\n'));
+  await fs.promises.writeFile(path.join(directory, fileName), fileBytes);
+
+  try {
+    await expect(stageSyncArtifactManifest({
+      protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+      runId: 'sync-partial-manifest',
+      institutionId: 'bank-of-america',
+      artifacts: [{
+        fileName,
+        accountId,
+        sizeBytes: fileBytes.byteLength,
+        sha256: new Bun.CryptoHasher('sha256').update(fileBytes).digest('hex'),
+      }, {
+        fileName: 'missing.csv',
+        accountId,
+        sizeBytes: 1,
+        sha256: '0'.repeat(64),
+      }],
+    }, directory, () => {})).rejects.toThrow();
+
+    expect(getDb().prepare('SELECT status FROM importFiles').all()).toEqual([
+      { status: 'discarded' },
+    ]);
+    expect(getDb().prepare('SELECT status FROM sourceFiles').all()).toEqual([
+      { status: 'discarded' },
+    ]);
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get())
+      .toEqual({ count: 0 });
   } finally {
     await fs.promises.rm(directory, { recursive: true, force: true });
   }

@@ -1,4 +1,5 @@
 export type { SyncEvent, SyncGoal, SyncReporter } from './protocol.ts';
+import type { RoutedSyncArtifact, SyncAccountCoverage } from './connector.ts';
 import type { SyncGoal } from './protocol.ts';
 import type { SyncInstitutionId as RegisteredSyncInstitutionId } from './registry.ts';
 
@@ -10,6 +11,43 @@ export interface SyncRunRequest {
   connectionId?: string;
   goal: SyncGoal;
 }
+
+export const SYNC_WORKER_PROTOCOL_VERSION = 1 as const;
+
+export interface SyncExecutionPlan {
+  protocolVersion: typeof SYNC_WORKER_PROTOCOL_VERSION;
+  runId: string;
+  institutionId: SyncInstitutionId;
+  today: string;
+  accounts: SyncAccountCoverage[];
+  connectionId?: string;
+  goal: SyncGoal;
+  outputDir: string;
+}
+
+export interface SyncArtifactManifestEntry extends RoutedSyncArtifact {
+  sizeBytes: number;
+  sha256: string;
+}
+
+export interface SyncArtifactManifest {
+  protocolVersion: typeof SYNC_WORKER_PROTOCOL_VERSION;
+  runId: string;
+  institutionId: SyncInstitutionId;
+  artifacts: SyncArtifactManifestEntry[];
+}
+
+export type SyncWorkerMessage =
+  | {
+      protocolVersion: typeof SYNC_WORKER_PROTOCOL_VERSION;
+      kind: 'event';
+      event: import('./protocol.ts').SyncEvent;
+    }
+  | {
+      protocolVersion: typeof SYNC_WORKER_PROTOCOL_VERSION;
+      kind: 'manifest';
+      manifest: SyncArtifactManifest;
+    };
 
 export interface SyncTarget {
   id: string;

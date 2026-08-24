@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 
 import { markInterruptedSyncJob } from './jobState.ts';
-import { syncChildProcessOptions } from './subprocess.ts';
+import { commandForSyncWorker, syncChildProcessOptions } from './subprocess.ts';
 import type { SyncEvent } from './types.ts';
 
 describe('sync child process options', () => {
-  test('passes runtime-assigned Electrobun paths to the sync worker', () => {
+  test('passes runtime paths without exposing the EasyMoney database', () => {
     const options = syncChildProcessOptions({
       EASYMONEY_DESKTOP: '1',
       EASYMONEY_DB_PATH: '/application-support/easymoney.sqlite',
@@ -15,10 +15,18 @@ describe('sync child process options', () => {
 
     expect(options.env).toMatchObject({
       EASYMONEY_DESKTOP: '1',
-      EASYMONEY_DB_PATH: '/application-support/easymoney.sqlite',
       EASYMONEY_ENV_PATH: '/application-support/.env.local',
       EASYMONEY_SYNC_ROOT: '/application-support/sync-runs',
     });
+    expect(options.env.EASYMONEY_DB_PATH).toBeUndefined();
+    expect(options.stdin).toBe('pipe');
+  });
+
+  test('keeps the complete runtime execution plan out of process arguments', () => {
+    const command = commandForSyncWorker();
+    expect(command).toHaveLength(2);
+    expect(command[0]).toBe(process.execPath);
+    expect(command[1]).toEndWith('scripts/sync.ts');
   });
 });
 

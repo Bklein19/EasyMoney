@@ -20,6 +20,13 @@ interface StageSyncArtifactInput {
   path: string;
   fileName?: string;
   accountId: number;
+  expectedSizeBytes?: number;
+  expectedSha256?: string;
+}
+
+export interface StagedSyncArtifact {
+  review: SyncArtifactReview;
+  createdPreview: boolean;
 }
 
 interface ImportFileRow {
@@ -186,9 +193,20 @@ export function buildSyncArtifactReview(options: {
   };
 }
 
-export async function stageSyncArtifact(input: StageSyncArtifactInput): Promise<SyncArtifactReview> {
+export async function stageSyncArtifactWithProvenance(
+  input: StageSyncArtifactInput,
+): Promise<StagedSyncArtifact> {
   const fileName = input.fileName || basename(input.path);
   const fileBytes = new Uint8Array(await readFile(input.path));
+  if (input.expectedSizeBytes !== undefined && fileBytes.byteLength !== input.expectedSizeBytes) {
+    throw new Error(`Downloaded artifact changed before review: ${fileName}`);
+  }
+  if (input.expectedSha256 !== undefined) {
+    const sha256 = new Bun.CryptoHasher('sha256').update(fileBytes).digest('hex');
+    if (sha256 !== input.expectedSha256) {
+      throw new Error(`Downloaded artifact changed before review: ${fileName}`);
+    }
+  }
   const text = /\.(?:csv|txt)$/i.test(fileName) ? new TextDecoder().decode(fileBytes) : '';
   const contentHash = hashImportContent(text, fileBytes);
   const existing = getDb().prepare(`
@@ -199,22 +217,32 @@ export async function stageSyncArtifact(input: StageSyncArtifactInput): Promise<
     LIMIT 1
   `).get(contentHash) as { id: number; status: 'committed' | 'previewed' } | undefined;
   if (existing) {
-    return buildSyncArtifactReview({
-      importFileId: existing.id,
-      accountId: input.accountId,
-      fileName,
-      status: existing.status === 'committed' ? 'already-imported' : 'ready',
-    });
+    return {
+      review: buildSyncArtifactReview({
+        importFileId: existing.id,
+        accountId: input.accountId,
+        fileName,
+        status: existing.status === 'committed' ? 'already-imported' : 'ready',
+      }),
+      createdPreview: false,
+    };
   }
 
   const preview = await previewImport({ fileName, text, fileBytes });
   if (preview.requiresMapping) throw new Error(`No institution parser matched ${fileName}`);
-  return buildSyncArtifactReview({
-    importFileId: Number(preview.importFileId),
-    accountId: input.accountId,
-    fileName,
-    status: 'ready',
-  });
+  return {
+    review: buildSyncArtifactReview({
+      importFileId: Number(preview.importFileId),
+      accountId: input.accountId,
+      fileName,
+      status: 'ready',
+    }),
+    createdPreview: true,
+  };
+}
+
+export async function stageSyncArtifact(input: StageSyncArtifactInput): Promise<SyncArtifactReview> {
+  return (await stageSyncArtifactWithProvenance(input)).review;
 }
 
 function commitArtifact(artifact: SyncArtifactReview) {
@@ -269,9 +297,13 @@ export async function commitSyncReview(
 }
 
 export function discardSyncReview(review: SyncRunReview): void {
-  const previewIds = review.artifacts
+  discardSyncPreviewIds(review.artifacts
     .filter(artifact => artifact.status === 'ready')
-    .map(artifact => artifact.importFileId);
+    .map(artifact => artifact.importFileId));
+}
+
+export function discardSyncPreviewIds(previewIds: number[]): void {
+  previewIds = [...new Set(previewIds)];
   if (previewIds.length === 0) return;
 
   const db = getDb();

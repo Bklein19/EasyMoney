@@ -1,56 +1,51 @@
 #!/usr/bin/env bun
 
-import { closeDatabase, initDatabase } from '../server/database.ts';
 import { loadLocalEnv } from '../server/app/localEnv.ts';
-import { isSyncInstitutionId, syncInstitutionIds } from '../server/app/dataSync/registry.ts';
-import { runSync } from '../server/app/dataSync/runner.ts';
-import type { SyncEvent, SyncGoal, SyncRunRequest } from '../server/app/dataSync/types.ts';
-
-function valueAfter(args: string[], flag: string) {
-  const index = args.indexOf(flag);
-  return index >= 0 ? args[index + 1] : undefined;
-}
-
-function parseGoal(args: string[]): SyncGoal {
-  const kind = valueAfter(args, '--goal') ?? 'current';
-  if (kind === 'current') return { kind, overlapDays: Number(valueAfter(args, '--overlap-days') ?? 7) };
-  if (kind === 'backfill') return { kind, stopAt: valueAfter(args, '--stop-at') };
-  if (kind === 'range') {
-    const startDate = valueAfter(args, '--from');
-    const endDate = valueAfter(args, '--to');
-    if (!startDate || !endDate) throw new Error('--goal range requires --from and --to');
-    return { kind, startDate, endDate };
-  }
-  throw new Error(`Unknown sync goal: ${kind}`);
-}
+import { runSyncExecutionPlan } from '../server/app/dataSync/runner.ts';
+import {
+  SYNC_WORKER_PROTOCOL_VERSION,
+  type SyncEvent,
+  type SyncExecutionPlan,
+  type SyncWorkerMessage,
+} from '../server/app/dataSync/types.ts';
+import {
+  parseSyncExecutionPlan,
+  serializeSyncWorkerLine,
+} from '../server/app/dataSync/workerProtocol.ts';
 
 loadLocalEnv();
-initDatabase();
+delete process.env.EASYMONEY_DB_PATH;
 
-const args = Bun.argv.slice(2);
-const institution = valueAfter(args, '--institution');
-if (!isSyncInstitutionId(institution)) {
-  throw new Error(`Use --institution ${syncInstitutionIds.join(', ')}`);
+function writeMessage(message: SyncWorkerMessage): void {
+  console.log(serializeSyncWorkerLine(message));
 }
-const runId = valueAfter(args, '--run-id') ?? `sync-${Date.now()}`;
-const request: SyncRunRequest = {
-  runId,
-  institutionId: institution,
-  connectionId: valueAfter(args, '--connection'),
-  goal: parseGoal(args),
-};
-const emit = (event: Omit<SyncEvent, 'runId' | 'timestamp'>) => {
-  console.log(JSON.stringify({ ...event, runId, timestamp: new Date().toISOString() } satisfies SyncEvent));
-};
+
+function emitForPlan(plan: SyncExecutionPlan, event: Omit<SyncEvent, 'runId' | 'timestamp'>): void {
+  writeMessage({
+    protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+    kind: 'event',
+    event: { ...event, runId: plan.runId, timestamp: new Date().toISOString() },
+  });
+}
 
 let exitCode = 0;
+let executionPlan: SyncExecutionPlan | null = null;
 try {
-  await runSync(request, emit);
+  executionPlan = parseSyncExecutionPlan(await Bun.stdin.text());
+  const manifest = await runSyncExecutionPlan(
+    executionPlan,
+    event => emitForPlan(executionPlan!, event),
+  );
+  writeMessage({
+    protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+    kind: 'manifest',
+    manifest,
+  });
 } catch (error) {
-  emit({ type: 'error', message: error instanceof Error ? error.message : String(error) });
+  const message = error instanceof Error ? error.message : String(error);
+  if (executionPlan) emitForPlan(executionPlan, { type: 'error', message });
+  else console.error(message);
   exitCode = 1;
-} finally {
-  closeDatabase();
 }
 
 await new Promise<void>((resolveFlush, rejectFlush) => {

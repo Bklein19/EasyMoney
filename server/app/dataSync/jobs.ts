@@ -1,11 +1,32 @@
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
-import { commitSyncReview, discardSyncReview } from './review.ts';
+import { runSerializedSyncDatabaseWork } from './databaseQueue.ts';
+import { createSyncExecutionPlan } from './executionPlan.ts';
 import { markInterruptedSyncJob } from './jobState.ts';
 import { syncApplicationDataRoot } from './paths.ts';
-import { syncChildProcessOptions } from './subprocess.ts';
-import type { SyncEvent, SyncGoal, SyncInstitutionId, SyncRunResult, SyncRunReview } from './types.ts';
+import {
+  commitSyncReview,
+  discardSyncPreviewIds,
+  discardSyncReview,
+} from './review.ts';
+import { stageSyncArtifactManifest } from './staging.ts';
+import {
+  commandForSyncWorker,
+  sendSyncExecutionPlan,
+  syncChildProcessOptions,
+} from './subprocess.ts';
+import type {
+  SyncArtifactManifest,
+  SyncEvent,
+  SyncExecutionPlan,
+  SyncGoal,
+  SyncInstitutionId,
+  SyncRunResult,
+  SyncRunReview,
+} from './types.ts';
+import { parseSyncWorkerLine } from './workerProtocol.ts';
+import { stageCompletedSyncWorker } from './workerCompletion.ts';
 
 export type SyncJobStatus = 'running' | 'awaiting-confirmation' | 'importing' | 'complete' | 'failed' | 'cancelled';
 
@@ -27,13 +48,29 @@ export interface SyncJob {
 type ManagedSyncJob = SyncJob & {
   process: ReturnType<typeof Bun.spawn> | null;
   persistence: Promise<void>;
+  manifest: SyncArtifactManifest | null;
+  protocolError: string | null;
+  cancelRequested: boolean;
 };
 
 const jobs = new Map<string, ManagedSyncJob>();
-const repositoryRoot = resolve(import.meta.dir, '../../..');
+const childEventTypes = new Set<SyncEvent['type']>([
+  'phase',
+  'action',
+  'artifact',
+  'warning',
+  'error',
+]);
 
 function publicJob(job: ManagedSyncJob): SyncJob {
-  const { process: _process, persistence: _persistence, ...result } = job;
+  const {
+    process: _process,
+    persistence: _persistence,
+    manifest: _manifest,
+    protocolError: _protocolError,
+    cancelRequested: _cancelRequested,
+    ...result
+  } = job;
   return result;
 }
 
@@ -73,6 +110,9 @@ async function managedJob(runId: string): Promise<ManagedSyncJob | null> {
       error: saved.error || null,
       process: null,
       persistence: Promise.resolve(),
+      manifest: null,
+      protocolError: null,
+      cancelRequested: false,
     };
     jobs.set(runId, job);
     if (markInterruptedSyncJob(job)) await persistJob(job);
@@ -105,6 +145,24 @@ function appendEvent(job: ManagedSyncJob, event: SyncEvent) {
   void persistJob(job);
 }
 
+function reportForJob(job: ManagedSyncJob) {
+  return (event: Omit<SyncEvent, 'runId' | 'timestamp'>) => appendEvent(job, {
+    ...event,
+    runId: job.runId,
+    timestamp: new Date().toISOString(),
+  });
+}
+
+function failJob(job: ManagedSyncJob, message: string): void {
+  if (job.status === 'cancelled') return;
+  appendEvent(job, {
+    runId: job.runId,
+    timestamp: new Date().toISOString(),
+    type: 'error',
+    message,
+  });
+}
+
 async function readLines(stream: ReadableStream<Uint8Array>, onLine: (line: string) => void) {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -120,20 +178,103 @@ async function readLines(stream: ReadableStream<Uint8Array>, onLine: (line: stri
   if (pending.trim()) onLine(pending);
 }
 
-function commandFor(runId: string, institutionId: SyncJob['institutionId'], goal: SyncGoal, connectionId?: string) {
-  const isDesktop = process.env.EASYMONEY_DESKTOP === '1';
-  const syncScript = isDesktop
-    ? resolve(import.meta.dir, 'sync.js')
-    : resolve(repositoryRoot, 'scripts/sync.ts');
-  const command = [process.execPath, syncScript, '--institution', institutionId, '--run-id', runId, '--goal', goal.kind];
-  if (connectionId) command.push('--connection', connectionId);
-  if (goal.kind === 'current') command.push('--overlap-days', String(goal.overlapDays));
-  if (goal.kind === 'backfill' && goal.stopAt) command.push('--stop-at', goal.stopAt);
-  if (goal.kind === 'range') command.push('--from', goal.startDate, '--to', goal.endDate);
-  return command;
+function acceptWorkerMessage(job: ManagedSyncJob, plan: SyncExecutionPlan, line: string): void {
+  try {
+    const message = parseSyncWorkerLine(line);
+    if (!message) {
+      appendEvent(job, {
+        runId: job.runId,
+        timestamp: new Date().toISOString(),
+        type: 'warning',
+        message: line,
+      });
+      return;
+    }
+    if (message.kind === 'event') {
+      if (message.event.runId !== plan.runId) {
+        throw new Error('Sync worker event run id does not match its execution plan');
+      }
+      if (!childEventTypes.has(message.event.type)) {
+        throw new Error('Sync worker attempted a parent-owned job transition');
+      }
+      appendEvent(job, message.event);
+      return;
+    }
+
+    if (
+      message.manifest.runId !== plan.runId ||
+      message.manifest.institutionId !== plan.institutionId
+    ) {
+      throw new Error('Sync artifact manifest does not match its execution plan');
+    }
+    if (message.manifest.artifacts.some(artifact =>
+      !plan.accounts.some(account => account.id === artifact.accountId)
+    )) {
+      throw new Error('Sync artifact manifest names an account outside its execution plan');
+    }
+    const artifactNames = message.manifest.artifacts.map(artifact => artifact.fileName);
+    if (new Set(artifactNames).size !== artifactNames.length) {
+      throw new Error('Sync artifact manifest repeats an artifact');
+    }
+    if (job.manifest) throw new Error('Sync worker emitted more than one artifact manifest');
+    job.manifest = message.manifest;
+  } catch (error) {
+    job.protocolError ??= error instanceof Error ? error.message : String(error);
+  }
 }
 
-export function startSyncJob(input: { institutionId: SyncJob['institutionId']; connectionId?: string; goal: SyncGoal }): SyncJob {
+async function finishWorker(
+  job: ManagedSyncJob,
+  plan: SyncExecutionPlan,
+  exitCode: number,
+): Promise<void> {
+  if (job.status !== 'running' || job.cancelRequested) return;
+
+  try {
+    const staged = await stageCompletedSyncWorker({
+      exitCode,
+      cancelled: job.cancelRequested,
+      protocolError: job.protocolError,
+      manifest: job.manifest,
+    }, async manifest => {
+      job.message = 'Downloads complete; preparing review';
+      await persistJob(job);
+      return runSerializedSyncDatabaseWork(async () => {
+        if (job.status !== 'running' || job.cancelRequested) return null;
+        const result = await stageSyncArtifactManifest(
+          manifest,
+          plan.outputDir,
+          event => {
+            if (job.status === 'running' && !job.cancelRequested) reportForJob(job)(event);
+          },
+          () => job.status === 'running' && !job.cancelRequested,
+        );
+        if (job.status !== 'running' || job.cancelRequested) {
+          discardSyncPreviewIds(result.createdImportFileIds);
+          return null;
+        }
+        return result;
+      });
+    });
+    if (!staged || job.status !== 'running' || job.cancelRequested) return;
+    appendEvent(job, {
+      runId: job.runId,
+      timestamp: new Date().toISOString(),
+      type: 'review',
+      message: 'Downloads are ready to review',
+      data: { review: staged.review },
+    });
+  } catch (error) {
+    if (job.cancelRequested) return;
+    failJob(job, error instanceof Error ? error.message : String(error));
+  }
+}
+
+export function startSyncJob(input: {
+  institutionId: SyncJob['institutionId'];
+  connectionId?: string;
+  goal: SyncGoal;
+}): SyncJob {
   const active = [...jobs.values()].find(job =>
     job.institutionId === input.institutionId &&
     job.connectionId === input.connectionId &&
@@ -143,6 +284,7 @@ export function startSyncJob(input: { institutionId: SyncJob['institutionId']; c
 
   const runId = `sync-${input.institutionId}-${Date.now()}`;
   const startedAt = new Date().toISOString();
+  const executionPlan = createSyncExecutionPlan({ runId, ...input });
   const job: ManagedSyncJob = {
     runId,
     institutionId: input.institutionId,
@@ -158,39 +300,37 @@ export function startSyncJob(input: { institutionId: SyncJob['institutionId']; c
     error: null,
     process: null,
     persistence: Promise.resolve(),
+    manifest: null,
+    protocolError: null,
+    cancelRequested: false,
   };
   jobs.set(runId, job);
   void persistJob(job);
 
-  const child = Bun.spawn(
-    commandFor(runId, input.institutionId, input.goal, input.connectionId),
-    syncChildProcessOptions(),
-  );
-  job.process = child;
+  try {
+    const child = Bun.spawn(commandForSyncWorker(), syncChildProcessOptions());
+    job.process = child;
+    sendSyncExecutionPlan(child, executionPlan);
 
-  const stdout = readLines(child.stdout, line => {
-    try {
-      appendEvent(job, JSON.parse(line) as SyncEvent);
-    } catch {
-      appendEvent(job, { runId, timestamp: new Date().toISOString(), type: 'warning', message: line });
-    }
-  });
-  const stderr = readLines(child.stderr, line => {
-    appendEvent(job, { runId, timestamp: new Date().toISOString(), type: 'warning', message: line });
-  });
-  void child.exited.then(async exitCode => {
-    await Promise.allSettled([stdout, stderr]);
-    job.process = null;
-    if (job.status === 'running') {
-      const timestamp = new Date().toISOString();
+    const stdout = readLines(child.stdout, line => acceptWorkerMessage(job, executionPlan, line));
+    const stderr = readLines(child.stderr, line => {
       appendEvent(job, {
         runId,
-        timestamp,
-        type: exitCode === 0 ? 'complete' : 'error',
-        message: exitCode === 0 ? 'Sync complete' : `Sync process exited with code ${exitCode}`,
+        timestamp: new Date().toISOString(),
+        type: 'warning',
+        message: line,
       });
-    }
-  });
+    });
+    void child.exited.then(async exitCode => {
+      await Promise.allSettled([stdout, stderr]);
+      job.process = null;
+      await finishWorker(job, executionPlan, exitCode);
+    });
+  } catch (error) {
+    job.process?.kill();
+    job.process = null;
+    failJob(job, error instanceof Error ? error.message : String(error));
+  }
 
   return publicJob(job);
 }
@@ -204,8 +344,8 @@ export async function cancelSyncJob(runId: string): Promise<SyncJob> {
   const job = await managedJob(runId);
   if (!job) throw new Error('Sync job not found');
   if (job.status === 'running') {
+    job.cancelRequested = true;
     job.process?.kill();
-    job.process = null;
     job.status = 'cancelled';
     job.message = 'Sync cancelled';
     job.completedAt = new Date().toISOString();
@@ -226,14 +366,10 @@ export async function confirmSyncJob(runId: string): Promise<SyncJob> {
   job.message = 'Importing confirmed data';
   job.error = null;
   await persistJob(job);
-  const report = (event: Omit<SyncEvent, 'runId' | 'timestamp'>) => appendEvent(job, {
-    ...event,
-    runId,
-    timestamp: new Date().toISOString(),
-  });
+  const report = reportForJob(job);
 
   try {
-    const result = await commitSyncReview(job.review, report);
+    const result = await runSerializedSyncDatabaseWork(() => commitSyncReview(job.review!, report));
     appendEvent(job, {
       runId,
       timestamp: new Date().toISOString(),
@@ -265,7 +401,7 @@ export async function discardSyncJob(runId: string): Promise<SyncJob> {
     throw new Error('Sync job is not awaiting confirmation');
   }
 
-  discardSyncReview(job.review);
+  await runSerializedSyncDatabaseWork(() => discardSyncReview(job.review!));
   const timestamp = new Date().toISOString();
   job.status = 'cancelled';
   job.message = 'Downloaded data discarded';
