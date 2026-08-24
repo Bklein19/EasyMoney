@@ -2,7 +2,7 @@ import { chmod, mkdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/pro
 import { homedir } from 'node:os';
 import { dirname, join, posix, resolve, win32 } from 'node:path';
 
-import { chromium, type BrowserContext, type Page } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 
 export const PLAYWRIGHT_VERSION = '1.62.1';
 
@@ -26,6 +26,7 @@ type SessionOptions = {
 type RunOptions = {
   authenticationTimeoutMs?: number;
   authenticationCheckpointTimeoutMs?: number;
+  authenticationRecoveryUrl?: string;
   isAuthenticated?: (page: Page) => boolean | Promise<boolean>;
   waitUntilAuthenticated?: (page: Page, timeoutMs: number) => Promise<void>;
   onProgress?: (message: string) => void;
@@ -495,9 +496,13 @@ export async function closeBrowserContext(
 }
 
 export async function runWhileBrowserOpen<T>(
-  context: Pick<BrowserContext, 'once' | 'off'>,
+  context: Pick<BrowserContext, 'browser' | 'once' | 'off'>,
   operation: () => Promise<T>,
 ): Promise<T> {
+  const browser: Pick<Browser, 'isConnected' | 'once' | 'off'> | null =
+    typeof (context as Partial<BrowserContext>).browser === 'function'
+      ? context.browser()
+      : null;
   let rejectClosed: ((error: Error) => void) | undefined;
   const handleClose = () => rejectClosed?.(
     new Error('Browser closed before the institution sync completed'),
@@ -505,9 +510,11 @@ export async function runWhileBrowserOpen<T>(
   const browserClosed = new Promise<never>((_resolve, reject) => {
     rejectClosed = reject;
     context.once('close', handleClose);
+    browser?.once('disconnected', handleClose);
   });
 
   try {
+    if (browser && !browser.isConnected()) handleClose();
     return await Promise.race([
       Promise.resolve().then(operation),
       browserClosed,
@@ -515,6 +522,7 @@ export async function runWhileBrowserOpen<T>(
   } finally {
     rejectClosed = undefined;
     context.off('close', handleClose);
+    browser?.off('disconnected', handleClose);
   }
 }
 
@@ -560,8 +568,11 @@ async function waitUntilDefaultAuthentication(page: Page, timeoutMs: number): Pr
 export async function waitForInteractiveAuthentication(
   page: Page,
   deadline: number,
-  options: Pick<RunOptions, 'isAuthenticated' | 'waitUntilAuthenticated'> = {},
-  context?: Pick<BrowserContext, 'pages' | 'on' | 'off'>,
+  options: Pick<
+    RunOptions,
+    'authenticationRecoveryUrl' | 'isAuthenticated' | 'onProgress' | 'waitUntilAuthenticated'
+  > = {},
+  context?: Pick<BrowserContext, 'newPage' | 'pages' | 'on' | 'off'>,
 ): Promise<Page> {
   const isAuthenticated = options.isAuthenticated ?? hasDefaultAuthentication;
   const waitUntilAuthenticated = options.waitUntilAuthenticated ?? waitUntilDefaultAuthentication;
@@ -603,12 +614,51 @@ export async function waitForInteractiveAuthentication(
   });
 
   let activePage: Page | null = newestOpenPage(browserContext, page);
+  let recoveredClosedAuthenticationPage = false;
   try {
     while (true) {
       const timeoutMs = deadline - Date.now();
       if (timeoutMs <= 0) throw new Error('Authentication timed out');
 
       if (!activePage) {
+        if (options.authenticationRecoveryUrl &&
+            !recoveredClosedAuthenticationPage &&
+            typeof browserContext.newPage === 'function') {
+          recoveredClosedAuthenticationPage = true;
+          options.onProgress?.('Authentication window closed. Reopening it.');
+          let recoveryTimeout: ReturnType<typeof setTimeout> | undefined;
+          try {
+            const recoveryPage = await Promise.race([
+              Promise.resolve()
+                .then(() => browserContext.newPage())
+                .then(async nextPage => {
+                  await nextPage.goto(options.authenticationRecoveryUrl!, {
+                    waitUntil: 'domcontentloaded',
+                  });
+                  return nextPage;
+                }),
+              contextClosed,
+              new Promise<never>((_resolve, reject) => {
+                recoveryTimeout = setTimeout(
+                  () => reject(new Error('Browser stopped responding while reopening authentication')),
+                  Math.min(5_000, Math.max(1, timeoutMs)),
+                );
+              }),
+            ]);
+            activePage = newestOpenPage(browserContext, recoveryPage);
+          } catch (error) {
+            if (isClosedContextError(error)) {
+              throw new Error('The browser was closed before authentication completed');
+            }
+            throw error;
+          } finally {
+            if (recoveryTimeout) clearTimeout(recoveryTimeout);
+          }
+          continue;
+        }
+        if (recoveredClosedAuthenticationPage) {
+          throw new Error('The authentication window closed before sign-in completed');
+        }
         const observer = observeAuthenticationPageChange(browserContext, undefined, timeoutMs);
         try {
           const outcome = await Promise.race([observer.promise, contextClosed]);
@@ -828,7 +878,10 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
       console.log(`Authentication required in ${session.name}. Complete login and MFA in the open browser.`);
     }
     while (allowInteractiveAuthentication && result.status === 'login-required' && Date.now() < deadline) {
-      activePage = await waitForInteractiveAuthentication(activePage, deadline, options, context);
+      activePage = await waitForInteractiveAuthentication(activePage, deadline, {
+        ...options,
+        authenticationRecoveryUrl: options.authenticationRecoveryUrl ?? session.startUrl,
+      }, context);
       await checkpointAuthentication();
       reportProgress('Authentication complete. Continuing downloads.');
       result = decodeInstitutionBrowserProgramResult<T>(await program(

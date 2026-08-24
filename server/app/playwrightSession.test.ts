@@ -378,6 +378,91 @@ describe('Playwright session helper', () => {
     await expect(waiting).rejects.toThrow('browser was closed before authentication completed');
   });
 
+  test('reopens the institution page when its only authentication page closes', async () => {
+    const contextEvents = new EventEmitter();
+    const originalEvents = new EventEmitter();
+    let originalClosed = false;
+    let recoveryUrl = '';
+    let pages: Page[] = [];
+    const originalPage = Object.assign(originalEvents, {
+      context: () => context,
+      isClosed: () => originalClosed,
+      url: () => 'https://login.example.test/',
+    }) as unknown as Page;
+    const recoveryPage = Object.assign(new EventEmitter(), {
+      isClosed: () => false,
+      url: () => recoveryUrl,
+      goto: async (url: string) => {
+        const recovered = new URL(url);
+        recovered.pathname = '/accounts';
+        recoveryUrl = recovered.toString();
+        return null;
+      },
+    }) as unknown as Page;
+    const context = Object.assign(contextEvents, {
+      pages: () => pages,
+      newPage: async () => {
+        pages = [recoveryPage];
+        return recoveryPage;
+      },
+    });
+    pages = [originalPage];
+
+    const waiting = waitForInteractiveAuthentication(
+      originalPage,
+      Date.now() + 5_000,
+      {
+        authenticationRecoveryUrl: 'https://login.example.test/login',
+        isAuthenticated: async currentPage => currentPage.url().endsWith('/accounts'),
+        waitUntilAuthenticated: async () => new Promise<void>(() => {}),
+      },
+      context as never,
+    );
+    await Promise.resolve();
+    originalClosed = true;
+    pages = [];
+    originalEvents.emit('close');
+
+    expect(await waiting).toBe(recoveryPage);
+    expect(recoveryUrl).toBe('https://login.example.test/accounts');
+  });
+
+  test('bounds recovery when Playwright cannot reopen a closed authentication page', async () => {
+    const contextEvents = new EventEmitter();
+    const pageEvents = new EventEmitter();
+    let pageClosed = false;
+    let pages: Page[] = [];
+    const page = Object.assign(pageEvents, {
+      context: () => context,
+      isClosed: () => pageClosed,
+      url: () => 'https://login.example.test/',
+    }) as unknown as Page;
+    const context = Object.assign(contextEvents, {
+      pages: () => pages,
+      newPage: async () => new Promise<Page>(() => {}),
+    });
+    pages = [page];
+
+    const startedAt = performance.now();
+    const waiting = waitForInteractiveAuthentication(
+      page,
+      Date.now() + 20,
+      {
+        authenticationRecoveryUrl: 'https://login.example.test/login',
+        isAuthenticated: async () => false,
+        waitUntilAuthenticated: async () => new Promise<void>(() => {}),
+      },
+      context as never,
+    );
+    await Promise.resolve();
+    pageClosed = true;
+    pages = [];
+    pageEvents.emit('close');
+
+    await expect(waiting).rejects.toThrow('Browser stopped responding while reopening authentication');
+    expect(performance.now() - startedAt).toBeLessThan(250);
+  });
+
   test('decodes the typed institution browser status contract', () => {
     expect(decodeInstitutionBrowserProgramResult(JSON.stringify({
       status: 'complete',
@@ -555,5 +640,24 @@ describe('Playwright session helper', () => {
 
     await expect(running).rejects.toThrow('Browser closed before the institution sync completed');
     expect(closeListener).toBeUndefined();
+  });
+
+  test('rejects when the browser disconnects without a context close', async () => {
+    const browser = Object.assign(new EventEmitter(), {
+      isConnected: () => true,
+    });
+    const context = Object.assign(new EventEmitter(), {
+      browser: () => browser,
+    });
+    const running = runWhileBrowserOpen(
+      context as never,
+      () => new Promise<never>(() => {}),
+    );
+    await Promise.resolve();
+    browser.emit('disconnected');
+
+    await expect(running).rejects.toThrow('Browser closed before the institution sync completed');
+    expect(browser.listenerCount('disconnected')).toBe(0);
+    expect(context.listenerCount('close')).toBe(0);
   });
 });
