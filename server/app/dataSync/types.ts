@@ -53,6 +53,8 @@ export interface SyncArtifactReview {
   accountId: number;
   accountName: string;
   parserName: string | null;
+  /** Human parser label. Optional so reviews persisted by older app builds still render. */
+  parserLabel?: string | null;
   institution: string | null;
   sourceType: string | null;
   coveredFrom: string | null;

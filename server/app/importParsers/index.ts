@@ -57,6 +57,11 @@ export const IMPORT_PARSERS: AppImportParser[] = [
   ...easyMoneyCsvProfileParsers,
 ];
 
+export function importParserDisplayName(parserId: string | null | undefined): string | null {
+  if (!parserId) return null;
+  return IMPORT_PARSERS.find(parser => parser.id === parserId)?.name ?? null;
+}
+
 function normalizedInstitution(value: string | null): string {
   return String(value ?? '').trim().toLowerCase();
 }

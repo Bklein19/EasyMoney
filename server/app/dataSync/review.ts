@@ -3,6 +3,7 @@ import { basename } from 'node:path';
 
 import { getDb } from '../../database.ts';
 import { commitImport, hashImportContent, previewImport, rebuildLedgerReadModel } from '../imports.ts';
+import { importParserDisplayName } from '../importParsers/index.ts';
 import { importSyncArtifactBatch } from './artifactBatch.ts';
 import type {
   SyncAccountClaim,
@@ -168,6 +169,7 @@ export function buildSyncArtifactReview(options: {
     accountId: account.id,
     accountName: account.name,
     parserName: metadata.parserName,
+    parserLabel: importParserDisplayName(metadata.parserName),
     institution: metadata.institution,
     sourceType: metadata.sourceType,
     coveredFrom: metadata.coveredFrom,

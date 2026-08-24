@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCircle2, ChevronDown, CircleDashed, Clock3, History
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import type { SyncArtifactReview, SyncRunReview, SyncTarget } from '../../../server/app/dataSync/types.ts';
+import { syncArtifactSubtitle, syncArtifactTitle } from './syncArtifactLabels.ts';
 
 type FreshnessStatus = 'current' | 'due' | 'stale' | 'no-data' | 'closed';
 interface FreshnessAccount {
@@ -135,17 +136,15 @@ function artifactCoverage(artifact: SyncArtifactReview) {
   return `${formatFreshnessDate(artifact.coveredFrom)} – ${formatFreshnessDate(artifact.coveredTo)}`;
 }
 
-function sourceTypeLabel(value: string | null) {
-  return value ? value.replaceAll('-', ' ') : 'Unknown source type';
-}
-
 function SyncArtifactDetails({ artifact, initiallyOpen }: { artifact: SyncArtifactReview; initiallyOpen: boolean }) {
+  const title = syncArtifactTitle(artifact);
+  const subtitle = syncArtifactSubtitle(artifact);
   return (
     <details className="sync-review__artifact" open={initiallyOpen}>
       <summary>
         <div className="sync-review__file">
-          <strong>{artifact.fileName}</strong>
-          <small>{artifact.parserName || 'Unknown parser'} · {sourceTypeLabel(artifact.sourceType)}</small>
+          <strong>{title}</strong>
+          {subtitle && <small>{subtitle}</small>}
         </div>
         <div className="sync-review__destination">
           <span>Import to</span>
@@ -233,6 +232,22 @@ function SyncArtifactDetails({ artifact, initiallyOpen }: { artifact: SyncArtifa
             )}
           </section>
         )}
+
+        <details className="sync-review__file-details">
+          <summary>File details</summary>
+          <dl>
+            <dt>Original filename</dt>
+            <dd>{artifact.fileName}</dd>
+            <dt>Parser</dt>
+            <dd>{artifact.parserLabel || artifact.parserName || 'Unknown parser'}</dd>
+            {artifact.parserLabel && artifact.parserName && (
+              <>
+                <dt>Parser ID</dt>
+                <dd>{artifact.parserName}</dd>
+              </>
+            )}
+          </dl>
+        </details>
       </div>
     </details>
   );

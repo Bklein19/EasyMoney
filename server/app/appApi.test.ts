@@ -3409,6 +3409,7 @@ test('institution catch-up stages reviewable claims before explicit confirmation
       accountId,
       accountName: 'Primary Checking',
       parserName: 'bofa-activity-csv',
+      parserLabel: 'Bank of America Activity',
       coveredFrom: '2026-01-05',
       coveredTo: '2026-01-06',
       transactionCount: 2,
