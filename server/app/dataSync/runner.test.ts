@@ -98,3 +98,33 @@ test('a connector cannot manifest an artifact routed outside its account plan', 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('a connector cannot manifest a multi-account route outside its account plan', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'easymoney-worker-multi-route-'));
+  const connector: SyncConnector<'bank-of-america'> = {
+    id: 'bank-of-america',
+    label: 'Synthetic Bank of America',
+    matchesAccount: () => true,
+    listTargets: () => [],
+    async run(context) {
+      await writeFile(join(context.outputDir, 'artifact.csv'), 'synthetic');
+      return [{
+        fileName: 'artifact.csv',
+        accountRoutes: [
+          { remoteAccountId: 'remote:new' },
+          { remoteAccountId: 'remote:routed', accountId: 99 },
+        ],
+      }];
+    },
+  };
+
+  try {
+    await expect(runSyncExecutionPlan(
+      plan('sync-invalid-multi-route', root),
+      () => {},
+      () => connector,
+    )).rejects.toThrow('outside its execution plan');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

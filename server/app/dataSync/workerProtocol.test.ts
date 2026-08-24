@@ -13,6 +13,7 @@ import {
   parseSyncWorkerMessage,
   serializeSyncExecutionPlan,
   serializeSyncWorkerLine,
+  validateSyncArtifactManifestForPlan,
 } from './workerProtocol.ts';
 
 function executionPlan(outputDir = '/runtime/sync/artifacts'): SyncExecutionPlan {
@@ -68,6 +69,90 @@ test('worker manifests reject path-shaped artifacts before parent staging', () =
       }],
     },
   }))).toThrow('Artifact file name must not contain a path');
+});
+
+test('worker manifests round-trip destinationless multi-account routes', () => {
+  const message = parseSyncWorkerMessage(JSON.stringify({
+    protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+    kind: 'manifest',
+    manifest: {
+      protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+      runId: 'sync-vanguard-test',
+      institutionId: 'vanguard',
+      artifacts: [{
+        fileName: 'consolidated.csv',
+        accountRoutes: [
+          { remoteAccountId: 'remote:first', accountId: 42 },
+          { remoteAccountId: 'remote:new' },
+        ],
+        sizeBytes: 12,
+        sha256: 'a'.repeat(64),
+      }],
+    },
+  }));
+  expect(message).toEqual(expect.objectContaining({
+    kind: 'manifest',
+    manifest: expect.objectContaining({
+      artifacts: [expect.objectContaining({
+        accountRoutes: [
+          { remoteAccountId: 'remote:first', accountId: 42 },
+          { remoteAccountId: 'remote:new' },
+        ],
+      })],
+    }),
+  }));
+});
+
+test('worker manifests require exactly one complete account routing form', () => {
+  const parseArtifact = (artifact: unknown) => parseSyncWorkerMessage(JSON.stringify({
+    protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+    kind: 'manifest',
+    manifest: {
+      protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+      runId: 'sync-vanguard-test',
+      institutionId: 'vanguard',
+      artifacts: [{
+        fileName: 'artifact.csv',
+        sizeBytes: 1,
+        sha256: 'a'.repeat(64),
+        ...(artifact as object),
+      }],
+    },
+  }));
+
+  expect(() => parseArtifact({})).toThrow();
+  expect(() => parseArtifact({ accountId: 42, accountRoutes: [{ remoteAccountId: 'remote:first' }] })).toThrow();
+  expect(() => parseArtifact({ accountRoutes: [] })).toThrow();
+  expect(() => parseArtifact({ accountRoutes: [{ remoteAccountId: '  ' }] })).toThrow();
+  expect(() => parseArtifact({
+    accountRoutes: [
+      { remoteAccountId: 'remote:first' },
+      { remoteAccountId: 'remote:first' },
+    ],
+  })).toThrow('Duplicate remote account identity');
+});
+
+test('parent manifest validation checks only concrete route destinations against the plan', () => {
+  const plan = executionPlan();
+  const manifest = {
+    protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+    runId: plan.runId,
+    institutionId: plan.institutionId,
+    artifacts: [{
+      fileName: 'consolidated.csv',
+      accountRoutes: [{ remoteAccountId: 'remote:new' }],
+      sizeBytes: 1,
+      sha256: 'a'.repeat(64),
+    }],
+  };
+  expect(() => validateSyncArtifactManifestForPlan(manifest, plan)).not.toThrow();
+  expect(() => validateSyncArtifactManifestForPlan({
+    ...manifest,
+    artifacts: [{
+      ...manifest.artifacts[0]!,
+      accountRoutes: [{ remoteAccountId: 'remote:routed', accountId: 99 }],
+    }],
+  }, plan)).toThrow('outside its execution plan');
 });
 
 test('typed worker output is distinguishable from browser diagnostics on stdout', () => {

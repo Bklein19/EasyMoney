@@ -11,6 +11,8 @@ const { appRouter } = await import('./router.ts');
 const { getDb, initDatabase, insertRow } = await import('../database.ts');
 const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
 const { buildSyncArtifactReview, stageSyncArtifact } = await import('./dataSync/review.ts');
+const { stageSyncArtifactManifest } = await import('./dataSync/staging.ts');
+const { SYNC_WORKER_PROTOCOL_VERSION } = await import('./dataSync/types.ts');
 const { upsertTransactionAnnotation } = await import('./transactionAnnotations.ts');
 const {
   groupTransactionsForAiCategorization,
@@ -3575,7 +3577,96 @@ test('institution catch-up stages reviewable claims before explicit confirmation
 
     const duplicate = await stageSyncArtifact({ path: filePath, accountId });
     expect(duplicate.status).toBe('already-imported');
+    const duplicateWithChangedConnectorIdentities = await stageSyncArtifact({
+      path: filePath,
+      accountRoutes: [
+        { remoteAccountId: 'new-parser:first' },
+        { remoteAccountId: 'new-parser:second' },
+      ],
+    });
+    expect(duplicateWithChangedConnectorIdentities).toMatchObject({
+      importFileId: artifact.importFileId,
+      status: 'already-imported',
+    });
     expect(getDb().prepare('SELECT COUNT(*) AS count FROM importFiles').get()).toEqual({ count: 1 });
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('independent sync previews arbitrate identical content once at confirmation', async () => {
+  const firstAccountId = Number(insertRow('accounts', {
+    name: 'First Synthetic Checking',
+    institution: 'Bank of America',
+    type: 'checking',
+    currentBalance: 0,
+    currency: 'USD',
+    status: 'active',
+  }));
+  const secondAccountId = Number(insertRow('accounts', {
+    name: 'Second Synthetic Checking',
+    institution: 'Bank of America',
+    type: 'checking',
+    currentBalance: 0,
+    currency: 'USD',
+    status: 'active',
+  }));
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-sync-arbitration-'));
+  const fileName = 'bofa-checking-1234-2026-07-01-to-2026-07-31.csv';
+  const fileBytes = new TextEncoder().encode([
+    'Description,,Summary Amt.',
+    'Opening Balance,,1000.00',
+    'Date,Description,Amount,Running Bal.',
+    '07/05/2026,SYNTHETIC PAYROLL,2500.00,3500.00',
+  ].join('\n'));
+  await fs.promises.writeFile(path.join(directory, fileName), fileBytes);
+  const manifest = (runId: string, accountId: number) => ({
+    protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+    runId,
+    institutionId: 'bank-of-america' as const,
+    artifacts: [{
+      fileName,
+      accountId,
+      sizeBytes: fileBytes.byteLength,
+      sha256: new Bun.CryptoHasher('sha256').update(fileBytes).digest('hex'),
+    }],
+  });
+
+  try {
+    const first = await stageSyncArtifactManifest(
+      manifest('sync-arbitration-first', firstAccountId), directory, () => {},
+    );
+    const second = await stageSyncArtifactManifest(
+      manifest('sync-arbitration-second', secondAccountId), directory, () => {},
+    );
+    expect(second.review.artifacts[0]!.importFileId)
+      .not.toBe(first.review.artifacts[0]!.importFileId);
+    await saveAwaitingSyncReview(first.review);
+    await saveAwaitingSyncReview(second.review);
+
+    expect(await caller.dataSync.confirm({ runId: first.review.runId })).toMatchObject({
+      status: 'complete',
+      result: { recordedTransactionFacts: 1, skippedArtifacts: 0 },
+    });
+    expect(await caller.dataSync.confirm({ runId: second.review.runId })).toMatchObject({
+      status: 'complete',
+      result: { recordedTransactionFacts: 0, skippedArtifacts: 1 },
+    });
+    expect(getDb().prepare(`
+      SELECT status, COUNT(*) AS count
+      FROM importFiles
+      GROUP BY status
+      ORDER BY status
+    `).all()).toEqual([
+      { status: 'committed', count: 1 },
+      { status: 'discarded', count: 1 },
+    ]);
+    expect(getDb().prepare(`
+      SELECT DISTINCT sa.accountId
+      FROM sourceAccounts sa
+      JOIN sourceFiles sf ON sf.id = sa.sourceFileId
+      WHERE sf.status = 'committed'
+    `).all()).toEqual([{ accountId: firstAccountId }]);
   } finally {
     await fs.promises.rm(directory, { recursive: true, force: true });
   }

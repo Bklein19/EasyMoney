@@ -32,6 +32,7 @@ export async function stageSyncArtifactManifest(
         path: join(outputDir, artifact.fileName),
         fileName: artifact.fileName,
         accountId: artifact.accountId,
+        accountRoutes: artifact.accountRoutes,
         expectedSizeBytes: artifact.sizeBytes,
         expectedSha256: artifact.sha256,
         reusePreview: false,

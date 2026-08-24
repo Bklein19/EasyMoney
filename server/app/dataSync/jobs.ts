@@ -26,7 +26,10 @@ import type {
   SyncRunResult,
   SyncRunReview,
 } from './types.ts';
-import { parseSyncWorkerLine } from './workerProtocol.ts';
+import {
+  parseSyncWorkerLine,
+  validateSyncArtifactManifestForPlan,
+} from './workerProtocol.ts';
 import { stageCompletedSyncWorker } from './workerCompletion.ts';
 
 export type SyncJobStatus = 'running' | 'awaiting-confirmation' | 'importing' | 'complete' | 'failed' | 'cancelled';
@@ -207,21 +210,7 @@ function acceptWorkerMessage(job: ManagedSyncJob, plan: SyncExecutionPlan, line:
       return;
     }
 
-    if (
-      message.manifest.runId !== plan.runId ||
-      message.manifest.institutionId !== plan.institutionId
-    ) {
-      throw new Error('Sync artifact manifest does not match its execution plan');
-    }
-    if (message.manifest.artifacts.some(artifact =>
-      !plan.accounts.some(account => account.id === artifact.accountId)
-    )) {
-      throw new Error('Sync artifact manifest names an account outside its execution plan');
-    }
-    const artifactNames = message.manifest.artifacts.map(artifact => artifact.fileName);
-    if (new Set(artifactNames).size !== artifactNames.length) {
-      throw new Error('Sync artifact manifest repeats an artifact');
-    }
+    validateSyncArtifactManifestForPlan(message.manifest, plan);
     if (job.manifest) throw new Error('Sync worker emitted more than one artifact manifest');
     job.manifest = message.manifest;
   } catch (error) {

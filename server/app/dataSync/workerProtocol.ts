@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { isSyncInstitutionId } from './registry.ts';
 import {
   SYNC_WORKER_PROTOCOL_VERSION,
+  type SyncArtifactManifest,
   type SyncExecutionPlan,
   type SyncWorkerMessage,
 } from './types.ts';
@@ -16,6 +17,22 @@ const artifactFileNameSchema = z.string().min(1).refine(value =>
   value !== '.' && value !== '..' && !/[\\/]/.test(value),
   'Artifact file name must not contain a path',
 );
+const syncArtifactAccountRoutesSchema = z.array(z.object({
+  remoteAccountId: z.string().trim().min(1),
+  accountId: z.number().int().positive().optional(),
+}).strict()).min(1).superRefine((routes, context) => {
+  const remoteAccountIds = new Set<string>();
+  for (const [index, route] of routes.entries()) {
+    if (remoteAccountIds.has(route.remoteAccountId)) {
+      context.addIssue({
+        code: 'custom',
+        message: `Duplicate remote account identity: ${route.remoteAccountId}`,
+        path: [index, 'remoteAccountId'],
+      });
+    }
+    remoteAccountIds.add(route.remoteAccountId);
+  }
+});
 
 const syncGoalSchema = z.discriminatedUnion('kind', [
   z.object({
@@ -73,12 +90,20 @@ const syncArtifactManifestSchema = z.object({
   protocolVersion: z.literal(SYNC_WORKER_PROTOCOL_VERSION),
   runId: runIdSchema,
   institutionId: z.string(),
-  artifacts: z.array(z.object({
-    fileName: artifactFileNameSchema,
-    accountId: z.number().int().positive(),
-    sizeBytes: z.number().int().nonnegative(),
-    sha256: z.string().regex(/^[a-f0-9]{64}$/),
-  }).strict()),
+  artifacts: z.array(z.union([
+    z.object({
+      fileName: artifactFileNameSchema,
+      accountId: z.number().int().positive(),
+      sizeBytes: z.number().int().nonnegative(),
+      sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    }).strict(),
+    z.object({
+      fileName: artifactFileNameSchema,
+      accountRoutes: syncArtifactAccountRoutesSchema,
+      sizeBytes: z.number().int().nonnegative(),
+      sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    }).strict(),
+  ])),
 }).strict();
 
 const syncWorkerMessageSchema = z.discriminatedUnion('kind', [
@@ -136,6 +161,30 @@ export function serializeSyncWorkerMessage(message: SyncWorkerMessage): string {
 export function parseSyncWorkerLine(input: string): SyncWorkerMessage | null {
   if (!input.startsWith(SYNC_WORKER_MESSAGE_PREFIX)) return null;
   return parseSyncWorkerMessage(input.slice(SYNC_WORKER_MESSAGE_PREFIX.length));
+}
+
+export function validateSyncArtifactManifestForPlan(
+  manifest: SyncArtifactManifest,
+  plan: SyncExecutionPlan,
+): void {
+  if (manifest.runId !== plan.runId || manifest.institutionId !== plan.institutionId) {
+    throw new Error('Sync artifact manifest does not match its execution plan');
+  }
+  const plannedAccountIds = new Set(plan.accounts.map(account => account.id));
+  const concreteAccountIds = manifest.artifacts.flatMap(artifact =>
+    artifact.accountId !== undefined
+      ? [artifact.accountId]
+      : artifact.accountRoutes.flatMap(route =>
+          route.accountId === undefined ? [] : [route.accountId]
+        )
+  );
+  if (concreteAccountIds.some(accountId => !plannedAccountIds.has(accountId))) {
+    throw new Error('Sync artifact manifest names an account outside its execution plan');
+  }
+  const artifactNames = manifest.artifacts.map(artifact => artifact.fileName);
+  if (new Set(artifactNames).size !== artifactNames.length) {
+    throw new Error('Sync artifact manifest repeats an artifact');
+  }
 }
 
 export function serializeSyncWorkerLine(message: SyncWorkerMessage): string {

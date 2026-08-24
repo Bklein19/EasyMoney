@@ -27,12 +27,20 @@ export interface SyncArtifactAccountRoute {
   accountId?: number;
 }
 
-export interface RoutedSyncArtifact {
+export interface SingleAccountSyncArtifact {
   fileName: string;
-  /** Legacy single-claim destination. Multi-account artifacts use accountRoutes. */
-  accountId?: number;
-  accountRoutes?: SyncArtifactAccountRoute[];
+  accountId: number;
+  accountRoutes?: never;
 }
+
+export interface MultiAccountSyncArtifact {
+  fileName: string;
+  accountId?: never;
+  accountRoutes: SyncArtifactAccountRoute[];
+}
+
+/** Exactly one routing form is required for every connector artifact. */
+export type RoutedSyncArtifact = SingleAccountSyncArtifact | MultiAccountSyncArtifact;
 
 export interface SyncConnectorContext {
   today: string;

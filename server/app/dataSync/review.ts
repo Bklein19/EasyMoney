@@ -330,11 +330,13 @@ export async function stageSyncArtifactWithProvenance(
     | { id: number; status: 'committed' | 'previewed' }
     | undefined;
   if (existing) {
+    const routes = existing.status === 'committed'
+      ? {}
+      : { accountId: input.accountId, accountRoutes: input.accountRoutes };
     return {
       review: buildSyncArtifactReview({
         importFileId: existing.id,
-        accountId: input.accountId,
-        accountRoutes: input.accountRoutes,
+        ...routes,
         fileName,
         status: existing.status === 'committed' ? 'already-imported' : 'ready',
       }),
@@ -554,6 +556,21 @@ function commitArtifact(
   }
   if (metadata.status !== 'previewed') {
     throw new Error(`${artifact.fileName} is no longer awaiting import`);
+  }
+  const committedDuplicate = getDb().prepare(`
+    SELECT id
+    FROM importFiles
+    WHERE contentHash = ? AND status = 'committed' AND id <> ?
+    LIMIT 1
+  `).get(metadata.contentHash, metadata.id) as { id: number } | undefined;
+  if (committedDuplicate) {
+    discardSyncPreviewIds([metadata.id]);
+    return {
+      importedCount: 0,
+      importedBalanceCount: 0,
+      skippedDuplicateCount: 0,
+      skippedArtifact: true,
+    };
   }
 
   return commitImport({

@@ -30,10 +30,25 @@ async function manifestEntry(
   artifact: RoutedSyncArtifact,
 ): Promise<SyncArtifactManifestEntry> {
   const plannedAccountIds = new Set(plan.accounts.map(account => account.id));
-  if (artifact.accountId !== undefined && !plannedAccountIds.has(artifact.accountId)) {
+  const hasAccountId = typeof artifact.accountId === 'number';
+  const hasAccountRoutes = Array.isArray(artifact.accountRoutes);
+  if (hasAccountId === hasAccountRoutes) {
+    throw new Error('Connector artifacts require exactly one account routing form');
+  }
+  if (hasAccountId && !plannedAccountIds.has(artifact.accountId!)) {
     throw new Error('Connector routed an artifact to an account outside its execution plan');
   }
+  if (hasAccountRoutes && artifact.accountRoutes!.length === 0) {
+    throw new Error('Connector account routes cannot be empty');
+  }
+  const remoteAccountIds = new Set<string>();
   for (const route of artifact.accountRoutes ?? []) {
+    const remoteAccountId = route.remoteAccountId.trim();
+    if (!remoteAccountId) throw new Error('Connector account routes require a remote account identity');
+    if (remoteAccountIds.has(remoteAccountId)) {
+      throw new Error(`Connector account routes repeat remote account identity: ${remoteAccountId}`);
+    }
+    remoteAccountIds.add(remoteAccountId);
     if (route.accountId !== undefined && !plannedAccountIds.has(route.accountId)) {
       throw new Error('Connector routed an artifact to an account outside its execution plan');
     }

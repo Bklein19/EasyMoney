@@ -28,10 +28,10 @@ export interface SyncExecutionPlan {
   outputDir: string;
 }
 
-export interface SyncArtifactManifestEntry extends RoutedSyncArtifact {
+export type SyncArtifactManifestEntry = RoutedSyncArtifact & {
   sizeBytes: number;
   sha256: string;
-}
+};
 
 export interface SyncArtifactManifest {
   protocolVersion: typeof SYNC_WORKER_PROTOCOL_VERSION;
