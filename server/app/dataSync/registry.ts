@@ -1,6 +1,7 @@
 import type { SyncConnector } from './connector.ts';
 import { bankOfAmericaConnector } from './institutions/bankOfAmericaConnector.ts';
 import { fidelityConnector } from './institutions/fidelityConnector.ts';
+import { marcusConnector } from './institutions/marcusConnector.ts';
 import { sequoiaFundConnector } from './institutions/sequoiaFundConnector.ts';
 import { tiaaConnector } from './institutions/tiaaConnector.ts';
 import { vanguardConnector } from './institutions/vanguardConnector.ts';
@@ -11,6 +12,7 @@ export const syncConnectors = [
   vanguardConnector,
   sequoiaFundConnector,
   tiaaConnector,
+  marcusConnector,
 ] as const satisfies readonly SyncConnector[];
 
 export type SyncInstitutionId = (typeof syncConnectors)[number]['id'];

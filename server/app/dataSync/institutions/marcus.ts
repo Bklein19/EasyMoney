@@ -45,6 +45,7 @@ export interface MarcusDownloadedArtifact {
   fileName: string;
   path: string;
   artifactType: MarcusArtifactType;
+  accountId: number;
   account: MarcusAccountIdentity;
   statementDate: string;
   parserId: string;
@@ -55,11 +56,18 @@ export interface MarcusDownloadedArtifact {
 
 export interface MarcusSyncConfig {
   outputDir: string;
-  from: string;
   through: string;
+  accounts: MarcusSyncAccount[];
   session?: string;
   profilePath?: string;
   allowInteractiveAuthentication?: boolean;
+}
+
+export interface MarcusSyncAccount {
+  accountId: number;
+  kind: MarcusAccountKind;
+  last4: string;
+  startDate: string;
 }
 
 export type MarcusAuthenticationReason = 'missing' | 'expired';
@@ -76,6 +84,8 @@ export type MarcusSyncResult =
       accounts: MarcusRemoteAccount[];
       artifacts: MarcusDownloadedArtifact[];
       unsupportedArtifactCount: number;
+      unmappedAccountCount: number;
+      unavailableAccountCount: number;
     };
 
 export interface MarcusAccountMetadata {
@@ -95,7 +105,7 @@ export interface MarcusApiRequest {
   url: string;
 }
 
-interface MarcusCatalogDocument {
+export interface MarcusCatalogDocument {
   account: MarcusAccountIdentity;
   artifactType: MarcusArtifactType;
   statementDate: string;
@@ -106,6 +116,21 @@ export interface MarcusRemoteCatalog {
   accounts: MarcusRemoteAccount[];
   documents: MarcusCatalogDocument[];
   unsupportedArtifactCount: number;
+}
+
+export interface MarcusMappedAccount {
+  remote: MarcusRemoteAccount;
+  planned: MarcusSyncAccount;
+}
+
+export interface MarcusCatalogPlan {
+  mappedAccounts: MarcusMappedAccount[];
+  documents: Array<{
+    document: MarcusCatalogDocument;
+    planned: MarcusSyncAccount;
+  }>;
+  unmappedAccountCount: number;
+  unavailableAccountCount: number;
 }
 
 type MarcusBrowserResult = {
@@ -132,30 +157,52 @@ function validateDateRange(from: string, through: string): void {
   }
 }
 
+function validateSyncAccounts(accounts: MarcusSyncAccount[], through: string): void {
+  if (accounts.length === 0) throw new Error('Marcus sync requires at least one planned account');
+  const identities = new Set<string>();
+  for (const account of accounts) {
+    validateDateRange(account.startDate, through);
+    if (!Number.isSafeInteger(account.accountId) || account.accountId <= 0) {
+      throw new Error('Marcus planned account ID is invalid');
+    }
+    if (!/^\d{4}$/.test(account.last4)) {
+      throw new Error('Marcus planned account number must contain exactly four digits');
+    }
+    const identity = `${account.kind}:${account.last4}`;
+    if (identities.has(identity)) {
+      throw new Error('Marcus planned account identities are ambiguous');
+    }
+    identities.add(identity);
+  }
+}
+
 function normalizedText(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
 function accountKindFromText(value: string): MarcusAccountKind | null {
-  if (/\b(?:online\s+)?savings(?:\s+account)?\b/i.test(value)) return 'savings';
-  if (/\b(?:certificate\s+of\s+deposit|deposit\s+account|(?:no[- ]penalty|high[- ]yield)\s+cd|cd)\b/i.test(value)) {
-    return 'deposit';
-  }
-  return null;
+  const savings = /\b(?:online\s+)?savings(?:\s+account)?\b/i.test(value);
+  const deposit = /\b(?:certificate\s+of\s+deposit|deposit\s+account|(?:no[- ]penalty|high[- ]yield)\s+cd|cd)\b/i.test(value);
+  if (savings === deposit) return null;
+  return savings ? 'savings' : 'deposit';
 }
 
 function accountLast4FromText(value: string): string | null {
-  const explicit = value.match(
-    /(?:account(?:\s+(?:number|ending\s+in))?|ending\s+in)\D{0,16}(\d{4,})\b/i,
-  )?.[1];
-  if (explicit) return explicit.slice(-4);
-
-  const masked = value.match(/(?:[*x\u2022]\s*){2,}(\d{4})\b/i)?.[1];
-  if (masked) return masked;
-
-  return value.match(
-    /\b(?:online\s+savings(?:\s+account)?|savings\s+account|certificate\s+of\s+deposit|deposit\s+account|(?:no[- ]penalty|high[- ]yield)\s+cd|cd)\s*[-:]\s*(\d{4})\b/i,
-  )?.[1] ?? null;
+  const candidates = new Set<string>();
+  for (const match of value.matchAll(
+    /(?:account(?:\s+(?:number|ending\s+in))?|ending\s+in)\D{0,16}(\d{4,})\b/gi,
+  )) {
+    candidates.add(match[1]!.slice(-4));
+  }
+  for (const match of value.matchAll(/(?:[*x\u2022]\s*){2,}(\d{4})\b/gi)) {
+    candidates.add(match[1]!);
+  }
+  for (const match of value.matchAll(
+    /\b(?:online\s+savings(?:\s+account)?|savings\s+account|certificate\s+of\s+deposit|deposit\s+account|(?:no[- ]penalty|high[- ]yield)\s+cd|cd)\s*[-:]\s*(\d{4})\b/gi,
+  )) {
+    candidates.add(match[1]!);
+  }
+  return candidates.size === 1 ? [...candidates][0]! : null;
 }
 
 export function marcusAccountIdentityFromText(value: string): MarcusAccountIdentity | null {
@@ -418,6 +465,60 @@ function documentIsInRange(document: MarcusCatalogDocument, from: string, throug
   return month >= from.slice(0, 7) && month <= through.slice(0, 7);
 }
 
+function accountIdentityKey(account: Pick<MarcusAccountIdentity, 'kind' | 'last4'>): string {
+  return `${account.kind}:${account.last4}`;
+}
+
+export function mapMarcusRemoteAccounts(
+  remoteAccounts: readonly MarcusRemoteAccount[],
+  plannedAccounts: readonly MarcusSyncAccount[],
+): MarcusMappedAccount[] {
+  const remoteByIdentity = new Map<string, MarcusRemoteAccount>();
+  for (const remote of remoteAccounts) {
+    const identity = accountIdentityKey(remote);
+    if (remoteByIdentity.has(identity)) {
+      throw new Error('Marcus remote account identities are ambiguous');
+    }
+    remoteByIdentity.set(identity, remote);
+  }
+
+  const mapped: MarcusMappedAccount[] = [];
+  for (const planned of plannedAccounts) {
+    const remote = remoteByIdentity.get(accountIdentityKey(planned));
+    if (remote) mapped.push({ remote, planned });
+  }
+  return mapped;
+}
+
+export function planMarcusCatalog(
+  catalog: MarcusRemoteCatalog,
+  plannedAccounts: readonly MarcusSyncAccount[],
+  through: string,
+): MarcusCatalogPlan {
+  const mappedAccounts = mapMarcusRemoteAccounts(catalog.accounts, plannedAccounts);
+  const planByIdentity = new Map(mappedAccounts.map(({ remote, planned }) => [
+    accountIdentityKey(remote),
+    planned,
+  ]));
+  const plannedIdentities = new Set(plannedAccounts.map(accountIdentityKey));
+  const unmappedAccountCount = catalog.accounts.filter(account =>
+    !plannedIdentities.has(accountIdentityKey(account))
+  ).length;
+  const unavailableAccountCount = plannedAccounts.length - mappedAccounts.length;
+  const documents = catalog.documents.flatMap(document => {
+    const planned = planByIdentity.get(accountIdentityKey(document.account));
+    return planned && documentIsInRange(document, planned.startDate, through)
+      ? [{ document, planned }]
+      : [];
+  });
+  return {
+    mappedAccounts,
+    documents,
+    unmappedAccountCount,
+    unavailableAccountCount,
+  };
+}
+
 function safeMarcusError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   if (!message.startsWith('Marcus ')) return 'Marcus sync failed';
@@ -476,7 +577,9 @@ export async function validateMarcusStatementArtifact(
   options: {
     outputDir: string;
     bytes: Uint8Array;
+    accountId: number;
     expectedAccount: MarcusAccountIdentity;
+    expectedStatementDate: string;
   },
   parser: MarcusParserLike = marcusStatementParser,
 ): Promise<MarcusDownloadedArtifact> {
@@ -507,6 +610,9 @@ export async function validateMarcusStatementArtifact(
       throw new Error('Marcus statement parser did not produce one dated balance');
     }
     const statementDate = parsed.balances[0]!.date;
+    if (statementDate.slice(0, 7) !== options.expectedStatementDate.slice(0, 7)) {
+      throw new Error('Marcus statement date does not match its remote document metadata');
+    }
     const fileName = `marcus-online-savings-${options.expectedAccount.last4}-${statementDate}-statement.pdf`;
     if (!parser.matches({ fileName, headers: [], sample: '' })) {
       throw new Error('Marcus statement does not match the EasyMoney parser route');
@@ -524,6 +630,7 @@ export async function validateMarcusStatementArtifact(
       fileName,
       path,
       artifactType: 'statement-pdf',
+      accountId: options.accountId,
       account: options.expectedAccount,
       statementDate,
       parserId: parser.id,
@@ -547,21 +654,28 @@ async function syncAuthenticatedMarcus(
     message: 'Discovering Marcus accounts and documents',
   }, () => collectMarcusMetadata(page));
   const catalog = buildMarcusRemoteCatalog(metadata.accounts, metadata.documents);
+  const plan = planMarcusCatalog(catalog, config.accounts, config.through);
   report({
     type: 'phase',
     message: 'Marcus discovery complete',
     data: {
       accountCount: catalog.accounts.length,
+      mappedAccountCount: plan.mappedAccounts.length,
+      unmappedAccountCount: plan.unmappedAccountCount,
+      unavailableAccountCount: plan.unavailableAccountCount,
       supportedArtifactCount: catalog.documents.length,
       unsupportedArtifactCount: catalog.unsupportedArtifactCount,
     },
   });
 
-  const documents = catalog.documents.filter(document => documentIsInRange(document, config.from, config.through));
   const artifacts: MarcusDownloadedArtifact[] = [];
   try {
-    for (const [index, document] of documents.entries()) {
-      const details = { artifactIndex: index + 1, artifactCount: documents.length, artifactType: document.artifactType };
+    for (const [index, { document, planned }] of plan.documents.entries()) {
+      const details = {
+        artifactIndex: index + 1,
+        artifactCount: plan.documents.length,
+        artifactType: document.artifactType,
+      };
       const bytes = await reportSyncStep(report, {
         step: 'download-artifact',
         message: 'Downloading Marcus statement',
@@ -574,7 +688,9 @@ async function syncAuthenticatedMarcus(
       }, () => validateMarcusStatementArtifact({
         outputDir: config.outputDir,
         bytes,
+        accountId: planned.accountId,
         expectedAccount: document.account,
+        expectedStatementDate: document.statementDate,
       }, parser));
       artifacts.push(artifact);
       report({
@@ -593,6 +709,8 @@ async function syncAuthenticatedMarcus(
     accounts: catalog.accounts,
     artifacts,
     unsupportedArtifactCount: catalog.unsupportedArtifactCount,
+    unmappedAccountCount: plan.unmappedAccountCount,
+    unavailableAccountCount: plan.unavailableAccountCount,
   };
 }
 
@@ -619,7 +737,10 @@ export async function runMarcusSync(
   report: SyncReporter = () => {},
   dependencies: MarcusSyncDependencies = defaultDependencies,
 ): Promise<MarcusSyncResult> {
-  validateDateRange(config.from, config.through);
+  if (!DATE_PATTERN.test(config.through)) {
+    throw new Error('Marcus through date must use YYYY-MM-DD');
+  }
+  validateSyncAccounts(config.accounts, config.through);
   const outputDir = resolve(config.outputDir);
   await mkdir(outputDir, { recursive: true, mode: 0o700 });
   const session = config.session ?? MARCUS_PROFILE_NAME;
@@ -685,6 +806,8 @@ export async function runMarcusSync(
       accountCount: result.result.accounts.length,
       artifactCount: result.result.artifacts.length,
       unsupportedArtifactCount: result.result.unsupportedArtifactCount,
+      unmappedAccountCount: result.result.unmappedAccountCount,
+      unavailableAccountCount: result.result.unavailableAccountCount,
     },
   });
   return result.result;

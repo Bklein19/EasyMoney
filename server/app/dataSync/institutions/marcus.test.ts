@@ -8,13 +8,16 @@ import {
   buildMarcusRemoteCatalog,
   fetchMarcusDocumentBytes,
   isMarcusAuthenticatedPath,
+  mapMarcusRemoteAccounts,
   marcusAccountIdentityFromText,
   marcusDocumentRequest,
   marcusStatementDateFromText,
+  planMarcusCatalog,
   runMarcusSync,
   validateMarcusPdfSignature,
   validateMarcusStatementArtifact,
   type MarcusAccountIdentity,
+  type MarcusSyncAccount,
   type MarcusSyncDependencies,
 } from './marcus.ts';
 
@@ -62,6 +65,16 @@ function savingsAccount(last4 = '1111'): MarcusAccountIdentity {
   };
 }
 
+function plannedSavingsAccount(overrides: Partial<MarcusSyncAccount> = {}): MarcusSyncAccount {
+  return {
+    accountId: 10,
+    kind: 'savings',
+    last4: '1111',
+    startDate: '2026-06-01',
+    ...overrides,
+  };
+}
+
 test('Marcus account and date metadata parsing is account-count agnostic', () => {
   expect(marcusAccountIdentityFromText('Online Savings Account ending in 1111')).toEqual(savingsAccount());
   expect(marcusAccountIdentityFromText('High-Yield CD - 2222')).toEqual({
@@ -71,6 +84,12 @@ test('Marcus account and date metadata parsing is account-count agnostic', () =>
     parserAccountName: null,
   });
   expect(marcusAccountIdentityFromText('Online Savings Statement June 2026')).toBeNull();
+  expect(marcusAccountIdentityFromText(
+    'Online Savings Account **** 1111 High-Yield CD - 2222',
+  )).toBeNull();
+  expect(marcusAccountIdentityFromText(
+    'Online Savings Account **** 1111 Online Savings Account **** 2222',
+  )).toBeNull();
   expect(marcusStatementDateFromText('Statement date 6/30/2026')).toBe('2026-06-30');
   expect(marcusStatementDateFromText('June 2026 Statement')).toBe('2026-06-01');
 });
@@ -152,6 +171,56 @@ test('Marcus rejects routing ambiguity rather than mixing remote accounts or sta
   ])).toThrow('multiple documents');
 });
 
+test('Marcus maps discovered accounts to exact local identities without account-count assumptions', () => {
+  const catalog = buildMarcusRemoteCatalog([
+    { text: 'Online Savings Account **** 1111', remoteKey: 'remote-a' },
+    { text: 'Online Savings Account **** 2222', remoteKey: 'remote-b' },
+    { text: 'High-Yield CD - 3333', remoteKey: 'remote-c' },
+  ], []);
+
+  expect(mapMarcusRemoteAccounts(catalog.accounts, [
+    plannedSavingsAccount({ accountId: 20, last4: '2222' }),
+    plannedSavingsAccount({ accountId: 10, last4: '1111' }),
+    plannedSavingsAccount({ accountId: 40, last4: '4444' }),
+  ])).toEqual([
+    { remote: expect.objectContaining({ kind: 'savings', last4: '2222' }), planned: plannedSavingsAccount({ accountId: 20, last4: '2222' }) },
+    { remote: expect.objectContaining({ kind: 'savings', last4: '1111' }), planned: plannedSavingsAccount({ accountId: 10, last4: '1111' }) },
+  ]);
+});
+
+test('Marcus selects only mapped documents inside each account-specific catch-up window', () => {
+  const catalog = buildMarcusRemoteCatalog([], [
+    {
+      href: '/us/en/accounts/document/savings-a-june',
+      accountText: 'Online Savings Account **** 1111',
+      documentText: 'June 30, 2026 Statement',
+    },
+    {
+      href: '/us/en/accounts/document/savings-b-may',
+      accountText: 'Online Savings Account **** 2222',
+      documentText: 'May 31, 2026 Statement',
+    },
+    {
+      href: '/us/en/accounts/document/unmapped-june',
+      accountText: 'Online Savings Account **** 3333',
+      documentText: 'June 30, 2026 Statement',
+    },
+  ]);
+  const plan = planMarcusCatalog(catalog, [
+    plannedSavingsAccount({ accountId: 10, last4: '1111', startDate: '2026-06-01' }),
+    plannedSavingsAccount({ accountId: 20, last4: '2222', startDate: '2026-06-01' }),
+    plannedSavingsAccount({ accountId: 40, last4: '4444', startDate: '2026-06-01' }),
+  ], '2026-06-30');
+
+  expect(plan.mappedAccounts.map(({ planned }) => planned.accountId)).toEqual([10, 20]);
+  expect(plan.documents.map(({ document, planned }) => ({
+    statementDate: document.statementDate,
+    accountId: planned.accountId,
+  }))).toEqual([{ statementDate: '2026-06-30', accountId: 10 }]);
+  expect(plan.unmappedAccountCount).toBe(1);
+  expect(plan.unavailableAccountCount).toBe(1);
+});
+
 test('Marcus permits only the verified authenticated document route', () => {
   expect(marcusDocumentRequest('/us/en/accounts/document/opaque-document')).toEqual({
     method: 'GET',
@@ -219,12 +288,15 @@ test('Marcus parser validation emits an account-identifiable review artifact', a
     const artifact = await validateMarcusStatementArtifact({
       outputDir,
       bytes: validPdf,
+      accountId: 10,
       expectedAccount: savingsAccount(),
+      expectedStatementDate: '2026-06-01',
     }, fakeParser());
 
     expect(artifact).toMatchObject({
       fileName: 'marcus-online-savings-1111-2026-06-30-statement.pdf',
       artifactType: 'statement-pdf',
+      accountId: 10,
       account: savingsAccount(),
       statementDate: '2026-06-30',
       parserId: 'marcus-statement-pdf',
@@ -244,8 +316,26 @@ test('Marcus rejects parser account mismatches and removes temporary financial f
     await expect(validateMarcusStatementArtifact({
       outputDir,
       bytes: validPdf,
+      accountId: 20,
       expectedAccount: savingsAccount('2222'),
+      expectedStatementDate: '2026-06-01',
     }, fakeParser())).rejects.toThrow('account identity does not match');
+    expect(await readdir(outputDir)).toEqual([]);
+  } finally {
+    await rm(outputDir, { recursive: true, force: true });
+  }
+});
+
+test('Marcus rejects parser dates that disagree with remote document metadata', async () => {
+  const outputDir = await mkdtemp(join(tmpdir(), 'marcus-date-mismatch-test-'));
+  try {
+    await expect(validateMarcusStatementArtifact({
+      outputDir,
+      bytes: validPdf,
+      accountId: 10,
+      expectedAccount: savingsAccount(),
+      expectedStatementDate: '2026-05-31',
+    }, fakeParser())).rejects.toThrow('date does not match');
     expect(await readdir(outputDir)).toEqual([]);
   } finally {
     await rm(outputDir, { recursive: true, force: true });
@@ -267,8 +357,8 @@ test('Marcus reports missing auth without launching Chrome', async () => {
   try {
     expect(await runMarcusSync({
       outputDir,
-      from: '2026-06-01',
       through: '2026-06-30',
+      accounts: [plannedSavingsAccount()],
     }, event => events.push(event), dependencies)).toEqual({
       status: 'authentication-required',
       reason: 'missing',
@@ -300,8 +390,8 @@ test('Marcus cached-auth probes stay headless when interactive auth is not grant
   try {
     expect(await runMarcusSync({
       outputDir,
-      from: '2026-06-01',
       through: '2026-06-30',
+      accounts: [plannedSavingsAccount()],
       allowInteractiveAuthentication: false,
     }, undefined, dependencies)).toMatchObject({
       status: 'authentication-required',
