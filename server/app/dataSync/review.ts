@@ -229,16 +229,25 @@ export async function stageSyncArtifactWithProvenance(
   }
 
   const preview = await previewImport({ fileName, text, fileBytes });
-  if (preview.requiresMapping) throw new Error(`No institution parser matched ${fileName}`);
-  return {
-    review: buildSyncArtifactReview({
-      importFileId: Number(preview.importFileId),
-      accountId: input.accountId,
-      fileName,
-      status: 'ready',
-    }),
-    createdPreview: true,
-  };
+  const importFileId = Number(preview.importFileId);
+  if (preview.requiresMapping) {
+    discardSyncPreviewIds([importFileId]);
+    throw new Error(`No institution parser matched ${fileName}`);
+  }
+  try {
+    return {
+      review: buildSyncArtifactReview({
+        importFileId,
+        accountId: input.accountId,
+        fileName,
+        status: 'ready',
+      }),
+      createdPreview: true,
+    };
+  } catch (error) {
+    discardSyncPreviewIds([importFileId]);
+    throw error;
+  }
 }
 
 export async function stageSyncArtifact(input: StageSyncArtifactInput): Promise<SyncArtifactReview> {

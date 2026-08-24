@@ -3527,6 +3527,31 @@ test('institution catch-up discards a partially staged manifest when a later art
   }
 });
 
+test('institution catch-up discards a new preview when review construction fails', async () => {
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-sync-invalid-route-'));
+  const fileName = 'bofa-checking-1234-2026-04-01-to-2026-04-30.csv';
+  const filePath = path.join(directory, fileName);
+  await fs.promises.writeFile(filePath, [
+    'Description,,Summary Amt.',
+    'Opening Balance,,1000.00',
+    'Date,Description,Amount,Running Bal.',
+    '04/05/2026,SYNTHETIC PAYROLL,2500.00,3500.00',
+  ].join('\n'));
+
+  try {
+    await expect(stageSyncArtifact({ path: filePath, accountId: 999_999 }))
+      .rejects.toThrow('Account not found');
+    expect(getDb().prepare('SELECT status FROM importFiles').all()).toEqual([
+      { status: 'discarded' },
+    ]);
+    expect(getDb().prepare('SELECT status FROM sourceFiles').all()).toEqual([
+      { status: 'discarded' },
+    ]);
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('discarding an institution catch-up leaves staged facts out of the ledger and history', async () => {
   const accountId = Number(insertRow('accounts', {
     name: 'Primary Checking',
