@@ -84,7 +84,10 @@ function syncAccountDraft(claim: SyncAccountClaim): SyncAccountDraft {
 }
 
 function initialSyncMappingChoice(claim: SyncAccountClaim): SyncMappingChoice {
-  return claim.resolvedAccountId && claim.resolution !== 'archived-match' && claim.resolution !== 'ambiguous'
+  return claim.resolvedAccountId &&
+    claim.resolution !== 'archived-match' &&
+    claim.resolution !== 'ambiguous' &&
+    !claim.requiresExplicitMapping
     ? { mode: 'auto', accountId: String(claim.resolvedAccountId), account: syncAccountDraft(claim) }
     : { mode: 'needs-selection', accountId: '', account: syncAccountDraft(claim) };
 }
@@ -92,7 +95,10 @@ function initialSyncMappingChoice(claim: SyncAccountClaim): SyncMappingChoice {
 function syncMappingChoiceComplete(choice: SyncMappingChoice | undefined, claim: SyncAccountClaim) {
   if (!choice) return false;
   if (choice.mode === 'auto') {
-    return Boolean(claim.resolvedAccountId) && claim.resolution !== 'archived-match' && claim.resolution !== 'ambiguous';
+    return Boolean(claim.resolvedAccountId) &&
+      claim.resolution !== 'archived-match' &&
+      claim.resolution !== 'ambiguous' &&
+      !claim.requiresExplicitMapping;
   }
   if (choice.mode === 'existing' || choice.mode === 'unarchive') return Boolean(choice.accountId);
   if (choice.mode === 'create') {
@@ -246,7 +252,10 @@ function SyncAccountMappingControl({
         }}
       >
         <option value="">Choose account action</option>
-        {claim.resolvedAccountId && claim.resolution !== 'archived-match' && claim.resolution !== 'ambiguous' && (
+        {claim.resolvedAccountId &&
+          claim.resolution !== 'archived-match' &&
+          claim.resolution !== 'ambiguous' &&
+          !claim.requiresExplicitMapping && (
           <option value="__auto__">Use matched account{matchedAccount ? `: ${matchedAccount.name}` : ''}</option>
         )}
         {claim.resolution === 'archived-match' && claim.resolvedAccountId && (

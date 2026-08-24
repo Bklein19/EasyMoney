@@ -64,6 +64,39 @@ const accountMetadataInput = z.object({
     accountHolder: z.unknown().optional(),
   }),
 });
+const accountMappingIdInput = z.coerce.number().int().positive();
+const accountMappingDecisionSchema = z.discriminatedUnion('mode', [
+  z.object({
+    sourceAccountId: accountMappingIdInput,
+    mode: z.literal('existing'),
+    accountId: accountMappingIdInput.nullable(),
+  }).strict(),
+  z.object({
+    sourceAccountId: accountMappingIdInput,
+    mode: z.literal('auto'),
+    accountId: accountMappingIdInput.nullable().optional(),
+  }).strict(),
+  z.object({
+    sourceAccountId: accountMappingIdInput,
+    mode: z.literal('unarchive'),
+    accountId: accountMappingIdInput,
+  }).strict(),
+  z.object({
+    sourceAccountId: accountMappingIdInput,
+    mode: z.literal('create'),
+    account: z.object({
+      name: z.string().nullable().optional(),
+      institution: z.string().nullable().optional(),
+      type: z.string().nullable().optional(),
+      currency: z.string().nullable().optional(),
+      accountHolder: z.string().nullable().optional(),
+    }).strict(),
+  }).strict(),
+]);
+const accountMappingDecisionInput = z.preprocess(value => {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || 'mode' in value) return value;
+  return { ...value, mode: 'existing' };
+}, accountMappingDecisionSchema);
 const commitImportInput = z.object({
   accountId: optionalId,
   importFileId: optionalId,
@@ -71,7 +104,7 @@ const commitImportInput = z.object({
   forceImportRowIds: z.array(z.union([z.string(), z.number()])).nullish(),
   balanceRowIds: z.array(z.union([z.string(), z.number()])).nullish(),
   transactions: z.array(z.unknown()).optional(),
-  accountMappings: z.array(z.unknown()).nullish(),
+  accountMappings: z.array(accountMappingDecisionInput).nullish(),
   importMeta: z.any().nullish(),
 });
 const syncGoalInput = z.discriminatedUnion('kind', [
@@ -272,12 +305,9 @@ export const appRouter = t.router({
     confirm: t.procedure
       .input(z.object({
         runId: z.string().min(1),
-        accountMappings: z.array(z.unknown()).nullish(),
+        accountMappings: z.array(accountMappingDecisionSchema).nullish(),
       }))
-      .mutation(({ input }) => confirmSyncJob(
-        input.runId,
-        input.accountMappings as Parameters<typeof confirmSyncJob>[1],
-      )),
+      .mutation(({ input }) => confirmSyncJob(input.runId, input.accountMappings)),
 
     discard: t.procedure
       .input(z.object({ runId: z.string().min(1) }))

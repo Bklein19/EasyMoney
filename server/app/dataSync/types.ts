@@ -3,7 +3,6 @@ import type { RoutedSyncArtifact, SyncAccountCoverage } from './connector.ts';
 import type { SyncGoal } from './protocol.ts';
 import type { SyncInstitutionId as RegisteredSyncInstitutionId } from './registry.ts';
 import type {
-  ImportAccountMappingDecision,
   ImportAccountMappingResolution,
 } from '../importTypes.ts';
 
@@ -87,11 +86,27 @@ export interface SyncAccountClaim {
   resolvedAccountName: string | null;
   resolvedAccountStatus: string | null;
   resolution: ImportAccountMappingResolution | 'connector';
+  /** True when the connector did not supply a concrete local destination. */
+  requiresExplicitMapping: boolean;
   transactionCount: number;
   balanceCount: number;
 }
 
-export type SyncAccountMappingDecision = ImportAccountMappingDecision;
+export type SyncAccountMappingDecision =
+  | { sourceAccountId: number; mode: 'existing'; accountId: number | null }
+  | { sourceAccountId: number; mode: 'auto'; accountId?: number | null }
+  | { sourceAccountId: number; mode: 'unarchive'; accountId: number }
+  | {
+      sourceAccountId: number;
+      mode: 'create';
+      account: {
+        name?: string | null;
+        institution?: string | null;
+        type?: string | null;
+        currency?: string | null;
+        accountHolder?: string | null;
+      };
+    };
 
 export interface SyncArtifactReview {
   fileName: string;

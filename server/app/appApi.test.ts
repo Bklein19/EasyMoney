@@ -3653,6 +3653,127 @@ test('catch-up commits two consolidated source-account claims to independent loc
   ]);
 });
 
+test('catch-up requires explicit choices for partial and destinationless connector routes', async () => {
+  const routedAccountId = Number(insertRow('accounts', {
+    name: 'Routed Local Account',
+    institution: 'Example Institution',
+    type: 'checking',
+    currentBalance: 0,
+    currency: 'USD',
+    status: 'active',
+  }));
+  const suggestedAccountId = Number(insertRow('accounts', {
+    name: 'Suggested Remote Savings',
+    institution: 'Example Institution',
+    type: 'savings',
+    currentBalance: 0,
+    currency: 'USD',
+    status: 'active',
+  }));
+  const unroutedAccountId = Number(insertRow('accounts', {
+    name: 'Unrouted Remote Card',
+    institution: 'Example Institution',
+    type: 'credit',
+    currentBalance: 0,
+    currency: 'USD',
+    status: 'active',
+  }));
+  const staged = stageConsolidatedSyncFacts([
+    { remoteAccountId: 'remote:routed', accountName: 'Remote Checking' },
+    { remoteAccountId: 'remote:destinationless', accountName: 'Suggested Remote Savings' },
+    { remoteAccountId: 'remote:unrouted', accountName: 'Unrouted Remote Card' },
+  ], 'partial-connector-routes.csv');
+  const artifact = buildSyncArtifactReview({
+    importFileId: staged.importFileId,
+    fileName: staged.fileName,
+    status: 'ready',
+    accountRoutes: [
+      { remoteAccountId: 'remote:routed', accountId: routedAccountId },
+      { remoteAccountId: 'remote:destinationless' },
+    ],
+  });
+
+  expect(artifact.accountClaims).toEqual([
+    expect.objectContaining({
+      remoteAccountId: 'remote:routed',
+      resolvedAccountId: routedAccountId,
+      resolution: 'connector',
+      requiresExplicitMapping: false,
+    }),
+    expect.objectContaining({
+      remoteAccountId: 'remote:destinationless',
+      resolvedAccountId: suggestedAccountId,
+      resolution: 'exact',
+      requiresExplicitMapping: true,
+    }),
+    expect.objectContaining({
+      remoteAccountId: 'remote:unrouted',
+      resolvedAccountId: unroutedAccountId,
+      resolution: 'exact',
+      requiresExplicitMapping: true,
+    }),
+  ]);
+
+  const review = {
+    runId: 'sync-partial-connector-routes',
+    institutionId: 'bank-of-america' as const,
+    downloaded: 1,
+    readyToImport: 1,
+    alreadyImported: 0,
+    artifacts: [artifact],
+  };
+  await saveAwaitingSyncReview(review);
+  await expect(caller.dataSync.confirm({ runId: review.runId })).rejects.toThrow(
+    'Resolve every source account before confirming the catch-up.',
+  );
+
+  const confirmed = await caller.dataSync.confirm({
+    runId: review.runId,
+    accountMappings: [
+      { sourceAccountId: staged.sourceAccountIds[0]!, mode: 'auto' },
+      { sourceAccountId: staged.sourceAccountIds[1]!, mode: 'existing', accountId: suggestedAccountId },
+      { sourceAccountId: staged.sourceAccountIds[2]!, mode: 'existing', accountId: unroutedAccountId },
+    ],
+  });
+  expect(confirmed.status).toBe('complete');
+  expect(getDb().prepare('SELECT accountId FROM sourceAccounts ORDER BY id').all()).toEqual([
+    { accountId: routedAccountId },
+    { accountId: suggestedAccountId },
+    { accountId: unroutedAccountId },
+  ]);
+});
+
+test('catch-up confirmation rejects unvalidated mapping decision variants at the API boundary', async () => {
+  const staged = stageConsolidatedSyncFacts([
+    { remoteAccountId: 'remote:validated-input', accountName: 'Validated Input Account' },
+  ], 'validated-confirmation-input.csv');
+  const artifact = buildSyncArtifactReview({
+    importFileId: staged.importFileId,
+    fileName: staged.fileName,
+    status: 'ready',
+    accountRoutes: [{ remoteAccountId: 'remote:validated-input' }],
+  });
+  const review = {
+    runId: 'sync-validated-confirmation-input',
+    institutionId: 'bank-of-america' as const,
+    downloaded: 1,
+    readyToImport: 1,
+    alreadyImported: 0,
+    artifacts: [artifact],
+  };
+  await saveAwaitingSyncReview(review);
+
+  await expect(caller.dataSync.confirm({
+    runId: review.runId,
+    accountMappings: [{
+      sourceAccountId: staged.sourceAccountIds[0]!,
+      mode: 'invented-mode',
+      accountId: 1,
+    }],
+  } as never)).rejects.toThrow();
+  expect((await caller.dataSync.status({ runId: review.runId }))?.status).toBe('awaiting-confirmation');
+});
+
 test('catch-up retains a newly discovered remote account until an explicit create decision', async () => {
   const staged = stageConsolidatedSyncFacts([
     { remoteAccountId: 'remote:new', accountName: 'New Remote Savings', amountCents: 2500, balanceCents: 500000 },

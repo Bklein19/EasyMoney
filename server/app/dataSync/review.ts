@@ -209,6 +209,7 @@ function resolveAccountClaims(
     if (!imported) throw new Error(`Import account claim is unavailable: ${claim.sourceAccountId}`);
     const connectorRoute = routeByRemoteId.get(claim.remoteAccountId);
     const connectorAccountId = connectorRoute?.accountId;
+    const requiresExplicitMapping = options.accountId === undefined && connectorAccountId === undefined;
     const resolvedAccountId = connectorAccountId ?? imported.resolvedAccountId;
     const account = resolvedAccountId
       ? destinationAccount(resolvedAccountId, { allowArchived: true })
@@ -219,6 +220,7 @@ function resolveAccountClaims(
       resolvedAccountName: account?.name ?? null,
       resolvedAccountStatus: account?.status || (account ? 'active' : null),
       resolution: connectorAccountId === undefined ? imported.resolution : 'connector',
+      requiresExplicitMapping,
     };
   });
 }
@@ -237,6 +239,9 @@ function reviewWarnings(claims: SyncAccountClaim[]): string[] {
     if (!claim.resolvedAccountId) {
       warnings.push(`${claim.accountName || 'A newly discovered source account'} needs an account mapping before import.`);
       continue;
+    }
+    if (claim.requiresExplicitMapping) {
+      warnings.push(`${claim.accountName || 'A source account'} needs an explicit account choice before import.`);
     }
     const account = destinationAccount(claim.resolvedAccountId, { allowArchived: true });
     const destinationHolder = account.accountHolder?.trim().toLowerCase();
@@ -393,9 +398,6 @@ function explicitMappingForClaim(
     destinationAccount(accountId, { allowArchived: true });
     return { ...mapping, accountId };
   }
-  if (mapping.mode && mapping.mode !== 'existing') {
-    throw new Error(`Unsupported account mapping mode: ${mapping.mode}`);
-  }
   const accountId = mapping.accountId === null ? null : Number(mapping.accountId);
   if (accountId === null || !Number.isFinite(accountId)) {
     throw new Error(`Account id is required for source account ${claim.sourceAccountId}.`);
@@ -447,7 +449,8 @@ function validatedSyncAccountMappings(
     const requestedMapping = requestedById.get(claim.sourceAccountId);
     const defaultMapping: SyncAccountMappingDecision | null = claim.resolvedAccountId &&
       claim.resolvedAccountStatus !== 'archived' &&
-      claim.resolution !== 'ambiguous'
+      claim.resolution !== 'ambiguous' &&
+      !claim.requiresExplicitMapping
       ? { sourceAccountId: claim.sourceAccountId, mode: 'existing', accountId: claim.resolvedAccountId }
       : null;
     const mapping = requestedMapping ?? defaultMapping;
