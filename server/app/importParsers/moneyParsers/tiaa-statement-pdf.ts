@@ -7,7 +7,7 @@ export const meta: ParserMeta = {
   kind: "statement",
   priority: 50,
   matches: ({ filename, sample }) =>
-    /^tiaa-\d{4}-\d{2}-\d{2}-retirement-q[1-4]-\d{4}-\d+\.pdf$/i.test(filename) ||
+    /^tiaa-\d{4}-\d{2}-\d{2}-retirement-q[1-4]-\d{4}-(?:\d+|[a-f0-9]{12})\.pdf$/i.test(filename) ||
     /Quarterly retirement savings portfolio statement/.test(sample),
 };
 
