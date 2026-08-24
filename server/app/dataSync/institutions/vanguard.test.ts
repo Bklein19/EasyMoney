@@ -12,6 +12,7 @@ import {
   parseVanguardRemoteAccount,
   runVanguardProfilesConcurrently,
   validateVanguardArtifact,
+  vanguardAuthenticationAction,
   vanguardAccountLast4FromText,
   vanguardApiRequestFromForm,
   vanguardCsvAccountLast4s,
@@ -34,6 +35,15 @@ test('Vanguard authentication recognizes the signed-in download center', async (
   } as unknown as Page;
 
   expect(await isVanguardAuthenticatedPage(page)).toBe(true);
+});
+
+test('Vanguard authentication copy identifies the intended account holder', () => {
+  expect(vanguardAuthenticationAction({ accountHolder: 'Example One' })).toBe(
+    'Sign in to Vanguard for Example One and complete MFA. EasyMoney will continue automatically.',
+  );
+  expect(() => vanguardAuthenticationAction({ accountHolder: '   ' })).toThrow(
+    'require an account holder',
+  );
 });
 
 test('Vanguard caps UTC-tomorrow downloads to the local calendar date', () => {

@@ -169,6 +169,14 @@ function accountLabel(kind: VanguardAccountKind): string {
   return 'Brokerage';
 }
 
+export function vanguardAuthenticationAction(
+  profile: Pick<VanguardSyncProfile, 'accountHolder'>,
+): string {
+  const accountHolder = profile.accountHolder.trim();
+  if (!accountHolder) throw new Error('Vanguard login profiles require an account holder');
+  return `Sign in to Vanguard for ${accountHolder} and complete MFA. EasyMoney will continue automatically.`;
+}
+
 function validateProfileLabel(value: string): void {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value)) {
     throw new Error('Vanguard profile labels must be PII-free kebab-case values');
@@ -731,11 +739,12 @@ async function executeVanguardProfile(
   reportProgress: VanguardProgressReporter,
 ): Promise<VanguardProfileProgramResult> {
   const report = (message: string) => reportProgress(`Vanguard ${profile.id}: ${message}`);
+  const authenticationAction = vanguardAuthenticationAction(profile);
   try {
     if (!await isVanguardAuthenticatedPage(page)) {
       return {
         status: 'login-required',
-        action: 'Sign in to Vanguard and complete MFA. EasyMoney will continue automatically.',
+        action: authenticationAction,
       };
     }
     report('authenticated cached profile');
@@ -743,7 +752,7 @@ async function executeVanguardProfile(
     if (!await ensureVanguardActivityForm(page)) {
       return {
         status: 'login-required',
-        action: 'Sign in to Vanguard and complete MFA. EasyMoney will continue automatically.',
+        action: authenticationAction,
       };
     }
 
@@ -774,7 +783,7 @@ async function executeVanguardProfile(
       if (isVanguardLoginUrl(page.url())) {
         return {
           status: 'login-required',
-          action: 'Sign in to Vanguard and complete MFA. EasyMoney will continue automatically.',
+          action: authenticationAction,
         };
       }
       const years = [...new Set(statementJobs.map(job => job.statementDate!.slice(0, 4)))].sort();
@@ -810,7 +819,7 @@ async function executeVanguardProfile(
     if (message.includes(AUTHENTICATION_REQUIRED) || isVanguardLoginUrl(page.url())) {
       return {
         status: 'login-required',
-        action: 'Sign in to Vanguard and complete MFA. EasyMoney will continue automatically.',
+        action: authenticationAction,
       };
     }
     return { status: 'error', message: safeVanguardError(error) };
@@ -846,7 +855,7 @@ async function runProfile(
     { name: profile.session, startUrl: LOGIN_URL },
     browserProgram(),
     {
-      completionDescription: `Vanguard ${profile.id} downloads are complete.`,
+      completionDescription: `Vanguard (${profile.accountHolder}) downloads are complete.`,
       isAuthenticated: isVanguardAuthenticatedPage,
       waitUntilAuthenticated: waitUntilVanguardAuthenticated,
       onProgress,
