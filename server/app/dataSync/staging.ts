@@ -34,6 +34,7 @@ export async function stageSyncArtifactManifest(
         accountId: artifact.accountId,
         expectedSizeBytes: artifact.sizeBytes,
         expectedSha256: artifact.sha256,
+        reusePreview: false,
       });
       const review = staged.review;
       reviews.push(review);

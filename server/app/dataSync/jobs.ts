@@ -51,6 +51,7 @@ type ManagedSyncJob = SyncJob & {
   manifest: SyncArtifactManifest | null;
   protocolError: string | null;
   cancelRequested: boolean;
+  reviewAction: 'confirm' | 'discard' | null;
 };
 
 const jobs = new Map<string, ManagedSyncJob>();
@@ -69,6 +70,7 @@ function publicJob(job: ManagedSyncJob): SyncJob {
     manifest: _manifest,
     protocolError: _protocolError,
     cancelRequested: _cancelRequested,
+    reviewAction: _reviewAction,
     ...result
   } = job;
   return result;
@@ -113,6 +115,7 @@ async function managedJob(runId: string): Promise<ManagedSyncJob | null> {
       manifest: null,
       protocolError: null,
       cancelRequested: false,
+      reviewAction: null,
     };
     jobs.set(runId, job);
     if (markInterruptedSyncJob(job)) await persistJob(job);
@@ -253,17 +256,17 @@ async function finishWorker(
           discardSyncPreviewIds(result.createdImportFileIds);
           return null;
         }
+        appendEvent(job, {
+          runId: job.runId,
+          timestamp: new Date().toISOString(),
+          type: 'review',
+          message: 'Downloads are ready to review',
+          data: { review: result.review },
+        });
         return result;
       });
     });
-    if (!staged || job.status !== 'running' || job.cancelRequested) return;
-    appendEvent(job, {
-      runId: job.runId,
-      timestamp: new Date().toISOString(),
-      type: 'review',
-      message: 'Downloads are ready to review',
-      data: { review: staged.review },
-    });
+    if (!staged) return;
   } catch (error) {
     if (job.cancelRequested) return;
     failJob(job, error instanceof Error ? error.message : String(error));
@@ -303,6 +306,7 @@ export function startSyncJob(input: {
     manifest: null,
     protocolError: null,
     cancelRequested: false,
+    reviewAction: null,
   };
   jobs.set(runId, job);
   void persistJob(job);
@@ -358,18 +362,20 @@ export async function confirmSyncJob(runId: string): Promise<SyncJob> {
   const job = await managedJob(runId);
   if (!job) throw new Error('Sync job not found');
   if (job.status === 'complete') return publicJob(job);
-  if (job.status !== 'awaiting-confirmation' || !job.review) {
+  if (job.status !== 'awaiting-confirmation' || !job.review || job.reviewAction) {
     throw new Error('Sync job is not awaiting confirmation');
   }
 
+  job.reviewAction = 'confirm';
   job.status = 'importing';
   job.message = 'Importing confirmed data';
   job.error = null;
-  await persistJob(job);
   const report = reportForJob(job);
 
   try {
+    await persistJob(job);
     const result = await runSerializedSyncDatabaseWork(() => commitSyncReview(job.review!, report));
+    job.reviewAction = null;
     appendEvent(job, {
       runId,
       timestamp: new Date().toISOString(),
@@ -381,6 +387,7 @@ export async function confirmSyncJob(runId: string): Promise<SyncJob> {
     return publicJob(job);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    job.reviewAction = null;
     job.status = 'awaiting-confirmation';
     job.error = message;
     appendEvent(job, {
@@ -397,22 +404,41 @@ export async function confirmSyncJob(runId: string): Promise<SyncJob> {
 export async function discardSyncJob(runId: string): Promise<SyncJob> {
   const job = await managedJob(runId);
   if (!job) throw new Error('Sync job not found');
-  if (job.status !== 'awaiting-confirmation' || !job.review) {
+  if (job.status !== 'awaiting-confirmation' || !job.review || job.reviewAction) {
     throw new Error('Sync job is not awaiting confirmation');
   }
 
-  await runSerializedSyncDatabaseWork(() => discardSyncReview(job.review!));
-  const timestamp = new Date().toISOString();
-  job.status = 'cancelled';
-  job.message = 'Downloaded data discarded';
-  job.completedAt = timestamp;
+  job.reviewAction = 'discard';
+  job.message = 'Discarding downloaded data';
   job.error = null;
-  job.events.push({
-    runId,
-    timestamp,
-    type: 'action',
-    message: job.message,
-  });
-  await persistJob(job);
-  return publicJob(job);
+  try {
+    await persistJob(job);
+    await runSerializedSyncDatabaseWork(() => discardSyncReview(job.review!));
+    const timestamp = new Date().toISOString();
+    job.reviewAction = null;
+    job.status = 'cancelled';
+    job.message = 'Downloaded data discarded';
+    job.completedAt = timestamp;
+    job.events.push({
+      runId,
+      timestamp,
+      type: 'action',
+      message: job.message,
+    });
+    await persistJob(job);
+    return publicJob(job);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    job.reviewAction = null;
+    job.status = 'awaiting-confirmation';
+    job.error = message;
+    appendEvent(job, {
+      runId,
+      timestamp: new Date().toISOString(),
+      type: 'warning',
+      message: `Discard failed: ${message}`,
+    });
+    await persistJob(job);
+    throw error;
+  }
 }

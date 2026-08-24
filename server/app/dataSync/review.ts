@@ -22,6 +22,7 @@ interface StageSyncArtifactInput {
   accountId: number;
   expectedSizeBytes?: number;
   expectedSha256?: string;
+  reusePreview?: boolean;
 }
 
 export interface StagedSyncArtifact {
@@ -212,10 +213,13 @@ export async function stageSyncArtifactWithProvenance(
   const existing = getDb().prepare(`
     SELECT id, status
     FROM importFiles
-    WHERE contentHash = ? AND status IN ('committed', 'previewed')
+    WHERE contentHash = ?
+      AND (status = 'committed' OR (? = 1 AND status = 'previewed'))
     ORDER BY status = 'committed' DESC, committedAt DESC, id DESC
     LIMIT 1
-  `).get(contentHash) as { id: number; status: 'committed' | 'previewed' } | undefined;
+  `).get(contentHash, input.reusePreview === false ? 0 : 1) as
+    | { id: number; status: 'committed' | 'previewed' }
+    | undefined;
   if (existing) {
     return {
       review: buildSyncArtifactReview({

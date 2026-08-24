@@ -10,7 +10,8 @@ process.env.EASYMONEY_SYNC_ROOT = path.join(os.tmpdir(), `easymoney-sync-runs-${
 const { appRouter } = await import('./router.ts');
 const { getDb, initDatabase, insertRow } = await import('../database.ts');
 const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
-const { stageSyncArtifact } = await import('./dataSync/review.ts');
+const { discardSyncReview, stageSyncArtifact } = await import('./dataSync/review.ts');
+const { runSerializedSyncDatabaseWork } = await import('./dataSync/databaseQueue.ts');
 const { stageSyncArtifactManifest } = await import('./dataSync/staging.ts');
 const { SYNC_WORKER_PROTOCOL_VERSION } = await import('./dataSync/types.ts');
 const { upsertTransactionAnnotation } = await import('./transactionAnnotations.ts');
@@ -3527,6 +3528,54 @@ test('institution catch-up discards a partially staged manifest when a later art
   }
 });
 
+test('concurrent sync reviews own independent previews of the same artifact', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Synthetic Checking',
+    institution: 'Bank of America',
+    type: 'checking',
+    currentBalance: 0,
+    currency: 'USD',
+    status: 'active',
+  }));
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-sync-ownership-'));
+  const fileName = 'bofa-checking-1234-2026-05-01-to-2026-05-31.csv';
+  const fileBytes = new TextEncoder().encode([
+    'Description,,Summary Amt.',
+    'Opening Balance,,1000.00',
+    'Date,Description,Amount,Running Bal.',
+    '05/05/2026,SYNTHETIC PAYROLL,2500.00,3500.00',
+  ].join('\n'));
+  await fs.promises.writeFile(path.join(directory, fileName), fileBytes);
+
+  const manifest = (runId: string) => ({
+    protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+    runId,
+    institutionId: 'bank-of-america' as const,
+    artifacts: [{
+      fileName,
+      accountId,
+      sizeBytes: fileBytes.byteLength,
+      sha256: new Bun.CryptoHasher('sha256').update(fileBytes).digest('hex'),
+    }],
+  });
+
+  try {
+    const first = await stageSyncArtifactManifest(manifest('sync-preview-owner-first'), directory, () => {});
+    const second = await stageSyncArtifactManifest(manifest('sync-preview-owner-second'), directory, () => {});
+    const firstId = first.review.artifacts[0]!.importFileId;
+    const secondId = second.review.artifacts[0]!.importFileId;
+
+    expect(secondId).not.toBe(firstId);
+    discardSyncReview(second.review);
+    expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(firstId))
+      .toEqual({ status: 'previewed' });
+    expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(secondId))
+      .toEqual({ status: 'discarded' });
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('institution catch-up discards a new preview when review construction fails', async () => {
   const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-sync-invalid-route-'));
   const fileName = 'bofa-checking-1234-2026-04-01-to-2026-04-30.csv';
@@ -3592,6 +3641,85 @@ test('discarding an institution catch-up leaves staged facts out of the ledger a
     expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
     expect((await listImportHistoryForTest()).imports).toHaveLength(0);
   } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('discard reserves an awaiting sync review before confirmation can start', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Primary Checking',
+    institution: 'Bank of America',
+    type: 'checking',
+    currentBalance: 0,
+    currency: 'USD',
+    status: 'active',
+  }));
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-sync-action-race-'));
+  const fileName = 'bofa-checking-1234-2026-06-01-to-2026-06-30.csv';
+  const filePath = path.join(directory, fileName);
+  await fs.promises.writeFile(filePath, [
+    'Description,,Summary Amt.',
+    'Opening Balance,,1000.00',
+    'Date,Description,Amount,Running Bal.',
+    '06/05/2026,EXAMPLE PAYROLL,2500.00,3500.00',
+  ].join('\n'));
+
+  let releaseQueue = () => {};
+  const queueGate = new Promise<void>(resolve => {
+    releaseQueue = resolve;
+  });
+  let markQueueHeld = () => {};
+  const queueHeld = new Promise<void>(resolve => {
+    markQueueHeld = resolve;
+  });
+  const heldDatabaseWork = runSerializedSyncDatabaseWork(async () => {
+    markQueueHeld();
+    await queueGate;
+  });
+  await queueHeld;
+
+  let discardPromise: ReturnType<typeof caller.dataSync.discard> | null = null;
+  try {
+    const artifact = await stageSyncArtifact({ path: filePath, accountId });
+    const review = {
+      runId: 'sync-test-discard-confirm-race',
+      institutionId: 'bank-of-america' as const,
+      downloaded: 1,
+      readyToImport: 1,
+      alreadyImported: 0,
+      artifacts: [artifact],
+    };
+    await saveAwaitingSyncReview(review);
+    await caller.dataSync.status({ runId: review.runId });
+
+    discardPromise = caller.dataSync.discard({ runId: review.runId });
+    let reservedJob = await caller.dataSync.status({ runId: review.runId });
+    for (let attempt = 0; attempt < 50 && reservedJob?.message !== 'Discarding downloaded data'; attempt += 1) {
+      await Promise.resolve();
+      reservedJob = await caller.dataSync.status({ runId: review.runId });
+    }
+    expect(reservedJob?.message).toBe('Discarding downloaded data');
+
+    const confirmPromise = caller.dataSync.confirm({ runId: review.runId });
+    releaseQueue();
+    const [discardResult, confirmResult] = await Promise.allSettled([discardPromise, confirmPromise]);
+
+    expect(discardResult).toMatchObject({
+      status: 'fulfilled',
+      value: { status: 'cancelled' },
+    });
+    expect(confirmResult).toMatchObject({
+      status: 'rejected',
+      reason: expect.objectContaining({ message: 'Sync job is not awaiting confirmation' }),
+    });
+    expect(await caller.dataSync.status({ runId: review.runId }))
+      .toMatchObject({ status: 'cancelled', message: 'Downloaded data discarded' });
+    expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(artifact.importFileId))
+      .toEqual({ status: 'discarded' });
+  } finally {
+    releaseQueue();
+    await heldDatabaseWork;
+    if (discardPromise) await discardPromise.catch(() => {});
     await fs.promises.rm(directory, { recursive: true, force: true });
   }
 });
