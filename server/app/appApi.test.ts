@@ -120,14 +120,15 @@ function stageConsolidatedSyncFacts(claims: Array<{
   accountName: string;
   amountCents?: number;
   balanceCents?: number;
-}>, requestedFileName?: string) {
+}>, requestedFileName?: string, sourceType = 'activity-export') {
   const fileName = requestedFileName || `consolidated-${++consolidatedSyncFixtureSequence}.csv`;
+  const sourceRole = sourceType === 'statement' ? 'statement-only' : 'activity';
   const createdAt = '2026-08-20T00:00:00.000Z';
   const importFileId = Number(insertRow('importFiles', {
     fileName,
     contentHash: `hash-${fileName}`,
     parserName: 'test-consolidated-parser',
-    sourceType: 'activity-export',
+    sourceType,
     institution: 'Example Institution',
     status: 'previewed',
     createdAt,
@@ -137,7 +138,7 @@ function stageConsolidatedSyncFacts(claims: Array<{
     fileName,
     contentHash: `hash-${fileName}`,
     parserName: 'test-consolidated-parser',
-    sourceType: 'activity-export',
+    sourceType,
     institution: 'Example Institution',
     coveredFrom: '2026-08-01',
     coveredTo: '2026-08-01',
@@ -167,7 +168,7 @@ function stageConsolidatedSyncFacts(claims: Array<{
         institution: 'Example Institution',
         account: claim.accountName,
         remoteAccountId: claim.remoteAccountId,
-        sourceRole: 'activity',
+        sourceRole,
         raw: {},
       }),
       createdAt,
@@ -176,11 +177,11 @@ function stageConsolidatedSyncFacts(claims: Array<{
       sourceFileId,
       sourceAccountId,
       importRowId,
-      stableSourceId: `${claim.remoteAccountId}:transaction`,
+      stableSourceId: `${fileName}:${claim.remoteAccountId}:transaction`,
       date: '2026-08-01',
       amountCents,
       description: `Example transaction ${index + 1}`,
-      sourceRole: 'activity',
+      sourceRole,
       rawJson: '{}',
       createdAt,
     });
@@ -3771,6 +3772,179 @@ test('catch-up confirmation rejects unvalidated mapping decision variants at the
       accountId: 1,
     }],
   } as never)).rejects.toThrow();
+  expect((await caller.dataSync.status({ runId: review.runId }))?.status).toBe('awaiting-confirmation');
+});
+
+test('catch-up creates one local account for the same remote identity across activity and statements', async () => {
+  const activity = stageConsolidatedSyncFacts([
+    { remoteAccountId: 'remote:shared-retirement', accountName: 'Retirement Activity' },
+  ], 'shared-retirement-activity.csv', 'activity-export');
+  const statement = stageConsolidatedSyncFacts([
+    { remoteAccountId: 'remote:shared-retirement', accountName: 'Retirement Quarterly Statement', balanceCents: 7250000 },
+  ], 'shared-retirement-statement.pdf', 'statement');
+  const artifacts = [activity, statement].map(staged => buildSyncArtifactReview({
+    importFileId: staged.importFileId,
+    fileName: staged.fileName,
+    status: 'ready',
+    accountRoutes: [{ remoteAccountId: 'remote:shared-retirement' }],
+  }));
+  const review = {
+    runId: 'sync-shared-remote-identity',
+    institutionId: 'bank-of-america' as const,
+    downloaded: 2,
+    readyToImport: 2,
+    alreadyImported: 0,
+    artifacts,
+  };
+  await saveAwaitingSyncReview(review);
+
+  const confirmed = await caller.dataSync.confirm({
+    runId: review.runId,
+    accountMappings: [{
+      sourceAccountId: activity.sourceAccountIds[0]!,
+      mode: 'create',
+      account: {
+        name: 'Shared Retirement Account',
+        institution: 'Example Institution',
+        type: 'investment',
+        currency: 'USD',
+      },
+    }],
+  });
+
+  expect(confirmed.status).toBe('complete');
+  const createdAccounts = getDb().prepare(`
+    SELECT id
+    FROM accounts
+    WHERE name = 'Shared Retirement Account'
+  `).all() as Array<{ id: number }>;
+  expect(createdAccounts).toHaveLength(1);
+  expect(getDb().prepare(`
+    SELECT DISTINCT accountId
+    FROM sourceAccounts
+    WHERE sourceAccountKey = 'remote:shared-retirement'
+  `).all()).toEqual([{ accountId: createdAccounts[0]!.id }]);
+  expect(getDb().prepare(`
+    SELECT COUNT(*) AS count
+    FROM sourceAccounts
+    WHERE sourceAccountKey = 'remote:shared-retirement'
+      AND accountId = ?
+  `).get(createdAccounts[0]!.id)).toEqual({ count: 2 });
+  expect(getDb().prepare('SELECT status FROM importFiles ORDER BY id').all()).toEqual([
+    { status: 'committed' },
+    { status: 'committed' },
+  ]);
+});
+
+test('catch-up rejects conflicting destinations for repeated remote identities', async () => {
+  const firstAccountId = Number(insertRow('accounts', {
+    name: 'First Existing Destination',
+    institution: 'Example Institution',
+    type: 'investment',
+    currentBalance: 0,
+    status: 'active',
+  }));
+  const secondAccountId = Number(insertRow('accounts', {
+    name: 'Second Existing Destination',
+    institution: 'Example Institution',
+    type: 'investment',
+    currentBalance: 0,
+    status: 'active',
+  }));
+  const first = stageConsolidatedSyncFacts([
+    { remoteAccountId: 'remote:conflicting-destination', accountName: 'First Download' },
+  ], 'conflicting-destination-activity.csv');
+  const second = stageConsolidatedSyncFacts([
+    { remoteAccountId: 'remote:conflicting-destination', accountName: 'Second Download' },
+  ], 'conflicting-destination-statement.pdf', 'statement');
+  const artifacts = [first, second].map(staged => buildSyncArtifactReview({
+    importFileId: staged.importFileId,
+    fileName: staged.fileName,
+    status: 'ready',
+    accountRoutes: [{ remoteAccountId: 'remote:conflicting-destination' }],
+  }));
+  const review = {
+    runId: 'sync-conflicting-remote-destination',
+    institutionId: 'bank-of-america' as const,
+    downloaded: 2,
+    readyToImport: 2,
+    alreadyImported: 0,
+    artifacts,
+  };
+  await saveAwaitingSyncReview(review);
+
+  await expect(caller.dataSync.confirm({
+    runId: review.runId,
+    accountMappings: [
+      { sourceAccountId: first.sourceAccountIds[0]!, mode: 'existing', accountId: firstAccountId },
+      { sourceAccountId: second.sourceAccountIds[0]!, mode: 'existing', accountId: secondAccountId },
+    ],
+  })).rejects.toThrow('Remote account remote:conflicting-destination has conflicting account choices.');
+  expect(getDb().prepare('SELECT accountId FROM sourceAccounts ORDER BY id').all()).toEqual([
+    { accountId: null },
+    { accountId: null },
+  ]);
+  expect(getDb().prepare('SELECT status FROM importFiles ORDER BY id').all()).toEqual([
+    { status: 'previewed' },
+    { status: 'previewed' },
+  ]);
+});
+
+test('failed catch-up confirmation rolls back earlier account creation, links, and artifacts', async () => {
+  const first = stageConsolidatedSyncFacts([
+    { remoteAccountId: 'remote:rollback-first', accountName: 'Rollback First Account' },
+  ], 'rollback-first-activity.csv');
+  const second = stageConsolidatedSyncFacts([
+    { remoteAccountId: 'remote:rollback-second', accountName: 'Rollback Second Account' },
+  ], 'rollback-second-activity.csv');
+  const artifacts = [first, second].map(staged => buildSyncArtifactReview({
+    importFileId: staged.importFileId,
+    fileName: staged.fileName,
+    status: 'ready',
+    accountRoutes: [{ remoteAccountId: staged === first ? 'remote:rollback-first' : 'remote:rollback-second' }],
+  }));
+  getDb().prepare(`
+    UPDATE importRows
+    SET normalizedJson = '{invalid json'
+    WHERE importFileId = ?
+  `).run(second.importFileId);
+  const review = {
+    runId: 'sync-confirmation-rollback',
+    institutionId: 'bank-of-america' as const,
+    downloaded: 2,
+    readyToImport: 2,
+    alreadyImported: 0,
+    artifacts,
+  };
+  await saveAwaitingSyncReview(review);
+
+  await expect(caller.dataSync.confirm({
+    runId: review.runId,
+    accountMappings: [
+      {
+        sourceAccountId: first.sourceAccountIds[0]!,
+        mode: 'create',
+        account: { name: 'Rollback First Account', institution: 'Example Institution', type: 'checking', currency: 'USD' },
+      },
+      {
+        sourceAccountId: second.sourceAccountIds[0]!,
+        mode: 'create',
+        account: { name: 'Rollback Second Account', institution: 'Example Institution', type: 'checking', currency: 'USD' },
+      },
+    ],
+  })).rejects.toThrow();
+
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM accounts').get()).toEqual({ count: 0 });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM accountAliases').get()).toEqual({ count: 0 });
+  expect(getDb().prepare('SELECT accountId FROM sourceAccounts ORDER BY id').all()).toEqual([
+    { accountId: null },
+    { accountId: null },
+  ]);
+  expect(getDb().prepare('SELECT status FROM importFiles ORDER BY id').all()).toEqual([
+    { status: 'previewed' },
+    { status: 'previewed' },
+  ]);
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
   expect((await caller.dataSync.status({ runId: review.runId }))?.status).toBe('awaiting-confirmation');
 });
 

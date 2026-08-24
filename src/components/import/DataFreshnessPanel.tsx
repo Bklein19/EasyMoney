@@ -65,6 +65,14 @@ type SyncMappingChoice =
 
 type SyncMappingChoices = Record<string, SyncMappingChoice>;
 
+function syncAccountIdentityKey(claim: SyncAccountClaim) {
+  return claim.remoteAccountId;
+}
+
+function syncClaimRequiresExplicitMapping(claim: SyncAccountClaim) {
+  return claim.requiresExplicitMapping ?? claim.resolution !== 'connector';
+}
+
 function syncAccountDraft(claim: SyncAccountClaim): SyncAccountDraft {
   const name = claim.accountName && claim.accountName !== 'Selected account' ? claim.accountName : '';
   const normalized = `${name} ${claim.institution || ''}`.toLowerCase();
@@ -87,9 +95,21 @@ function initialSyncMappingChoice(claim: SyncAccountClaim): SyncMappingChoice {
   return claim.resolvedAccountId &&
     claim.resolution !== 'archived-match' &&
     claim.resolution !== 'ambiguous' &&
-    !claim.requiresExplicitMapping
+    !syncClaimRequiresExplicitMapping(claim)
     ? { mode: 'auto', accountId: String(claim.resolvedAccountId), account: syncAccountDraft(claim) }
     : { mode: 'needs-selection', accountId: '', account: syncAccountDraft(claim) };
+}
+
+function initialSyncGroupMappingChoice(claims: SyncAccountClaim[]): SyncMappingChoice {
+  const representative = claims[0]!;
+  if (claims.some(syncClaimRequiresExplicitMapping)) {
+    return { mode: 'needs-selection', accountId: '', account: syncAccountDraft(representative) };
+  }
+  const resolvedIds = [...new Set(claims.map(claim => claim.resolvedAccountId))];
+  if (resolvedIds.length !== 1 || resolvedIds[0] === null) {
+    return { mode: 'needs-selection', accountId: '', account: syncAccountDraft(representative) };
+  }
+  return initialSyncMappingChoice(representative);
 }
 
 function syncMappingChoiceComplete(choice: SyncMappingChoice | undefined, claim: SyncAccountClaim) {
@@ -98,7 +118,7 @@ function syncMappingChoiceComplete(choice: SyncMappingChoice | undefined, claim:
     return Boolean(claim.resolvedAccountId) &&
       claim.resolution !== 'archived-match' &&
       claim.resolution !== 'ambiguous' &&
-      !claim.requiresExplicitMapping;
+      !syncClaimRequiresExplicitMapping(claim);
   }
   if (choice.mode === 'existing' || choice.mode === 'unarchive') return Boolean(choice.accountId);
   if (choice.mode === 'create') {
@@ -255,7 +275,7 @@ function SyncAccountMappingControl({
         {claim.resolvedAccountId &&
           claim.resolution !== 'archived-match' &&
           claim.resolution !== 'ambiguous' &&
-          !claim.requiresExplicitMapping && (
+          !syncClaimRequiresExplicitMapping(claim) && (
           <option value="__auto__">Use matched account{matchedAccount ? `: ${matchedAccount.name}` : ''}</option>
         )}
         {claim.resolution === 'archived-match' && claim.resolvedAccountId && (
@@ -327,7 +347,7 @@ function SyncArtifactDetails({
   initiallyOpen: boolean;
   accounts: AccountRow[];
   mappingChoices: SyncMappingChoices;
-  onMappingChange: (sourceAccountId: number, choice: SyncMappingChoice) => void;
+  onMappingChange: (identityKey: string, choice: SyncMappingChoice) => void;
 }) {
   const title = syncArtifactTitle(artifact);
   const subtitle = syncArtifactSubtitle(artifact);
@@ -368,7 +388,8 @@ function SyncArtifactDetails({
           <section>
             <h4>Account claims</h4>
             {artifact.accountClaims.map(claim => {
-              const choice = mappingChoices[String(claim.sourceAccountId)] || initialSyncMappingChoice(claim);
+              const identityKey = syncAccountIdentityKey(claim);
+              const choice = mappingChoices[identityKey] || initialSyncMappingChoice(claim);
               return (
                 <div className="sync-review__claim-row sync-review__claim-row--mapping" key={claim.sourceAccountId}>
                   <div>
@@ -381,7 +402,7 @@ function SyncArtifactDetails({
                       claim={claim}
                       accounts={accounts}
                       choice={choice}
-                      onChange={next => onMappingChange(claim.sourceAccountId, next)}
+                      onChange={next => onMappingChange(identityKey, next)}
                     />
                   ) : (
                     <span>{claim.resolvedAccountName || 'Previously imported'}</span>
@@ -478,19 +499,30 @@ function SyncReviewPanel({
       .flatMap(artifact => artifact.accountClaims),
     [review.artifacts],
   );
+  const readyClaimGroups = useMemo(() => {
+    const groups = new Map<string, SyncAccountClaim[]>();
+    for (const claim of readyClaims) {
+      const identityKey = syncAccountIdentityKey(claim);
+      const claims = groups.get(identityKey) ?? [];
+      claims.push(claim);
+      groups.set(identityKey, claims);
+    }
+    return [...groups.entries()];
+  }, [readyClaims]);
   const [mappingChoices, setMappingChoices] = useState<SyncMappingChoices>(() => Object.fromEntries(
-    readyClaims.map(claim => [String(claim.sourceAccountId), initialSyncMappingChoice(claim)]),
+    readyClaimGroups.map(([identityKey, claims]) => [identityKey, initialSyncGroupMappingChoice(claims)]),
   ));
   useEffect(() => {
     setMappingChoices(Object.fromEntries(
-      readyClaims.map(claim => [String(claim.sourceAccountId), initialSyncMappingChoice(claim)]),
+      readyClaimGroups.map(([identityKey, claims]) => [identityKey, initialSyncGroupMappingChoice(claims)]),
     ));
-  }, [review.runId, readyClaims]);
-  const mappingsComplete = readyClaims.every(claim =>
-    syncMappingChoiceComplete(mappingChoices[String(claim.sourceAccountId)], claim)
+  }, [review.runId, readyClaimGroups]);
+  const mappingsComplete = readyClaimGroups.every(([identityKey, claims]) =>
+    syncMappingChoiceComplete(mappingChoices[identityKey], claims[0]!)
   );
-  const buildAccountMappings = (): SyncAccountMappingDecision[] => readyClaims.map(claim => {
-    const choice = mappingChoices[String(claim.sourceAccountId)];
+  const buildAccountMappings = (): SyncAccountMappingDecision[] => readyClaimGroups.map(([identityKey, claims]) => {
+    const claim = claims[0]!;
+    const choice = mappingChoices[identityKey];
     if (!choice || !syncMappingChoiceComplete(choice, claim)) {
       throw new Error('Resolve every source account before confirming the catch-up.');
     }
@@ -559,9 +591,9 @@ function SyncReviewPanel({
                 accounts={accounts}
                 initiallyOpen={review.artifacts.length === 1 || artifact.warnings.length > 0 || index === 0}
                 mappingChoices={mappingChoices}
-                onMappingChange={(sourceAccountId, choice) => setMappingChoices(previous => ({
+                onMappingChange={(identityKey, choice) => setMappingChoices(previous => ({
                   ...previous,
-                  [String(sourceAccountId)]: choice,
+                  [identityKey]: choice,
                 }))}
                 key={`${artifact.importFileId}-${artifact.fileName}`}
               />

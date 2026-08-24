@@ -1308,7 +1308,7 @@ export async function previewImport({ fileName, text, fileBytes, customProfile =
 
 export { hashImportContent } from './importContentHash.ts';
 
-export function materializeImportTransactions({
+function materializeImportTransactionsUnsafe({
   accountId,
   importFileId: stagedImportFileId = null,
   importRowIds = null,
@@ -1671,7 +1671,11 @@ export function materializeImportTransactions({
   };
 }
 
-export function commitImport({
+export function materializeImportTransactions(options: MaterializeImportTransactionsOptions) {
+  return getDb().transaction(() => materializeImportTransactionsUnsafe(options))();
+}
+
+function commitImportUnsafe({
   accountId,
   importFileId = null,
   importRowIds = null,
@@ -1724,6 +1728,10 @@ export function commitImport({
   }
 
   return result;
+}
+
+export function commitImport(options: CommitImportOptions) {
+  return getDb().transaction(() => commitImportUnsafe(options))();
 }
 
 export function rebuildLedgerReadModel() {

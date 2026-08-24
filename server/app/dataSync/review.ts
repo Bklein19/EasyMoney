@@ -11,7 +11,6 @@ import {
 } from '../imports.ts';
 import { importParserDisplayName } from '../importParsers/index.ts';
 import type { SyncArtifactAccountRoute } from './connector.ts';
-import { importSyncArtifactBatch } from './artifactBatch.ts';
 import type {
   SyncAccountMappingDecision,
   SyncAccountClaim,
@@ -240,7 +239,7 @@ function reviewWarnings(claims: SyncAccountClaim[]): string[] {
       warnings.push(`${claim.accountName || 'A newly discovered source account'} needs an account mapping before import.`);
       continue;
     }
-    if (claim.requiresExplicitMapping) {
+    if (claimRequiresExplicitMapping(claim)) {
       warnings.push(`${claim.accountName || 'A source account'} needs an explicit account choice before import.`);
     }
     const account = destinationAccount(claim.resolvedAccountId, { allowArchived: true });
@@ -251,6 +250,10 @@ function reviewWarnings(claims: SyncAccountClaim[]): string[] {
     }
   }
   return warnings;
+}
+
+function claimRequiresExplicitMapping(claim: SyncAccountClaim): boolean {
+  return claim.requiresExplicitMapping ?? claim.resolution !== 'connector';
 }
 
 export function buildSyncArtifactReview(options: {
@@ -371,6 +374,9 @@ function explicitMappingForClaim(
   mapping: SyncAccountMappingDecision,
 ): SyncAccountMappingDecision {
   if (mapping.mode === 'auto') {
+    if (claimRequiresExplicitMapping(claim)) {
+      throw new Error(`Source account ${claim.sourceAccountId} requires an explicit account choice.`);
+    }
     if (!claim.resolvedAccountId || claim.resolution === 'ambiguous' || claim.resolution === 'archived-match') {
       throw new Error(`Source account ${claim.sourceAccountId} requires an explicit account choice.`);
     }
@@ -388,7 +394,7 @@ function explicitMappingForClaim(
     )) {
       throw new Error(`Account name is required for source account ${claim.sourceAccountId}.`);
     }
-    return mapping;
+    return { ...mapping, sourceAccountId: claim.sourceAccountId };
   }
   if (mapping.mode === 'unarchive') {
     const accountId = Number(mapping.accountId);
@@ -396,7 +402,7 @@ function explicitMappingForClaim(
       throw new Error(`Account id is required for source account ${claim.sourceAccountId}.`);
     }
     destinationAccount(accountId, { allowArchived: true });
-    return { ...mapping, accountId };
+    return { ...mapping, sourceAccountId: claim.sourceAccountId, accountId };
   }
   const accountId = mapping.accountId === null ? null : Number(mapping.accountId);
   if (accountId === null || !Number.isFinite(accountId)) {
@@ -410,10 +416,39 @@ function explicitMappingForClaim(
   };
 }
 
+interface PlannedSyncAccountMapping {
+  remoteAccountId: string;
+  mapping: SyncAccountMappingDecision;
+}
+
+function mappingDecisionSignature(mapping: SyncAccountMappingDecision): string {
+  if (mapping.mode === 'create') {
+    return JSON.stringify({
+      mode: mapping.mode,
+      account: {
+        name: mapping.account.name?.trim() || '',
+        institution: mapping.account.institution?.trim() || '',
+        type: mapping.account.type?.trim() || '',
+        currency: mapping.account.currency?.trim() || '',
+        accountHolder: mapping.account.accountHolder?.trim() || '',
+      },
+    });
+  }
+  if (mapping.mode === 'auto') return JSON.stringify({ mode: mapping.mode });
+  return JSON.stringify({ mode: mapping.mode, accountId: mapping.accountId });
+}
+
+function mappingForSourceAccount(
+  mapping: SyncAccountMappingDecision,
+  sourceAccountId: number,
+): SyncAccountMappingDecision {
+  return { ...mapping, sourceAccountId };
+}
+
 function validatedSyncAccountMappings(
   review: SyncRunReview,
   requested?: SyncAccountMappingDecision[] | null,
-): Map<number, SyncAccountMappingDecision[]> {
+): Map<number, PlannedSyncAccountMapping[]> {
   const readyArtifacts = review.artifacts.filter(artifact => artifact.status === 'ready');
   const claims = readyArtifacts.flatMap(artifact => artifact.accountClaims);
   const claimById = new Map(claims.map(claim => [claim.sourceAccountId, claim]));
@@ -422,42 +457,90 @@ function validatedSyncAccountMappings(
   }
 
   for (const artifact of readyArtifacts) {
-    const storedIds = storedAccountClaims(artifact.importFileId).map(claim => claim.sourceAccountId).sort((a, b) => a - b);
-    const reviewIds = artifact.accountClaims.map(claim => claim.sourceAccountId).sort((a, b) => a - b);
-    if (storedIds.join(',') !== reviewIds.join(',')) {
+    const storedIdentities = storedAccountClaims(artifact.importFileId)
+      .map(claim => `${claim.sourceAccountId}:${claim.remoteAccountId}`)
+      .sort();
+    const reviewIdentities = artifact.accountClaims
+      .map(claim => `${claim.sourceAccountId}:${claim.remoteAccountId}`)
+      .sort();
+    if (storedIdentities.join('\n') !== reviewIdentities.join('\n')) {
       throw new Error(`${artifact.fileName} account claims changed after review.`);
     }
   }
 
-  const requestedById = new Map<number, SyncAccountMappingDecision>();
+  const claimsByRemoteId = new Map<string, SyncAccountClaim[]>();
+  for (const claim of claims) {
+    const groupedClaims = claimsByRemoteId.get(claim.remoteAccountId) ?? [];
+    groupedClaims.push(claim);
+    claimsByRemoteId.set(claim.remoteAccountId, groupedClaims);
+  }
+
+  const requestedByRemoteId = new Map<string, SyncAccountMappingDecision[]>();
+  const requestedSourceIds = new Set<number>();
   for (const mapping of requested ?? []) {
     const sourceAccountId = Number(mapping?.sourceAccountId);
     if (!Number.isFinite(sourceAccountId) || !claimById.has(sourceAccountId)) {
       throw new Error('Sync confirmation contains an unknown source account claim.');
     }
-    if (requestedById.has(sourceAccountId)) {
+    if (requestedSourceIds.has(sourceAccountId)) {
       throw new Error(`Sync confirmation contains duplicate mapping for source account ${sourceAccountId}.`);
     }
-    requestedById.set(sourceAccountId, mapping);
-  }
-  if (requested && requestedById.size !== claimById.size) {
-    throw new Error('Resolve every source account before confirming the catch-up.');
+    requestedSourceIds.add(sourceAccountId);
+    const claim = claimById.get(sourceAccountId)!;
+    const groupMappings = requestedByRemoteId.get(claim.remoteAccountId) ?? [];
+    groupMappings.push(mapping);
+    requestedByRemoteId.set(claim.remoteAccountId, groupMappings);
   }
 
-  const validatedBySourceId = new Map<number, SyncAccountMappingDecision>();
-  for (const claim of claims) {
-    const requestedMapping = requestedById.get(claim.sourceAccountId);
-    const defaultMapping: SyncAccountMappingDecision | null = claim.resolvedAccountId &&
-      claim.resolvedAccountStatus !== 'archived' &&
-      claim.resolution !== 'ambiguous' &&
-      !claim.requiresExplicitMapping
-      ? { sourceAccountId: claim.sourceAccountId, mode: 'existing', accountId: claim.resolvedAccountId }
-      : null;
-    const mapping = requestedMapping ?? defaultMapping;
-    if (!mapping) {
+  const validatedBySourceId = new Map<number, PlannedSyncAccountMapping>();
+  for (const [remoteAccountId, groupedClaims] of claimsByRemoteId) {
+    const requestedMappings = requestedByRemoteId.get(remoteAccountId) ?? [];
+    if (groupedClaims.some(claimRequiresExplicitMapping) &&
+      requestedMappings.some(mapping => mapping.mode === 'auto')) {
+      throw new Error(`Remote account ${remoteAccountId} requires an explicit existing or create choice.`);
+    }
+
+    let canonical: SyncAccountMappingDecision;
+    if (requestedMappings.length > 0) {
+      const validated = requestedMappings.map(mapping => {
+        const claim = claimById.get(mapping.sourceAccountId)!;
+        return explicitMappingForClaim(claim, mapping);
+      });
+      const signatures = new Set(validated.map(mappingDecisionSignature));
+      if (signatures.size !== 1) {
+        throw new Error(`Remote account ${remoteAccountId} has conflicting account choices.`);
+      }
+      canonical = validated[0]!;
+    } else {
+      const candidates = groupedClaims.map(claim => claim.resolvedAccountId &&
+        claim.resolvedAccountStatus !== 'archived' &&
+        claim.resolution !== 'ambiguous' &&
+        !claimRequiresExplicitMapping(claim)
+        ? claim.resolvedAccountId
+        : null);
+      if (candidates.some(accountId => accountId === null)) {
+        throw new Error('Resolve every source account before confirming the catch-up.');
+      }
+      const accountIds = [...new Set(candidates as number[])];
+      if (accountIds.length !== 1) {
+        throw new Error(`Remote account ${remoteAccountId} maps to multiple local accounts.`);
+      }
+      canonical = {
+        sourceAccountId: groupedClaims[0]!.sourceAccountId,
+        mode: 'existing',
+        accountId: accountIds[0]!,
+      };
+    }
+
+    if (!canonical) {
       throw new Error('Resolve every source account before confirming the catch-up.');
     }
-    validatedBySourceId.set(claim.sourceAccountId, explicitMappingForClaim(claim, mapping));
+    for (const claim of groupedClaims) {
+      validatedBySourceId.set(claim.sourceAccountId, {
+        remoteAccountId,
+        mapping: mappingForSourceAccount(canonical, claim.sourceAccountId),
+      });
+    }
   }
 
   return new Map(readyArtifacts.map(artifact => [
@@ -498,22 +581,83 @@ export async function commitSyncReview(
   report: SyncReporter,
   accountMappings?: SyncAccountMappingDecision[] | null,
 ): Promise<SyncRunResult> {
-  const mappingsByImportFile = validatedSyncAccountMappings(review, accountMappings);
-  const imported = await importSyncArtifactBatch(
-    review.artifacts.map(artifact => ({
-      fileName: artifact.fileName,
-      accountId: artifact.accountId,
-      accountIds: [...new Set(artifact.accountClaims
-        .map(claim => claim.resolvedAccountId)
-        .filter((accountId): accountId is number => accountId !== null))],
-      import: () => Promise.resolve(commitArtifact(
-        artifact,
-        mappingsByImportFile.get(artifact.importFileId) ?? [],
-      )),
-    })),
-    report,
-    rebuildLedgerReadModel,
-  );
+  const pendingReports: Array<Parameters<SyncReporter>[0]> = [];
+  const imported = getDb().transaction(() => {
+    const mappingsByImportFile = validatedSyncAccountMappings(review, accountMappings);
+    const accountIdByRemoteId = new Map<string, number>();
+    let recordedTransactionFacts = 0;
+    let recordedBalanceFacts = 0;
+    let skippedTransactionDuplicates = 0;
+    let skippedArtifacts = 0;
+    let committedArtifacts = 0;
+
+    for (const artifact of review.artifacts) {
+      pendingReports.push({ type: 'artifact', message: `Importing ${artifact.fileName}` });
+      const plannedMappings = mappingsByImportFile.get(artifact.importFileId) ?? [];
+      const mappings = plannedMappings.map(({ remoteAccountId, mapping }) => {
+        const existingAccountId = accountIdByRemoteId.get(remoteAccountId);
+        return existingAccountId === undefined
+          ? mapping
+          : {
+              sourceAccountId: mapping.sourceAccountId,
+              mode: 'existing' as const,
+              accountId: existingAccountId,
+            };
+      });
+      const result = commitArtifact(artifact, mappings);
+      if ('skippedArtifact' in result && result.skippedArtifact) {
+        skippedArtifacts += 1;
+        pendingReports.push({
+          type: 'import',
+          message: `Skipped ${artifact.fileName}; artifact was already imported`,
+        });
+        continue;
+      }
+
+      const destinationIds = new Set<number>();
+      for (const { remoteAccountId, mapping } of plannedMappings) {
+        const linked = getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?')
+          .get(mapping.sourceAccountId) as { accountId: number | null } | undefined;
+        if (!linked?.accountId) {
+          throw new Error(`Source account ${mapping.sourceAccountId} was not linked during confirmation.`);
+        }
+        const previousAccountId = accountIdByRemoteId.get(remoteAccountId);
+        if (previousAccountId !== undefined && previousAccountId !== linked.accountId) {
+          throw new Error(`Remote account ${remoteAccountId} was linked to multiple local accounts.`);
+        }
+        accountIdByRemoteId.set(remoteAccountId, linked.accountId);
+        destinationIds.add(linked.accountId);
+      }
+
+      committedArtifacts += 1;
+      recordedTransactionFacts += result.importedCount;
+      recordedBalanceFacts += result.importedBalanceCount;
+      skippedTransactionDuplicates += result.skippedDuplicateCount;
+      pendingReports.push({
+        type: 'import',
+        message: `Imported ${artifact.fileName}`,
+        data: {
+          ...(destinationIds.size === 1 ? { accountId: [...destinationIds][0] } : {}),
+          ...(destinationIds.size > 1 ? { accountIds: [...destinationIds] } : {}),
+          transactions: result.importedCount,
+          balances: result.importedBalanceCount,
+          duplicates: result.skippedDuplicateCount,
+        },
+      });
+    }
+
+    if (committedArtifacts > 0) {
+      pendingReports.push({ type: 'phase', message: 'Rebuilding ledger from imported source facts' });
+      rebuildLedgerReadModel();
+    }
+    return {
+      recordedTransactionFacts,
+      recordedBalanceFacts,
+      skippedTransactionDuplicates,
+      skippedArtifacts,
+    };
+  })();
+  for (const event of pendingReports) report(event);
   return {
     runId: review.runId,
     institutionId: review.institutionId,
