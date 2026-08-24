@@ -1,7 +1,13 @@
 import { expect, test } from 'bun:test';
 
-import type { SyncAccountCoverage, SyncConnectorContext } from '../connector.ts';
+import type {
+  SyncAccountCoverage,
+  SyncConnectorContext,
+  SyncConnectorRunContext,
+} from '../connector.ts';
+import type { SyncEvent } from '../protocol.ts';
 import {
+  createVanguardConnector,
   inferVanguardAccountKind,
   inferVanguardAccountLast4,
   matchesVanguardAccount,
@@ -12,7 +18,11 @@ import {
   vanguardConnector,
   vanguardProfileIdFromArtifactFileNames,
 } from './vanguardConnector.ts';
-import type { VanguardDownloadedArtifact } from './vanguard.ts';
+import type {
+  VanguardDownloadedArtifact,
+  VanguardProgressReporter,
+  VanguardSyncConfig,
+} from './vanguard.ts';
 
 function account(
   overrides: Partial<SyncAccountCoverage> & Pick<SyncAccountCoverage, 'id' | 'name'>,
@@ -36,6 +46,20 @@ function account(
 
 function context(accounts: SyncAccountCoverage[]): SyncConnectorContext {
   return { today: '2026-08-16', accounts };
+}
+
+function runContext(
+  accounts: SyncAccountCoverage[],
+  report: SyncConnectorRunContext['report'] = () => {},
+  connectionId?: string,
+): SyncConnectorRunContext {
+  return {
+    ...context(accounts),
+    ...(connectionId ? { connectionId } : {}),
+    goal: { kind: 'current', overlapDays: 7 },
+    outputDir: '/tmp/vanguard-connector-test',
+    report,
+  };
 }
 
 const twoProfileAccounts = [
@@ -244,4 +268,53 @@ test('Vanguard downloaded artifacts expose only generic routing data', () => {
   };
 
   expect(routeVanguardArtifacts([artifact])).toEqual([{ fileName: 'activity.csv', accountId: 42 }]);
+});
+
+test('Vanguard connector selects one profile, translates progress, and routes artifacts', async () => {
+  const configs: VanguardSyncConfig[] = [];
+  const events: Array<Omit<SyncEvent, 'runId' | 'timestamp'>> = [];
+  const connector = createVanguardConnector(async (
+    config: VanguardSyncConfig,
+    progress: VanguardProgressReporter = () => {},
+  ) => {
+    configs.push(config);
+    progress({
+      profileId: 'current',
+      phase: 'authentication',
+      state: 'waiting',
+      timestamp: '2026-08-24T00:00:00.000Z',
+      message: 'Waiting for Vanguard authentication for Example One',
+      elapsedMs: 125,
+      data: { cachedAuthentication: false },
+    });
+    return [{
+      fileName: 'activity.csv',
+      accountId: 10,
+      institution: 'vanguard',
+      profileId: 'current',
+      accountKind: 'brokerage',
+      accountLast4: '1111',
+      artifactType: 'activity',
+    }];
+  });
+
+  await expect(connector.run(runContext(
+    twoProfileAccounts,
+    event => events.push(event),
+    'current',
+  ))).resolves.toEqual([{ fileName: 'activity.csv', accountId: 10 }]);
+
+  expect(configs).toHaveLength(1);
+  expect(configs[0]?.profiles.map(profile => profile.id)).toEqual(['current']);
+  expect(events).toContainEqual({
+    type: 'action',
+    message: 'Waiting for Vanguard authentication for Example One',
+    data: {
+      phase: 'authentication',
+      state: 'waiting',
+      profileId: 'current',
+      elapsedMs: 125,
+      cachedAuthentication: false,
+    },
+  });
 });

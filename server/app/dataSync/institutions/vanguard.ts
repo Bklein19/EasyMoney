@@ -1,24 +1,29 @@
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, extname, resolve } from 'node:path';
 
-import type { APIRequestContext, Locator, Page } from 'playwright';
+import type { APIRequestContext, Page } from 'playwright';
 
 import { vanguardActivityCsvParser } from '../../importParsers/vanguardActivityCsv.ts';
 import { parseCsvRows } from '../../importParsers/csvRows.ts';
 import { vanguardStatementParser } from '../../importParsers/vanguardStatement.ts';
-import { runInstitutionBrowserProgram } from '../browserSession.ts';
+import {
+  playwrightHasSavedAuthentication,
+  runInstitutionBrowserProgram,
+} from '../browserSession.ts';
 
 const LOGIN_URL = 'https://investor.vanguard.com/my-account/log-on';
-const TRANSACTION_HISTORY_URL = 'https://www.vanguard.com/en/investor/portfolio/transactions/history';
 const STATEMENTS_URL = 'https://statements.web.vanguard.com/';
+const ACCOUNTS_API_URL = 'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts';
+const ACTIVITY_API_URL =
+  'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts-transactions';
+const ACTIVITY_REFERER_URL =
+  'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofx-welcome';
+const STATEMENTS_API_URL =
+  'https://personal1.vanguard.com/usa/api/lah-statements-consumer/statements/consumer';
+const STATEMENT_PDF_API_URL =
+  'https://personal1.vanguard.com/usa/api/lah-statements-consumer/statements/pdf';
 const AUTHENTICATED_PATH_PATTERN = '^/en/investor/portfolio(?:/|$)';
 const AUTHENTICATION_REQUIRED = 'VANGUARD_AUTHENTICATION_REQUIRED';
-
-const ALLOWED_ARTIFACT_HOSTS = new Set([
-  'personal1.vanguard.com',
-  'statements.web.vanguard.com',
-  'transactions.web.vanguard.com',
-]);
 
 export type VanguardAccountKind = 'brokerage' | 'roth-ira' | 'traditional-ira';
 export type VanguardArtifactType = 'activity' | 'statement';
@@ -60,7 +65,18 @@ export interface VanguardDownloadedArtifact extends VanguardArtifactIdentity {
 export interface VanguardRemoteAccount {
   accountKind: VanguardAccountKind | null;
   accountLast4: string;
-  controlIndex: number;
+  apiAccount: VanguardAccountApiRecord;
+}
+
+export interface VanguardAccountApiRecord {
+  accountId: string;
+  accountName: string;
+  balance: string;
+  fundAccountNumber: string;
+  fundName: string;
+  isManaged: boolean;
+  nickname: string;
+  productType: string;
 }
 
 export interface VanguardMappedAccount {
@@ -75,27 +91,49 @@ export interface VanguardApiRequest {
   headers?: Record<string, string>;
 }
 
-export interface VanguardFormMetadata {
-  action: string;
-  method: string;
-  fields: Array<[string, string]>;
+export type VanguardProgressPhase =
+  | 'sync'
+  | 'authentication'
+  | 'discovery'
+  | 'activity-request'
+  | 'activity-download'
+  | 'statement-discovery'
+  | 'statement-download';
+
+export interface VanguardProgressEvent {
+  profileId?: string;
+  phase: VanguardProgressPhase;
+  state: 'start' | 'waiting' | 'complete' | 'error';
+  timestamp: string;
+  message: string;
+  elapsedMs?: number;
+  data?: Record<string, number | string | boolean>;
 }
 
+export type VanguardProgressReporter = (event: VanguardProgressEvent) => void;
+
 type ArtifactFormat = 'csv' | 'pdf';
-type VanguardProgressReporter = (message: string) => void;
+type VanguardProgress = ReturnType<typeof createVanguardProgress>;
 
 interface ArtifactJob extends VanguardDownloadedArtifact {
   format: ArtifactFormat;
   targetPath: string;
   startDate?: string;
   statementDate?: string;
+  validationAccountLast4s?: string[];
 }
 
-interface VanguardRemoteStatement {
-  accountKind: VanguardAccountKind | null;
-  accountLast4: string | null;
+export interface VanguardRemoteStatement {
+  accountKind: VanguardAccountKind;
+  accountLast4: string;
+  validationAccountLast4s: string[];
   statementDate: string;
   request: VanguardApiRequest;
+}
+
+export interface VanguardStatementAccountRoute {
+  account: VanguardSyncAccount;
+  identityLast4s: string[];
 }
 
 interface VanguardProfileProgramResult {
@@ -105,6 +143,37 @@ interface VanguardProfileProgramResult {
   accountCount?: number;
   action?: string;
   message?: string;
+}
+
+export function createVanguardProgress(
+  onProgress: VanguardProgressReporter,
+  profileId?: string,
+  clock: () => number = () => performance.now(),
+  timestamp: () => string = () => new Date().toISOString(),
+) {
+  const started = new Map<string, number>();
+  return (
+    key: string,
+    phase: VanguardProgressPhase,
+    state: VanguardProgressEvent['state'],
+    message: string,
+    data?: Record<string, number | string | boolean>,
+  ): void => {
+    const now = clock();
+    if (state === 'start') started.set(key, now);
+    const began = started.get(key);
+    onProgress({
+      ...(profileId ? { profileId } : {}),
+      phase,
+      state,
+      timestamp: timestamp(),
+      message,
+      ...((state === 'complete' || state === 'error') && began !== undefined
+        ? { elapsedMs: Math.round(now - began) }
+        : {}),
+      ...(data ? { data } : {}),
+    });
+  };
 }
 
 function isVanguardHost(hostname: string): boolean {
@@ -206,18 +275,56 @@ export function vanguardAccountLast4FromText(text: string): string | null {
   return match?.[1] ?? null;
 }
 
-export function parseVanguardRemoteAccount(text: string, controlIndex: number): VanguardRemoteAccount {
-  const compact = text.replace(/\s+/g, ' ').trim();
-  const fallback = compact.match(/(\d{4})(?!.*\d)/);
-  const accountLast4 = vanguardAccountLast4FromText(compact) ?? fallback?.[1];
-  if (!accountLast4) {
-    throw new Error('A Vanguard remote account did not expose a usable account identity');
+function apiString(
+  record: Record<string, unknown>,
+  field: string,
+): string {
+  const value = record[field];
+  return typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
+}
+
+export function parseVanguardAccountApiResponse(value: unknown): VanguardRemoteAccount[] {
+  if (!value || typeof value !== 'object' || !('accounts' in value) ||
+      !Array.isArray(value.accounts)) {
+    throw new Error('Vanguard account API returned an invalid account collection');
   }
-  return {
-    accountKind: vanguardAccountKindFromText(compact),
-    accountLast4,
-    controlIndex,
-  };
+  const accounts = value.accounts.map((record, index) => {
+    if (!record || typeof record !== 'object') {
+      throw new Error(`Vanguard account API record ${index + 1} is invalid`);
+    }
+    const apiRecord = record as Record<string, unknown>;
+    const apiAccount: VanguardAccountApiRecord = {
+      accountId: apiString(apiRecord, 'accountId'),
+      accountName: apiString(apiRecord, 'accountName'),
+      balance: apiString(apiRecord, 'balance'),
+      fundAccountNumber: apiString(apiRecord, 'fundAccountNumber'),
+      fundName: apiString(apiRecord, 'fundName'),
+      isManaged: typeof apiRecord.isManaged === 'boolean' ? apiRecord.isManaged : false,
+      nickname: apiString(apiRecord, 'nickname'),
+      productType: apiString(apiRecord, 'productType'),
+    };
+    const accountNumber = apiAccount.fundAccountNumber.replace(/\D/g, '');
+    if (accountNumber.length < 4 || !apiAccount.accountId || !apiAccount.accountName) {
+      throw new Error(`Vanguard account API record ${index + 1} has no usable identity`);
+    }
+    return {
+      accountKind: vanguardAccountKindFromText([
+        apiAccount.accountName,
+        apiAccount.nickname,
+        apiAccount.productType,
+      ].join(' ')),
+      accountLast4: accountNumber.slice(-4),
+      apiAccount,
+    };
+  });
+  const last4s = new Set<string>();
+  for (const account of accounts) {
+    if (last4s.has(account.accountLast4)) {
+      throw new Error('Vanguard account API returned ambiguous account identities');
+    }
+    last4s.add(account.accountLast4);
+  }
+  return accounts;
 }
 
 export function mapVanguardRemoteAccounts(
@@ -241,21 +348,58 @@ export function mapVanguardRemoteAccounts(
     }
     plannedIdentities.add(planned.accountLast4);
   }
-  const mapped = remoteAccounts.map(remote => {
+  const plannedForRemote = new Map<VanguardRemoteAccount, VanguardSyncAccount>();
+  const usedPlannedAccounts = new Set<VanguardSyncAccount>();
+  const unresolvedRemoteAccounts: VanguardRemoteAccount[] = [];
+  for (const remote of remoteAccounts) {
     const matches = plannedAccounts.filter(planned => planned.accountLast4 === remote.accountLast4);
-    if (matches.length !== 1) {
-      throw new Error('A Vanguard remote account has no unambiguous local account route');
+    if (matches.length === 0) {
+      unresolvedRemoteAccounts.push(remote);
+      continue;
     }
+    if (matches.length !== 1) throw new Error('Vanguard local account routing is ambiguous');
     const planned = matches[0]!;
     if (remote.accountKind && remote.accountKind !== planned.accountKind) {
       throw new Error('A Vanguard remote account conflicts with its planned local account kind');
     }
-    return { remote, planned };
-  });
-  if (mapped.length !== plannedAccounts.length) {
-    throw new Error('A planned Vanguard account was not present in the authenticated profile');
+    plannedForRemote.set(remote, planned);
+    usedPlannedAccounts.add(planned);
   }
-  return mapped;
+
+  for (const remote of unresolvedRemoteAccounts) {
+    if (!remote.accountKind) {
+      throw new Error('A Vanguard remote account has no unambiguous local account route');
+    }
+    const remoteKindCount = unresolvedRemoteAccounts.filter(candidate =>
+      candidate.accountKind === remote.accountKind,
+    ).length;
+    const candidates = plannedAccounts.filter(planned =>
+      !usedPlannedAccounts.has(planned) && planned.accountKind === remote.accountKind,
+    );
+    if (remoteKindCount !== 1 || candidates.length !== 1) {
+      throw new Error('A Vanguard remote account has no unambiguous local account route');
+    }
+    const planned = candidates[0]!;
+    plannedForRemote.set(remote, planned);
+    usedPlannedAccounts.add(planned);
+  }
+
+  return remoteAccounts.map(remote => ({ remote, planned: plannedForRemote.get(remote)! }));
+}
+
+export function vanguardStatementAccountRoutes(
+  plannedAccounts: readonly VanguardSyncAccount[],
+  mappedAccounts: readonly VanguardMappedAccount[],
+): VanguardStatementAccountRoute[] {
+  return plannedAccounts.map(account => ({
+    account,
+    identityLast4s: [...new Set([
+      account.accountLast4,
+      ...mappedAccounts
+        .filter(mapped => mapped.planned.accountId === account.accountId)
+        .map(mapped => mapped.remote.accountLast4),
+    ])],
+  }));
 }
 
 export function vanguardCsvAccountLast4s(text: string): string[] {
@@ -267,13 +411,17 @@ export function vanguardCsvAccountLast4s(text: string): string[] {
   return [...new Set(accountNumbers)];
 }
 
-export function assertVanguardArtifactAccount(expectedLast4: string, actualLast4s: string[]): void {
-  if (actualLast4s.length !== 1 || actualLast4s[0] !== expectedLast4) {
+export function assertVanguardArtifactAccount(
+  expectedLast4: string | readonly string[],
+  actualLast4s: string[],
+): void {
+  const expectedLast4s = typeof expectedLast4 === 'string' ? [expectedLast4] : expectedLast4;
+  if (actualLast4s.length !== 1 || !expectedLast4s.includes(actualLast4s[0]!)) {
     throw new Error('Vanguard artifact does not match its planned EasyMoney account');
   }
 }
 
-async function validateCsv(path: string, expectedLast4: string): Promise<void> {
+async function validateCsv(path: string, expectedLast4: string | readonly string[]): Promise<void> {
   const data = await readFile(path);
   if (data.includes(0)) throw new Error(`${basename(path)} contains binary NUL bytes`);
   const text = new TextDecoder().decode(data);
@@ -291,7 +439,7 @@ async function validateCsv(path: string, expectedLast4: string): Promise<void> {
   assertVanguardArtifactAccount(expectedLast4, vanguardCsvAccountLast4s(text));
 }
 
-async function validatePdf(path: string, expectedLast4: string): Promise<void> {
+async function validatePdf(path: string, expectedLast4: string | readonly string[]): Promise<void> {
   const data = await readFile(path);
   if (new TextDecoder().decode(data.subarray(0, 5)) !== '%PDF-') {
     throw new Error(`${basename(path)} does not have PDF magic`);
@@ -322,7 +470,7 @@ async function validatePdf(path: string, expectedLast4: string): Promise<void> {
 export async function validateVanguardArtifact(
   path: string,
   format: ArtifactFormat,
-  expectedLast4: string,
+  expectedLast4: string | readonly string[],
 ): Promise<void> {
   if (extname(path).toLowerCase() !== `.${format}`) {
     throw new Error(`${basename(path)} has the wrong extension`);
@@ -407,44 +555,178 @@ function jobsForProfile(config: VanguardSyncConfig, profile: VanguardSyncProfile
   return jobs;
 }
 
-function validatedArtifactUrl(value: string, baseUrl: string): string {
-  const url = new URL(value, baseUrl);
-  if (url.protocol !== 'https:' || !ALLOWED_ARTIFACT_HOSTS.has(url.hostname)) {
-    throw new Error('Vanguard artifact API destination is outside the allowed institution hosts');
-  }
-  if (url.username || url.password || url.hash || isVanguardLoginUrl(url.toString())) {
-    throw new Error('Vanguard artifact API destination is invalid');
-  }
-  if (!/(?:download|export|statement|document|transaction|open-fin-exchange|ofx)/i.test(url.pathname)) {
-    throw new Error('Vanguard artifact API destination is not a verified artifact path');
-  }
-  return url.toString();
+function vanguardActivityDate(value: string): string {
+  validateIsoDate(value);
+  const [year, month, day] = value.split('-');
+  return `${month}/${day}/${year}`;
 }
 
-export function vanguardApiRequestFromForm(
-  metadata: VanguardFormMetadata,
-  baseUrl: string,
+export function vanguardActivityApiRequest(
+  account: VanguardAccountApiRecord,
+  from: string,
+  through: string,
+  userAgent: string,
+  xsrfToken: string,
 ): VanguardApiRequest {
-  const method = metadata.method.trim().toUpperCase();
-  if (method !== 'GET' && method !== 'POST') {
-    throw new Error('Vanguard artifact form uses an unsupported HTTP method');
+  validateIsoDate(from);
+  validateIsoDate(through);
+  if (from > through) throw new Error('Vanguard activity start date cannot be after its end date');
+  if (!account.accountId || !account.accountName || !account.fundAccountNumber) {
+    throw new Error('Vanguard activity account is missing its API identity');
   }
-  const url = new URL(validatedArtifactUrl(metadata.action || baseUrl, baseUrl));
-  const fields = new URLSearchParams(metadata.fields);
-  if (method === 'GET') {
-    for (const [name, value] of fields) url.searchParams.append(name, value);
-    return { url: url.toString(), method };
-  }
+  if (!userAgent.trim()) throw new Error('Vanguard activity request requires a browser user agent');
+  if (!xsrfToken.trim()) throw new Error('Vanguard activity request requires an XSRF token');
+
   return {
-    url: url.toString(),
-    method,
-    body: fields.toString(),
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    url: ACTIVITY_API_URL,
+    method: 'POST',
+    body: JSON.stringify({
+      downloadOptionSelect: '2',
+      downloadDateSelect: '5',
+      fromDate: vanguardActivityDate(from),
+      toDate: vanguardActivityDate(through),
+      selectedAccounts: [account],
+      userAgent,
+      isSingle: false,
+    }),
+    headers: {
+      accept: 'application/json, text/plain, */*',
+      'content-type': 'application/json',
+      referer: ACTIVITY_REFERER_URL,
+      'x-xsrf-token': xsrfToken,
+    },
   };
 }
 
-function vanguardGetRequest(value: string, baseUrl: string): VanguardApiRequest {
-  return { url: validatedArtifactUrl(value, baseUrl), method: 'GET' };
+function vanguardEnvelopeHeader(
+  headers: Record<string, unknown>,
+  expectedName: string,
+): string {
+  const entry = Object.entries(headers).find(([name]) => name.toLowerCase() === expectedName);
+  if (!entry) return '';
+  const value = entry[1];
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.filter(item => typeof item === 'string').join(', ');
+  return '';
+}
+
+export function vanguardActivityCsvFromEnvelope(value: unknown): string {
+  if (!value || typeof value !== 'object') {
+    throw new Error('Vanguard activity API returned an invalid download envelope');
+  }
+  const envelope = value as Record<string, unknown>;
+  if (typeof envelope.body !== 'string' || !envelope.headers ||
+      typeof envelope.headers !== 'object' || Array.isArray(envelope.headers)) {
+    throw new Error('Vanguard activity API returned an invalid download envelope');
+  }
+  const contentType = vanguardEnvelopeHeader(
+    envelope.headers as Record<string, unknown>,
+    'content-type',
+  ).toLowerCase();
+  if (!contentType.includes('csv') && !contentType.includes('text/plain') &&
+      !contentType.includes('octet-stream')) {
+    throw new Error('Vanguard activity download has an unexpected content type');
+  }
+  if (!vanguardActivityCsvParser.matches({
+    fileName: 'vanguard-activity.csv',
+    headers: [],
+    sample: envelope.body,
+  })) {
+    throw new Error('Vanguard activity download does not match the expected CSV format');
+  }
+  return envelope.body;
+}
+
+export function vanguardStatementListRequest(year: string): VanguardApiRequest {
+  if (!/^\d{4}$/.test(year)) throw new Error('Vanguard statement year must use YYYY');
+  const url = new URL(STATEMENTS_API_URL);
+  url.searchParams.set('year', year);
+  return {
+    url: url.toString(),
+    method: 'GET',
+    headers: {
+      accept: 'application/json, text/plain, */*',
+      referer: STATEMENTS_URL,
+      urlflag: 'getStatements',
+    },
+  };
+}
+
+export function vanguardStatementPdfRequest(statementId: string): VanguardApiRequest {
+  const normalizedId = statementId.trim();
+  if (!normalizedId || /[\r\n]/.test(normalizedId)) {
+    throw new Error('Vanguard statement is missing a usable document identity');
+  }
+  return {
+    url: STATEMENT_PDF_API_URL,
+    method: 'GET',
+    headers: {
+      accept: 'application/pdf, */*',
+      referer: STATEMENTS_URL,
+      statementid: normalizedId,
+      urlflag: 'getPdf',
+    },
+  };
+}
+
+function vanguardStatementIdentityValues(record: Record<string, unknown>): string[] {
+  return [
+    'accountId',
+    'accountNumber',
+    'productAccountData',
+    'statementDescription',
+    'statementNumber',
+  ].map(field => apiString(record, field)).filter(Boolean);
+}
+
+function vanguardIdentityIncludesLast4(value: string, last4: string): boolean {
+  return new RegExp(`${last4}(?!\\d)`).test(value);
+}
+
+export function parseVanguardStatementApiResponse(
+  value: unknown,
+  accountRoutes: readonly VanguardStatementAccountRoute[],
+): VanguardRemoteStatement[] {
+  if (!value || typeof value !== 'object' || !('statements' in value) ||
+      !Array.isArray(value.statements)) {
+    throw new Error('Vanguard statement API returned an invalid statement collection');
+  }
+  const statementIds = new Set<string>();
+  const statements: VanguardRemoteStatement[] = [];
+  for (const [index, statement] of value.statements.entries()) {
+    if (!statement || typeof statement !== 'object') {
+      throw new Error(`Vanguard statement API record ${index + 1} is invalid`);
+    }
+    const record = statement as Record<string, unknown>;
+    const identityValues = vanguardStatementIdentityValues(record);
+    const matches = accountRoutes.filter(route => route.identityLast4s.some(last4 =>
+      identityValues.some(identity => vanguardIdentityIncludesLast4(identity, last4)),
+    ));
+    if (matches.length > 1) {
+      throw new Error('Vanguard statement metadata is ambiguous across local accounts');
+    }
+    if (matches.length === 0) continue;
+
+    const statementId = apiString(record, 'statementId');
+    const endDate = apiString(record, 'endDate').slice(0, 10);
+    if (!statementId) {
+      throw new Error(`Vanguard statement API record ${index + 1} has no document identity`);
+    }
+    validateIsoDate(endDate);
+    if (statementIds.has(statementId)) {
+      throw new Error('Vanguard statement API returned duplicate document identities');
+    }
+    statementIds.add(statementId);
+    const route = matches[0]!;
+    statements.push({
+      accountKind: route.account.accountKind,
+      accountLast4: route.account.accountLast4,
+      validationAccountLast4s: route.identityLast4s,
+      statementDate: endDate,
+      request: vanguardStatementPdfRequest(statementId),
+    });
+  }
+  return statements;
 }
 
 function vanguardAuthenticationResponse(value: string): boolean {
@@ -483,67 +765,61 @@ async function saveVanguardArtifact(
   }
   await writeFile(job.targetPath, await response.body());
   try {
-    await validateVanguardArtifact(job.targetPath, job.format, job.accountLast4);
+    await validateVanguardArtifact(
+      job.targetPath,
+      job.format,
+      job.validationAccountLast4s ?? job.accountLast4,
+    );
   } catch (error) {
     await rm(job.targetPath, { force: true });
     throw error;
   }
 }
 
-function accountRow(control: Locator): Locator {
-  return control.locator(
-    'xpath=ancestor::*[self::tr or @role="row" or contains(@class,"account")][1]',
-  );
-}
-
-async function ensureVanguardActivityForm(page: Page): Promise<boolean> {
-  const dateRange = page.locator('select[name="downloadDateOption"]:visible').first();
-  if (await dateRange.count() > 0) return true;
-  if (!new URL(page.url()).pathname.includes('/portfolio/transactions/history')) {
-    await page.goto(TRANSACTION_HISTORY_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+async function saveVanguardActivityArtifact(
+  requestContext: APIRequestContext,
+  request: VanguardApiRequest,
+  job: ArtifactJob,
+): Promise<void> {
+  const response = await requestContext.fetch(request.url, {
+    method: request.method,
+    ...(request.body ? { data: request.body } : {}),
+    ...(request.headers ? { headers: request.headers } : {}),
+  });
+  if (vanguardAuthenticationResponse(response.url()) || response.status() === 401 || response.status() === 403) {
+    throw new Error(AUTHENTICATION_REQUIRED);
   }
-  if (isVanguardLoginUrl(page.url())) return false;
-  if (await dateRange.count() === 0) {
-    const downloadControl = page
-      .getByRole('link', { name: /^Download center$/i })
-      .or(page.getByRole('button', { name: /^Download(?: transactions| activity)?$/i }))
-      .first();
-    await downloadControl.waitFor({ state: 'visible', timeout: 30_000 });
-    await downloadControl.click();
+  if (!response.ok()) {
+    throw new Error(`Vanguard CSV request failed with status ${response.status()}`);
   }
-  await dateRange.waitFor({ state: 'visible', timeout: 30_000 });
-  return true;
+  const responseContentType = response.headers()['content-type']?.toLowerCase() ?? '';
+  if (!responseContentType.includes('json')) {
+    if (responseContentType.includes('html')) throw new Error(AUTHENTICATION_REQUIRED);
+    throw new Error('Vanguard activity API response has an unexpected content type');
+  }
+  const csv = vanguardActivityCsvFromEnvelope(await response.json());
+  await writeFile(job.targetPath, csv);
+  try {
+    await validateVanguardArtifact(
+      job.targetPath,
+      'csv',
+      job.validationAccountLast4s ?? job.accountLast4,
+    );
+  } catch (error) {
+    await rm(job.targetPath, { force: true });
+    throw error;
+  }
 }
 
 export async function discoverVanguardAccounts(page: Page): Promise<VanguardRemoteAccount[]> {
-  const controls = page.locator('input[name="check-box"]');
-  await controls.first().waitFor({ state: 'attached', timeout: 30_000 }).catch(() => {
-    throw new Error('Vanguard download accounts are unavailable');
-  });
-  const accounts: VanguardRemoteAccount[] = [];
-  for (let index = 0; index < await controls.count(); index += 1) {
-    const control = controls.nth(index);
-    const id = await control.getAttribute('id');
-    const label = id ? page.locator(`label[for=${JSON.stringify(id)}]`) : null;
-    const text = [
-      await accountRow(control).textContent().catch(() => ''),
-      label ? await label.textContent().catch(() => '') : '',
-    ].filter(Boolean).join(' ');
-    accounts.push(parseVanguardRemoteAccount(text, index));
+  const response = await page.context().request.get(ACCOUNTS_API_URL);
+  if (vanguardAuthenticationResponse(response.url()) || response.status() === 401 || response.status() === 403) {
+    throw new Error(AUTHENTICATION_REQUIRED);
   }
-  return accounts;
-}
-
-async function csvFormatControl(page: Page): Promise<Locator> {
-  const radios = page.locator('input[name="download-option"]');
-  await radios.first().waitFor({ state: 'attached', timeout: 30_000 });
-  for (let index = 0; index < await radios.count(); index += 1) {
-    const radio = radios.nth(index);
-    const id = await radio.getAttribute('id');
-    const label = id ? await page.locator(`label[for=${JSON.stringify(id)}]`).textContent() : '';
-    if (/csv/i.test(label ?? '')) return radio;
+  if (!response.ok() || !/json/i.test(response.headers()['content-type'] ?? '')) {
+    throw new Error(`Vanguard account API request failed with status ${response.status()}`);
   }
-  throw new Error('Vanguard CSV export is unavailable');
+  return parseVanguardAccountApiResponse(await response.json());
 }
 
 async function activityRequestForAccount(
@@ -552,156 +828,38 @@ async function activityRequestForAccount(
   from: string,
   through: string,
 ): Promise<VanguardApiRequest> {
-  const controls = page.locator('input[name="check-box"]');
-  for (let index = 0; index < await controls.count(); index += 1) {
-    await controls.nth(index).setChecked(index === account.controlIndex);
-  }
-  await (await csvFormatControl(page)).setChecked(true);
-
-  const dateRange = page.locator('select[name="downloadDateOption"]:visible').first();
-  const customValue = await dateRange.locator('option').evaluateAll(options => {
-    const custom = options.find(option => /^custom$/i.test(option.textContent?.trim() ?? ''));
-    return custom?.getAttribute('value') ?? null;
-  });
-  if (customValue === null) throw new Error('Vanguard custom activity date range is unavailable');
-  await dateRange.selectOption(customValue);
-  await page.locator('input[name="fromDatePicker"]:visible').fill(from);
-  await page.locator('input[name="toDatePicker"]:visible').fill(through);
-
-  const button = page.getByRole('button', { name: /^download$/i }).last();
-  await button.waitFor({ state: 'visible', timeout: 30_000 });
-  const buttonHandle = await button.elementHandle();
-  if (!buttonHandle) throw new Error('Vanguard activity download button is unavailable');
-  await page.waitForFunction((element: Element) => {
-    const buttonElement = element as HTMLButtonElement;
-    return !buttonElement.disabled && buttonElement.getAttribute('aria-disabled') !== 'true';
-  }, buttonHandle, { timeout: 30_000 });
-
-  const form = button.locator('xpath=ancestor::form[1]');
-  if (await form.count() !== 1) throw new Error('Vanguard activity API form is unavailable');
-  const metadata = await form.evaluate((element): VanguardFormMetadata => {
-    const formElement = element as HTMLFormElement;
-    const fields: Array<[string, string]> = [];
-    for (const [name, value] of new FormData(formElement).entries()) {
-      if (typeof value !== 'string') throw new Error('Vanguard activity form included a file upload');
-      fields.push([name, value]);
-    }
-    return { action: formElement.action, method: formElement.method, fields };
-  });
-  return vanguardApiRequestFromForm(metadata, page.url());
-}
-
-function statementDateFromText(text: string): string | null {
-  const numeric = text.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);
-  if (numeric) {
-    return `${numeric[3]}-${numeric[1]!.padStart(2, '0')}-${numeric[2]!.padStart(2, '0')}`;
-  }
-  const named = text.match(
-    /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s+(\d{4})\b/i,
+  const cookies = await page.context().cookies(ACTIVITY_REFERER_URL);
+  const xsrfCookie = cookies.find(cookie => cookie.name.toLowerCase() === 'xsrf-token');
+  if (!xsrfCookie?.value) throw new Error(AUTHENTICATION_REQUIRED);
+  const userAgent = await page.evaluate(() => navigator.userAgent);
+  return vanguardActivityApiRequest(
+    account.apiAccount,
+    from,
+    through,
+    userAgent,
+    decodeURIComponent(xsrfCookie.value),
   );
-  if (!named) return null;
-  const month = [
-    'january', 'february', 'march', 'april', 'may', 'june',
-    'july', 'august', 'september', 'october', 'november', 'december',
-  ].indexOf(named[1]!.toLowerCase()) + 1;
-  return `${named[3]}-${String(month).padStart(2, '0')}-${named[2]!.padStart(2, '0')}`;
-}
-
-async function statementRequestFromRow(row: Locator, baseUrl: string): Promise<VanguardApiRequest> {
-  const icon = row.locator('c11n-icon[name="download"]');
-  if (await icon.count() !== 1) throw new Error('Vanguard statement download metadata is unavailable');
-  const anchor = icon.locator('xpath=ancestor::a[@href][1]');
-  if (await anchor.count() === 1) {
-    const href = await anchor.getAttribute('href');
-    if (href) return vanguardGetRequest(href, baseUrl);
-  }
-  const form = icon.locator('xpath=ancestor::form[1]');
-  if (await form.count() === 1) {
-    const metadata = await form.evaluate((element): VanguardFormMetadata => {
-      const formElement = element as HTMLFormElement;
-      const fields: Array<[string, string]> = [];
-      for (const [name, value] of new FormData(formElement).entries()) {
-        if (typeof value !== 'string') throw new Error('Vanguard statement form included a file upload');
-        fields.push([name, value]);
-      }
-      return { action: formElement.action, method: formElement.method, fields };
-    });
-    return vanguardApiRequestFromForm(metadata, baseUrl);
-  }
-  const dataUrl = await icon.evaluate(element => {
-    const candidates = [element, element.parentElement, element.parentElement?.parentElement]
-      .filter((value): value is HTMLElement | SVGElement => value !== null && value !== undefined);
-    for (const candidate of candidates) {
-      for (const attribute of Array.from(candidate.attributes)) {
-        if (/(?:href|url|download)/i.test(attribute.name) && attribute.value) return attribute.value;
-      }
-    }
-    return null;
-  });
-  if (dataUrl) return vanguardGetRequest(dataUrl, baseUrl);
-  throw new Error('Vanguard statement API request metadata is unavailable');
-}
-
-async function selectStatementYear(page: Page, year: string): Promise<boolean> {
-  const yearSelect = page.locator('#select-year-id:visible').first();
-  await yearSelect.waitFor({ state: 'visible', timeout: 30_000 });
-  const optionValue = await yearSelect.locator('option').evaluateAll((options, expectedYear) => {
-    const option = options.find(candidate =>
-      candidate.getAttribute('value') === expectedYear || candidate.textContent?.trim() === expectedYear,
-    );
-    return option?.getAttribute('value') ?? null;
-  }, year);
-  if (optionValue === null) return false;
-  const previous = await page.locator('tbody tr').evaluateAll(rows =>
-    rows.map(row => row.textContent?.replace(/\s+/g, ' ').trim() ?? '').join('\n'),
-  );
-  if (await yearSelect.inputValue() !== optionValue) {
-    await yearSelect.selectOption(optionValue);
-    await page.waitForFunction(({ expectedYear, previousRows }) => {
-      const select = document.querySelector('#select-year-id') as HTMLSelectElement | null;
-      const rows = Array.from(document.querySelectorAll('tbody tr'));
-      const text = rows.map(row => row.textContent?.replace(/\s+/g, ' ').trim() ?? '').join('\n');
-      const selected = select?.selectedOptions[0];
-      const selectedYear = selected?.value === expectedYear || selected?.textContent?.trim() === expectedYear;
-      return Boolean(selectedYear && rows.length > 0 && text !== previousRows && text.includes(expectedYear));
-    }, { expectedYear: year, previousRows: previous }, { timeout: 30_000 });
-  }
-  await page.locator('tbody tr').first().waitFor({ state: 'attached', timeout: 30_000 });
-  return true;
 }
 
 async function discoverVanguardStatements(
-  page: Page,
+  requestContext: APIRequestContext,
   years: string[],
-  plannedAccounts: VanguardSyncAccount[],
+  accountRoutes: VanguardStatementAccountRoute[],
 ): Promise<VanguardRemoteStatement[]> {
   const statements: VanguardRemoteStatement[] = [];
   for (const year of years) {
-    if (!await selectStatementYear(page, year)) continue;
-    const rows = page.locator('tbody tr');
-    for (let index = 0; index < await rows.count(); index += 1) {
-      const row = rows.nth(index);
-      if (await row.locator('c11n-icon[name="download"]').count() !== 1) continue;
-      const text = (await row.textContent() ?? '').replace(/\s+/g, ' ').trim();
-      const statementDate = statementDateFromText(text);
-      if (!statementDate || !statementDate.startsWith(`${year}-`)) continue;
-      const last4 = vanguardAccountLast4FromText(text);
-      const kind = vanguardAccountKindFromText(text);
-      let accountLast4 = last4;
-      if (!accountLast4 && kind) {
-        const matches = plannedAccounts.filter(account => account.accountKind === kind);
-        if (matches.length > 1) {
-          throw new Error('Vanguard statement metadata is ambiguous across local accounts');
-        }
-        accountLast4 = matches[0]?.accountLast4 ?? null;
-      }
-      statements.push({
-        accountKind: kind,
-        accountLast4,
-        statementDate,
-        request: await statementRequestFromRow(row, page.url()),
-      });
+    const request = vanguardStatementListRequest(year);
+    const response = await requestContext.fetch(request.url, {
+      method: request.method,
+      headers: request.headers,
+    });
+    if (vanguardAuthenticationResponse(response.url()) || response.status() === 401 || response.status() === 403) {
+      throw new Error(AUTHENTICATION_REQUIRED);
     }
+    if (!response.ok() || !/json/i.test(response.headers()['content-type'] ?? '')) {
+      throw new Error(`Vanguard statement API request failed with status ${response.status()}`);
+    }
+    statements.push(...parseVanguardStatementApiResponse(await response.json(), accountRoutes));
   }
   return statements;
 }
@@ -714,14 +872,7 @@ function statementForJob(
     statement.statementDate === job.statementDate && statement.accountLast4 === job.accountLast4,
   );
   if (exact.length > 1) throw new Error('Multiple Vanguard statement artifacts matched one local account');
-  if (exact.length === 1) return exact[0]!;
-  const kindMatches = statements.filter(statement =>
-    statement.statementDate === job.statementDate &&
-    statement.accountLast4 === null &&
-    statement.accountKind === job.accountKind,
-  );
-  if (kindMatches.length > 1) throw new Error('Vanguard statement artifact routing is ambiguous');
-  return kindMatches[0] ?? null;
+  return exact[0] ?? null;
 }
 
 function safeVanguardError(error: unknown): string {
@@ -736,30 +887,38 @@ async function executeVanguardProfile(
   profile: VanguardSyncProfile,
   pending: ArtifactJob[],
   through: string,
-  reportProgress: VanguardProgressReporter,
+  progress: VanguardProgress,
 ): Promise<VanguardProfileProgramResult> {
-  const report = (message: string) => reportProgress(`Vanguard ${profile.id}: ${message}`);
   const authenticationAction = vanguardAuthenticationAction(profile);
   try {
     if (!await isVanguardAuthenticatedPage(page)) {
+      progress(
+        'authentication',
+        'authentication',
+        'waiting',
+        `Waiting for Vanguard authentication for ${profile.accountHolder}`,
+      );
       return {
         status: 'login-required',
         action: authenticationAction,
       };
     }
-    report('authenticated cached profile');
-    report('opening activity metadata');
-    if (!await ensureVanguardActivityForm(page)) {
-      return {
-        status: 'login-required',
-        action: authenticationAction,
-      };
-    }
-
-    report('discovering remote accounts');
+    progress(
+      'authentication',
+      'authentication',
+      'complete',
+      `Vanguard authentication is ready for ${profile.accountHolder}`,
+    );
+    progress('discovery', 'discovery', 'start', 'Discovering Vanguard accounts');
     const remoteAccounts = await discoverVanguardAccounts(page);
     const mappedAccounts = mapVanguardRemoteAccounts(remoteAccounts, profile.accounts);
-    report(`discovered ${mappedAccounts.length} remote account${mappedAccounts.length === 1 ? '' : 's'}`);
+    progress(
+      'discovery',
+      'discovery',
+      'complete',
+      `Discovered ${mappedAccounts.length} Vanguard account${mappedAccounts.length === 1 ? '' : 's'}`,
+      { accountCount: mappedAccounts.length },
+    );
 
     const saved: string[] = [];
     const unavailable: string[] = [];
@@ -767,47 +926,126 @@ async function executeVanguardProfile(
     for (let index = 0; index < activityJobs.length; index += 1) {
       const job = activityJobs[index]!;
       const mapped = mappedAccounts.find(account => account.planned.accountId === job.accountId);
-      if (!mapped) throw new Error('Vanguard activity routing changed after remote discovery');
-      report(`preparing activity API request ${index + 1} of ${activityJobs.length}`);
+      const requestKey = `activity-request-${index}`;
+      if (!mapped) {
+        unavailable.push(job.fileName);
+        progress(
+          requestKey,
+          'activity-request',
+          'complete',
+          `Vanguard activity ${index + 1} of ${activityJobs.length} is unavailable`,
+          {
+            artifactIndex: index + 1,
+            artifactCount: activityJobs.length,
+            unavailable: true,
+          },
+        );
+        continue;
+      }
+      progress(
+        requestKey,
+        'activity-request',
+        'start',
+        `Preparing Vanguard activity API request ${index + 1} of ${activityJobs.length}`,
+        { artifactIndex: index + 1, artifactCount: activityJobs.length },
+      );
+      job.validationAccountLast4s = [mapped.remote.accountLast4];
       const request = await activityRequestForAccount(page, mapped.remote, job.startDate!, through);
-      report(`downloading activity ${index + 1} of ${activityJobs.length}`);
-      await saveVanguardArtifact(page.context().request, request, job);
-      report(`validated activity ${index + 1} of ${activityJobs.length}`);
+      progress(
+        requestKey,
+        'activity-request',
+        'complete',
+        `Prepared Vanguard activity API request ${index + 1} of ${activityJobs.length}`,
+        { artifactIndex: index + 1, artifactCount: activityJobs.length },
+      );
+      const downloadKey = `activity-download-${index}`;
+      progress(
+        downloadKey,
+        'activity-download',
+        'start',
+        `Downloading Vanguard activity ${index + 1} of ${activityJobs.length}`,
+        { artifactIndex: index + 1, artifactCount: activityJobs.length },
+      );
+      await saveVanguardActivityArtifact(page.context().request, request, job);
+      progress(
+        downloadKey,
+        'activity-download',
+        'complete',
+        `Downloaded and parser-validated Vanguard activity ${index + 1} of ${activityJobs.length}`,
+        {
+          artifactIndex: index + 1,
+          artifactCount: activityJobs.length,
+          parserValidated: true,
+        },
+      );
       saved.push(job.fileName);
     }
 
     const statementJobs = pending.filter(job => job.artifactType === 'statement');
     if (statementJobs.length > 0) {
-      report('opening statement metadata');
-      await page.goto(STATEMENTS_URL, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-      if (isVanguardLoginUrl(page.url())) {
-        return {
-          status: 'login-required',
-          action: authenticationAction,
-        };
-      }
+      progress(
+        'statement-discovery',
+        'statement-discovery',
+        'start',
+        'Discovering Vanguard statements through the API',
+        { requestedStatementCount: statementJobs.length },
+      );
       const years = [...new Set(statementJobs.map(job => job.statementDate!.slice(0, 4)))].sort();
-      report(`discovering statements across ${years.length} year${years.length === 1 ? '' : 's'}`);
-      const statements = await discoverVanguardStatements(page, years, profile.accounts);
-      report(`discovered ${statements.length} statement artifact${statements.length === 1 ? '' : 's'}`);
+      const statements = await discoverVanguardStatements(
+        page.context().request,
+        years,
+        vanguardStatementAccountRoutes(profile.accounts, mappedAccounts),
+      );
+      progress(
+        'statement-discovery',
+        'statement-discovery',
+        'complete',
+        `Discovered ${statements.length} Vanguard statement artifact${statements.length === 1 ? '' : 's'}`,
+        { discoveredStatementCount: statements.length, yearCount: years.length },
+      );
+      let unavailableStatementCount = 0;
       for (let index = 0; index < statementJobs.length; index += 1) {
         const job = statementJobs[index]!;
         const statement = statementForJob(job, statements);
         if (!statement) {
           unavailable.push(job.fileName);
+          unavailableStatementCount += 1;
           continue;
         }
-        report(`downloading statement ${index + 1} of ${statementJobs.length}`);
+        job.validationAccountLast4s = statement.validationAccountLast4s;
+        const downloadKey = `statement-download-${index}`;
+        progress(
+          downloadKey,
+          'statement-download',
+          'start',
+          `Downloading Vanguard statement ${index + 1} of ${statementJobs.length}`,
+          { artifactIndex: index + 1, artifactCount: statementJobs.length },
+        );
         await saveVanguardArtifact(page.context().request, statement.request, job);
-        report(`validated statement ${index + 1} of ${statementJobs.length}`);
+        progress(
+          downloadKey,
+          'statement-download',
+          'complete',
+          `Downloaded and parser-validated Vanguard statement ${index + 1} of ${statementJobs.length}`,
+          {
+            artifactIndex: index + 1,
+            artifactCount: statementJobs.length,
+            parserValidated: true,
+          },
+        );
         saved.push(job.fileName);
       }
-      if (unavailable.length > 0) {
-        report(`${unavailable.length} requested statement artifact${unavailable.length === 1 ? ' was' : 's were'} unavailable`);
+      if (unavailableStatementCount > 0) {
+        progress(
+          'statement-unavailable',
+          'statement-download',
+          'complete',
+          `${unavailableStatementCount} requested Vanguard statement artifact${unavailableStatementCount === 1 ? ' was' : 's were'} unavailable`,
+          { unavailableStatementCount },
+        );
       }
     }
 
-    report(`completed with ${saved.length} validated artifact${saved.length === 1 ? '' : 's'}`);
     return {
       status: 'complete',
       saved,
@@ -817,18 +1055,30 @@ async function executeVanguardProfile(
   } catch (error) {
     const message = String(error instanceof Error ? error.message : error);
     if (message.includes(AUTHENTICATION_REQUIRED) || isVanguardLoginUrl(page.url())) {
+      progress(
+        'authentication',
+        'authentication',
+        'waiting',
+        `Waiting for Vanguard authentication for ${profile.accountHolder}`,
+      );
       return {
         status: 'login-required',
         action: authenticationAction,
       };
     }
+    progress(
+      'profile',
+      'sync',
+      'error',
+      `Vanguard sync failed for ${profile.accountHolder}`,
+    );
     return { status: 'error', message: safeVanguardError(error) };
   }
 }
 
 function browserProgram(): string {
-  return `async (page, reportProgress, bindings) => JSON.stringify(
-    await bindings.execute(page, reportProgress)
+  return `async (page, _reportProgress, bindings) => JSON.stringify(
+    await bindings.execute(page)
   )`;
 }
 
@@ -837,15 +1087,34 @@ async function runProfile(
   profile: VanguardSyncProfile,
   onProgress: VanguardProgressReporter,
 ): Promise<VanguardDownloadedArtifact[]> {
+  const progress = createVanguardProgress(onProgress, profile.id);
+  progress('profile', 'sync', 'start', `Starting Vanguard sync for ${profile.accountHolder}`, {
+    plannedAccountCount: profile.accounts.length,
+  });
   const jobs = jobsForProfile(config, profile);
   const pending: ArtifactJob[] = [];
   for (const job of jobs) {
     if (!await isValid(job.targetPath, job.format, job.accountLast4)) pending.push(job);
   }
   if (pending.length === 0) {
-    onProgress(`Vanguard ${profile.id}: no missing artifacts`);
+    progress('profile', 'sync', 'complete', `Vanguard data is already current for ${profile.accountHolder}`, {
+      artifactCount: 0,
+    });
     return [];
   }
+
+  const hasSavedAuthentication = await playwrightHasSavedAuthentication(profile.session);
+  progress(
+    'authentication',
+    'authentication',
+    'start',
+    `Checking Vanguard authentication for ${profile.accountHolder}`,
+    {
+      cachedAuthentication: hasSavedAuthentication,
+      initialMode: hasSavedAuthentication ? 'headless' : 'interactive',
+    },
+  );
+  let authenticationWaiting = false;
 
   const result = await runInstitutionBrowserProgram<{
     saved: string[];
@@ -858,10 +1127,20 @@ async function runProfile(
       completionDescription: `Vanguard (${profile.accountHolder}) downloads are complete.`,
       isAuthenticated: isVanguardAuthenticatedPage,
       waitUntilAuthenticated: waitUntilVanguardAuthenticated,
-      onProgress,
+      onProgress: message => {
+        if (!authenticationWaiting && /waiting|authentication required|needs attention/i.test(message)) {
+          authenticationWaiting = true;
+          progress(
+            'authentication',
+            'authentication',
+            'waiting',
+            `Waiting for Vanguard authentication for ${profile.accountHolder}`,
+          );
+        }
+      },
       programBindings: {
-        execute: (page: Page, reportProgress: VanguardProgressReporter) =>
-          executeVanguardProfile(page, profile, pending, config.through, reportProgress),
+        execute: (page: Page) =>
+          executeVanguardProfile(page, profile, pending, config.through, progress),
       },
     },
   );
@@ -877,17 +1156,22 @@ async function runProfile(
   for (const fileName of result.saved ?? []) {
     const job = byName.get(fileName);
     if (!job) throw new Error(`Vanguard ${profile.id}: an unplanned artifact was returned`);
-    await validateVanguardArtifact(job.targetPath, job.format, job.accountLast4);
+    const validationAccountLast4s = job.validationAccountLast4s ?? [job.accountLast4];
+    await validateVanguardArtifact(job.targetPath, job.format, validationAccountLast4s);
     downloaded.push({
       fileName: job.fileName,
       accountId: job.accountId,
       institution: job.institution,
       profileId: job.profileId,
       accountKind: job.accountKind,
-      accountLast4: job.accountLast4,
+      accountLast4: validationAccountLast4s[0]!,
       artifactType: job.artifactType,
     });
   }
+  progress('profile', 'sync', 'complete', `Vanguard downloads are ready for ${profile.accountHolder}`, {
+    artifactCount: downloaded.length,
+    unavailableArtifactCount: result.unavailable?.length ?? 0,
+  });
   return downloaded;
 }
 
@@ -908,14 +1192,25 @@ export async function runVanguardSync(
   };
   validateIsoDate(normalizedConfig.through);
   await mkdir(normalizedConfig.outputDir, { recursive: true });
-  onProgress(
-    `Vanguard: starting ${normalizedConfig.profiles.length} cached profile${normalizedConfig.profiles.length === 1 ? '' : 's'}`,
+  const progress = createVanguardProgress(onProgress);
+  progress(
+    'sync',
+    'sync',
+    'start',
+    `Starting ${normalizedConfig.profiles.length} Vanguard profile${normalizedConfig.profiles.length === 1 ? '' : 's'}`,
+    { profileCount: normalizedConfig.profiles.length },
   );
   const results = await runVanguardProfilesConcurrently(
     normalizedConfig.profiles,
     profile => runProfile(normalizedConfig, profile, onProgress),
   );
   const artifacts = results.flat();
-  onProgress(`Vanguard: completed with ${artifacts.length} validated artifact${artifacts.length === 1 ? '' : 's'}`);
+  progress(
+    'sync',
+    'sync',
+    'complete',
+    `Vanguard downloads are ready for review`,
+    { artifactCount: artifacts.length, profileCount: normalizedConfig.profiles.length },
+  );
   return artifacts;
 }

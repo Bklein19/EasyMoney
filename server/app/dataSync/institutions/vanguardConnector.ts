@@ -3,6 +3,7 @@ import type {
   SyncAccountCoverage,
   SyncConnector,
   SyncConnectorContext,
+  SyncConnectorRunContext,
   SyncConnectorTarget,
 } from '../connector.ts';
 import { goalWindowForCoverage } from '../planning.ts';
@@ -11,10 +12,12 @@ import {
   runVanguardSync,
   type VanguardAccountKind,
   type VanguardDownloadedArtifact,
+  type VanguardProgressEvent,
   type VanguardSyncProfile,
 } from './vanguard.ts';
 
 const DEFAULT_TARGET_GOAL: SyncGoal = { kind: 'current', overlapDays: 7 };
+type VanguardSyncRunner = typeof runVanguardSync;
 
 function identityTexts(account: SyncAccountCoverage): string[] {
   return [
@@ -254,35 +257,58 @@ export function routeVanguardArtifacts(
   return artifacts.map(({ fileName, accountId }) => ({ fileName, accountId }));
 }
 
-export const vanguardConnector = {
-  id: 'vanguard',
-  label: 'Vanguard',
-  matchesAccount: matchesVanguardAccount,
-  listTargets(context) {
-    return vanguardTargetsForProfiles(planVanguardProfiles(context, DEFAULT_TARGET_GOAL));
-  },
-  async run(context) {
-    const plannedProfiles = planVanguardProfiles(context, context.goal, context.report);
-    const profiles = selectVanguardProfiles(plannedProfiles, context.connectionId);
-    if (context.connectionId && profiles.length === 0) {
-      throw new Error(`Vanguard connection is unavailable: ${context.connectionId}`);
-    }
-    if (profiles.length === 0) {
-      throw new Error('No active Vanguard accounts are associated with a known login profile');
-    }
-    context.report({
-      type: 'phase',
-      message: `Opening ${profiles.length} Vanguard login${profiles.length === 1 ? '' : 's'}`,
-      data: { goal: context.goal.kind, profiles: profiles.map(profile => profile.id) },
-    });
-    const downloaded = await runVanguardSync(
-      { outputDir: context.outputDir, through: context.today, profiles },
-      message => context.report({ type: 'phase', message }),
-    );
-    context.report({
-      type: 'phase',
-      message: `Validated ${downloaded.length} new artifact${downloaded.length === 1 ? '' : 's'}`,
-    });
-    return routeVanguardArtifacts(downloaded);
-  },
-} satisfies SyncConnector<'vanguard'>;
+export function reportVanguardProgress(
+  context: Pick<SyncConnectorRunContext, 'report'>,
+  event: VanguardProgressEvent,
+): void {
+  context.report({
+    type: event.state === 'waiting' ? 'action' : event.state === 'error' ? 'warning' : 'phase',
+    message: event.message,
+    data: {
+      phase: event.phase,
+      state: event.state,
+      ...(event.profileId ? { profileId: event.profileId } : {}),
+      ...(event.elapsedMs === undefined ? {} : { elapsedMs: event.elapsedMs }),
+      ...(event.data ?? {}),
+    },
+  });
+}
+
+export function createVanguardConnector(
+  runSync: VanguardSyncRunner = runVanguardSync,
+) {
+  return {
+    id: 'vanguard',
+    label: 'Vanguard',
+    matchesAccount: matchesVanguardAccount,
+    listTargets(context) {
+      return vanguardTargetsForProfiles(planVanguardProfiles(context, DEFAULT_TARGET_GOAL));
+    },
+    async run(context) {
+      const plannedProfiles = planVanguardProfiles(context, context.goal, context.report);
+      const profiles = selectVanguardProfiles(plannedProfiles, context.connectionId);
+      if (context.connectionId && profiles.length === 0) {
+        throw new Error(`Vanguard connection is unavailable: ${context.connectionId}`);
+      }
+      if (profiles.length === 0) {
+        throw new Error('No active Vanguard accounts are associated with a known login profile');
+      }
+      context.report({
+        type: 'phase',
+        message: `Opening ${profiles.length} Vanguard login${profiles.length === 1 ? '' : 's'}`,
+        data: { goal: context.goal.kind, profiles: profiles.map(profile => profile.id) },
+      });
+      const downloaded = await runSync(
+        { outputDir: context.outputDir, through: context.today, profiles },
+        event => reportVanguardProgress(context, event),
+      );
+      context.report({
+        type: 'phase',
+        message: `Validated ${downloaded.length} new artifact${downloaded.length === 1 ? '' : 's'}`,
+      });
+      return routeVanguardArtifacts(downloaded);
+    },
+  } satisfies SyncConnector<'vanguard'>;
+}
+
+export const vanguardConnector = createVanguardConnector();
