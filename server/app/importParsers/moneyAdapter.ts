@@ -41,6 +41,8 @@ export function createMoneyParserAdapter({
 
       const result = await parseMoneyFile(input.filePath);
       return {
+        coveredFrom: result.covered_from ?? null,
+        coveredTo: result.covered_to ?? null,
         transactions: result.transactions.map((transaction, index) => ({
           sourceRowIndex: index,
           date: transaction.date,

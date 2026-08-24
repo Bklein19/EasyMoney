@@ -46,6 +46,8 @@ export interface AppImportParseInput {
 export interface AppImportParseResult {
   transactions: Array<ParsedImportTransaction | null>;
   balances: ParsedImportBalance[];
+  coveredFrom?: string | null;
+  coveredTo?: string | null;
 }
 
 export interface AppImportParser {

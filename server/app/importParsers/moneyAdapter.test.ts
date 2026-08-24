@@ -110,6 +110,10 @@ test('money parser adapter translates money activity output to app import output
     filePath: '/tmp/activity.pdf',
   });
 
+  expect(result).toMatchObject({
+    coveredFrom: '2026-06-01',
+    coveredTo: '2026-06-30',
+  });
   expect(result.transactions).toEqual([
     {
       sourceRowIndex: 0,

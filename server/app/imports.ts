@@ -953,6 +953,8 @@ function saveImportPreview({
   sourceType,
   parserPriority,
   institution,
+  coveredFrom,
+  coveredTo,
   rawRows,
   parsedTransactions,
   parsedBalances = [],
@@ -964,12 +966,18 @@ function saveImportPreview({
   sourceType?: string | null;
   parserPriority?: number | null;
   institution?: string | null;
+  coveredFrom?: string | null;
+  coveredTo?: string | null;
   rawRows: Array<Record<string, string>>;
   parsedTransactions: Array<ParsedImportTransaction | null>;
   parsedBalances?: ParsedImportBalance[];
 }) {
   const now = new Date().toISOString();
   const headerSignature = getHeaderSignature(headers);
+  const factDates = [
+    ...parsedTransactions.filter((item): item is ParsedImportTransaction => item !== null).map(item => item.date),
+    ...parsedBalances.map(item => item.date),
+  ].sort();
   const importFileId = insertRow('importFiles', {
     fileName,
     contentHash,
@@ -990,14 +998,8 @@ function saveImportPreview({
     sourceType,
     parserPriority,
     institution,
-    coveredFrom: [
-      ...parsedTransactions.filter((item): item is ParsedImportTransaction => item !== null).map(item => item.date),
-      ...parsedBalances.map(item => item.date),
-    ].sort()[0] || null,
-    coveredTo: [
-      ...parsedTransactions.filter((item): item is ParsedImportTransaction => item !== null).map(item => item.date),
-      ...parsedBalances.map(item => item.date),
-    ].sort().at(-1) || null,
+    coveredFrom: coveredFrom?.trim() || factDates[0] || null,
+    coveredTo: coveredTo?.trim() || factDates.at(-1) || null,
     status: 'previewed',
     createdAt: now,
   });
@@ -1205,6 +1207,8 @@ export async function previewImport({ fileName, text, fileBytes, customProfile =
       sourceType: appParser.sourceType,
       parserPriority: appParser.priority,
       institution: appParser.institution,
+      coveredFrom: parsedResult.coveredFrom,
+      coveredTo: parsedResult.coveredTo,
       rawRows,
       parsedTransactions: parsedResult.transactions,
       parsedBalances: parsedResult.balances,
