@@ -530,16 +530,17 @@ export async function waitUntilFidelityAuthenticated(page: Page, timeoutMs: numb
       const style = getComputedStyle(element);
       return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
     };
-    const bodyText = document.body?.innerText ?? '';
-    if (/sorry,? we can['\u2019]?t complete this action right now|temporarily unavailable|scheduled maintenance/i.test(bodyText)) {
-      return 'institution-unavailable';
-    }
     const hasAuthenticationField = Array.from(document.querySelectorAll(selector)).some(visible);
     const fidelityHost = /(?:^|\.)fidelity\.com$/i.test(location.hostname);
     const authenticatedPath = /\/ftgw\/digital\/portfolio(?:\/|$)|\/mybenefits(?:\/|$)|\/public\/nb\//i.test(location.pathname);
     const authenticationPath = /(?:login|logon|sign[-_]?in|authenticate|authorization|oauth|sso|auth)/i.test(
       location.hostname + location.pathname,
     );
+    if (authenticationPath || hasAuthenticationField) return null;
+    const bodyText = document.body?.innerText ?? '';
+    if (/sorry,? we can['\u2019]?t complete this action right now|temporarily unavailable|scheduled maintenance/i.test(bodyText)) {
+      return 'institution-unavailable';
+    }
     return fidelityHost && authenticatedPath && !authenticationPath && !hasAuthenticationField
       ? 'authenticated'
       : null;
@@ -559,7 +560,6 @@ async function navigateToFidelityPage(
   try {
     await page.goto(url, { waitUntil: 'commit', timeout: 30_000 });
   } catch {}
-  if (await pageShowsInstitutionUnavailable(page)) return 'institution-unavailable';
   let currentUrl: URL;
   try {
     currentUrl = new URL(page.url());
@@ -569,9 +569,18 @@ async function navigateToFidelityPage(
   if (fidelityAuthenticationRoute(currentUrl) || await page.locator(VISIBLE_AUTHENTICATION_FIELDS).count() > 0) {
     return 'authentication-required';
   }
+  if (await pageShowsInstitutionUnavailable(page)) return 'institution-unavailable';
   try {
     await page.locator(readySelector).first().waitFor({ state: 'attached', timeout: 30_000 });
   } catch {
+    try {
+      currentUrl = new URL(page.url());
+    } catch {
+      return 'authentication-required';
+    }
+    if (fidelityAuthenticationRoute(currentUrl) || await page.locator(VISIBLE_AUTHENTICATION_FIELDS).count() > 0) {
+      return 'authentication-required';
+    }
     if (await pageShowsInstitutionUnavailable(page)) return 'institution-unavailable';
     if (!fidelityAuthenticatedRoute(currentUrl)) return 'authentication-required';
     if (options.missingControlsMeanNoAccounts) return 'no-accounts';

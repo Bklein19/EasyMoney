@@ -238,6 +238,24 @@ test('recognizes Fidelity maintenance separately from authentication failures', 
   expect(isFidelityInstitutionUnavailableText('Enter your username and password.')).toBe(false);
 });
 
+test('Fidelity authentication waits classify login before maintenance copy', async () => {
+  const source = await readFile(new URL('./fidelity.ts', import.meta.url), 'utf8');
+  const waitStart = source.indexOf('export async function waitUntilFidelityAuthenticated');
+  const waitEnd = source.indexOf('\ntype PageGate', waitStart);
+  const waitSource = source.slice(waitStart, waitEnd);
+  expect(waitSource.indexOf('authenticationPath || hasAuthenticationField')).toBeGreaterThan(-1);
+  expect(waitSource.indexOf('authenticationPath || hasAuthenticationField')).toBeLessThan(
+    waitSource.indexOf("return 'institution-unavailable'"),
+  );
+
+  const navigationStart = source.indexOf('async function navigateToFidelityPage');
+  const navigationEnd = source.indexOf('\nfunction assertGate', navigationStart);
+  const navigationSource = source.slice(navigationStart, navigationEnd);
+  expect(navigationSource.indexOf('fidelityAuthenticationRoute(currentUrl)')).toBeLessThan(
+    navigationSource.indexOf("return 'institution-unavailable'"),
+  );
+});
+
 test('Fidelity institution code uses direct requests and no fixed browser sleeps', async () => {
   const source = await readFile(new URL('./fidelity.ts', import.meta.url), 'utf8');
   expect(source).toContain('page.context().request.fetch');
