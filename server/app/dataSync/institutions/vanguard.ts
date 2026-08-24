@@ -140,6 +140,7 @@ interface ArtifactJob extends VanguardDownloadedArtifact {
 }
 
 export interface VanguardRemoteStatement {
+  accountId: number;
   accountKind: VanguardAccountKind;
   accountLast4: string;
   validationAccountLast4s: string[];
@@ -441,8 +442,11 @@ export function mapVanguardRemoteAccounts(
 export function vanguardStatementAccountRoutes(
   plannedAccounts: readonly VanguardSyncAccount[],
   mappedAccounts: readonly VanguardMappedAccount[],
+  requestedAccountIds?: ReadonlySet<number>,
 ): VanguardStatementAccountRoute[] {
-  return plannedAccounts.map(account => ({
+  return plannedAccounts.filter(account => (
+    !requestedAccountIds || requestedAccountIds.has(account.accountId)
+  )).map(account => ({
     account,
     identityLast4s: [...new Set([
       account.accountLast4,
@@ -451,6 +455,36 @@ export function vanguardStatementAccountRoutes(
         .map(mapped => mapped.remote.accountLast4),
     ])],
   }));
+}
+
+export type VanguardStatementRouteDate = {
+  accountId: number;
+  statementDate?: string;
+};
+
+export type VanguardStatementRequest = {
+  accountLast4: string;
+  statementDate?: string;
+};
+
+export function vanguardStatementRouteSummary(
+  plannedAccounts: readonly VanguardSyncAccount[],
+  routes: readonly VanguardStatementRouteDate[],
+): string {
+  const datesByAccount = new Map<number, Set<string>>();
+  for (const route of routes) {
+    if (!route.statementDate) continue;
+    const dates = datesByAccount.get(route.accountId) ?? new Set<string>();
+    dates.add(route.statementDate);
+    datesByAccount.set(route.accountId, dates);
+  }
+  const summaries = plannedAccounts.flatMap((account, index) => {
+    const dates = [...(datesByAccount.get(account.accountId) ?? [])].sort();
+    return dates.length > 0
+      ? [`route-${index + 1}/${account.accountKind}[${dates.join(',')}]`]
+      : [];
+  });
+  return summaries.join(';') || 'none';
 }
 
 export function vanguardCsvAccountLast4s(text: string): string[] {
@@ -770,6 +804,7 @@ export function parseVanguardStatementApiResponse(
     statementIds.add(statementId);
     const route = matches[0]!;
     statements.push({
+      accountId: route.account.accountId,
       accountKind: route.account.accountKind,
       accountLast4: route.account.accountLast4,
       validationAccountLast4s: route.identityLast4s,
@@ -1033,8 +1068,8 @@ async function discoverVanguardStatements(
   return statements;
 }
 
-function statementForJob(
-  job: ArtifactJob,
+export function vanguardStatementForRequest(
+  job: VanguardStatementRequest,
   statements: VanguardRemoteStatement[],
 ): VanguardRemoteStatement | null {
   const exact = statements.filter(statement =>
@@ -1165,28 +1200,38 @@ async function executeVanguardProfile(
         'statement-discovery',
         'statement-discovery',
         'start',
-        'Discovering Vanguard statements through the API',
-        { requestedStatementCount: statementJobs.length },
+        'Discovering requested Vanguard statements through the API',
+        {
+          requestedStatementCount: statementJobs.length,
+          requestedStatementRoutes: vanguardStatementRouteSummary(profile.accounts, statementJobs),
+        },
       );
       const years = [...new Set(statementJobs.map(job => job.statementDate!.slice(0, 4)))].sort();
+      const requestedAccountIds = new Set(statementJobs.map(job => job.accountId));
       const statements = await discoverVanguardStatements(
         page,
         years,
-        vanguardStatementAccountRoutes(profile.accounts, mappedAccounts),
+        vanguardStatementAccountRoutes(profile.accounts, mappedAccounts, requestedAccountIds),
       );
       progress(
         'statement-discovery',
         'statement-discovery',
         'complete',
-        `Discovered ${statements.length} Vanguard statement artifact${statements.length === 1 ? '' : 's'}`,
-        { discoveredStatementCount: statements.length, yearCount: years.length },
+        `Discovered ${statements.length} relevant Vanguard statement candidate${statements.length === 1 ? '' : 's'}`,
+        {
+          discoveredStatementCount: statements.length,
+          discoveredStatementRoutes: vanguardStatementRouteSummary(profile.accounts, statements),
+          yearCount: years.length,
+        },
       );
       let unavailableStatementCount = 0;
+      const unavailableStatementJobs: ArtifactJob[] = [];
       for (let index = 0; index < statementJobs.length; index += 1) {
         const job = statementJobs[index]!;
-        const statement = statementForJob(job, statements);
+        const statement = vanguardStatementForRequest(job, statements);
         if (!statement) {
           unavailable.push(job.fileName);
+          unavailableStatementJobs.push(job);
           unavailableStatementCount += 1;
           continue;
         }
@@ -1219,7 +1264,13 @@ async function executeVanguardProfile(
           'statement-download',
           'complete',
           `${unavailableStatementCount} requested Vanguard statement artifact${unavailableStatementCount === 1 ? ' was' : 's were'} unavailable`,
-          { unavailableStatementCount },
+          {
+            unavailableStatementCount,
+            unavailableStatementRoutes: vanguardStatementRouteSummary(
+              profile.accounts,
+              unavailableStatementJobs,
+            ),
+          },
         );
       }
     }

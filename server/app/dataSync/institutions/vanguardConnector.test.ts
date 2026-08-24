@@ -171,6 +171,44 @@ test('Vanguard statement planning includes only missing completed month ends', (
   )).toEqual([]);
 });
 
+test('Vanguard current planning skips covered accounts and requests only dormant-account gaps', () => {
+  const profiles = planVanguardProfiles(context([
+    account({
+      id: 10,
+      name: 'Brokerage 1111',
+      sourceAccountName: 'Individual brokerage account ending in 1111',
+      artifactFileNames: ['vanguard-current-brokerage-2026-07-24-to-2026-08-16-activity-1111.csv'],
+      latestBalanceDate: '2026-07-31',
+      balanceDates: ['2026-07-31'],
+    }),
+    account({
+      id: 20,
+      name: 'Roth IRA 2222',
+      sourceAccountName: 'Roth IRA account ending in 2222',
+      artifactFileNames: ['2026-07-31-Roth-IRA-2222---current.pdf'],
+      latestBalanceDate: '2026-07-31',
+      balanceDates: ['2026-07-31'],
+    }),
+    account({
+      id: 30,
+      name: 'Traditional IRA 3333',
+      sourceAccountName: 'Traditional IRA account ending in 3333',
+      latestBalanceDate: '2026-04-30',
+      balanceDates: ['2026-04-30'],
+    }),
+  ]), { kind: 'current', overlapDays: 7 });
+
+  expect(profiles).toHaveLength(1);
+  expect(profiles[0]!.accounts.map(plan => ({
+    accountId: plan.accountId,
+    statementDates: plan.statementDates,
+  }))).toEqual([
+    { accountId: 10, statementDates: [] },
+    { accountId: 20, statementDates: [] },
+    { accountId: 30, statementDates: ['2026-05-31', '2026-06-30', '2026-07-31'] },
+  ]);
+});
+
 test('Vanguard connection selection isolates one login without changing all-profile runs', () => {
   const profiles = planVanguardProfiles(
     context(twoProfileAccounts),

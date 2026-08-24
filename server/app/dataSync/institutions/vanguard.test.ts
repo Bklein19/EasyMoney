@@ -31,8 +31,10 @@ import {
   vanguardAccountLast4FromText,
   vanguardCsvAccountLast4s,
   vanguardStatementAccountRoutes,
+  vanguardStatementForRequest,
   vanguardStatementListRequest,
   vanguardStatementPdfRequest,
+  vanguardStatementRouteSummary,
   vanguardThroughDate,
   type VanguardAccountApiRecord,
   type VanguardSyncAccount,
@@ -545,10 +547,75 @@ test('Vanguard carries a safely matched remote identity into statement routing',
     statementDescription: 'Individual brokerage XXXX9999',
     statementId: 'statement-document',
   }] }, routes)[0]).toMatchObject({
+    accountId: 10,
     accountKind: 'brokerage',
     accountLast4: '1111',
     validationAccountLast4s: ['1111', '9999'],
   });
+});
+
+test('Vanguard statement discovery keeps only pending routes including a dormant account', () => {
+  const planned: VanguardSyncAccount[] = [
+    {
+      accountId: 10,
+      accountKind: 'brokerage',
+      accountLast4: '1111',
+      startDate: '2026-07-24',
+      statementDates: [],
+    },
+    {
+      accountId: 20,
+      accountKind: 'roth-ira',
+      accountLast4: '2222',
+      startDate: '2026-07-24',
+      statementDates: [],
+    },
+    {
+      accountId: 30,
+      accountKind: 'traditional-ira',
+      accountLast4: '3333',
+      startDate: '2026-04-23',
+      statementDates: ['2026-05-31', '2026-06-30', '2026-07-31'],
+    },
+  ];
+  const mapped = mapVanguardRemoteAccounts(parseVanguardAccountApiResponse({ accounts: [
+    apiAccount('1111', 'Individual brokerage', 'Brokerage'),
+    apiAccount('2222', 'Roth IRA', 'Roth IRA'),
+  ] }), planned);
+  const routes = vanguardStatementAccountRoutes(planned, mapped, new Set([30]));
+  const candidates = parseVanguardStatementApiResponse({ statements: [
+    {
+      endDate: '2026-07-31',
+      statementDescription: 'Individual brokerage XXXX1111',
+      statementId: 'brokerage-july',
+    },
+    {
+      endDate: '2026-07-31',
+      statementDescription: 'Roth IRA XXXX2222',
+      statementId: 'roth-july',
+    },
+    {
+      endDate: '2026-04-30',
+      statementDescription: 'Traditional IRA XXXX3333',
+      statementId: 'traditional-april',
+    },
+  ] }, routes);
+
+  expect(routes.map(route => route.account.accountId)).toEqual([30]);
+  expect(candidates.map(candidate => [candidate.accountId, candidate.statementDate])).toEqual([
+    [30, '2026-04-30'],
+  ]);
+  expect(planned[2]!.statementDates.map(statementDate => vanguardStatementForRequest({
+    accountLast4: '3333',
+    statementDate,
+  }, candidates))).toEqual([null, null, null]);
+  expect(vanguardStatementRouteSummary(planned, candidates)).toBe(
+    'route-3/traditional-ira[2026-04-30]',
+  );
+  expect(vanguardStatementRouteSummary(planned, planned[2]!.statementDates.map(statementDate => ({
+    accountId: 30,
+    statementDate,
+  })))).toBe('route-3/traditional-ira[2026-05-31,2026-06-30,2026-07-31]');
 });
 
 test('Vanguard builds direct statement list and PDF requests', () => {
