@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
-import { chromium, type Page } from 'playwright';
+import { chromium, type Page, type Request, type Response } from 'playwright';
 
 import { parseCsvRows } from '../../importParsers/csvRows.ts';
 import parseTiaaActivity, {
@@ -53,6 +53,7 @@ export interface TiaaSyncConfig {
   session?: string;
   profilePath?: string;
   headless?: boolean;
+  authenticationTimeoutMs?: number;
   artifactTypes?: TiaaArtifactType[];
 }
 
@@ -172,6 +173,11 @@ type BrowserFetchResult = {
   contentType: string;
   finalUrl: string;
   body: Buffer;
+};
+
+type TiaaAuthenticationEntry = {
+  url: string;
+  ready: 'activity' | 'statement';
 };
 
 class TiaaAuthenticationRequiredError extends Error {
@@ -318,6 +324,19 @@ export function tiaaResponseRequiresAuthentication(status: number, finalUrl: str
     /\/(?:public\/authentication|login|signin|authorization|oauth)(?:\/|$)/i.test(url.pathname);
 }
 
+export function tiaaResponseBodyRequiresAuthentication(contentType: string, body: Buffer): boolean {
+  if (!/text\/html|application\/xhtml\+xml/i.test(contentType)) return false;
+  const sample = body.toString('utf8', 0, 64 * 1_024);
+  return /<input\b[^>]*(?:type=["']?password|autocomplete=["']?(?:username|current-password))/i.test(sample) ||
+    /auth\.tiaa\.org|\/public\/authentication\/securelogin/i.test(sample);
+}
+
+export function tiaaAuthenticationEntry(artifactTypes: readonly TiaaArtifactType[]): TiaaAuthenticationEntry {
+  return artifactTypes.length === 1 && artifactTypes[0] === 'statement'
+    ? { url: TIAA_STATEMENTS_URL, ready: 'statement' }
+    : { url: TIAA_ACTIVITY_URL, ready: 'activity' };
+}
+
 function isTiaaAuthenticationRequired(error: unknown): boolean {
   return error instanceof TiaaAuthenticationRequiredError ||
     (error instanceof Error && error.name === 'TiaaAuthenticationRequiredError');
@@ -351,51 +370,84 @@ function requiredString(value: unknown, description: string): string {
   return value.trim();
 }
 
-async function browserFetch(
+function requestRoot(request: Request): Request {
+  let root = request;
+  while (root.redirectedFrom()) root = root.redirectedFrom()!;
+  return root;
+}
+
+function belongsToBrowserFetch(request: Request, destination: string, method: 'GET' | 'POST'): boolean {
+  const root = requestRoot(request);
+  return root.url() === destination && root.method() === method;
+}
+
+export async function browserFetch(
   page: Page,
   url: string,
   options: { method?: 'GET' | 'POST'; headers?: Record<string, string>; body?: string } = {},
 ): Promise<BrowserFetchResult> {
   const destination = validatedTiaaUrl(url, /^\/(?:secure|private)\//i);
-  const response = await page.evaluate(async ({ destination, method, headers, body }) => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30_000);
-    try {
-      const result = await fetch(destination, {
-        method,
-        headers,
-        body,
-        credentials: 'include',
-        redirect: 'follow',
-        signal: controller.signal,
-      });
-      const bytes = new Uint8Array(await result.arrayBuffer());
-      let binary = '';
-      for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-        binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  const method = options.method ?? 'GET';
+  let authenticationEvidence = false;
+  const observeRequest = (request: Request) => {
+    if (belongsToBrowserFetch(request, destination, method) &&
+      tiaaResponseRequiresAuthentication(200, request.url())) authenticationEvidence = true;
+  };
+  const observeResponse = (response: Response) => {
+    if (belongsToBrowserFetch(response.request(), destination, method) &&
+      tiaaResponseRequiresAuthentication(response.status(), response.url())) authenticationEvidence = true;
+  };
+  page.on('request', observeRequest);
+  page.on('response', observeResponse);
+  let response: { status: number; contentType: string; finalUrl: string; body: string };
+  try {
+    response = await page.evaluate(async ({ destination, method, headers, body }) => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30_000);
+      try {
+        const result = await fetch(destination, {
+          method,
+          headers,
+          body,
+          credentials: 'include',
+          redirect: 'follow',
+          signal: controller.signal,
+        });
+        const bytes = new Uint8Array(await result.arrayBuffer());
+        let binary = '';
+        for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+          binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+        }
+        return {
+          status: result.status,
+          contentType: result.headers.get('content-type') ?? '',
+          finalUrl: result.url,
+          body: btoa(binary),
+        };
+      } finally {
+        clearTimeout(timeout);
       }
-      return {
-        status: result.status,
-        contentType: result.headers.get('content-type') ?? '',
-        finalUrl: result.url,
-        body: btoa(binary),
-      };
-    } finally {
-      clearTimeout(timeout);
-    }
-  }, {
-    destination,
-    method: options.method ?? 'GET',
-    headers: options.headers ?? {},
-    body: options.body,
-  });
+    }, {
+      destination,
+      method,
+      headers: options.headers ?? {},
+      body: options.body,
+    });
+  } catch (error) {
+    if (authenticationEvidence) throw new TiaaAuthenticationRequiredError('TIAA authentication is required');
+    throw error;
+  } finally {
+    page.off('request', observeRequest);
+    page.off('response', observeResponse);
+  }
   const decoded = {
     status: response.status,
     contentType: response.contentType.toLowerCase(),
     finalUrl: response.finalUrl,
     body: Buffer.from(response.body, 'base64'),
   };
-  if (tiaaResponseRequiresAuthentication(decoded.status, decoded.finalUrl)) {
+  if (tiaaResponseRequiresAuthentication(decoded.status, decoded.finalUrl) ||
+    tiaaResponseBodyRequiresAuthentication(decoded.contentType, decoded.body)) {
     throw new TiaaAuthenticationRequiredError('TIAA authentication is required');
   }
   return decoded;
@@ -421,19 +473,6 @@ async function browserFetchJson(
   }
 }
 
-async function prepareTiaaBrowser(page: Page): Promise<void> {
-  const userAgent = await page.evaluate(() => navigator.userAgent);
-  if (!/HeadlessChrome/i.test(userAgent)) return;
-  const session = await page.context().newCDPSession(page);
-  try {
-    await session.send('Network.setUserAgentOverride', {
-      userAgent: userAgent.replace(/HeadlessChrome/gi, 'Chrome'),
-    });
-  } finally {
-    await session.detach();
-  }
-}
-
 export async function isTiaaAuthenticatedPage(page: Page): Promise<boolean> {
   if (await page.locator(VISIBLE_AUTHENTICATION_FIELDS).count() > 0) return false;
   const url = new URL(page.url());
@@ -456,23 +495,26 @@ export async function waitUntilTiaaAuthenticated(page: Page, timeoutMs: number):
   );
 }
 
-async function openTiaaHomeForAuthentication(page: Page): Promise<void> {
+async function openTiaaForAuthentication(page: Page, entry: TiaaAuthenticationEntry): Promise<void> {
   let current: URL | null = null;
   try {
     current = new URL(page.url());
   } catch {}
-  const target = new URL(TIAA_ACTIVITY_URL);
+  const target = new URL(entry.url);
   if (!current || current.hostname !== target.hostname || current.pathname !== target.pathname) {
     try {
-      await page.goto(TIAA_ACTIVITY_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      await page.goto(entry.url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     } catch (error) {
       if (!/net::ERR_ABORTED|navigation.*interrupted/i.test(String(error instanceof Error ? error.message : error))) {
         throw error;
       }
     }
   }
+  const ready = entry.ready === 'activity'
+    ? page.getByRole('button', { name: /^Download$/i })
+    : page.getByRole('combobox');
   await Promise.race([
-    page.getByRole('button', { name: /^Download$/i }).first().waitFor({ state: 'visible', timeout: 30_000 }),
+    ready.first().waitFor({ state: 'visible', timeout: 30_000 }),
     page.locator(VISIBLE_AUTHENTICATION_FIELDS).first().waitFor({ state: 'visible', timeout: 30_000 }),
     page.waitForURL(url => /login|signin|authenticate|authorization|oauth|sso|auth\./i.test(url.toString()), {
       timeout: 30_000,
@@ -569,6 +611,9 @@ export function validateTiaaActivityRequestBody(
   const record = asRecord(value, 'activity download request');
   if (typeof record.selectedTimePeriod !== 'string' || !Array.isArray(record.selectedAccountTypes)) {
     throw new Error('TIAA activity download request had an unexpected shape');
+  }
+  if (record.downloadCSV !== true || record.noAccountSelected !== false) {
+    throw new Error('TIAA activity download request did not select an isolated CSV export');
   }
   if (period.value && record.selectedTimePeriod !== period.value) {
     throw new Error('TIAA activity download request did not match the selected period');
@@ -1065,7 +1110,7 @@ export async function runAuthenticatedTiaa(
   const sourceClaims = new Set(artifacts.flatMap(artifact => artifact.account.remoteAccounts.map(account => account.claimKey)));
   return {
     artifacts,
-    accountsDiscovered: sourceClaims.size || accountSelectionsDiscovered,
+    accountsDiscovered: sourceClaims.size,
     accountSelectionsDiscovered,
     activityPeriodsDiscovered,
     statementsDiscovered,
@@ -1075,7 +1120,6 @@ export async function runAuthenticatedTiaa(
 
 const browserProgram = `async (page, _reportProgress, bindings) => {
   try {
-    await bindings.prepare(page);
     await bindings.openHome(page);
     if (!await bindings.isAuthenticated(page)) {
       return JSON.stringify({
@@ -1112,11 +1156,12 @@ export async function runTiaaSync(
   const progress = createProgressTracker(onProgress);
   progress.start('authentication', 'Checking the cached TIAA authentication');
   const userAgent = await normalChromeUserAgent();
+  const authenticationEntry = tiaaAuthenticationEntry(normalizedConfig.artifactTypes!);
 
   const result = await runInstitutionBrowserProgram<BrowserRunResult>(
     {
       name: normalizedConfig.session!,
-      startUrl: TIAA_ACTIVITY_URL,
+      startUrl: authenticationEntry.url,
       profilePath: normalizedConfig.profilePath,
       launchArgs: ['--disable-blink-features=AutomationControlled'],
       contextOptions: {
@@ -1126,6 +1171,7 @@ export async function runTiaaSync(
     },
     browserProgram,
     {
+      authenticationTimeoutMs: normalizedConfig.authenticationTimeoutMs,
       completionDescription: 'TIAA downloads are complete and ready for review.',
       isAuthenticated: isTiaaAuthenticatedPage,
       waitUntilAuthenticated: waitUntilTiaaAuthenticated,
@@ -1133,9 +1179,8 @@ export async function runTiaaSync(
         if (/Authentication complete/i.test(message)) progress.progress('authentication', 'TIAA login and MFA completed');
       },
       programBindings: {
-        prepare: prepareTiaaBrowser,
         isAuthenticated: isTiaaAuthenticatedPage,
-        openHome: openTiaaHomeForAuthentication,
+        openHome: (page: Page) => openTiaaForAuthentication(page, authenticationEntry),
         run: (page: Page) => runAuthenticatedTiaa(page, normalizedConfig, progress),
         isAuthenticationRequired: isTiaaAuthenticationRequired,
         sanitizeError: sanitizedError,

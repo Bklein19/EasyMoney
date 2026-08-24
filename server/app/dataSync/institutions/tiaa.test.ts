@@ -7,12 +7,15 @@ import type { Page } from 'playwright';
 
 import { meta as tiaaStatementMeta } from '../../importParsers/moneyParsers/tiaa-statement-pdf.ts';
 import {
+  browserFetch,
+  tiaaAuthenticationEntry,
   tiaaActivityAccountIds,
   tiaaActivityAccountTypes,
   tiaaActivityPeriod,
   tiaaActivityRemoteAccount,
   tiaaActivitySourceAccountName,
   tiaaResponseRequiresAuthentication,
+  tiaaResponseBodyRequiresAuthentication,
   runAuthenticatedTiaa,
   tiaaSourceAccountClaimKey,
   tiaaStatementDocuments,
@@ -97,6 +100,10 @@ describe('TIAA live metadata mapping', () => {
         { id: 'trust', description: 'Trust Accounts', selected: true },
       ],
     }, period, account)).toThrow('did not isolate the supported account selection');
+    expect(() => validateTiaaActivityRequestBody({ ...request, downloadCSV: false }, period, account))
+      .toThrow('did not select an isolated CSV export');
+    expect(() => validateTiaaActivityRequestBody({ ...request, noAccountSelected: true }, period, account))
+      .toThrow('did not select an isolated CSV export');
 
     expect(() => validateTiaaActivityCoverage({
       coveredFrom: '2025-01-01',
@@ -222,10 +229,77 @@ describe('TIAA parser claim identity', () => {
       .toBe(true);
     expect(tiaaResponseRequiresAuthentication(200, 'https://my.tiaa.org/private/documentdelivery/documents/one'))
       .toBe(false);
+    expect(tiaaResponseBodyRequiresAuthentication(
+      'text/html',
+      Buffer.from('<html><input type="password" autocomplete="current-password"></html>'),
+    )).toBe(true);
+    expect(tiaaResponseBodyRequiresAuthentication('text/html', Buffer.from('<html>Service unavailable</html>')))
+      .toBe(false);
+  });
+
+  test('maps a CORS-failed login redirect request chain to authentication required', async () => {
+    const destination = 'https://my.tiaa.org/secure/account-statements/api/type';
+    const requestListeners: Array<(request: unknown) => void> = [];
+    const rootRequest = {
+      url: () => destination,
+      method: () => 'GET',
+      redirectedFrom: () => null,
+    };
+    const loginRequest = {
+      url: () => 'https://auth.tiaa.org/public/authentication/securelogin',
+      method: () => 'GET',
+      redirectedFrom: () => rootRequest,
+    };
+    const page = {
+      on(event: string, listener: (request: unknown) => void) {
+        if (event === 'request') requestListeners.push(listener);
+      },
+      off(event: string, listener: (request: unknown) => void) {
+        if (event !== 'request') return;
+        const index = requestListeners.indexOf(listener);
+        if (index >= 0) requestListeners.splice(index, 1);
+      },
+      async evaluate() {
+        for (const listener of requestListeners) listener(loginRequest);
+        throw new Error('Failed to fetch');
+      },
+    } as unknown as Page;
+
+    await expect(browserFetch(page, destination)).rejects.toMatchObject({
+      name: 'TiaaAuthenticationRequiredError',
+    });
+
+    const loginHtmlPage = {
+      on() {},
+      off() {},
+      async evaluate() {
+        return {
+          status: 200,
+          contentType: 'text/html',
+          finalUrl: destination,
+          body: Buffer.from('<html><input autocomplete="username"><input type="password"></html>')
+            .toString('base64'),
+        };
+      },
+    } as unknown as Page;
+    await expect(browserFetch(loginHtmlPage, destination)).rejects.toMatchObject({
+      name: 'TiaaAuthenticationRequiredError',
+    });
   });
 });
 
 describe('TIAA artifact phase isolation', () => {
+  test('uses statement readiness for statement-only browser sessions', () => {
+    expect(tiaaAuthenticationEntry(['statement'])).toEqual({
+      url: 'https://my.tiaa.org/secure/account-statements/all',
+      ready: 'statement',
+    });
+    expect(tiaaAuthenticationEntry(['activity', 'statement'])).toEqual({
+      url: 'https://my.tiaa.org/secure/participantdata/webconnect',
+      ready: 'activity',
+    });
+  });
+
   test('statement-only discovery never depends on the activity SPA', async () => {
     let activityDiscoveryCalls = 0;
     let statementDiscoveryCalls = 0;
@@ -255,6 +329,39 @@ describe('TIAA artifact phase isolation', () => {
       statementsDiscovered: 0,
       emptyActivityExports: 0,
     });
+  });
+
+  test('does not count an account selection when every activity export is empty', async () => {
+    const result = await runAuthenticatedTiaa({} as Page, {
+      outputDir: '/tmp/tiaa-empty-activity-test',
+      from: '2026-01-01',
+      through: '2026-08-24',
+      artifactTypes: ['activity'],
+    }, undefined, {
+      discoverActivityMetadata: async () => ({
+        accountTypes: [{
+          id: 'retirement',
+          description: 'Retirement Accounts',
+          selected: true,
+          routingKey: 'aaaaaaaaaaaa',
+        }],
+        periods: [{
+          label: 'Current year',
+          value: '0',
+          year: 2026,
+          coveredFrom: '2026-01-01',
+          coveredThrough: '2026-12-31',
+        }],
+      }),
+      captureActivityRequestBody: async () => ({}),
+      downloadActivityArtifact: async () => {
+        throw new Error('TIAA CSV artifact contains no parser-visible activity');
+      },
+    });
+
+    expect(result.accountsDiscovered).toBe(0);
+    expect(result.accountSelectionsDiscovered).toBe(1);
+    expect(result.emptyActivityExports).toBe(1);
   });
 });
 
