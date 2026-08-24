@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 
 import { meta as tiaaStatementMeta } from '../../importParsers/moneyParsers/tiaa-statement-pdf.ts';
 import {
@@ -105,6 +105,12 @@ describe('TIAA authenticated API requests', () => {
       'multipart/form-data',
       [],
     )).toThrow('unsupported encoding');
+  });
+
+  test('keeps downloads on authenticated requests without fixed browser sleeps', async () => {
+    const source = await Bun.file(resolve(import.meta.dir, 'tiaa.ts')).text();
+    expect(source).toContain('page.context().request');
+    expect(source).not.toContain('waitForTimeout(');
   });
 });
 

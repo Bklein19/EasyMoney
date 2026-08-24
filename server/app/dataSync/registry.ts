@@ -1,12 +1,14 @@
 import type { SyncConnector } from './connector.ts';
 import { bankOfAmericaConnector } from './institutions/bankOfAmericaConnector.ts';
 import { sequoiaFundConnector } from './institutions/sequoiaFundConnector.ts';
+import { tiaaConnector } from './institutions/tiaaConnector.ts';
 import { vanguardConnector } from './institutions/vanguardConnector.ts';
 
 export const syncConnectors = [
   bankOfAmericaConnector,
   vanguardConnector,
   sequoiaFundConnector,
+  tiaaConnector,
 ] as const satisfies readonly SyncConnector[];
 
 export type SyncInstitutionId = (typeof syncConnectors)[number]['id'];
