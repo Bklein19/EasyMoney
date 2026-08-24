@@ -1,4 +1,4 @@
-import type { SyncGoal } from './types.ts';
+import type { SyncGoal } from './protocol.ts';
 
 interface CoverageWindow {
   latestFactDate: string | null;

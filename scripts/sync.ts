@@ -2,6 +2,7 @@
 
 import { closeDatabase, initDatabase } from '../server/database.ts';
 import { loadLocalEnv } from '../server/app/localEnv.ts';
+import { isSyncInstitutionId, syncInstitutionIds } from '../server/app/dataSync/registry.ts';
 import { runSync } from '../server/app/dataSync/runner.ts';
 import type { SyncEvent, SyncGoal, SyncRunRequest } from '../server/app/dataSync/types.ts';
 
@@ -28,8 +29,8 @@ initDatabase();
 
 const args = Bun.argv.slice(2);
 const institution = valueAfter(args, '--institution');
-if (institution !== 'bank-of-america' && institution !== 'vanguard' && institution !== 'sequoia-fund') {
-  throw new Error('Use --institution bank-of-america, vanguard, or sequoia-fund');
+if (!isSyncInstitutionId(institution)) {
+  throw new Error(`Use --institution ${syncInstitutionIds.join(', ')}`);
 }
 const runId = valueAfter(args, '--run-id') ?? `sync-${Date.now()}`;
 const request: SyncRunRequest = {

@@ -1,7 +1,8 @@
 export type { SyncEvent, SyncGoal, SyncReporter } from './protocol.ts';
 import type { SyncGoal } from './protocol.ts';
+import type { SyncInstitutionId as RegisteredSyncInstitutionId } from './registry.ts';
 
-export type SyncInstitutionId = 'bank-of-america' | 'vanguard' | 'sequoia-fund';
+export type SyncInstitutionId = RegisteredSyncInstitutionId;
 
 export interface SyncRunRequest {
   runId: string;

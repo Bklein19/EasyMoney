@@ -22,7 +22,9 @@ import {
 import { createCategory, deleteCategory, listCategories, updateCategory } from './categories.ts';
 import { getDataFreshnessReport } from './dataFreshness.ts';
 import { cancelSyncJob, confirmSyncJob, discardSyncJob, getSyncJob, startSyncJob } from './dataSync/jobs.ts';
+import { isSyncInstitutionId } from './dataSync/registry.ts';
 import { listSyncTargets } from './dataSync/runner.ts';
+import type { SyncInstitutionId } from './dataSync/types.ts';
 import { commitImport, listImportHistory, previewImport, reimportFile, reimportFiles, unimportFile, unimportFiles } from './imports.ts';
 import { listImportProfiles, upsertImportProfile } from './importProfiles.ts';
 import { getInvestmentNetWorthReport, getSavingsRateReport } from './investmentReports.ts';
@@ -253,7 +255,7 @@ export const appRouter = t.router({
 
     start: t.procedure
       .input(z.object({
-        institutionId: z.enum(['bank-of-america', 'vanguard', 'sequoia-fund']),
+        institutionId: z.custom<SyncInstitutionId>(isSyncInstitutionId, 'Unsupported institution connector'),
         connectionId: z.string().optional(),
         goal: syncGoalInput,
       }))

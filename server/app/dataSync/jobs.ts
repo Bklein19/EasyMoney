@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 
 import { commitSyncReview, discardSyncReview } from './review.ts';
 import { markInterruptedSyncJob } from './jobState.ts';
-import { syncApplicationDataRoot } from './runner.ts';
+import { syncApplicationDataRoot } from './paths.ts';
 import { syncChildProcessOptions } from './subprocess.ts';
 import type { SyncEvent, SyncGoal, SyncInstitutionId, SyncRunResult, SyncRunReview } from './types.ts';
 
