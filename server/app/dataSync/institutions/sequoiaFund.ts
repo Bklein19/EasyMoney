@@ -976,7 +976,6 @@ export async function runSequoiaFundSync(
     {
       name: session,
       startUrl: sequoiaFundLoginUrl,
-      savedAuthenticationMode: 'headed',
       ...(config.profilePath ? { profilePath: config.profilePath } : {}),
       ...(config.headless === undefined ? {} : { contextOptions: { headless: config.headless } }),
     },

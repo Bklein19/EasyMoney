@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Page } from 'playwright';
@@ -13,6 +13,8 @@ import {
   playwrightAuthStatePath,
   playwrightHasSavedAuthentication,
   playwrightProfilePath,
+  playwrightSessionStoragePath,
+  restoreBrowserAuthentication,
   runWhileBrowserOpen,
   showAuthenticationChapter,
   showSyncCompletionChapter,
@@ -48,6 +50,8 @@ describe('Playwright session helper', () => {
   test('keeps auth state inside the private institution profile', () => {
     expect(playwrightAuthStatePath('/profiles/tiaa-catchup'))
       .toBe('/profiles/tiaa-catchup/.easymoney-auth-state.json');
+    expect(playwrightSessionStoragePath('/profiles/tiaa-catchup'))
+      .toBe('/profiles/tiaa-catchup/.easymoney-session-storage.json');
   });
 
   test('detects saved authentication independently from the browser profile', async () => {
@@ -100,16 +104,6 @@ describe('Playwright session helper', () => {
       allowHeadedAuthenticationFallback: true,
     });
     expect(institutionBrowserLaunchStrategy({ hasSavedAuthentication: false })).toEqual({
-      initialHeadless: false,
-      allowHeadedAuthenticationFallback: false,
-    });
-  });
-
-  test('can reuse saved authentication in headed Chrome for sites that reject headless sessions', () => {
-    expect(institutionBrowserLaunchStrategy({
-      hasSavedAuthentication: true,
-      savedAuthenticationMode: 'headed',
-    })).toEqual({
       initialHeadless: false,
       allowHeadedAuthenticationFallback: false,
     });
@@ -292,6 +286,54 @@ describe('Playwright session helper', () => {
 
     expect(persisted).toBe(false);
     expect(performance.now() - startedAt).toBeLessThan(250);
+  });
+
+  test('persists session storage that Playwright storage state omits', async () => {
+    const profilePath = await mkdtemp(join(tmpdir(), 'easymoney-playwright-session-storage-'));
+    temporaryDirectories.push(profilePath);
+    const authStatePath = playwrightAuthStatePath(profilePath);
+    const context = {
+      storageState: async ({ path }: { path: string }) => {
+        await writeFile(path, JSON.stringify({ cookies: [], origins: [] }));
+      },
+      pages: () => [{
+        isClosed: () => false,
+        evaluate: async () => ({
+          origin: 'https://accounts.example.test',
+          entries: { authenticatedFlow: 'resume-token' },
+        }),
+      }],
+    };
+
+    expect(await persistBrowserAuthentication(context as never, authStatePath)).toBe(true);
+    expect(JSON.parse(await readFile(playwrightSessionStoragePath(profilePath), 'utf8'))).toEqual({
+      'https://accounts.example.test': { authenticatedFlow: 'resume-token' },
+    });
+  });
+
+  test('restores session storage before reopening the institution page', async () => {
+    const profilePath = await mkdtemp(join(tmpdir(), 'easymoney-playwright-session-restore-'));
+    temporaryDirectories.push(profilePath);
+    await writeFile(playwrightAuthStatePath(profilePath), JSON.stringify({ cookies: [], origins: [] }));
+    const saved = {
+      'https://accounts.example.test': { authenticatedFlow: 'resume-token' },
+    };
+    await writeFile(playwrightSessionStoragePath(profilePath), JSON.stringify(saved));
+    let restoredStatePath: string | undefined;
+    let restoredSessionStorage: unknown;
+    const context = {
+      setStorageState: async (path: string) => {
+        restoredStatePath = path;
+      },
+      addInitScript: async (_script: unknown, value: unknown) => {
+        restoredSessionStorage = value;
+      },
+    };
+
+    await restoreBrowserAuthentication(context as never, profilePath);
+
+    expect(restoredStatePath).toBe(playwrightAuthStatePath(profilePath));
+    expect(restoredSessionStorage).toEqual(saved);
   });
 
   test('rejects the active institution step when Chrome exits', async () => {

@@ -18,7 +18,6 @@ type SessionOptions = {
   startUrl: string;
   profilePath?: string;
   persistAuthentication?: boolean;
-  savedAuthenticationMode?: 'headless' | 'headed';
   onInteractiveBrowserWait?: (message: string) => void;
   contextOptions?: NonNullable<Parameters<typeof chromium.launchPersistentContext>[1]>;
   launchArgs?: string[];
@@ -57,6 +56,10 @@ export function playwrightProfilePath(
 
 export function playwrightAuthStatePath(profilePath: string): string {
   return resolve(profilePath, '.easymoney-auth-state.json');
+}
+
+export function playwrightSessionStoragePath(profilePath: string): string {
+  return resolve(profilePath, '.easymoney-session-storage.json');
 }
 
 type InteractiveBrowserLeaseOptions = {
@@ -209,7 +212,6 @@ export function institutionBrowserLaunchStrategy(options: {
   hasSavedAuthentication: boolean;
   persistAuthentication?: boolean;
   requestedHeadless?: boolean;
-  savedAuthenticationMode?: 'headless' | 'headed';
 }): InstitutionBrowserLaunchStrategy {
   if (options.requestedHeadless !== undefined) {
     return {
@@ -219,8 +221,7 @@ export function institutionBrowserLaunchStrategy(options: {
   }
 
   const initialHeadless = (options.persistAuthentication ?? true) &&
-    options.hasSavedAuthentication &&
-    options.savedAuthenticationMode !== 'headed';
+    options.hasSavedAuthentication;
   return {
     initialHeadless,
     allowHeadedAuthenticationFallback: initialHeadless,
@@ -255,12 +256,10 @@ async function launchPlaywrightPage<T>(
   operation: (page: Page, context: BrowserContext) => Promise<T>,
 ): Promise<T> {
   const profilePath = options.profilePath;
-  const authStatePath = playwrightAuthStatePath(profilePath);
   const persistAuthentication = options.persistAuthentication ?? true;
 
-  const savedStorageState = persistAuthentication && await fileExists(authStatePath)
-    ? authStatePath
-    : undefined;
+  const hasSavedAuthentication = persistAuthentication &&
+    await fileExists(playwrightAuthStatePath(profilePath));
 
   let context: BrowserContext;
   try {
@@ -280,25 +279,77 @@ async function launchPlaywrightPage<T>(
   }
 
   try {
-    if (savedStorageState) await context.setStorageState(savedStorageState);
+    if (hasSavedAuthentication) await restoreBrowserAuthentication(context, profilePath);
     const page = context.pages()[0] ?? await context.newPage();
-    await openInstitutionStartPage(page, options.startUrl, Boolean(savedStorageState));
+    await openInstitutionStartPage(page, options.startUrl, hasSavedAuthentication);
     return await runWhileBrowserOpen(context, () => operation(page, context));
   } finally {
-    try {
-      if (persistAuthentication) {
-        const persisted = await persistBrowserAuthentication(context, authStatePath);
-        if (!persisted) console.warn(`Could not finish saving authentication for ${options.name}.`);
-      }
-    } finally {
-      const closed = await closeBrowserContext(context);
-      if (!closed) console.warn(`Timed out closing the ${options.name} browser context after Chrome exited.`);
-    }
+    const closed = await closeBrowserContext(context);
+    if (!closed) console.warn(`Timed out closing the ${options.name} browser context after Chrome exited.`);
   }
 }
 
+type SessionStorageByOrigin = Record<string, Record<string, string>>;
+
+function isStringRecord(value: unknown): value is Record<string, string> {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Object.values(value).every(entry => typeof entry === 'string');
+}
+
+function isSessionStorageByOrigin(value: unknown): value is SessionStorageByOrigin {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  return Object.entries(value).every(([origin, entries]) =>
+    /^https?:\/\//.test(origin) && isStringRecord(entries)
+  );
+}
+
+async function savedSessionStorage(profilePath: string): Promise<SessionStorageByOrigin> {
+  try {
+    const value = JSON.parse(await readFile(playwrightSessionStoragePath(profilePath), 'utf8')) as unknown;
+    return isSessionStorageByOrigin(value) ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function restoreBrowserAuthentication(
+  context: Pick<BrowserContext, 'addInitScript' | 'setStorageState'>,
+  profilePath: string,
+): Promise<void> {
+  await context.setStorageState(playwrightAuthStatePath(profilePath));
+  const storageByOrigin = await savedSessionStorage(profilePath);
+  if (Object.keys(storageByOrigin).length === 0) return;
+  await context.addInitScript((saved: SessionStorageByOrigin) => {
+    const entries = saved[location.origin];
+    if (!entries) return;
+    for (const [key, value] of Object.entries(entries)) sessionStorage.setItem(key, value);
+  }, storageByOrigin);
+}
+
+async function captureSessionStorage(
+  context: Pick<BrowserContext, 'pages'>,
+): Promise<SessionStorageByOrigin | null> {
+  const pages = context.pages();
+  const snapshots = await Promise.all(pages.map(async page => {
+    if (page.isClosed()) return null;
+    try {
+      return await page.evaluate(() => ({
+        origin: location.origin,
+        entries: Object.fromEntries(Object.entries(sessionStorage)),
+      }));
+    } catch {
+      return null;
+    }
+  }));
+  const valid = snapshots.filter((snapshot): snapshot is { origin: string; entries: Record<string, string> } =>
+    Boolean(snapshot && /^https?:\/\//.test(snapshot.origin) && isStringRecord(snapshot.entries))
+  );
+  if (valid.length === 0) return null;
+  return Object.fromEntries(valid.map(snapshot => [snapshot.origin, snapshot.entries]));
+}
+
 export async function persistBrowserAuthentication(
-  context: Pick<BrowserContext, 'storageState'>,
+  context: Pick<BrowserContext, 'pages' | 'storageState'>,
   authStatePath: string,
   timeoutMs = 5_000,
 ): Promise<boolean> {
@@ -306,7 +357,15 @@ export async function persistBrowserAuthentication(
   try {
     const persisted = await Promise.race([
       Promise.resolve()
-        .then(() => context.storageState({ path: authStatePath, indexedDB: true }))
+        .then(async () => {
+          await context.storageState({ path: authStatePath, indexedDB: true });
+          const sessionStorage = await captureSessionStorage(context);
+          if (sessionStorage) {
+            const sessionStoragePath = playwrightSessionStoragePath(dirname(authStatePath));
+            await writeFile(sessionStoragePath, JSON.stringify(sessionStorage), { mode: 0o600 });
+            if (process.platform !== 'win32') await chmod(sessionStoragePath, 0o600);
+          }
+        })
         .then(() => true),
       new Promise<false>(resolveTimeout => {
         timeout = setTimeout(() => resolveTimeout(false), timeoutMs);
@@ -475,7 +534,6 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     hasSavedAuthentication,
     persistAuthentication: session.persistAuthentication,
     requestedHeadless: session.contextOptions?.headless,
-    savedAuthenticationMode: session.savedAuthenticationMode,
   });
 
   const runAttempt = async (headless: boolean, allowInteractiveAuthentication: boolean) => withPlaywrightPage({
@@ -487,6 +545,20 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     },
   }, async (page, context) => {
     const deadline = Date.now() + (options.authenticationTimeoutMs ?? 10 * 60_000);
+    const isAuthenticated = options.isAuthenticated ?? hasDefaultAuthentication;
+    const checkpointAuthentication = async () => {
+      if (!(session.persistAuthentication ?? true)) return;
+      let authenticated = false;
+      try {
+        authenticated = await isAuthenticated(page);
+      } catch {
+        return;
+      }
+      if (!authenticated) return;
+      const profilePath = resolve(session.profilePath ?? playwrightProfilePath(session.name));
+      const persisted = await persistBrowserAuthentication(context, playwrightAuthStatePath(profilePath));
+      if (!persisted) console.warn(`Could not checkpoint authentication for ${session.name}.`);
+    };
     let result = decodeInstitutionBrowserProgramResult<T>(await program(
       page,
       reportProgress,
@@ -501,11 +573,7 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     }
     while (allowInteractiveAuthentication && result.status === 'login-required' && Date.now() < deadline) {
       await waitForInteractiveAuthentication(page, deadline, options);
-      if (session.persistAuthentication ?? true) {
-        const profilePath = resolve(session.profilePath ?? playwrightProfilePath(session.name));
-        const persisted = await persistBrowserAuthentication(context, playwrightAuthStatePath(profilePath));
-        if (!persisted) console.warn(`Could not checkpoint authentication for ${session.name}.`);
-      }
+      await checkpointAuthentication();
       reportProgress('Authentication complete. Continuing downloads.');
       result = decodeInstitutionBrowserProgramResult<T>(await program(
         page,
@@ -516,6 +584,7 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     if (allowInteractiveAuthentication && result.status === 'login-required') {
       throw new Error(`Authentication timed out in ${session.name}`);
     }
+    if (result.status !== 'login-required') await checkpointAuthentication();
     if (result.status === 'complete') await showSyncCompletionChapter(page, options);
     return result;
   });

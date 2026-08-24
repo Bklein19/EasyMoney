@@ -318,7 +318,6 @@ test('Sequoia Fund institution code uses direct requests and no fixed browser wa
   const source = await Bun.file(new URL('./sequoiaFund.ts', import.meta.url)).text();
 
   expect(source).toContain('page.context().request');
-  expect(source).toContain("savedAuthenticationMode: 'headed'");
   expect(source).not.toContain('waitForTimeout');
   expect(source).not.toContain("waitForEvent('download'");
 });
