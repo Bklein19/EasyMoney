@@ -9,6 +9,20 @@
   --active-sidebar-width: 0px;
 }
 
+.desktop-window-drag-strip {
+  display: none;
+}
+
+.easymoney-desktop .desktop-window-drag-strip {
+  position: fixed;
+  z-index: 70;
+  top: 0;
+  right: 0;
+  left: var(--active-sidebar-width);
+  display: block;
+  height: 12px;
+}
+
 .app-content {
   flex: 1;
   display: flex;

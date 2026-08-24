@@ -83,6 +83,10 @@ function App() {
   return (
     <Router>
       <div className={`app-shell ${isSidebarCollapsed ? 'app-shell--sidebar-collapsed' : ''} ${isSidebarPeekOpen ? 'app-shell--sidebar-peek' : ''}`}>
+        <div
+          className="desktop-window-drag-strip electrobun-webkit-app-region-drag"
+          aria-hidden="true"
+        />
         <Sidebar
           isMobileOpen={isMobileSidebarOpen}
           onClose={() => setIsMobileSidebarOpen(false)}

@@ -92,6 +92,13 @@ body.sidebar-resizing {
   padding: 0 var(--space-3);
 }
 
+.easymoney-desktop .sidebar-header {
+  flex: 0 0 52px;
+  height: 52px;
+  margin-top: 42px;
+  padding: 0 var(--space-5);
+}
+
 .sidebar-brand {
   display: flex;
   align-items: center;

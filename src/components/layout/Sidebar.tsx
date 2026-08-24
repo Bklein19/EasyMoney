@@ -176,8 +176,12 @@ const Sidebar = ({
         ref={sidebarRef}
         className={`sidebar ${isMobileOpen ? 'mobile-open' : ''} ${isCollapsed ? 'sidebar--collapsed' : ''} ${isPeekOpen ? 'sidebar--peek' : ''}`}
       >
-        <div className="sidebar-header">
-          <NavLink to="/" className="sidebar-brand" onClick={onClose}>
+        <div className="sidebar-header electrobun-webkit-app-region-drag">
+          <NavLink
+            to="/"
+            className="sidebar-brand electrobun-webkit-app-region-no-drag"
+            onClick={onClose}
+          >
             <div className="sidebar-brand-icon">
               <Wallet size={18} />
             </div>

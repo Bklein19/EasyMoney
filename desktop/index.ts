@@ -87,6 +87,8 @@ const rpc = BrowserView.defineRPC<EasyMoneyDesktopRpc>({
 
 new BrowserWindow({
   title: 'EasyMoney',
+  titleBarStyle: 'hiddenInset',
+  trafficLightOffset: { x: 6, y: 6 },
   url: 'views://mainview/index.html',
   rpc,
   frame: {
