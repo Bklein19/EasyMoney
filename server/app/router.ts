@@ -270,8 +270,14 @@ export const appRouter = t.router({
       .mutation(({ input }) => cancelSyncJob(input.runId)),
 
     confirm: t.procedure
-      .input(z.object({ runId: z.string().min(1) }))
-      .mutation(({ input }) => confirmSyncJob(input.runId)),
+      .input(z.object({
+        runId: z.string().min(1),
+        accountMappings: z.array(z.unknown()).nullish(),
+      }))
+      .mutation(({ input }) => confirmSyncJob(
+        input.runId,
+        input.accountMappings as Parameters<typeof confirmSyncJob>[1],
+      )),
 
     discard: t.procedure
       .input(z.object({ runId: z.string().min(1) }))

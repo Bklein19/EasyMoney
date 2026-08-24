@@ -2,6 +2,10 @@ export type { SyncEvent, SyncGoal, SyncReporter } from './protocol.ts';
 import type { RoutedSyncArtifact, SyncAccountCoverage } from './connector.ts';
 import type { SyncGoal } from './protocol.ts';
 import type { SyncInstitutionId as RegisteredSyncInstitutionId } from './registry.ts';
+import type {
+  ImportAccountMappingDecision,
+  ImportAccountMappingResolution,
+} from '../importTypes.ts';
 
 export type SyncInstitutionId = RegisteredSyncInstitutionId;
 
@@ -75,21 +79,26 @@ export interface SyncBalanceClaim {
 
 export interface SyncAccountClaim {
   sourceAccountId: number;
+  remoteAccountId: string;
   institution: string | null;
   accountName: string | null;
   accountHolder: string | null;
   resolvedAccountId: number | null;
   resolvedAccountName: string | null;
+  resolvedAccountStatus: string | null;
+  resolution: ImportAccountMappingResolution | 'connector';
   transactionCount: number;
   balanceCount: number;
 }
+
+export type SyncAccountMappingDecision = ImportAccountMappingDecision;
 
 export interface SyncArtifactReview {
   fileName: string;
   status: SyncArtifactReviewStatus;
   importFileId: number;
-  accountId: number;
-  accountName: string;
+  accountId: number | null;
+  accountName: string | null;
   parserName: string | null;
   /** Human parser label. Optional so reviews persisted by older app builds still render. */
   parserLabel?: string | null;

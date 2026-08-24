@@ -415,6 +415,34 @@
   border-bottom: 0;
 }
 
+.sync-review__claim-row--mapping {
+  align-items: flex-start;
+  padding: 0.55rem 0;
+}
+
+.sync-review__mapping-control {
+  display: grid;
+  width: min(100%, 300px);
+  gap: 0.45rem;
+}
+
+.sync-review__mapping-control > .form-input {
+  width: 100%;
+  min-width: 190px;
+  font-size: var(--text-xs);
+}
+
+.sync-review__account-create {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+
+.sync-review__account-create .form-input {
+  min-width: 0;
+  font-size: var(--text-xs);
+}
+
 .sync-review__claim-row > div {
   min-width: 0;
 }

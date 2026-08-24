@@ -17,6 +17,7 @@ import {
   syncChildProcessOptions,
 } from './subprocess.ts';
 import type {
+  SyncAccountMappingDecision,
   SyncArtifactManifest,
   SyncEvent,
   SyncExecutionPlan,
@@ -360,7 +361,10 @@ export async function cancelSyncJob(runId: string): Promise<SyncJob> {
   return publicJob(job);
 }
 
-export async function confirmSyncJob(runId: string): Promise<SyncJob> {
+export async function confirmSyncJob(
+  runId: string,
+  accountMappings?: SyncAccountMappingDecision[] | null,
+): Promise<SyncJob> {
   const job = await managedJob(runId);
   if (!job) throw new Error('Sync job not found');
   if (job.status === 'complete') return publicJob(job);
@@ -376,7 +380,9 @@ export async function confirmSyncJob(runId: string): Promise<SyncJob> {
 
   try {
     await persistJob(job);
-    const result = await runSerializedSyncDatabaseWork(() => commitSyncReview(job.review!, report));
+    const result = await runSerializedSyncDatabaseWork(() =>
+      commitSyncReview(job.review!, report, accountMappings)
+    );
     job.reviewAction = null;
     appendEvent(job, {
       runId,

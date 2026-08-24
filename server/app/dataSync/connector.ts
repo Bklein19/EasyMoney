@@ -22,9 +22,16 @@ export interface SyncConnectorTarget {
   label: string;
 }
 
+export interface SyncArtifactAccountRoute {
+  remoteAccountId: string;
+  accountId?: number;
+}
+
 export interface RoutedSyncArtifact {
   fileName: string;
-  accountId: number;
+  /** Legacy single-claim destination. Multi-account artifacts use accountRoutes. */
+  accountId?: number;
+  accountRoutes?: SyncArtifactAccountRoute[];
 }
 
 export interface SyncConnectorContext {

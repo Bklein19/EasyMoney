@@ -2,8 +2,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, ChevronDown, CircleDashed, Clock3, History, LoaderCircle, Lock, RefreshCw, X } from 'lucide-react';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
-import { formatCurrency, formatDate } from '../../utils/formatters';
-import type { SyncArtifactReview, SyncRunReview, SyncTarget } from '../../../server/app/dataSync/types.ts';
+import { useAccounts, type AccountRow } from '../../hooks/useAccounts';
+import { formatCurrency, formatDate, getAccountTypeLabel } from '../../utils/formatters';
+import type {
+  SyncAccountClaim,
+  SyncAccountMappingDecision,
+  SyncArtifactReview,
+  SyncRunReview,
+  SyncTarget,
+} from '../../../server/app/dataSync/types.ts';
 import { syncArtifactSubtitle, syncArtifactTitle } from './syncArtifactLabels.ts';
 
 type FreshnessStatus = 'current' | 'due' | 'stale' | 'no-data' | 'closed';
@@ -39,6 +46,59 @@ interface FreshnessReport {
     closedAccounts: number;
   };
   accounts: FreshnessAccount[];
+}
+
+interface SyncAccountDraft {
+  name: string;
+  institution: string;
+  type: string;
+  currency: string;
+  accountHolder: string;
+}
+
+type SyncMappingChoice =
+  | { mode: 'auto'; accountId: string; account: SyncAccountDraft }
+  | { mode: 'needs-selection'; accountId: string; account: SyncAccountDraft }
+  | { mode: 'existing'; accountId: string; account: SyncAccountDraft }
+  | { mode: 'unarchive'; accountId: string; account: SyncAccountDraft }
+  | { mode: 'create'; accountId: string; account: SyncAccountDraft };
+
+type SyncMappingChoices = Record<string, SyncMappingChoice>;
+
+function syncAccountDraft(claim: SyncAccountClaim): SyncAccountDraft {
+  const name = claim.accountName && claim.accountName !== 'Selected account' ? claim.accountName : '';
+  const normalized = `${name} ${claim.institution || ''}`.toLowerCase();
+  return {
+    name,
+    institution: claim.institution || '',
+    accountHolder: claim.accountHolder || '',
+    type: /\b(credit|card|visa|mastercard|amex|discover)\b/.test(normalized)
+      ? 'credit'
+      : /\b(ira|roth|brokerage|investment|retirement|annuity)\b/.test(normalized)
+        ? 'investment'
+        : /\b(savings|save)\b/.test(normalized)
+          ? 'savings'
+          : 'checking',
+    currency: 'USD',
+  };
+}
+
+function initialSyncMappingChoice(claim: SyncAccountClaim): SyncMappingChoice {
+  return claim.resolvedAccountId && claim.resolution !== 'archived-match' && claim.resolution !== 'ambiguous'
+    ? { mode: 'auto', accountId: String(claim.resolvedAccountId), account: syncAccountDraft(claim) }
+    : { mode: 'needs-selection', accountId: '', account: syncAccountDraft(claim) };
+}
+
+function syncMappingChoiceComplete(choice: SyncMappingChoice | undefined, claim: SyncAccountClaim) {
+  if (!choice) return false;
+  if (choice.mode === 'auto') {
+    return Boolean(claim.resolvedAccountId) && claim.resolution !== 'archived-match' && claim.resolution !== 'ambiguous';
+  }
+  if (choice.mode === 'existing' || choice.mode === 'unarchive') return Boolean(choice.accountId);
+  if (choice.mode === 'create') {
+    return Boolean(choice.account.name.trim() && choice.account.type && choice.account.currency);
+  }
+  return false;
 }
 
 const STATUS_LABELS: Record<FreshnessStatus, string> = {
@@ -136,7 +196,130 @@ function artifactCoverage(artifact: SyncArtifactReview) {
   return `${formatFreshnessDate(artifact.coveredFrom)} – ${formatFreshnessDate(artifact.coveredTo)}`;
 }
 
-function SyncArtifactDetails({ artifact, initiallyOpen }: { artifact: SyncArtifactReview; initiallyOpen: boolean }) {
+function SyncAccountMappingControl({
+  claim,
+  accounts,
+  choice,
+  onChange,
+}: {
+  claim: SyncAccountClaim;
+  accounts: AccountRow[];
+  choice: SyncMappingChoice;
+  onChange: (choice: SyncMappingChoice) => void;
+}) {
+  const activeAccounts = accounts.filter(account => account.status !== 'archived');
+  const matchedAccount = accounts.find(account => account.id === claim.resolvedAccountId);
+  const selectValue = choice.mode === 'existing'
+    ? choice.accountId
+    : choice.mode === 'unarchive'
+      ? '__unarchive__'
+      : choice.mode === 'create'
+        ? '__create__'
+        : choice.mode === 'auto'
+          ? '__auto__'
+          : '';
+  const updateDraft = (field: keyof SyncAccountDraft, value: string) => onChange({
+    ...choice,
+    mode: 'create',
+    account: { ...choice.account, [field]: value },
+  });
+
+  return (
+    <div className="sync-review__mapping-control">
+      <select
+        className="form-input"
+        aria-label={`Map ${claim.accountName || 'source account'}`}
+        value={selectValue}
+        onChange={event => {
+          const value = event.target.value;
+          if (value === '__auto__') {
+            onChange({ ...choice, mode: 'auto', accountId: String(claim.resolvedAccountId || '') });
+          } else if (value === '__unarchive__') {
+            onChange({ ...choice, mode: 'unarchive', accountId: String(claim.resolvedAccountId || '') });
+          } else if (value === '__create__') {
+            onChange({ ...choice, mode: 'create', accountId: '' });
+          } else if (value) {
+            onChange({ ...choice, mode: 'existing', accountId: value });
+          } else {
+            onChange({ ...choice, mode: 'needs-selection', accountId: '' });
+          }
+        }}
+      >
+        <option value="">Choose account action</option>
+        {claim.resolvedAccountId && claim.resolution !== 'archived-match' && claim.resolution !== 'ambiguous' && (
+          <option value="__auto__">Use matched account{matchedAccount ? `: ${matchedAccount.name}` : ''}</option>
+        )}
+        {claim.resolution === 'archived-match' && claim.resolvedAccountId && (
+          <option value="__unarchive__">Unarchive and use {matchedAccount?.name || 'matched account'}</option>
+        )}
+        <option value="__create__">Create account from this download</option>
+        {activeAccounts.map(account => (
+          <option key={account.id} value={account.id}>
+            {account.name} ({getAccountTypeLabel(account.type)})
+          </option>
+        ))}
+      </select>
+      {choice.mode === 'create' && (
+        <div className="sync-review__account-create">
+          <input
+            className="form-input"
+            value={choice.account.name}
+            onChange={event => updateDraft('name', event.target.value)}
+            placeholder="Account name"
+          />
+          <input
+            className="form-input"
+            value={choice.account.institution}
+            onChange={event => updateDraft('institution', event.target.value)}
+            placeholder="Institution"
+          />
+          <select
+            className="form-input"
+            value={choice.account.type}
+            onChange={event => updateDraft('type', event.target.value)}
+          >
+            <option value="checking">Checking</option>
+            <option value="savings">Savings</option>
+            <option value="credit">Credit Card</option>
+            <option value="investment">Investment</option>
+            <option value="loan">Loan</option>
+            <option value="other">Other</option>
+          </select>
+          <input
+            className="form-input"
+            value={choice.account.accountHolder}
+            onChange={event => updateDraft('accountHolder', event.target.value)}
+            placeholder="Owner"
+          />
+          <select
+            className="form-input"
+            value={choice.account.currency}
+            onChange={event => updateDraft('currency', event.target.value)}
+          >
+            <option value="USD">USD ($)</option>
+            <option value="EUR">EUR</option>
+            <option value="GBP">GBP</option>
+            <option value="CAD">CAD ($)</option>
+          </select>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SyncArtifactDetails({
+  artifact,
+  initiallyOpen,
+  accounts,
+  mappingChoices,
+  onMappingChange,
+}: {
+  artifact: SyncArtifactReview;
+  initiallyOpen: boolean;
+  accounts: AccountRow[];
+  mappingChoices: SyncMappingChoices;
+  onMappingChange: (sourceAccountId: number, choice: SyncMappingChoice) => void;
+}) {
   const title = syncArtifactTitle(artifact);
   const subtitle = syncArtifactSubtitle(artifact);
   return (
@@ -148,7 +331,7 @@ function SyncArtifactDetails({ artifact, initiallyOpen }: { artifact: SyncArtifa
         </div>
         <div className="sync-review__destination">
           <span>Import to</span>
-          <strong>{artifact.accountName}</strong>
+          <strong>{artifact.accountName || (artifact.accountClaims.length > 1 ? 'Mapped per account' : 'Needs mapping')}</strong>
         </div>
         <div className="sync-review__coverage">
           <span>Coverage</span>
@@ -175,15 +358,28 @@ function SyncArtifactDetails({ artifact, initiallyOpen }: { artifact: SyncArtifa
         <div className="sync-review__claim-grid">
           <section>
             <h4>Account claims</h4>
-            {artifact.accountClaims.map(claim => (
-              <div className="sync-review__claim-row" key={claim.sourceAccountId}>
-                <div>
-                  <strong>{claim.accountName || 'Unidentified account'}</strong>
-                  <small>{[claim.accountHolder, claim.institution].filter(Boolean).join(' · ') || 'No holder or institution stated'}</small>
+            {artifact.accountClaims.map(claim => {
+              const choice = mappingChoices[String(claim.sourceAccountId)] || initialSyncMappingChoice(claim);
+              return (
+                <div className="sync-review__claim-row sync-review__claim-row--mapping" key={claim.sourceAccountId}>
+                  <div>
+                    <strong>{claim.accountName || 'Unidentified account'}</strong>
+                    <small>{[claim.accountHolder, claim.institution].filter(Boolean).join(' · ') || 'No holder or institution stated'}</small>
+                    <small>{claim.transactionCount} tx · {claim.balanceCount} bal</small>
+                  </div>
+                  {artifact.status === 'ready' ? (
+                    <SyncAccountMappingControl
+                      claim={claim}
+                      accounts={accounts}
+                      choice={choice}
+                      onChange={next => onMappingChange(claim.sourceAccountId, next)}
+                    />
+                  ) : (
+                    <span>{claim.resolvedAccountName || 'Previously imported'}</span>
+                  )}
                 </div>
-                <span>{claim.transactionCount} tx · {claim.balanceCount} bal</span>
-              </div>
-            ))}
+              );
+            })}
           </section>
 
           <section>
@@ -192,7 +388,7 @@ function SyncArtifactDetails({ artifact, initiallyOpen }: { artifact: SyncArtifa
               <div className="sync-review__claim-row" key={`${claim.date}-${claim.account}-${index}`}>
                 <div>
                   <strong>{formatFreshnessDate(claim.date)}</strong>
-                  <small>{claim.account || artifact.accountName}</small>
+                  <small>{claim.account || artifact.accountName || 'Mapped source account'}</small>
                 </div>
                 <span className="num">{formatCurrency(claim.balanceCents / 100)}</span>
               </div>
@@ -220,7 +416,7 @@ function SyncArtifactDetails({ artifact, initiallyOpen }: { artifact: SyncArtifa
                     <td>{formatFreshnessDate(claim.date)}</td>
                     <td>
                       <strong>{claim.description}</strong>
-                      <small>{claim.account || artifact.accountName}</small>
+                      <small>{claim.account || artifact.accountName || 'Mapped source account'}</small>
                     </td>
                     <td className="num">{formatCurrency(claim.amountCents / 100, true)}</td>
                   </tr>
@@ -263,9 +459,56 @@ function SyncReviewPanel({
   review: SyncRunReview;
   isWorking: boolean;
   error: string;
-  onConfirm: () => void;
+  onConfirm: (accountMappings: SyncAccountMappingDecision[]) => void;
   onDiscard: () => void;
 }) {
+  const { accounts } = useAccounts({ includeArchived: true });
+  const readyClaims = useMemo(
+    () => review.artifacts
+      .filter(artifact => artifact.status === 'ready')
+      .flatMap(artifact => artifact.accountClaims),
+    [review.artifacts],
+  );
+  const [mappingChoices, setMappingChoices] = useState<SyncMappingChoices>(() => Object.fromEntries(
+    readyClaims.map(claim => [String(claim.sourceAccountId), initialSyncMappingChoice(claim)]),
+  ));
+  useEffect(() => {
+    setMappingChoices(Object.fromEntries(
+      readyClaims.map(claim => [String(claim.sourceAccountId), initialSyncMappingChoice(claim)]),
+    ));
+  }, [review.runId, readyClaims]);
+  const mappingsComplete = readyClaims.every(claim =>
+    syncMappingChoiceComplete(mappingChoices[String(claim.sourceAccountId)], claim)
+  );
+  const buildAccountMappings = (): SyncAccountMappingDecision[] => readyClaims.map(claim => {
+    const choice = mappingChoices[String(claim.sourceAccountId)];
+    if (!choice || !syncMappingChoiceComplete(choice, claim)) {
+      throw new Error('Resolve every source account before confirming the catch-up.');
+    }
+    if (choice.mode === 'auto') {
+      return { sourceAccountId: claim.sourceAccountId, mode: 'auto' };
+    }
+    if (choice.mode === 'existing') {
+      return { sourceAccountId: claim.sourceAccountId, mode: 'existing', accountId: Number(choice.accountId) };
+    }
+    if (choice.mode === 'unarchive') {
+      return { sourceAccountId: claim.sourceAccountId, mode: 'unarchive', accountId: Number(choice.accountId) };
+    }
+    if (choice.mode !== 'create') {
+      throw new Error('Resolve every source account before confirming the catch-up.');
+    }
+    return {
+      sourceAccountId: claim.sourceAccountId,
+      mode: 'create',
+      account: {
+        name: choice.account.name.trim(),
+        institution: choice.account.institution.trim() || null,
+        type: choice.account.type,
+        currency: choice.account.currency,
+        accountHolder: choice.account.accountHolder.trim() || null,
+      },
+    };
+  });
   const transactionCount = review.artifacts.reduce((sum, artifact) => sum + artifact.transactionCount, 0);
   const balanceCount = review.artifacts.reduce((sum, artifact) => sum + artifact.balanceCount, 0);
   return (
@@ -282,7 +525,12 @@ function SyncReviewPanel({
         </div>
         <div className="sync-review__actions">
           <button className="btn btn--secondary btn--sm" type="button" disabled={isWorking} onClick={onDiscard}>Discard</button>
-          <button className="btn btn--primary btn--sm" type="button" disabled={isWorking} onClick={onConfirm}>
+          <button
+            className="btn btn--primary btn--sm"
+            type="button"
+            disabled={isWorking || !mappingsComplete}
+            onClick={() => onConfirm(buildAccountMappings())}
+          >
             {isWorking && <LoaderCircle className="spin" size={14} />}
             {review.readyToImport > 0 ? 'Confirm import' : 'Finish'}
           </button>
@@ -299,7 +547,13 @@ function SyncReviewPanel({
           ? review.artifacts.map((artifact, index) => (
               <SyncArtifactDetails
                 artifact={artifact}
+                accounts={accounts}
                 initiallyOpen={review.artifacts.length === 1 || artifact.warnings.length > 0 || index === 0}
+                mappingChoices={mappingChoices}
+                onMappingChange={(sourceAccountId, choice) => setMappingChoices(previous => ({
+                  ...previous,
+                  [String(sourceAccountId)]: choice,
+                }))}
                 key={`${artifact.importFileId}-${artifact.fileName}`}
               />
             ))
@@ -374,12 +628,12 @@ export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPa
     setSyncRunId('');
   };
 
-  const confirmSync = async () => {
+  const confirmSync = async (accountMappings: SyncAccountMappingDecision[]) => {
     if (!syncRunId) return;
     setSyncAction('confirm');
     setSyncActionError('');
     try {
-      await trpcClient.dataSync.confirm.mutate({ runId: syncRunId });
+      await trpcClient.dataSync.confirm.mutate({ runId: syncRunId, accountMappings });
       await onImportComplete?.();
       await syncQuery.refetch();
     } catch (actionError) {
@@ -472,7 +726,7 @@ export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPa
           review={syncJob.review}
           isWorking={Boolean(syncAction)}
           error={syncActionError || syncJob.error || ''}
-          onConfirm={() => void confirmSync()}
+          onConfirm={accountMappings => void confirmSync(accountMappings)}
           onDiscard={() => void discardSync()}
         />
       )}

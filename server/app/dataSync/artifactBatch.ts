@@ -9,7 +9,8 @@ export interface SyncArtifactImportResult {
 
 export interface SyncArtifactJob {
   fileName: string;
-  accountId: number;
+  accountId: number | null;
+  accountIds?: number[];
   import: () => Promise<SyncArtifactImportResult>;
 }
 
@@ -41,7 +42,8 @@ export async function importSyncArtifactBatch(
         type: 'import',
         message: `Imported ${job.fileName}`,
         data: {
-          accountId: job.accountId,
+          ...(job.accountId === null ? {} : { accountId: job.accountId }),
+          ...(job.accountIds && job.accountIds.length > 1 ? { accountIds: job.accountIds } : {}),
           transactions: result.importedCount,
           balances: result.importedBalanceCount,
           duplicates: result.skippedDuplicateCount,

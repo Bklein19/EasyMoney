@@ -19,6 +19,7 @@ export interface ParsedImportTransaction {
   description: string;
   institution?: string | null;
   account?: string | null;
+  remoteAccountId?: string | null;
   accountHolder?: string | null;
   sourceRole: ParsedImportSourceRole;
   raw?: Record<string, unknown>;
@@ -29,6 +30,7 @@ export interface ParsedImportBalance {
   date: string;
   balanceCents: number;
   account?: string | null;
+  remoteAccountId?: string | null;
   institution?: string | null;
   accountHolder?: string | null;
   raw?: Record<string, unknown>;
@@ -93,7 +95,24 @@ export type ImportAccountMappingResolution =
   | 'auto-create'
   | 'archived-match'
   | 'selected-fallback'
+  | 'ambiguous'
   | 'unresolved';
+
+export type ImportAccountMappingDecision =
+  | { sourceAccountId: number; mode?: 'existing'; accountId: number | null }
+  | { sourceAccountId: number; mode: 'auto'; accountId?: number | null }
+  | { sourceAccountId: number; mode: 'unarchive'; accountId: number }
+  | {
+      sourceAccountId: number;
+      mode: 'create';
+      account: {
+        name?: string | null;
+        institution?: string | null;
+        type?: string | null;
+        currency?: string | null;
+        accountHolder?: string | null;
+      };
+    };
 
 export interface ImportAccountMapping {
   sourceAccountId: number;

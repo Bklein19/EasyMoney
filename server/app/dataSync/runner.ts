@@ -1,7 +1,7 @@
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
 
-import type { SyncConnector } from './connector.ts';
+import type { RoutedSyncArtifact, SyncConnector } from './connector.ts';
 import { getSyncConnector } from './registry.ts';
 import {
   SYNC_WORKER_PROTOCOL_VERSION,
@@ -27,10 +27,16 @@ function artifactPath(outputDir: string, fileName: string): string {
 
 async function manifestEntry(
   plan: SyncExecutionPlan,
-  artifact: { fileName: string; accountId: number },
+  artifact: RoutedSyncArtifact,
 ): Promise<SyncArtifactManifestEntry> {
-  if (!plan.accounts.some(account => account.id === artifact.accountId)) {
+  const plannedAccountIds = new Set(plan.accounts.map(account => account.id));
+  if (artifact.accountId !== undefined && !plannedAccountIds.has(artifact.accountId)) {
     throw new Error('Connector routed an artifact to an account outside its execution plan');
+  }
+  for (const route of artifact.accountRoutes ?? []) {
+    if (route.accountId !== undefined && !plannedAccountIds.has(route.accountId)) {
+      throw new Error('Connector routed an artifact to an account outside its execution plan');
+    }
   }
   const path = artifactPath(plan.outputDir, artifact.fileName);
   const file = await stat(path);

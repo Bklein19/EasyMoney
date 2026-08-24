@@ -5,7 +5,7 @@ import path from 'node:path';
 import { getDb, insertRow, updateRow } from '../database.ts';
 import { hashContent } from '../hash.ts';
 import { hashImportContent } from './importContentHash.ts';
-import type { CommitImportTransaction, ImportAccountMapping, ImportPreviewTransaction, ImportProfile, ParsedImportBalance, ParsedImportTransaction } from './importTypes.ts';
+import type { CommitImportTransaction, ImportAccountMapping, ImportAccountMappingDecision, ImportPreviewTransaction, ImportProfile, ParsedImportBalance, ParsedImportTransaction } from './importTypes.ts';
 import { CUSTOM_CSV_PARSER_ID, parseCustomCsv } from './importParsers/customCsv.ts';
 import { mappingFromProfile } from './importParsers/csvMapping.ts';
 import { resolveImportParser } from './importParsers/index.ts';
@@ -24,22 +24,6 @@ type ImportTransactionInput = Partial<ImportPreviewTransaction> & {
   amount: number;
 };
 
-type AccountMappingDecision =
-  | { sourceAccountId: number; mode?: 'existing'; accountId: number | null }
-  | { sourceAccountId: number; mode: 'auto'; accountId?: number | null }
-  | { sourceAccountId: number; mode: 'unarchive'; accountId: number }
-  | {
-      sourceAccountId: number;
-      mode: 'create';
-      account: {
-        name?: string | null;
-        institution?: string | null;
-        type?: string | null;
-        currency?: string | null;
-        accountHolder?: string | null;
-      };
-    };
-
 interface CommitImportOptions {
   accountId?: number | null;
   importFileId?: number | null;
@@ -47,14 +31,14 @@ interface CommitImportOptions {
   forceImportRowIds?: number[] | null;
   balanceRowIds?: number[] | null;
   transactions?: ImportTransactionInput[];
-  accountMappings?: AccountMappingDecision[] | null;
+  accountMappings?: ImportAccountMappingDecision[] | null;
   importMeta?: {
     importFileId?: number | null;
     headers?: string[];
     profile?: ImportProfile | null;
     mapping?: Record<string, unknown> | null;
     profileName?: string | null;
-    accountMappings?: AccountMappingDecision[] | null;
+    accountMappings?: ImportAccountMappingDecision[] | null;
   } | null;
   rebuildLedger?: boolean;
 }
@@ -92,7 +76,7 @@ interface MaterializeImportTransactionsOptions {
   forceImportRowIds?: number[] | null;
   balanceRowIds?: number[] | null;
   transactions?: ImportTransactionInput[];
-  accountMappings?: AccountMappingDecision[] | null;
+  accountMappings?: ImportAccountMappingDecision[] | null;
   fallbackImportFileId?: number | null;
 }
 
@@ -517,7 +501,7 @@ function normalizeAccountStatus(status: string | null | undefined) {
   return status || 'active';
 }
 
-function normalizeAccountCreateInput(mapping: Extract<AccountMappingDecision, { mode: 'create' }>, sourceAccount: {
+function normalizeAccountCreateInput(mapping: Extract<ImportAccountMappingDecision, { mode: 'create' }>, sourceAccount: {
   institution: string | null;
   sourceAccountName: string | null;
   accountHolder?: string | null;
@@ -541,7 +525,7 @@ function normalizeAccountCreateInput(mapping: Extract<AccountMappingDecision, { 
   return { name, institution, type, currency, accountHolder };
 }
 
-function createAccountForSourceMapping(mapping: Extract<AccountMappingDecision, { mode: 'create' }>, sourceAccount: {
+function createAccountForSourceMapping(mapping: Extract<ImportAccountMappingDecision, { mode: 'create' }>, sourceAccount: {
   institution: string | null;
   sourceAccountName: string | null;
   accountHolder?: string | null;
@@ -646,7 +630,7 @@ function unarchiveAccountForImport(accountId: number) {
   `).run({ id: accountId, updatedAt: new Date().toISOString() });
 }
 
-function applyAccountMappingOverrides(accountMappings: AccountMappingDecision[] | null | undefined) {
+function applyAccountMappingOverrides(accountMappings: ImportAccountMappingDecision[] | null | undefined) {
   if (!accountMappings?.length) return;
   for (const mapping of accountMappings) {
     if (!Number.isFinite(Number(mapping.sourceAccountId))) continue;
@@ -697,6 +681,9 @@ function getImportAccountResolution(sourceAccount: {
     const linked = getDb().prepare('SELECT status FROM accounts WHERE id = ?').get(sourceAccount.accountId) as
       | { status: string | null }
       | undefined;
+    if (!linked) {
+      return { resolvedAccountId: null, resolvedAccountStatus: null, resolution: 'unresolved' };
+    }
     const status = normalizeAccountStatus(linked?.status);
     return {
       resolvedAccountId: sourceAccount.accountId,
@@ -716,11 +703,14 @@ function getImportAccountResolution(sourceAccount: {
     FROM accountAliases aa
     JOIN accounts a ON a.id = aa.accountId
     WHERE aa.institution = ? AND aa.alias = ?
-  `).get(institution, alias) as { accountId: number; status: string | null } | undefined;
-  if (aliased) {
-    const status = normalizeAccountStatus(aliased.status);
+  `).all(institution, alias) as Array<{ accountId: number; status: string | null }>;
+  if (aliased.length > 1) {
+    return { resolvedAccountId: null, resolvedAccountStatus: null, resolution: 'ambiguous' };
+  }
+  if (aliased[0]) {
+    const status = normalizeAccountStatus(aliased[0].status);
     return {
-      resolvedAccountId: aliased.accountId,
+      resolvedAccountId: aliased[0].accountId,
       resolvedAccountStatus: status,
       resolution: status === 'archived' ? 'archived-match' : 'alias',
     };
@@ -730,11 +720,14 @@ function getImportAccountResolution(sourceAccount: {
     SELECT id, status
     FROM accounts
     WHERE institution IS ? AND name = ?
-  `).get(institution, alias) as { id: number; status: string | null } | undefined;
-  if (exact) {
-    const status = normalizeAccountStatus(exact.status);
+  `).all(institution, alias) as Array<{ id: number; status: string | null }>;
+  if (exact.length > 1) {
+    return { resolvedAccountId: null, resolvedAccountStatus: null, resolution: 'ambiguous' };
+  }
+  if (exact[0]) {
+    const status = normalizeAccountStatus(exact[0].status);
     return {
-      resolvedAccountId: exact.id,
+      resolvedAccountId: exact[0].id,
       resolvedAccountStatus: status,
       resolution: status === 'archived' ? 'archived-match' : 'exact',
     };
@@ -743,7 +736,7 @@ function getImportAccountResolution(sourceAccount: {
   return { resolvedAccountId: null, resolvedAccountStatus: null, resolution: 'auto-create' };
 }
 
-function getImportAccountMappings(importFileId: number): ImportAccountMapping[] {
+export function getImportAccountMappings(importFileId: number): ImportAccountMapping[] {
   const rows = getDb().prepare(`
     SELECT
       sa.id AS sourceAccountId,
@@ -810,6 +803,7 @@ function resolveImportedAccount(sourceAccountId: number | null | undefined, fall
     const account = db.prepare('SELECT status FROM accounts WHERE id = ?').get(sourceAccount.accountId) as
       | { status: string | null }
       | undefined;
+    if (!account) throw new Error(`Mapped account not found: ${sourceAccount.accountId}`);
     if (normalizeAccountStatus(account?.status) === 'archived') {
       throw new Error('Import account mapping matched an archived account. Choose unarchive, another account, or create a new account.');
     }
@@ -830,26 +824,28 @@ function resolveImportedAccount(sourceAccountId: number | null | undefined, fall
     FROM accountAliases aa
     JOIN accounts a ON a.id = aa.accountId
     WHERE aa.institution = ? AND aa.alias = ?
-  `).get(institution, alias) as { accountId: number; status: string | null } | undefined;
-  if (aliased) {
-    if (normalizeAccountStatus(aliased.status) === 'archived') {
+  `).all(institution, alias) as Array<{ accountId: number; status: string | null }>;
+  if (aliased.length > 1) throw new Error('Import account identity is ambiguous. Choose an account explicitly.');
+  if (aliased[0]) {
+    if (normalizeAccountStatus(aliased[0].status) === 'archived') {
       throw new Error('Import account mapping matched an archived account. Choose unarchive, another account, or create a new account.');
     }
-    db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(aliased.accountId, sourceAccount.id);
-    applySourceAccountHolder(sourceAccount, aliased.accountId);
-    return aliased.accountId;
+    db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(aliased[0].accountId, sourceAccount.id);
+    applySourceAccountHolder(sourceAccount, aliased[0].accountId);
+    return aliased[0].accountId;
   }
 
   const exact = db.prepare(`
     SELECT id, status
     FROM accounts
     WHERE institution IS ? AND name = ?
-  `).get(institution, alias) as { id: number; status: string | null } | undefined;
-  if (exact && normalizeAccountStatus(exact.status) === 'archived') {
+  `).all(institution, alias) as Array<{ id: number; status: string | null }>;
+  if (exact.length > 1) throw new Error('Import account identity is ambiguous. Choose an account explicitly.');
+  if (exact[0] && normalizeAccountStatus(exact[0].status) === 'archived') {
     throw new Error('Import account mapping matched an archived account. Choose unarchive, another account, or create a new account.');
   }
   const now = new Date().toISOString();
-  const accountId = exact?.id ?? Number(insertRow('accounts', {
+  const accountId = exact[0]?.id ?? Number(insertRow('accounts', {
     name: alias,
     institution,
     type: inferAccountType(alias),
@@ -945,6 +941,47 @@ function toPreviewTransaction(transaction: ParsedImportTransaction, importFileId
   };
 }
 
+type ParsedSourceAccountFact = Pick<
+  ParsedImportTransaction | ParsedImportBalance,
+  'institution' | 'account' | 'remoteAccountId' | 'accountHolder' | 'raw'
+>;
+
+function parsedSourceAccountIdentity(item: ParsedSourceAccountFact, fallbackInstitution?: string | null) {
+  const institution = item.institution || fallbackInstitution || null;
+  const accountName = item.account || 'Selected account';
+  const accountHolder = item.accountHolder?.trim() || null;
+  const explicitRemoteId = item.remoteAccountId?.trim() || null;
+  return {
+    institution,
+    accountName,
+    accountHolder,
+    remoteAccountId: explicitRemoteId || `${institution || 'unknown'}|${accountHolder || ''}|${accountName}`,
+  };
+}
+
+function assertUnambiguousRemoteAccountIdentities(
+  facts: ParsedSourceAccountFact[],
+  fallbackInstitution?: string | null,
+) {
+  const identities = new Map<string, ReturnType<typeof parsedSourceAccountIdentity>>();
+  for (const fact of facts) {
+    const identity = parsedSourceAccountIdentity(fact, fallbackInstitution);
+    const previous = identities.get(identity.remoteAccountId);
+    if (!previous) {
+      identities.set(identity.remoteAccountId, identity);
+      continue;
+    }
+    const conflicts = (
+      (previous.institution && identity.institution && previous.institution !== identity.institution) ||
+      (previous.accountName !== 'Selected account' && identity.accountName !== 'Selected account' && previous.accountName !== identity.accountName) ||
+      (previous.accountHolder && identity.accountHolder && previous.accountHolder !== identity.accountHolder)
+    );
+    if (conflicts) {
+      throw new Error(`Ambiguous parser account identity: ${identity.remoteAccountId}`);
+    }
+  }
+}
+
 function saveImportPreview({
   fileName,
   contentHash,
@@ -972,6 +1009,10 @@ function saveImportPreview({
   parsedTransactions: Array<ParsedImportTransaction | null>;
   parsedBalances?: ParsedImportBalance[];
 }) {
+  assertUnambiguousRemoteAccountIdentities([
+    ...parsedTransactions.filter((item): item is ParsedImportTransaction => item !== null),
+    ...parsedBalances,
+  ], institution);
   const now = new Date().toISOString();
   const headerSignature = getHeaderSignature(headers);
   const factDates = [
@@ -1004,11 +1045,12 @@ function saveImportPreview({
     createdAt: now,
   });
   const sourceAccountIds = new Map<string, number>();
-  const getSourceAccountId = (item: Pick<ParsedImportTransaction | ParsedImportBalance, 'institution' | 'account' | 'accountHolder' | 'raw'>) => {
-    const sourceInstitution = item.institution || institution || null;
-    const sourceAccountName = item.account || 'Selected account';
-    const sourceAccountHolder = item.accountHolder?.trim() || null;
-    const sourceAccountKey = `${sourceInstitution || 'unknown'}|${sourceAccountHolder || ''}|${sourceAccountName}`;
+  const getSourceAccountId = (item: ParsedSourceAccountFact) => {
+    const identity = parsedSourceAccountIdentity(item, institution);
+    const sourceInstitution = identity.institution;
+    const sourceAccountName = identity.accountName;
+    const sourceAccountHolder = identity.accountHolder;
+    const sourceAccountKey = identity.remoteAccountId;
     const existing = sourceAccountIds.get(sourceAccountKey);
     if (existing) return existing;
 
@@ -1018,7 +1060,12 @@ function saveImportPreview({
       sourceAccountKey,
       sourceAccountName,
       accountHolder: sourceAccountHolder,
-      rawJson: JSON.stringify({ account: item.account, institution: item.institution, accountHolder: sourceAccountHolder }),
+      rawJson: JSON.stringify({
+        account: item.account,
+        institution: item.institution,
+        remoteAccountId: item.remoteAccountId || null,
+        accountHolder: sourceAccountHolder,
+      }),
       createdAt: now,
     }));
     sourceAccountIds.set(sourceAccountKey, sourceAccountId);

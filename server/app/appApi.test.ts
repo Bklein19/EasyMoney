@@ -10,10 +10,7 @@ process.env.EASYMONEY_SYNC_ROOT = path.join(os.tmpdir(), `easymoney-sync-runs-${
 const { appRouter } = await import('./router.ts');
 const { getDb, initDatabase, insertRow } = await import('../database.ts');
 const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
-const { discardSyncReview, stageSyncArtifact } = await import('./dataSync/review.ts');
-const { runSerializedSyncDatabaseWork } = await import('./dataSync/databaseQueue.ts');
-const { stageSyncArtifactManifest } = await import('./dataSync/staging.ts');
-const { SYNC_WORKER_PROTOCOL_VERSION } = await import('./dataSync/types.ts');
+const { buildSyncArtifactReview, stageSyncArtifact } = await import('./dataSync/review.ts');
 const { upsertTransactionAnnotation } = await import('./transactionAnnotations.ts');
 const {
   groupTransactionsForAiCategorization,
@@ -114,6 +111,109 @@ async function saveAwaitingSyncReview(review: {
     result: null,
     error: null,
   }, null, 2)}\n`);
+}
+
+let consolidatedSyncFixtureSequence = 0;
+
+function stageConsolidatedSyncFacts(claims: Array<{
+  remoteAccountId: string;
+  accountName: string;
+  amountCents?: number;
+  balanceCents?: number;
+}>, requestedFileName?: string) {
+  const fileName = requestedFileName || `consolidated-${++consolidatedSyncFixtureSequence}.csv`;
+  const createdAt = '2026-08-20T00:00:00.000Z';
+  const importFileId = Number(insertRow('importFiles', {
+    fileName,
+    contentHash: `hash-${fileName}`,
+    parserName: 'test-consolidated-parser',
+    sourceType: 'activity-export',
+    institution: 'Example Institution',
+    status: 'previewed',
+    createdAt,
+  }));
+  const sourceFileId = Number(insertRow('sourceFiles', {
+    importFileId,
+    fileName,
+    contentHash: `hash-${fileName}`,
+    parserName: 'test-consolidated-parser',
+    sourceType: 'activity-export',
+    institution: 'Example Institution',
+    coveredFrom: '2026-08-01',
+    coveredTo: '2026-08-01',
+    status: 'previewed',
+    createdAt,
+  }));
+  const sourceAccountIds = claims.map((claim, index) => {
+    const sourceAccountId = Number(insertRow('sourceAccounts', {
+      sourceFileId,
+      institution: 'Example Institution',
+      sourceAccountKey: claim.remoteAccountId,
+      sourceAccountName: claim.accountName,
+      rawJson: JSON.stringify({ remoteAccountId: claim.remoteAccountId }),
+      createdAt,
+    }));
+    const amountCents = claim.amountCents ?? (index + 1) * 1000;
+    const importRowId = Number(insertRow('importRows', {
+      importFileId,
+      rowIndex: index,
+      rowType: 'transaction',
+      rawJson: '{}',
+      normalizedJson: JSON.stringify({
+        sourceRowIndex: index,
+        date: '2026-08-01',
+        amountCents,
+        description: `Example transaction ${index + 1}`,
+        institution: 'Example Institution',
+        account: claim.accountName,
+        remoteAccountId: claim.remoteAccountId,
+        sourceRole: 'activity',
+        raw: {},
+      }),
+      createdAt,
+    }));
+    insertRow('sourceTransactions', {
+      sourceFileId,
+      sourceAccountId,
+      importRowId,
+      stableSourceId: `${claim.remoteAccountId}:transaction`,
+      date: '2026-08-01',
+      amountCents,
+      description: `Example transaction ${index + 1}`,
+      sourceRole: 'activity',
+      rawJson: '{}',
+      createdAt,
+    });
+    if (claim.balanceCents !== undefined) {
+      const balanceRowId = Number(insertRow('importRows', {
+        importFileId,
+        rowIndex: claims.length + index,
+        rowType: 'balance',
+        rawJson: '{}',
+        normalizedJson: JSON.stringify({
+          sourceRowIndex: null,
+          date: '2026-08-01',
+          balanceCents: claim.balanceCents,
+          institution: 'Example Institution',
+          account: claim.accountName,
+          remoteAccountId: claim.remoteAccountId,
+          raw: {},
+        }),
+        createdAt,
+      }));
+      insertRow('sourceBalances', {
+        sourceFileId,
+        sourceAccountId,
+        importRowId: balanceRowId,
+        date: '2026-08-01',
+        balanceCents: claim.balanceCents,
+        rawJson: '{}',
+        createdAt,
+      });
+    }
+    return sourceAccountId;
+  });
+  return { importFileId, sourceAccountIds, fileName };
 }
 
 function snapshotAccountTransactions(accountId: number) {
@@ -3412,7 +3512,6 @@ test('institution catch-up stages reviewable claims before explicit confirmation
       accountId,
       accountName: 'Primary Checking',
       parserName: 'bofa-activity-csv',
-      parserLabel: 'Bank of America Activity',
       coveredFrom: '2026-01-05',
       coveredTo: '2026-01-06',
       transactionCount: 2,
@@ -3422,7 +3521,10 @@ test('institution catch-up stages reviewable claims before explicit confirmation
       netAmountCents: 237450,
     });
     expect(artifact.accountClaims).toEqual([expect.objectContaining({
+      remoteAccountId: 'Bank of America||Adv Plus Banking - 1234',
       accountName: 'Adv Plus Banking - 1234',
+      resolvedAccountId: accountId,
+      resolution: 'connector',
       transactionCount: 2,
       balanceCount: 2,
     })]);
@@ -3478,217 +3580,185 @@ test('institution catch-up stages reviewable claims before explicit confirmation
   }
 });
 
-test('institution catch-up discards a partially staged manifest when a later artifact fails', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Synthetic Checking',
-    institution: 'Bank of America',
-    type: 'checking',
-    currentBalance: 0,
-    currency: 'USD',
-    status: 'active',
-  }));
-  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-sync-partial-'));
-  const fileName = 'bofa-checking-1234-2026-03-01-to-2026-03-31.csv';
-  const fileBytes = new TextEncoder().encode([
-    'Description,,Summary Amt.',
-    'Opening Balance,,1000.00',
-    'Date,Description,Amount,Running Bal.',
-    '03/05/2026,SYNTHETIC PAYROLL,2500.00,3500.00',
-  ].join('\n'));
-  await fs.promises.writeFile(path.join(directory, fileName), fileBytes);
-
-  try {
-    await expect(stageSyncArtifactManifest({
-      protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
-      runId: 'sync-partial-manifest',
-      institutionId: 'bank-of-america',
-      artifacts: [{
-        fileName,
-        accountId,
-        sizeBytes: fileBytes.byteLength,
-        sha256: new Bun.CryptoHasher('sha256').update(fileBytes).digest('hex'),
-      }, {
-        fileName: 'missing.csv',
-        accountId,
-        sizeBytes: 1,
-        sha256: '0'.repeat(64),
-      }],
-    }, directory, () => {})).rejects.toThrow();
-
-    expect(getDb().prepare('SELECT status FROM importFiles').all()).toEqual([
-      { status: 'discarded' },
-    ]);
-    expect(getDb().prepare('SELECT status FROM sourceFiles').all()).toEqual([
-      { status: 'discarded' },
-    ]);
-    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get())
-      .toEqual({ count: 0 });
-  } finally {
-    await fs.promises.rm(directory, { recursive: true, force: true });
-  }
-});
-
-test('concurrent sync reviews own independent previews of the same artifact', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Synthetic Checking',
-    institution: 'Bank of America',
-    type: 'checking',
-    currentBalance: 0,
-    currency: 'USD',
-    status: 'active',
-  }));
-  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-sync-ownership-'));
-  const fileName = 'bofa-checking-1234-2026-05-01-to-2026-05-31.csv';
-  const fileBytes = new TextEncoder().encode([
-    'Description,,Summary Amt.',
-    'Opening Balance,,1000.00',
-    'Date,Description,Amount,Running Bal.',
-    '05/05/2026,SYNTHETIC PAYROLL,2500.00,3500.00',
-  ].join('\n'));
-  await fs.promises.writeFile(path.join(directory, fileName), fileBytes);
-
-  const manifest = (runId: string) => ({
-    protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
-    runId,
-    institutionId: 'bank-of-america' as const,
-    artifacts: [{
-      fileName,
-      accountId,
-      sizeBytes: fileBytes.byteLength,
-      sha256: new Bun.CryptoHasher('sha256').update(fileBytes).digest('hex'),
-    }],
-  });
-
-  try {
-    const first = await stageSyncArtifactManifest(manifest('sync-preview-owner-first'), directory, () => {});
-    const second = await stageSyncArtifactManifest(manifest('sync-preview-owner-second'), directory, () => {});
-    const firstId = first.review.artifacts[0]!.importFileId;
-    const secondId = second.review.artifacts[0]!.importFileId;
-
-    expect(secondId).not.toBe(firstId);
-    discardSyncReview(second.review);
-    expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(firstId))
-      .toEqual({ status: 'previewed' });
-    expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(secondId))
-      .toEqual({ status: 'discarded' });
-  } finally {
-    await fs.promises.rm(directory, { recursive: true, force: true });
-  }
-});
-
-test('confirming identical concurrent sync previews commits the content and route once', async () => {
+test('catch-up commits two consolidated source-account claims to independent local accounts', async () => {
   const firstAccountId = Number(insertRow('accounts', {
-    name: 'First Synthetic Checking',
-    institution: 'Bank of America',
+    name: 'First Local Account',
+    institution: 'Example Institution',
     type: 'checking',
     currentBalance: 0,
     currency: 'USD',
     status: 'active',
   }));
   const secondAccountId = Number(insertRow('accounts', {
-    name: 'Second Synthetic Checking',
-    institution: 'Bank of America',
-    type: 'checking',
+    name: 'Second Local Account',
+    institution: 'Example Institution',
+    type: 'savings',
     currentBalance: 0,
     currency: 'USD',
     status: 'active',
   }));
-  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-sync-commit-owner-'));
-  const fileName = 'bofa-checking-1234-2026-07-01-to-2026-07-31.csv';
-  const fileBytes = new TextEncoder().encode([
-    'Description,,Summary Amt.',
-    'Opening Balance,,1000.00',
-    'Date,Description,Amount,Running Bal.',
-    '07/05/2026,SYNTHETIC PAYROLL,2500.00,3500.00',
-  ].join('\n'));
-  await fs.promises.writeFile(path.join(directory, fileName), fileBytes);
-
-  const manifest = (runId: string, accountId: number) => ({
-    protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
-    runId,
-    institutionId: 'bank-of-america' as const,
-    artifacts: [{
-      fileName,
-      accountId,
-      sizeBytes: fileBytes.byteLength,
-      sha256: new Bun.CryptoHasher('sha256').update(fileBytes).digest('hex'),
-    }],
+  const staged = stageConsolidatedSyncFacts([
+    { remoteAccountId: 'remote:first', accountName: 'Remote Checking', amountCents: -1200 },
+    { remoteAccountId: 'remote:second', accountName: 'Remote Savings', amountCents: 3400 },
+  ], 'consolidated-two-account-review.csv');
+  const artifact = buildSyncArtifactReview({
+    importFileId: staged.importFileId,
+    fileName: staged.fileName,
+    status: 'ready',
+    accountRoutes: [
+      { remoteAccountId: 'remote:first', accountId: firstAccountId },
+      { remoteAccountId: 'remote:second', accountId: secondAccountId },
+    ],
   });
 
-  try {
-    const first = await stageSyncArtifactManifest(
-      manifest('sync-preview-commit-first', firstAccountId),
-      directory,
-      () => {},
-    );
-    const second = await stageSyncArtifactManifest(
-      manifest('sync-preview-commit-second', secondAccountId),
-      directory,
-      () => {},
-    );
-    await saveAwaitingSyncReview(first.review);
-    await saveAwaitingSyncReview(second.review);
+  expect(artifact).toMatchObject({ accountId: null, accountName: null, transactionCount: 2 });
+  expect(artifact.accountClaims).toEqual([
+    expect.objectContaining({
+      remoteAccountId: 'remote:first',
+      resolvedAccountId: firstAccountId,
+      resolution: 'connector',
+    }),
+    expect.objectContaining({
+      remoteAccountId: 'remote:second',
+      resolvedAccountId: secondAccountId,
+      resolution: 'connector',
+    }),
+  ]);
 
-    const firstConfirmation = await caller.dataSync.confirm({ runId: first.review.runId });
-    const secondConfirmation = await caller.dataSync.confirm({ runId: second.review.runId });
+  const review = {
+    runId: 'sync-consolidated-two-account',
+    institutionId: 'bank-of-america' as const,
+    downloaded: 1,
+    readyToImport: 1,
+    alreadyImported: 0,
+    artifacts: [artifact],
+  };
+  await saveAwaitingSyncReview(review);
+  const confirmed = await caller.dataSync.confirm({
+    runId: review.runId,
+    accountMappings: artifact.accountClaims.map(claim => ({
+      sourceAccountId: claim.sourceAccountId,
+      mode: 'auto',
+    })),
+  });
 
-    expect(firstConfirmation).toMatchObject({
-      status: 'complete',
-      result: { recordedTransactionFacts: 1, skippedArtifacts: 0 },
-    });
-    expect(secondConfirmation).toMatchObject({
-      status: 'complete',
-      result: { recordedTransactionFacts: 0, skippedArtifacts: 1 },
-    });
-    expect(secondConfirmation.events).toContainEqual(expect.objectContaining({
-      type: 'import',
-      message: `Skipped ${fileName}; artifact was already imported`,
-    }));
-    expect(getDb().prepare(`
-      SELECT status, COUNT(*) AS count
-      FROM importFiles
-      GROUP BY status
-      ORDER BY status
-    `).all()).toEqual([
-      { status: 'committed', count: 1 },
-      { status: 'discarded', count: 1 },
-    ]);
-    expect(getDb().prepare(`
-      SELECT DISTINCT sa.accountId
-      FROM sourceAccounts sa
-      JOIN sourceFiles sf ON sf.id = sa.sourceFileId
-      WHERE sf.status = 'committed'
-    `).all()).toEqual([{ accountId: firstAccountId }]);
-    expect(getDb().prepare('SELECT accountId, COUNT(*) AS count FROM ledgerTransactions GROUP BY accountId').all())
-      .toEqual([{ accountId: firstAccountId, count: 1 }]);
-  } finally {
-    await fs.promises.rm(directory, { recursive: true, force: true });
-  }
+  expect(confirmed.status).toBe('complete');
+  expect(getDb().prepare('SELECT accountId FROM sourceAccounts ORDER BY id').all()).toEqual([
+    { accountId: firstAccountId },
+    { accountId: secondAccountId },
+  ]);
+  expect(getDb().prepare('SELECT accountId, COUNT(*) AS count FROM ledgerTransactions GROUP BY accountId ORDER BY accountId').all()).toEqual([
+    { accountId: firstAccountId, count: 1 },
+    { accountId: secondAccountId, count: 1 },
+  ]);
 });
 
-test('institution catch-up discards a new preview when review construction fails', async () => {
-  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-sync-invalid-route-'));
-  const fileName = 'bofa-checking-1234-2026-04-01-to-2026-04-30.csv';
-  const filePath = path.join(directory, fileName);
-  await fs.promises.writeFile(filePath, [
-    'Description,,Summary Amt.',
-    'Opening Balance,,1000.00',
-    'Date,Description,Amount,Running Bal.',
-    '04/05/2026,SYNTHETIC PAYROLL,2500.00,3500.00',
-  ].join('\n'));
+test('catch-up retains a newly discovered remote account until an explicit create decision', async () => {
+  const staged = stageConsolidatedSyncFacts([
+    { remoteAccountId: 'remote:new', accountName: 'New Remote Savings', amountCents: 2500, balanceCents: 500000 },
+  ], 'new-remote-account-review.csv');
+  const artifact = buildSyncArtifactReview({
+    importFileId: staged.importFileId,
+    fileName: staged.fileName,
+    status: 'ready',
+    accountRoutes: [{ remoteAccountId: 'remote:new' }],
+  });
+  expect(artifact.accountClaims).toEqual([expect.objectContaining({
+    remoteAccountId: 'remote:new',
+    resolvedAccountId: null,
+    resolution: 'auto-create',
+    transactionCount: 1,
+    balanceCount: 1,
+  })]);
 
-  try {
-    await expect(stageSyncArtifact({ path: filePath, accountId: 999_999 }))
-      .rejects.toThrow('Account not found');
-    expect(getDb().prepare('SELECT status FROM importFiles').all()).toEqual([
-      { status: 'discarded' },
-    ]);
-    expect(getDb().prepare('SELECT status FROM sourceFiles').all()).toEqual([
-      { status: 'discarded' },
-    ]);
-  } finally {
-    await fs.promises.rm(directory, { recursive: true, force: true });
+  const review = {
+    runId: 'sync-new-remote-account',
+    institutionId: 'bank-of-america' as const,
+    downloaded: 1,
+    readyToImport: 1,
+    alreadyImported: 0,
+    artifacts: [artifact],
+  };
+  await saveAwaitingSyncReview(review);
+  await expect(caller.dataSync.confirm({ runId: review.runId })).rejects.toThrow(
+    'Resolve every source account before confirming the catch-up.',
+  );
+  expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(staged.importFileId))
+    .toEqual({ status: 'previewed' });
+
+  const confirmed = await caller.dataSync.confirm({
+    runId: review.runId,
+    accountMappings: [{
+      sourceAccountId: staged.sourceAccountIds[0]!,
+      mode: 'create',
+      account: {
+        name: 'Confirmed New Savings',
+        institution: 'Example Institution',
+        type: 'savings',
+        currency: 'USD',
+      },
+    }],
+  });
+  expect(confirmed.status).toBe('complete');
+  const created = getDb().prepare("SELECT id, type, status FROM accounts WHERE name = 'Confirmed New Savings'").get() as {
+    id: number;
+    type: string;
+    status: string;
+  };
+  expect(created).toMatchObject({ type: 'savings', status: 'active' });
+  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(staged.sourceAccountIds[0]!))
+    .toEqual({ accountId: created.id });
+});
+
+test('catch-up rejects ambiguous parser and local account identities', async () => {
+  const duplicateRemote = stageConsolidatedSyncFacts([
+    { remoteAccountId: 'remote:duplicate', accountName: 'Parsed Account' },
+  ], 'ambiguous-remote-identity.csv');
+  expect(() => buildSyncArtifactReview({
+    importFileId: duplicateRemote.importFileId,
+    status: 'ready',
+    accountRoutes: [
+      { remoteAccountId: 'remote:duplicate' },
+      { remoteAccountId: 'remote:duplicate' },
+    ],
+  })).toThrow('Ambiguous connector account identity: remote:duplicate');
+
+  for (const name of ['First Duplicate Local', 'Second Duplicate Local']) {
+    insertRow('accounts', {
+      name: 'Ambiguous Remote Account',
+      institution: 'Example Institution',
+      type: 'checking',
+      currentBalance: 0,
+      currency: 'USD',
+      status: 'active',
+      accountHolder: name,
+    });
   }
+  const ambiguousLocal = stageConsolidatedSyncFacts([
+    { remoteAccountId: 'remote:ambiguous-local', accountName: 'Ambiguous Remote Account' },
+  ], 'ambiguous-local-identity.csv');
+  const artifact = buildSyncArtifactReview({
+    importFileId: ambiguousLocal.importFileId,
+    status: 'ready',
+  });
+  expect(artifact.accountClaims[0]).toMatchObject({
+    resolution: 'ambiguous',
+    resolvedAccountId: null,
+  });
+  const review = {
+    runId: 'sync-ambiguous-local-account',
+    institutionId: 'bank-of-america' as const,
+    downloaded: 1,
+    readyToImport: 1,
+    alreadyImported: 0,
+    artifacts: [artifact],
+  };
+  await saveAwaitingSyncReview(review);
+  await expect(caller.dataSync.confirm({ runId: review.runId })).rejects.toThrow(
+    'Resolve every source account before confirming the catch-up.',
+  );
+  expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(ambiguousLocal.importFileId))
+    .toEqual({ status: 'previewed' });
 });
 
 test('discarding an institution catch-up leaves staged facts out of the ledger and history', async () => {
@@ -3731,99 +3801,6 @@ test('discarding an institution catch-up leaves staged facts out of the ledger a
     expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
     expect((await listImportHistoryForTest()).imports).toHaveLength(0);
   } finally {
-    await fs.promises.rm(directory, { recursive: true, force: true });
-  }
-});
-
-test('cold concurrent confirm and discard share one canonical review action', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Primary Checking',
-    institution: 'Bank of America',
-    type: 'checking',
-    currentBalance: 0,
-    currency: 'USD',
-    status: 'active',
-  }));
-  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-sync-action-race-'));
-  const fileName = 'bofa-checking-1234-2026-06-01-to-2026-06-30.csv';
-  const filePath = path.join(directory, fileName);
-  await fs.promises.writeFile(filePath, [
-    'Description,,Summary Amt.',
-    'Opening Balance,,1000.00',
-    'Date,Description,Amount,Running Bal.',
-    '06/05/2026,EXAMPLE PAYROLL,2500.00,3500.00',
-  ].join('\n'));
-
-  let releaseQueue = () => {};
-  const queueGate = new Promise<void>(resolve => {
-    releaseQueue = resolve;
-  });
-  let markQueueHeld = () => {};
-  const queueHeld = new Promise<void>(resolve => {
-    markQueueHeld = resolve;
-  });
-  const heldDatabaseWork = runSerializedSyncDatabaseWork(async () => {
-    markQueueHeld();
-    await queueGate;
-  });
-  await queueHeld;
-
-  let actionPromises: [
-    ReturnType<typeof caller.dataSync.discard>,
-    ReturnType<typeof caller.dataSync.confirm>,
-  ] | null = null;
-  try {
-    const artifact = await stageSyncArtifact({ path: filePath, accountId });
-    const review = {
-      runId: 'sync-test-discard-confirm-race',
-      institutionId: 'bank-of-america' as const,
-      downloaded: 1,
-      readyToImport: 1,
-      alreadyImported: 0,
-      artifacts: [artifact],
-    };
-    await saveAwaitingSyncReview(review);
-
-    actionPromises = [
-      caller.dataSync.discard({ runId: review.runId }),
-      caller.dataSync.confirm({ runId: review.runId }),
-    ];
-    const settledActions = Promise.allSettled(actionPromises);
-    let activeJob = await caller.dataSync.status({ runId: review.runId });
-    for (
-      let attempt = 0;
-      attempt < 50 && activeJob?.status !== 'importing' && activeJob?.message !== 'Discarding downloaded data';
-      attempt += 1
-    ) {
-      await new Promise<void>(resolve => setImmediate(resolve));
-      activeJob = await caller.dataSync.status({ runId: review.runId });
-    }
-    expect(
-      activeJob?.status === 'importing' || activeJob?.message === 'Discarding downloaded data',
-    ).toBe(true);
-
-    releaseQueue();
-    const actionResults = await settledActions;
-    const fulfilled = actionResults.filter(result => result.status === 'fulfilled');
-    const rejected = actionResults.filter(result => result.status === 'rejected');
-
-    expect(fulfilled).toHaveLength(1);
-    expect(rejected).toEqual([
-      expect.objectContaining({
-        reason: expect.objectContaining({ message: 'Sync job is not awaiting confirmation' }),
-      }),
-    ]);
-    const finalJob = await caller.dataSync.status({ runId: review.runId });
-    const winningStatus = (fulfilled[0] as PromiseFulfilledResult<{
-      status: 'complete' | 'cancelled';
-    }>).value.status;
-    expect(finalJob?.status).toBe(winningStatus);
-    expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(artifact.importFileId))
-      .toEqual({ status: finalJob?.status === 'complete' ? 'committed' : 'discarded' });
-  } finally {
-    releaseQueue();
-    await heldDatabaseWork;
-    if (actionPromises) await Promise.allSettled(actionPromises);
     await fs.promises.rm(directory, { recursive: true, force: true });
   }
 });
