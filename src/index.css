@@ -250,25 +250,6 @@ a:hover {
   color: var(--accent-violet);
 }
 
-/* ─── Scrollbar ─────────────────────────────────────────────────── */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: var(--bg-surface);
-  border-radius: var(--radius-full);
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--bg-hover);
-}
-
 /* ─── Glass Card ────────────────────────────────────────────────── */
 .glass-card {
   background: var(--glass-bg);
