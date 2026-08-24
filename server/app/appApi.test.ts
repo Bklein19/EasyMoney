@@ -3576,6 +3576,96 @@ test('concurrent sync reviews own independent previews of the same artifact', as
   }
 });
 
+test('confirming identical concurrent sync previews commits the content and route once', async () => {
+  const firstAccountId = Number(insertRow('accounts', {
+    name: 'First Synthetic Checking',
+    institution: 'Bank of America',
+    type: 'checking',
+    currentBalance: 0,
+    currency: 'USD',
+    status: 'active',
+  }));
+  const secondAccountId = Number(insertRow('accounts', {
+    name: 'Second Synthetic Checking',
+    institution: 'Bank of America',
+    type: 'checking',
+    currentBalance: 0,
+    currency: 'USD',
+    status: 'active',
+  }));
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-sync-commit-owner-'));
+  const fileName = 'bofa-checking-1234-2026-07-01-to-2026-07-31.csv';
+  const fileBytes = new TextEncoder().encode([
+    'Description,,Summary Amt.',
+    'Opening Balance,,1000.00',
+    'Date,Description,Amount,Running Bal.',
+    '07/05/2026,SYNTHETIC PAYROLL,2500.00,3500.00',
+  ].join('\n'));
+  await fs.promises.writeFile(path.join(directory, fileName), fileBytes);
+
+  const manifest = (runId: string, accountId: number) => ({
+    protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+    runId,
+    institutionId: 'bank-of-america' as const,
+    artifacts: [{
+      fileName,
+      accountId,
+      sizeBytes: fileBytes.byteLength,
+      sha256: new Bun.CryptoHasher('sha256').update(fileBytes).digest('hex'),
+    }],
+  });
+
+  try {
+    const first = await stageSyncArtifactManifest(
+      manifest('sync-preview-commit-first', firstAccountId),
+      directory,
+      () => {},
+    );
+    const second = await stageSyncArtifactManifest(
+      manifest('sync-preview-commit-second', secondAccountId),
+      directory,
+      () => {},
+    );
+    await saveAwaitingSyncReview(first.review);
+    await saveAwaitingSyncReview(second.review);
+
+    const firstConfirmation = await caller.dataSync.confirm({ runId: first.review.runId });
+    const secondConfirmation = await caller.dataSync.confirm({ runId: second.review.runId });
+
+    expect(firstConfirmation).toMatchObject({
+      status: 'complete',
+      result: { recordedTransactionFacts: 1, skippedArtifacts: 0 },
+    });
+    expect(secondConfirmation).toMatchObject({
+      status: 'complete',
+      result: { recordedTransactionFacts: 0, skippedArtifacts: 1 },
+    });
+    expect(secondConfirmation.events).toContainEqual(expect.objectContaining({
+      type: 'import',
+      message: `Skipped ${fileName}; artifact was already imported`,
+    }));
+    expect(getDb().prepare(`
+      SELECT status, COUNT(*) AS count
+      FROM importFiles
+      GROUP BY status
+      ORDER BY status
+    `).all()).toEqual([
+      { status: 'committed', count: 1 },
+      { status: 'discarded', count: 1 },
+    ]);
+    expect(getDb().prepare(`
+      SELECT DISTINCT sa.accountId
+      FROM sourceAccounts sa
+      JOIN sourceFiles sf ON sf.id = sa.sourceFileId
+      WHERE sf.status = 'committed'
+    `).all()).toEqual([{ accountId: firstAccountId }]);
+    expect(getDb().prepare('SELECT accountId, COUNT(*) AS count FROM ledgerTransactions GROUP BY accountId').all())
+      .toEqual([{ accountId: firstAccountId, count: 1 }]);
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('institution catch-up discards a new preview when review construction fails', async () => {
   const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-sync-invalid-route-'));
   const fileName = 'bofa-checking-1234-2026-04-01-to-2026-04-30.csv';
@@ -3645,7 +3735,7 @@ test('discarding an institution catch-up leaves staged facts out of the ledger a
   }
 });
 
-test('discard reserves an awaiting sync review before confirmation can start', async () => {
+test('cold concurrent confirm and discard share one canonical review action', async () => {
   const accountId = Number(insertRow('accounts', {
     name: 'Primary Checking',
     institution: 'Bank of America',
@@ -3678,7 +3768,10 @@ test('discard reserves an awaiting sync review before confirmation can start', a
   });
   await queueHeld;
 
-  let discardPromise: ReturnType<typeof caller.dataSync.discard> | null = null;
+  let actionPromises: [
+    ReturnType<typeof caller.dataSync.discard>,
+    ReturnType<typeof caller.dataSync.confirm>,
+  ] | null = null;
   try {
     const artifact = await stageSyncArtifact({ path: filePath, accountId });
     const review = {
@@ -3690,36 +3783,47 @@ test('discard reserves an awaiting sync review before confirmation can start', a
       artifacts: [artifact],
     };
     await saveAwaitingSyncReview(review);
-    await caller.dataSync.status({ runId: review.runId });
 
-    discardPromise = caller.dataSync.discard({ runId: review.runId });
-    let reservedJob = await caller.dataSync.status({ runId: review.runId });
-    for (let attempt = 0; attempt < 50 && reservedJob?.message !== 'Discarding downloaded data'; attempt += 1) {
-      await Promise.resolve();
-      reservedJob = await caller.dataSync.status({ runId: review.runId });
+    actionPromises = [
+      caller.dataSync.discard({ runId: review.runId }),
+      caller.dataSync.confirm({ runId: review.runId }),
+    ];
+    const settledActions = Promise.allSettled(actionPromises);
+    let activeJob = await caller.dataSync.status({ runId: review.runId });
+    for (
+      let attempt = 0;
+      attempt < 50 && activeJob?.status !== 'importing' && activeJob?.message !== 'Discarding downloaded data';
+      attempt += 1
+    ) {
+      await new Promise<void>(resolve => setImmediate(resolve));
+      activeJob = await caller.dataSync.status({ runId: review.runId });
     }
-    expect(reservedJob?.message).toBe('Discarding downloaded data');
+    expect(
+      activeJob?.status === 'importing' || activeJob?.message === 'Discarding downloaded data',
+    ).toBe(true);
 
-    const confirmPromise = caller.dataSync.confirm({ runId: review.runId });
     releaseQueue();
-    const [discardResult, confirmResult] = await Promise.allSettled([discardPromise, confirmPromise]);
+    const actionResults = await settledActions;
+    const fulfilled = actionResults.filter(result => result.status === 'fulfilled');
+    const rejected = actionResults.filter(result => result.status === 'rejected');
 
-    expect(discardResult).toMatchObject({
-      status: 'fulfilled',
-      value: { status: 'cancelled' },
-    });
-    expect(confirmResult).toMatchObject({
-      status: 'rejected',
-      reason: expect.objectContaining({ message: 'Sync job is not awaiting confirmation' }),
-    });
-    expect(await caller.dataSync.status({ runId: review.runId }))
-      .toMatchObject({ status: 'cancelled', message: 'Downloaded data discarded' });
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toEqual([
+      expect.objectContaining({
+        reason: expect.objectContaining({ message: 'Sync job is not awaiting confirmation' }),
+      }),
+    ]);
+    const finalJob = await caller.dataSync.status({ runId: review.runId });
+    const winningStatus = (fulfilled[0] as PromiseFulfilledResult<{
+      status: 'complete' | 'cancelled';
+    }>).value.status;
+    expect(finalJob?.status).toBe(winningStatus);
     expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(artifact.importFileId))
-      .toEqual({ status: 'discarded' });
+      .toEqual({ status: finalJob?.status === 'complete' ? 'committed' : 'discarded' });
   } finally {
     releaseQueue();
     await heldDatabaseWork;
-    if (discardPromise) await discardPromise.catch(() => {});
+    if (actionPromises) await Promise.allSettled(actionPromises);
     await fs.promises.rm(directory, { recursive: true, force: true });
   }
 });

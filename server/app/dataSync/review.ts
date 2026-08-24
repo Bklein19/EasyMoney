@@ -33,6 +33,7 @@ export interface StagedSyncArtifact {
 interface ImportFileRow {
   id: number;
   fileName: string;
+  contentHash: string;
   parserName: string | null;
   institution: string | null;
   sourceType: string | null;
@@ -46,6 +47,7 @@ function importFileRow(importFileId: number): ImportFileRow {
     SELECT
       ifs.id,
       ifs.fileName,
+      ifs.contentHash,
       ifs.parserName,
       ifs.institution,
       ifs.sourceType,
@@ -270,6 +272,21 @@ function commitArtifact(artifact: SyncArtifactReview) {
   }
   if (metadata.status !== 'previewed') {
     throw new Error(`${artifact.fileName} is no longer awaiting import`);
+  }
+  const committedDuplicate = getDb().prepare(`
+    SELECT id
+    FROM importFiles
+    WHERE contentHash = ? AND status = 'committed' AND id <> ?
+    LIMIT 1
+  `).get(metadata.contentHash, metadata.id) as { id: number } | undefined;
+  if (committedDuplicate) {
+    discardSyncPreviewIds([metadata.id]);
+    return {
+      importedCount: 0,
+      importedBalanceCount: 0,
+      skippedDuplicateCount: 0,
+      skippedArtifact: true,
+    };
   }
 
   const mappings = accountClaims(artifact.importFileId).map(claim => ({

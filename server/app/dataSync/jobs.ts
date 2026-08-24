@@ -96,6 +96,8 @@ async function managedJob(runId: string): Promise<ManagedSyncJob | null> {
   if (current) return current;
   try {
     const saved = JSON.parse(await readFile(runFilePath(runId), 'utf8')) as Partial<SyncJob>;
+    const loadedWhileReading = jobs.get(runId);
+    if (loadedWhileReading) return loadedWhileReading;
     if (saved.runId !== runId || !saved.institutionId || !saved.goal || !saved.status) return null;
     const job: ManagedSyncJob = {
       runId,
