@@ -195,6 +195,15 @@ export async function playwrightHasSavedAuthentication(
   return fileExists(playwrightAuthStatePath(resolve(profilePath)));
 }
 
+export async function openInstitutionStartPage(
+  page: Pick<Page, 'goto' | 'url'>,
+  startUrl: string,
+  restoredAuthentication: boolean,
+): Promise<void> {
+  if (page.url() !== 'about:blank' && !restoredAuthentication) return;
+  await page.goto(startUrl, { waitUntil: 'domcontentloaded' });
+}
+
 export function institutionBrowserLaunchStrategy(options: {
   hasSavedAuthentication: boolean;
   persistAuthentication?: boolean;
@@ -269,7 +278,7 @@ async function launchPlaywrightPage<T>(
   try {
     if (savedStorageState) await context.setStorageState(savedStorageState);
     const page = context.pages()[0] ?? await context.newPage();
-    if (page.url() === 'about:blank') await page.goto(options.startUrl, { waitUntil: 'domcontentloaded' });
+    await openInstitutionStartPage(page, options.startUrl, Boolean(savedStorageState));
     return await runWhileBrowserOpen(context, () => operation(page, context));
   } finally {
     try {

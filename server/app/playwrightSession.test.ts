@@ -8,6 +8,7 @@ import {
   closeBrowserContext,
   decodeInstitutionBrowserProgramResult,
   institutionBrowserLaunchStrategy,
+  openInstitutionStartPage,
   persistBrowserAuthentication,
   playwrightAuthStatePath,
   playwrightHasSavedAuthentication,
@@ -58,6 +59,39 @@ describe('Playwright session helper', () => {
     expect(await playwrightHasSavedAuthentication('vanguard-catchup', profilePath)).toBe(false);
     await writeFile(playwrightAuthStatePath(profilePath), '{}');
     expect(await playwrightHasSavedAuthentication('vanguard-catchup', profilePath)).toBe(true);
+  });
+
+  test('reopens the institution start page after restoring cached authentication', async () => {
+    const navigations: Array<{ url: string; options: unknown }> = [];
+    const page = {
+      url: () => 'https://example.test/login',
+      goto: async (url: string, options: unknown) => {
+        navigations.push({ url, options });
+        return null;
+      },
+    } as unknown as Page;
+
+    await openInstitutionStartPage(page, 'https://example.test/start', true);
+
+    expect(navigations).toEqual([{
+      url: 'https://example.test/start',
+      options: { waitUntil: 'domcontentloaded' },
+    }]);
+  });
+
+  test('preserves an interactive page when there is no cached authentication to restore', async () => {
+    let navigated = false;
+    const page = {
+      url: () => 'https://example.test/login',
+      goto: async () => {
+        navigated = true;
+        return null;
+      },
+    } as unknown as Page;
+
+    await openInstitutionStartPage(page, 'https://example.test/start', false);
+
+    expect(navigated).toBe(false);
   });
 
   test('uses saved authentication headlessly with a headed login fallback', () => {
