@@ -101,7 +101,7 @@ function initialSyncMappingChoice(claim: SyncAccountClaim): SyncMappingChoice {
 }
 
 function initialSyncGroupMappingChoice(claims: SyncAccountClaim[]): SyncMappingChoice {
-  const representative = claims[0]!;
+  const representative = syncAccountGroupClaim(claims);
   if (claims.some(syncClaimRequiresExplicitMapping)) {
     return { mode: 'needs-selection', accountId: '', account: syncAccountDraft(representative) };
   }
@@ -110,6 +110,13 @@ function initialSyncGroupMappingChoice(claims: SyncAccountClaim[]): SyncMappingC
     return { mode: 'needs-selection', accountId: '', account: syncAccountDraft(representative) };
   }
   return initialSyncMappingChoice(representative);
+}
+
+function syncAccountGroupClaim(claims: SyncAccountClaim[]): SyncAccountClaim {
+  const representative = claims[0]!;
+  return claims.some(syncClaimRequiresExplicitMapping)
+    ? { ...representative, requiresExplicitMapping: true }
+    : representative;
 }
 
 function syncMappingChoiceComplete(choice: SyncMappingChoice | undefined, claim: SyncAccountClaim) {
@@ -341,12 +348,14 @@ function SyncArtifactDetails({
   initiallyOpen,
   accounts,
   mappingChoices,
+  explicitMappingIdentityKeys,
   onMappingChange,
 }: {
   artifact: SyncArtifactReview;
   initiallyOpen: boolean;
   accounts: AccountRow[];
   mappingChoices: SyncMappingChoices;
+  explicitMappingIdentityKeys: Set<string>;
   onMappingChange: (identityKey: string, choice: SyncMappingChoice) => void;
 }) {
   const title = syncArtifactTitle(artifact);
@@ -389,7 +398,10 @@ function SyncArtifactDetails({
             <h4>Account claims</h4>
             {artifact.accountClaims.map(claim => {
               const identityKey = syncAccountIdentityKey(claim);
-              const choice = mappingChoices[identityKey] || initialSyncMappingChoice(claim);
+              const mappingClaim = explicitMappingIdentityKeys.has(identityKey)
+                ? { ...claim, requiresExplicitMapping: true }
+                : claim;
+              const choice = mappingChoices[identityKey] || initialSyncMappingChoice(mappingClaim);
               return (
                 <div className="sync-review__claim-row sync-review__claim-row--mapping" key={claim.sourceAccountId}>
                   <div>
@@ -399,7 +411,7 @@ function SyncArtifactDetails({
                   </div>
                   {artifact.status === 'ready' ? (
                     <SyncAccountMappingControl
-                      claim={claim}
+                      claim={mappingClaim}
                       accounts={accounts}
                       choice={choice}
                       onChange={next => onMappingChange(identityKey, next)}
@@ -509,6 +521,11 @@ function SyncReviewPanel({
     }
     return [...groups.entries()];
   }, [readyClaims]);
+  const explicitMappingIdentityKeys = useMemo(() => new Set(
+    readyClaimGroups
+      .filter(([, claims]) => claims.some(syncClaimRequiresExplicitMapping))
+      .map(([identityKey]) => identityKey),
+  ), [readyClaimGroups]);
   const [mappingChoices, setMappingChoices] = useState<SyncMappingChoices>(() => Object.fromEntries(
     readyClaimGroups.map(([identityKey, claims]) => [identityKey, initialSyncGroupMappingChoice(claims)]),
   ));
@@ -518,10 +535,10 @@ function SyncReviewPanel({
     ));
   }, [review.runId, readyClaimGroups]);
   const mappingsComplete = readyClaimGroups.every(([identityKey, claims]) =>
-    syncMappingChoiceComplete(mappingChoices[identityKey], claims[0]!)
+    syncMappingChoiceComplete(mappingChoices[identityKey], syncAccountGroupClaim(claims))
   );
   const buildAccountMappings = (): SyncAccountMappingDecision[] => readyClaimGroups.map(([identityKey, claims]) => {
-    const claim = claims[0]!;
+    const claim = syncAccountGroupClaim(claims);
     const choice = mappingChoices[identityKey];
     if (!choice || !syncMappingChoiceComplete(choice, claim)) {
       throw new Error('Resolve every source account before confirming the catch-up.');
@@ -591,6 +608,7 @@ function SyncReviewPanel({
                 accounts={accounts}
                 initiallyOpen={review.artifacts.length === 1 || artifact.warnings.length > 0 || index === 0}
                 mappingChoices={mappingChoices}
+                explicitMappingIdentityKeys={explicitMappingIdentityKeys}
                 onMappingChange={(identityKey, choice) => setMappingChoices(previous => ({
                   ...previous,
                   [identityKey]: choice,
