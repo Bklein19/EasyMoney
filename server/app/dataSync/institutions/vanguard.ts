@@ -194,7 +194,7 @@ function validateIsoDate(value: string): void {
 
 export function vanguardAccountKindFromText(text: string): VanguardAccountKind | null {
   if (/roth/i.test(text) && /ira/i.test(text)) return 'roth-ira';
-  if (/(?:traditional|trad\.?)/i.test(text) && /ira/i.test(text)) return 'traditional-ira';
+  if (/\bira\b/i.test(text)) return 'traditional-ira';
   if (/brokerage|individual|joint|trust|custodial/i.test(text)) return 'brokerage';
   return null;
 }

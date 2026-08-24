@@ -70,8 +70,8 @@ export function inferVanguardAccountKind(
   account: SyncAccountCoverage,
 ): VanguardAccountKind | null {
   const text = identityTexts(account).join(' ').toLowerCase();
-  if (/(?:traditional|trad\.?)\s*(?:-|\s)*ira/.test(text)) return 'traditional-ira';
   if (/roth\s*(?:-|\s)*ira/.test(text)) return 'roth-ira';
+  if (/\bira\b/.test(text)) return 'traditional-ira';
   if (/brokerage|individual|joint|trust|custodial|vanguard/.test(text)) return 'brokerage';
   return null;
 }
@@ -132,14 +132,56 @@ export function planVanguardProfiles(
   goal: SyncGoal,
   report: SyncReporter = () => {},
 ): VanguardSyncProfile[] {
-  const profiles = new Map<string, VanguardSyncProfile>();
-  const invalidProfiles = new Set<string>();
+  const candidates = context.accounts.filter(matchesVanguardAccount).map(account => ({
+    account,
+    profileId: vanguardProfileIdFromArtifactFileNames(account.artifactFileNames),
+    accountKind: inferVanguardAccountKind(account),
+    accountLast4: inferVanguardAccountLast4(account),
+    accountHolder: account.accountHolder?.trim() || null,
+    holderKey: account.accountHolder?.replace(/\s+/g, ' ').trim().toLowerCase() || null,
+  }));
+  const holdersByProfile = new Map<string, Map<string, string>>();
+  for (const candidate of candidates) {
+    if (!candidate.profileId || !candidate.holderKey || !candidate.accountHolder) continue;
+    const holders = holdersByProfile.get(candidate.profileId) ?? new Map<string, string>();
+    holders.set(candidate.holderKey, candidate.accountHolder);
+    holdersByProfile.set(candidate.profileId, holders);
+  }
 
-  for (const account of context.accounts.filter(matchesVanguardAccount)) {
-    const profileId = vanguardProfileIdFromArtifactFileNames(account.artifactFileNames);
-    const accountKind = inferVanguardAccountKind(account);
-    const accountLast4 = inferVanguardAccountLast4(account);
-    const accountHolder = account.accountHolder?.trim() || null;
+  const invalidProfiles = new Set<string>();
+  const holderByProfile = new Map<string, { key: string; display: string }>();
+  for (const [profileId, holders] of holdersByProfile) {
+    if (holders.size > 1) {
+      invalidProfiles.add(profileId);
+      report({
+        type: 'warning',
+        message: `Skipped Vanguard profile ${profileId}; its accounts have conflicting account holders`,
+      });
+      continue;
+    }
+    const [key, display] = holders.entries().next().value!;
+    holderByProfile.set(profileId, { key, display });
+  }
+
+  const profilesByHolder = new Map<string, Set<string>>();
+  for (const [profileId, holder] of holderByProfile) {
+    const profileIds = profilesByHolder.get(holder.key) ?? new Set<string>();
+    profileIds.add(profileId);
+    profilesByHolder.set(holder.key, profileIds);
+  }
+
+  const profiles = new Map<string, VanguardSyncProfile>();
+  for (const candidate of candidates) {
+    const { account, accountKind, accountLast4 } = candidate;
+    let profileId = candidate.profileId;
+    if (profileId && invalidProfiles.has(profileId)) continue;
+    if (!profileId && candidate.holderKey) {
+      const matchingProfiles = profilesByHolder.get(candidate.holderKey);
+      if (matchingProfiles?.size === 1) profileId = matchingProfiles.values().next().value!;
+    }
+    const accountHolder = profileId
+      ? holderByProfile.get(profileId)?.display ?? candidate.accountHolder
+      : candidate.accountHolder;
     if (!profileId || !accountKind || !accountLast4 || !accountHolder) {
       report({
         type: 'warning',
@@ -148,18 +190,8 @@ export function planVanguardProfiles(
       });
       continue;
     }
-    if (invalidProfiles.has(profileId)) continue;
 
     const existingProfile = profiles.get(profileId);
-    if (existingProfile && existingProfile.accountHolder !== accountHolder) {
-      profiles.delete(profileId);
-      invalidProfiles.add(profileId);
-      report({
-        type: 'warning',
-        message: `Skipped Vanguard profile ${profileId}; its accounts have conflicting account holders`,
-      });
-      continue;
-    }
     if (existingProfile?.accounts.some(accountPlan => accountPlan.accountLast4 === accountLast4)) {
       profiles.delete(profileId);
       invalidProfiles.add(profileId);

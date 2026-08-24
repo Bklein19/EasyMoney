@@ -88,6 +88,52 @@ test('Vanguard connector plans independent login profiles from artifact provenan
   ]);
 });
 
+test('Vanguard connector safely assigns accounts without provenance by unique account holder', () => {
+  const profiles = planVanguardProfiles(
+    context([
+      ...twoProfileAccounts,
+      account({
+        id: 30,
+        name: 'Rollover IRA 3333',
+        sourceAccountName: 'Rollover IRA account ending in 3333',
+        accountHolder: 'Example One',
+      }),
+    ]),
+    { kind: 'current', overlapDays: 7 },
+  );
+
+  expect(profiles[0]?.accounts).toContainEqual({
+    accountId: 30,
+    accountKind: 'traditional-ira',
+    accountLast4: '3333',
+    startDate: '2026-07-24',
+    statementDates: [],
+  });
+});
+
+test('Vanguard connector does not infer a profile when one holder has multiple logins', () => {
+  const warnings: string[] = [];
+  const profiles = planVanguardProfiles(
+    context([
+      twoProfileAccounts[0]!,
+      { ...twoProfileAccounts[1]!, accountHolder: 'Example One' },
+      account({
+        id: 30,
+        name: 'Rollover IRA 3333',
+        sourceAccountName: 'Rollover IRA account ending in 3333',
+        accountHolder: 'Example One',
+      }),
+    ]),
+    { kind: 'current', overlapDays: 7 },
+    event => warnings.push(event.message),
+  );
+
+  expect(profiles.flatMap(profile => profile.accounts).map(plan => plan.accountId)).toEqual([10, 20]);
+  expect(warnings).toContain(
+    'Skipped Rollover IRA 3333; its Vanguard login profile, account number, or account holder is missing',
+  );
+});
+
 test('Vanguard statement planning includes only missing completed month ends', () => {
   expect(missingVanguardMonthlyStatementDates(
     '2026-05-25',
@@ -145,9 +191,9 @@ test('Vanguard connector rejects unsafe provenance and incomplete or conflicting
 
   expect(profiles).toEqual([]);
   expect(warnings).toEqual([
+    'Skipped Vanguard profile account-3; its accounts have conflicting account holders',
     'Skipped Brokerage 1111; its Vanguard login profile, account number, or account holder is missing',
     'Skipped Brokerage 2222; its Vanguard login profile, account number, or account holder is missing',
-    'Skipped Vanguard profile account-3; its accounts have conflicting account holders',
   ]);
 });
 
@@ -173,6 +219,9 @@ test('Vanguard identity helpers do not depend on generic shared routing', () => 
   expect(matchesVanguardAccount(brokerage)).toBe(true);
   expect(matchesVanguardAccount({ ...brokerage, institution: 'Example Bank' })).toBe(false);
   expect(inferVanguardAccountKind(brokerage)).toBe('brokerage');
+  expect(inferVanguardAccountKind(account({ id: 3, name: 'Rollover IRA 4444' }))).toBe(
+    'traditional-ira',
+  );
   expect(inferVanguardAccountLast4(brokerage)).toBe('1111');
   expect(inferVanguardAccountLast4(ambiguous)).toBeNull();
   expect(vanguardProfileIdFromArtifactFileNames([

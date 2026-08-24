@@ -82,6 +82,11 @@ test('Vanguard discovers account identity without relying on row position or a f
   expect(vanguardAccountLast4FromText(
     'Individual brokerage account XXXX1111 statement date 07/31/2026',
   )).toBe('1111');
+  expect(parseVanguardRemoteAccount('Rollover IRA account ending in 3333', 8)).toEqual({
+    accountKind: 'traditional-ira',
+    accountLast4: '3333',
+    controlIndex: 8,
+  });
 });
 
 test('Vanguard starts independent cached profiles concurrently', async () => {
