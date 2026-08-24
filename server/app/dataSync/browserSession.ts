@@ -25,6 +25,7 @@ type SessionOptions = {
 
 type RunOptions = {
   authenticationTimeoutMs?: number;
+  authenticationCheckpointTimeoutMs?: number;
   isAuthenticated?: (page: Page) => boolean | Promise<boolean>;
   waitUntilAuthenticated?: (page: Page, timeoutMs: number) => Promise<void>;
   onProgress?: (message: string) => void;
@@ -384,6 +385,47 @@ export async function persistBrowserAuthentication(
   }
 }
 
+export async function checkAuthenticationForCheckpoint(
+  page: Page,
+  isAuthenticated: (page: Page) => boolean | Promise<boolean>,
+  timeoutMs = 2_000,
+): Promise<boolean> {
+  if (page.isClosed()) return false;
+  let context: BrowserContext;
+  try {
+    context = page.context();
+  } catch {
+    return false;
+  }
+
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let resolveClosed: ((authenticated: false) => void) | undefined;
+  const handleClose = () => resolveClosed?.(false);
+  const closed = new Promise<false>(resolve => {
+    resolveClosed = resolve;
+    page.on('close', handleClose);
+    context.on('close', handleClose);
+  });
+
+  try {
+    return await Promise.race([
+      Promise.resolve()
+        .then(() => isAuthenticated(page))
+        .then(Boolean)
+        .catch(() => false),
+      closed,
+      new Promise<false>(resolveTimeout => {
+        timeout = setTimeout(() => resolveTimeout(false), Math.max(0, timeoutMs));
+      }),
+    ]);
+  } finally {
+    resolveClosed = undefined;
+    page.off('close', handleClose);
+    context.off('close', handleClose);
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 export async function closeBrowserContext(
   context: Pick<BrowserContext, 'close'>,
   timeoutMs = 5_000,
@@ -711,12 +753,11 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     const isAuthenticated = options.isAuthenticated ?? hasDefaultAuthentication;
     const checkpointAuthentication = async () => {
       if (!(session.persistAuthentication ?? true)) return;
-      let authenticated = false;
-      try {
-        authenticated = await isAuthenticated(activePage);
-      } catch {
-        return;
-      }
+      const authenticated = await checkAuthenticationForCheckpoint(
+        activePage,
+        isAuthenticated,
+        options.authenticationCheckpointTimeoutMs,
+      );
       if (!authenticated) return;
       const profilePath = resolve(session.profilePath ?? playwrightProfilePath(session.name));
       const persisted = await persistBrowserAuthentication(context, playwrightAuthStatePath(profilePath));

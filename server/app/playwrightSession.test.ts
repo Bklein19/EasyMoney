@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { Page } from 'playwright';
 
 import {
+  checkAuthenticationForCheckpoint,
   closeBrowserContext,
   decodeInstitutionBrowserProgramResult,
   institutionBrowserLaunchStrategy,
@@ -389,6 +390,46 @@ describe('Playwright session helper', () => {
 
     expect(persisted).toBe(false);
     expect(performance.now() - startedAt).toBeLessThan(250);
+  });
+
+  test('bounds an authentication checkpoint when the page check never settles', async () => {
+    const context = new EventEmitter();
+    const page = Object.assign(new EventEmitter(), {
+      context: () => context,
+      isClosed: () => false,
+    }) as unknown as Page;
+
+    const startedAt = performance.now();
+    const authenticated = await checkAuthenticationForCheckpoint(
+      page,
+      async () => new Promise<boolean>(() => {}),
+      10,
+    );
+
+    expect(authenticated).toBe(false);
+    expect(performance.now() - startedAt).toBeLessThan(250);
+    expect(context.listenerCount('close')).toBe(0);
+  });
+
+  test('ends an authentication checkpoint as soon as its browser page closes', async () => {
+    const context = new EventEmitter();
+    const pageEvents = new EventEmitter();
+    const page = Object.assign(pageEvents, {
+      context: () => context,
+      isClosed: () => false,
+    }) as unknown as Page;
+
+    const checking = checkAuthenticationForCheckpoint(
+      page,
+      async () => new Promise<boolean>(() => {}),
+      5_000,
+    );
+    await Promise.resolve();
+    pageEvents.emit('close');
+
+    expect(await checking).toBe(false);
+    expect(pageEvents.listenerCount('close')).toBe(0);
+    expect(context.listenerCount('close')).toBe(0);
   });
 
   test('persists session storage that Playwright storage state omits', async () => {
