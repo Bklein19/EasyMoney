@@ -260,7 +260,10 @@ export function buildSyncArtifactReview(options: {
   const resolvedIds = [...new Set(accounts
     .map(claim => claim.resolvedAccountId)
     .filter((accountId): accountId is number => accountId !== null))];
-  const destination = resolvedIds.length === 1 ? destinationAccount(resolvedIds[0]!, { allowArchived: true }) : null;
+  const destination = resolvedIds.length === 1 &&
+    accounts.every(claim => claim.resolvedAccountId === resolvedIds[0])
+    ? destinationAccount(resolvedIds[0]!, { allowArchived: true })
+    : null;
   const transactions = transactionClaims(options.importFileId);
   const balances = balanceClaims(options.importFileId);
   const inflowCents = transactions.reduce((sum, transaction) =>
