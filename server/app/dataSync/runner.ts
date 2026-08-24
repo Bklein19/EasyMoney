@@ -9,11 +9,16 @@ import {
   type BankOfAmericaSyncConfig,
 } from './institutions/bankOfAmerica.ts';
 import {
+  runSequoiaFundSync,
+  type SequoiaFundProgressEvent,
+} from './institutions/sequoiaFund.ts';
+import {
   runVanguardSync,
   type VanguardAccountKind,
   type VanguardSyncProfile,
 } from './institutions/vanguard.ts';
 import type { SyncGoal, SyncReporter, SyncRunRequest, SyncTarget } from './types.ts';
+import { routeSequoiaFundArtifacts } from './accountRouting.ts';
 import {
   goalWindowForCoverage,
   missingMonthlyStatementDates,
@@ -97,6 +102,10 @@ function institutionCoverage(institutionPattern: string): AccountCoverageRow[] {
 
 function bankOfAmericaCoverage() {
   return institutionCoverage('%bank of america%');
+}
+
+function sequoiaFundCoverage() {
+  return institutionCoverage('%sequoia%');
 }
 
 function bankOfAmericaAccountKind(account: AccountCoverageRow): BankOfAmericaAccountKind {
@@ -227,9 +236,20 @@ export function planVanguardProfiles(goal: SyncGoal, today: string, report: Sync
   return [...profiles.values()];
 }
 
+function sequoiaFundTargetHolder(accounts: AccountCoverageRow[]): string | null | undefined {
+  if (accounts.length === 0) return undefined;
+  const holders = [...new Set(accounts.map(account => account.accountHolder?.trim()).filter(Boolean))];
+  return holders.length === 1 ? holders[0]! : null;
+}
+
 export function listSyncTargets(): SyncTarget[] {
   const profiles = planVanguardProfiles({ kind: 'current', overlapDays: 7 }, isoDate(), () => {});
-  return syncTargetsForProfiles(bankOfAmericaCoverage().length > 0, profiles);
+  const sequoiaAccounts = sequoiaFundCoverage();
+  return syncTargetsForProfiles(
+    bankOfAmericaCoverage().length > 0,
+    profiles,
+    sequoiaFundTargetHolder(sequoiaAccounts),
+  );
 }
 
 function accountForArtifact(fileName: string, accounts: AccountCoverageRow[]) {
@@ -287,6 +307,42 @@ async function stageArtifacts(
 }
 
 export async function runSync(request: SyncRunRequest, report: SyncReporter): Promise<SyncRunReview> {
+  if (request.institutionId === 'sequoia-fund') {
+    const accounts = sequoiaFundCoverage();
+    if (accounts.length === 0) throw new Error('No active Sequoia Fund accounts are available');
+    const today = isoDate();
+    const windows = accounts.map(account => goalWindowForCoverage(request.goal, account, today));
+    const from = windows.map(window => window.startDate).sort()[0]!;
+    const through = windows.map(window => window.endDate).sort().at(-1)!;
+    const outputDir = join(syncApplicationDataRoot(), request.runId, 'artifacts');
+    await mkdir(outputDir, { recursive: true });
+    report({
+      type: 'phase',
+      message: 'Opening Sequoia Fund',
+      data: { goal: request.goal.kind, accountCount: accounts.length, from, through },
+    });
+    const syncResult = await runSequoiaFundSync(
+      { outputDir, from, through },
+      (event: SequoiaFundProgressEvent) => report({
+        type: event.state === 'waiting' ? 'action' : 'phase',
+        message: event.message,
+        data: {
+          phase: event.phase,
+          state: event.state,
+          ...(event.elapsedMs === undefined ? {} : { elapsedMs: event.elapsedMs }),
+          ...(event.data ?? {}),
+        },
+      }),
+    );
+    const routedArtifacts = routeSequoiaFundArtifacts(syncResult.artifacts, accounts);
+    report({
+      type: 'phase',
+      message: `Validated ${routedArtifacts.length} Sequoia Fund artifact${routedArtifacts.length === 1 ? '' : 's'}`,
+    });
+    const review = await stageArtifacts(request, routedArtifacts, outputDir, report);
+    report({ type: 'review', message: 'Sequoia Fund downloads are ready to review', data: { review } });
+    return review;
+  }
   if (request.institutionId === 'vanguard') {
     const today = isoDate();
     const plannedProfiles = planVanguardProfiles(request.goal, today, report);
@@ -302,7 +358,10 @@ export async function runSync(request: SyncRunRequest, report: SyncReporter): Pr
       message: `Opening ${profiles.length} Vanguard login${profiles.length === 1 ? '' : 's'}`,
       data: { goal: request.goal.kind, profiles: profiles.map(profile => profile.id) },
     });
-    const downloaded = await runVanguardSync({ outputDir, through: today, profiles });
+    const downloaded = await runVanguardSync(
+      { outputDir, through: today, profiles },
+      message => report({ type: 'phase', message }),
+    );
     report({ type: 'phase', message: `Validated ${downloaded.length} new artifact${downloaded.length === 1 ? '' : 's'}` });
     const review = await stageArtifacts(request, downloaded, outputDir, report);
     report({ type: 'review', message: 'Vanguard downloads are ready to review', data: { review } });

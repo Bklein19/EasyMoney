@@ -13,7 +13,7 @@ export type SyncEvent = {
 
 export type SyncReporter = (event: Omit<SyncEvent, 'runId' | 'timestamp'>) => void;
 
-export type SyncInstitutionId = 'bank-of-america' | 'vanguard';
+export type SyncInstitutionId = 'bank-of-america' | 'vanguard' | 'sequoia-fund';
 
 export interface SyncRunRequest {
   runId: string;

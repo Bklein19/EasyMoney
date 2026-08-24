@@ -12,6 +12,7 @@ import {
   openBankOfAmericaAccount,
   parseBankOfAmericaArgs,
 } from './institutions/bankOfAmerica.ts';
+import type { SequoiaFundDownloadedArtifact } from './institutions/sequoiaFund.ts';
 import type { VanguardSyncProfile } from './institutions/vanguard.ts';
 import {
   goalWindowForCoverage,
@@ -19,11 +20,31 @@ import {
   vanguardProfileIdFromFileNames,
 } from './planning.ts';
 import { selectVanguardProfiles, syncTargetsForProfiles } from './targets.ts';
+import { routeSequoiaFundArtifacts } from './accountRouting.ts';
 
 const vanguardProfiles: VanguardSyncProfile[] = [
   { id: 'current', session: 'vanguard-catchup', accountHolder: 'Example One', accounts: [] },
   { id: 'account-2', session: 'vanguard-account-2-catchup', accountHolder: 'Example Two', accounts: [] },
 ];
+
+function sequoiaArtifact(
+  accountToken: string,
+  accountName: string,
+  fileName: string,
+): SequoiaFundDownloadedArtifact {
+  return {
+    fileName,
+    path: `/tmp/${fileName}`,
+    kind: 'activity',
+    parserId: 'sequoia-fund-activity-csv',
+    accountToken,
+    accountName,
+    status: 'downloaded',
+    size: 100,
+    transactionCount: 1,
+    balanceCount: 0,
+  };
+}
 
 describe('data sync planning', () => {
   test('current sync overlaps the latest imported fact', () => {
@@ -238,6 +259,46 @@ describe('data sync planning', () => {
       { id: 'vanguard:current', institutionId: 'vanguard', connectionId: 'current', label: 'Vanguard (Example One)' },
       { id: 'vanguard:account-2', institutionId: 'vanguard', connectionId: 'account-2', label: 'Vanguard (Example Two)' },
     ]);
+  });
+
+  test('sync targets expose Sequoia Fund through the same scalable target list', () => {
+    expect(syncTargetsForProfiles(false, [], 'Example Owner')).toEqual([{
+      id: 'sequoia-fund',
+      institutionId: 'sequoia-fund',
+      label: 'Sequoia Fund (Example Owner)',
+    }]);
+  });
+
+  test('Sequoia Fund artifacts route by last four or a saved exact identity', () => {
+    const artifacts = [
+      sequoiaArtifact('last4-1111', 'Sequoia Fund - 1111', 'first.csv'),
+      sequoiaArtifact('key-abc123abc123', 'Sequoia Fund account abc123abc123', 'second.csv'),
+    ];
+    expect(routeSequoiaFundArtifacts(artifacts, [
+      { id: 10, name: 'Fund - 1111', sourceAccountName: null, sourceAccountNames: null, accountAliases: null },
+      {
+        id: 20,
+        name: 'Second fund',
+        sourceAccountName: 'Sequoia Fund account abc123abc123',
+        sourceAccountNames: null,
+        accountAliases: null,
+      },
+    ])).toEqual([
+      { fileName: 'first.csv', accountId: 10 },
+      { fileName: 'second.csv', accountId: 20 },
+    ]);
+  });
+
+  test('Sequoia Fund permits only the unambiguous single-account fallback', () => {
+    const artifact = sequoiaArtifact('key-abc123abc123', 'Sequoia Fund account abc123abc123', 'activity.csv');
+    expect(routeSequoiaFundArtifacts([artifact], [
+      { id: 10, name: 'Sequoia', sourceAccountName: 'Sequoia Fund', sourceAccountNames: null, accountAliases: null },
+    ])).toEqual([{ fileName: 'activity.csv', accountId: 10 }]);
+
+    expect(() => routeSequoiaFundArtifacts([artifact], [
+      { id: 10, name: 'First', sourceAccountName: null, sourceAccountNames: null, accountAliases: null },
+      { id: 20, name: 'Second', sourceAccountName: null, sourceAccountNames: null, accountAliases: null },
+    ])).toThrow('no unambiguous local account route');
   });
 
   test('a connection-specific Vanguard sync selects only that login profile', () => {

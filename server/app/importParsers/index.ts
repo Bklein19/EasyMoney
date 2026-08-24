@@ -16,6 +16,7 @@ import { morganStanleyActivityParser } from './morganStanleyActivity.ts';
 import { morganStanleyStatementParser } from './morganStanleyStatement.ts';
 import { robinhoodBankingParser } from './robinhoodBanking.ts';
 import { robinhoodStatementParser } from './robinhoodStatement.ts';
+import { sequoiaFundActivityParser } from './sequoiaFundActivity.ts';
 import { sequoiaFundStatementParser } from './sequoiaFundStatement.ts';
 import { tiaaActivityParser } from './tiaaActivity.ts';
 import { tiaaStatementParser } from './tiaaStatement.ts';
@@ -39,6 +40,7 @@ export const IMPORT_PARSERS: AppImportParser[] = [
   vanguardActivityParser,
   vanguardActivityCsvParser,
   morganStanleyActivityParser,
+  sequoiaFundActivityParser,
   bofaStatementParser,
   wellsFargoStatementParser,
   morganStanleyStatementParser,

@@ -77,6 +77,15 @@ test('PII-free Fidelity report filename resolves from document structure', () =>
   expect(parser?.id).toBe('fidelity-investment-report-pdf');
 });
 
+test('Sequoia Fund catch-up activity resolves through the public parser registry', () => {
+  const parser = resolveImportParser({
+    fileName: 'sequoia-fund-account-last4-1111-activity-2026-01-01-to-2026-08-23.csv',
+    headers: ['Transaction Date', 'Transaction Type', 'Dollar Amount'],
+    sample: 'Transaction Date,Transaction Type,Dollar Amount\n08/01/2026,Fund Purchase,400.00',
+  });
+  expect(parser?.id).toBe('sequoia-fund-activity-csv');
+});
+
 test('PII-free BofA and Wells Fargo statement filenames do not use the year as last four', () => {
   const bofa = parseBofaDepositStatementText([
     'Your Adv Plus Banking',

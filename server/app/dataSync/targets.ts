@@ -4,6 +4,7 @@ import type { SyncTarget } from './types.ts';
 export function syncTargetsForProfiles(
   hasBankOfAmericaAccounts: boolean,
   profiles: VanguardSyncProfile[],
+  sequoiaFundAccountHolder?: string | null,
 ): SyncTarget[] {
   const targets: SyncTarget[] = [];
   if (hasBankOfAmericaAccounts) {
@@ -15,6 +16,15 @@ export function syncTargetsForProfiles(
       institutionId: 'vanguard',
       connectionId: profile.id,
       label: `Vanguard (${profile.accountHolder})`,
+    });
+  }
+  if (sequoiaFundAccountHolder !== undefined) {
+    targets.push({
+      id: 'sequoia-fund',
+      institutionId: 'sequoia-fund',
+      label: sequoiaFundAccountHolder
+        ? `Sequoia Fund (${sequoiaFundAccountHolder})`
+        : 'Sequoia Fund',
     });
   }
   return targets;

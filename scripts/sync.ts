@@ -28,8 +28,8 @@ initDatabase();
 
 const args = Bun.argv.slice(2);
 const institution = valueAfter(args, '--institution');
-if (institution !== 'bank-of-america' && institution !== 'vanguard') {
-  throw new Error('Use --institution bank-of-america or vanguard');
+if (institution !== 'bank-of-america' && institution !== 'vanguard' && institution !== 'sequoia-fund') {
+  throw new Error('Use --institution bank-of-america, vanguard, or sequoia-fund');
 }
 const runId = valueAfter(args, '--run-id') ?? `sync-${Date.now()}`;
 const request: SyncRunRequest = {

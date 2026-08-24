@@ -253,7 +253,7 @@ export const appRouter = t.router({
 
     start: t.procedure
       .input(z.object({
-        institutionId: z.enum(['bank-of-america', 'vanguard']),
+        institutionId: z.enum(['bank-of-america', 'vanguard', 'sequoia-fund']),
         connectionId: z.string().optional(),
         goal: syncGoalInput,
       }))

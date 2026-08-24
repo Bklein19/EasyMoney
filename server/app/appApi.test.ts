@@ -90,7 +90,7 @@ function csvFromRows(rows: string[]) {
 
 async function saveAwaitingSyncReview(review: {
   runId: string;
-  institutionId: 'bank-of-america' | 'vanguard';
+  institutionId: 'bank-of-america' | 'vanguard' | 'sequoia-fund';
   downloaded: number;
   readyToImport: number;
   alreadyImported: number;
