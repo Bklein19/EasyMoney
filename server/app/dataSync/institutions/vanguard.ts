@@ -27,6 +27,7 @@ const STATEMENT_PDF_API_URL =
   'https://personal1.vanguard.com/usa/api/lah-statements-consumer/statements/pdf';
 const AUTHENTICATED_PATH_PATTERN = '^/en/investor/portfolio(?:/|$)';
 const AUTHENTICATION_REQUIRED = 'VANGUARD_AUTHENTICATION_REQUIRED';
+export const VANGUARD_AUTHENTICATION_TIMEOUT_MS = 30 * 60_000;
 const AUTHENTICATION_FIELD_SELECTOR = [
   'input[type="password"]:visible',
   'input[autocomplete="username"]:visible',
@@ -1315,6 +1316,7 @@ async function runProfile(
     { name: profile.session, startUrl: LOGIN_URL, profilePath },
     browserProgram(),
     {
+      authenticationTimeoutMs: VANGUARD_AUTHENTICATION_TIMEOUT_MS,
       completionDescription: `Vanguard (${profile.accountHolder}) downloads are complete.`,
       isAuthenticated: isVanguardAuthenticatedPage,
       waitUntilAuthenticated: waitUntilVanguardAuthenticated,

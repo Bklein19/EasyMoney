@@ -70,6 +70,7 @@ type InteractiveBrowserLeaseOptions = {
   staleAfterMs?: number;
   pollIntervalMs?: number;
   onWait?: (message: string) => void;
+  processIsAlive?: (pid: number) => boolean;
 };
 
 type InteractiveBrowserLeaseOwner = {
@@ -100,6 +101,45 @@ async function interactiveBrowserLeaseMatches(lockPath: string, token: string): 
   }
 }
 
+async function interactiveBrowserLeaseOwner(
+  lockPath: string,
+): Promise<InteractiveBrowserLeaseOwner | null> {
+  try {
+    const owner = JSON.parse(
+      await readFile(join(lockPath, 'owner.json'), 'utf8'),
+    ) as Partial<InteractiveBrowserLeaseOwner>;
+    if (typeof owner.token !== 'string' ||
+        !Number.isInteger(owner.pid) || owner.pid! <= 0 ||
+        typeof owner.sessionName !== 'string' ||
+        typeof owner.startedAt !== 'string') {
+      return null;
+    }
+    return owner as InteractiveBrowserLeaseOwner;
+  } catch {
+    return null;
+  }
+}
+
+function systemProcessIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return fileSystemErrorCode(error) !== 'ESRCH';
+  }
+}
+
+async function interactiveBrowserLeaseCanBeReclaimed(
+  lockPath: string,
+  modifiedAtMs: number,
+  staleAfterMs: number,
+  processIsAlive: (pid: number) => boolean,
+): Promise<boolean> {
+  const owner = await interactiveBrowserLeaseOwner(lockPath);
+  if (owner) return !processIsAlive(owner.pid);
+  return Date.now() - modifiedAtMs > staleAfterMs;
+}
+
 export async function withInteractiveBrowserLease<T>(
   options: InteractiveBrowserLeaseOptions,
   operation: () => Promise<T>,
@@ -110,6 +150,7 @@ export async function withInteractiveBrowserLease<T>(
   const pollIntervalMs = options.pollIntervalMs ?? 250;
   const deadline = Date.now() + timeoutMs;
   const token = crypto.randomUUID();
+  const processIsAlive = options.processIsAlive ?? systemProcessIsAlive;
   let reportedWait = false;
 
   await mkdir(dirname(lockPath), { recursive: true });
@@ -134,14 +175,24 @@ export async function withInteractiveBrowserLease<T>(
       if (fileSystemErrorCode(error) !== 'EEXIST') throw error;
       const lockStat = await stat(lockPath).catch(() => null);
       if (!lockStat) continue;
-      if (Date.now() - lockStat.mtimeMs > staleAfterMs) {
+      if (await interactiveBrowserLeaseCanBeReclaimed(
+        lockPath,
+        lockStat.mtimeMs,
+        staleAfterMs,
+        processIsAlive,
+      )) {
         const cleanupLockPath = `${lockPath}.cleanup`;
         let ownsCleanupLock = false;
         try {
           await mkdir(cleanupLockPath);
           ownsCleanupLock = true;
           const currentLockStat = await stat(lockPath).catch(() => null);
-          if (currentLockStat && Date.now() - currentLockStat.mtimeMs > staleAfterMs) {
+          if (currentLockStat && await interactiveBrowserLeaseCanBeReclaimed(
+            lockPath,
+            currentLockStat.mtimeMs,
+            staleAfterMs,
+            processIsAlive,
+          )) {
             await rm(lockPath, { recursive: true, force: true });
           }
         } catch (cleanupError) {
@@ -711,6 +762,7 @@ export async function showSyncCompletionChapter(
 }
 
 export async function showAuthenticationChapter(page: Page, action: string): Promise<void> {
+  await page.bringToFront();
   await page.screencast.showChapter('Sign in required', {
     description: action,
     duration: 2_000,

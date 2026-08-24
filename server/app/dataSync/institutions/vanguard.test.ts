@@ -21,6 +21,7 @@ import {
   runVanguardProfilesConcurrently,
   safeVanguardError,
   transitionVanguardToInteractiveAuthentication,
+  VANGUARD_AUTHENTICATION_TIMEOUT_MS,
   validateVanguardArtifact,
   vanguardApiResponseRequiresAuthentication,
   vanguardActivityApiRequest,
@@ -37,6 +38,10 @@ import {
   type VanguardSyncAccount,
   type VanguardProgressEvent,
 } from './vanguard.ts';
+
+test('Vanguard interactive authentication allows a full user MFA window', () => {
+  expect(VANGUARD_AUTHENTICATION_TIMEOUT_MS).toBe(30 * 60_000);
+});
 
 function apiAccount(
   last4: string,

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Page } from 'playwright';
@@ -183,6 +183,59 @@ describe('Playwright session helper', () => {
     expect(secondEntered).toBe(true);
   });
 
+  test('immediately reclaims a browser lease whose worker is dead', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-lease-'));
+    temporaryDirectories.push(root);
+    const profilePath = join(root, 'vanguard-catchup');
+    const lockPath = join(profilePath, '.interactive-browser.lock');
+    await mkdir(lockPath, { recursive: true });
+    await writeFile(join(lockPath, 'owner.json'), JSON.stringify({
+      token: 'dead-worker',
+      pid: 12345,
+      sessionName: 'vanguard-catchup',
+      startedAt: new Date().toISOString(),
+    }));
+
+    let entered = false;
+    const result = await withInteractiveBrowserLease({
+      profilePath,
+      sessionName: 'vanguard-catchup',
+      staleAfterMs: 60_000,
+      processIsAlive: () => false,
+    }, async () => {
+      entered = true;
+      return 'recovered';
+    });
+
+    expect(result).toBe('recovered');
+    expect(entered).toBe(true);
+  });
+
+  test('does not reclaim a stale browser lease while its worker is alive', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-lease-'));
+    temporaryDirectories.push(root);
+    const profilePath = join(root, 'vanguard-catchup');
+    const lockPath = join(profilePath, '.interactive-browser.lock');
+    await mkdir(lockPath, { recursive: true });
+    await writeFile(join(lockPath, 'owner.json'), JSON.stringify({
+      token: 'live-worker',
+      pid: 12345,
+      sessionName: 'vanguard-catchup',
+      startedAt: new Date(Date.now() - 60_000).toISOString(),
+    }));
+    const old = new Date(Date.now() - 60_000);
+    await utimes(lockPath, old, old);
+
+    await expect(withInteractiveBrowserLease({
+      profilePath,
+      sessionName: 'vanguard-catchup',
+      timeoutMs: 20,
+      staleAfterMs: 1,
+      pollIntervalMs: 5,
+      processIsAlive: () => true,
+    }, async () => 'overlapped')).rejects.toThrow('Timed out waiting');
+  });
+
   test('honors explicit browser visibility choices', () => {
     expect(institutionBrowserLaunchStrategy({
       hasSavedAuthentication: true,
@@ -352,6 +405,7 @@ describe('Playwright session helper', () => {
   test('clears the shared authentication chapter before credential entry', async () => {
     const events: string[] = [];
     const page = {
+      bringToFront: async () => events.push('foreground'),
       screencast: {
         showChapter: async (title: string) => events.push(`show:${title}`),
         hideOverlays: async () => events.push('hide'),
@@ -361,7 +415,7 @@ describe('Playwright session helper', () => {
 
     await showAuthenticationChapter(page, 'Sign in and complete MFA.');
 
-    expect(events).toEqual(['show:Sign in required', 'wait:2000', 'hide']);
+    expect(events).toEqual(['foreground', 'show:Sign in required', 'wait:2000', 'hide']);
   });
 
   test('does not hang when Chrome closes without settling context cleanup', async () => {
