@@ -1,18 +1,33 @@
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { pdfToText, cents, makeTx } from "./_helpers";
+import {
+  isSequoiaFundStatementFileName,
+  sequoiaFundFileAccountIdentity,
+  sequoiaFundSourceAccountName,
+} from "../sequoiaFundIdentity.ts";
 
 export const meta: ParserMeta = {
   id: "sequoia-fund-pdf",
   institution: "Sequoia Fund",
   kind: "statement",
   priority: 50,
-  matches: ({ filename }) => /^sequoia-fund-\d{4}-\d{2}-\d{2}\.pdf$/.test(filename),
+  matches: ({ filename }) => isSequoiaFundStatementFileName(filename),
 };
 
-const ACCOUNT = "Sequoia Fund";
+export function sequoiaFundStatementAccount(filePath: string, text = ""): string {
+  const identity = sequoiaFundFileAccountIdentity(filePath);
+  if (identity.kind === "last4") {
+    const statementLast4 = text.match(/(?:account|fund account)(?:\s+(?:number|no\.?))?\s*[:#-]?\s*(?:x+|\*+|\u2022+)?\s*(\d{4})\b/i)?.[1];
+    if (statementLast4 && statementLast4 !== identity.value) {
+      throw new Error("Sequoia Fund statement account does not match its artifact identity");
+    }
+  }
+  return sequoiaFundSourceAccountName(filePath);
+}
 
 export default async function parse(filePath: string): Promise<ParseResult> {
   const text = await pdfToText(filePath);
+  const account = sequoiaFundStatementAccount(filePath, text);
 
   // "MM/DD/YY through MM/DD/YY" or "MM/DD/YYYY through MM/DD/YYYY"
   const periodMatch = text.match(
@@ -41,8 +56,8 @@ export default async function parse(filePath: string): Promise<ParseResult> {
         date,
         amount_cents: cents(m[5]!),
         description,
-        account: ACCOUNT,
-        institution: ACCOUNT,
+        account,
+        institution: "Sequoia Fund",
         raw: { type: "purchase", date, description, amount: m[5] },
       })
     );
@@ -51,7 +66,7 @@ export default async function parse(filePath: string): Promise<ParseResult> {
   // Balance: "$57,277.55\n" then shortly after "Market Value as of MM/DD"
   const balMatch = text.match(/\$([\d,]+\.\d{2})\s*\n[\s\S]{0,300}Market Value as of \d{2}\/\d{2}\/\d{2}/);
   const balances = balMatch
-    ? [{ date: covered_to, account: ACCOUNT, institution: ACCOUNT, balance_cents: cents(balMatch[1]!) }]
+    ? [{ date: covered_to, account, institution: "Sequoia Fund", balance_cents: cents(balMatch[1]!) }]
     : [];
 
   return { transactions, balances, covered_from, covered_to };
