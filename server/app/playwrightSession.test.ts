@@ -109,12 +109,11 @@ describe('Playwright session helper', () => {
     });
   });
 
-  test('serializes interactive sign-in browsers across institution profiles', async () => {
+  test('allows interactive sign-in browsers for different profiles to run concurrently', async () => {
     const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-lease-'));
     temporaryDirectories.push(root);
     const firstEntered = Promise.withResolvers<void>();
     const releaseFirst = Promise.withResolvers<void>();
-    const secondWaiting = Promise.withResolvers<void>();
     let secondEntered = false;
 
     const first = withInteractiveBrowserLease({
@@ -132,17 +131,53 @@ describe('Playwright session helper', () => {
       profilePath: join(root, 'wells-fargo-catchup'),
       sessionName: 'wells-fargo-catchup',
       pollIntervalMs: 5,
-      onWait: () => secondWaiting.resolve(),
     }, async () => {
       secondEntered = true;
       return 'wells-fargo';
+    });
+
+    expect(await second).toBe('wells-fargo');
+    expect(secondEntered).toBe(true);
+
+    releaseFirst.resolve();
+    expect(await first).toBe('fidelity');
+  });
+
+  test('serializes interactive browsers that share a profile', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-lease-'));
+    temporaryDirectories.push(root);
+    const profilePath = join(root, 'fidelity-catchup');
+    const firstEntered = Promise.withResolvers<void>();
+    const releaseFirst = Promise.withResolvers<void>();
+    const secondWaiting = Promise.withResolvers<void>();
+    let secondEntered = false;
+
+    const first = withInteractiveBrowserLease({
+      profilePath,
+      sessionName: 'fidelity-catchup',
+      pollIntervalMs: 5,
+    }, async () => {
+      firstEntered.resolve();
+      await releaseFirst.promise;
+      return 'first';
+    });
+    await firstEntered.promise;
+
+    const second = withInteractiveBrowserLease({
+      profilePath,
+      sessionName: 'fidelity-catchup',
+      pollIntervalMs: 5,
+      onWait: () => secondWaiting.resolve(),
+    }, async () => {
+      secondEntered = true;
+      return 'second';
     });
     await secondWaiting.promise;
     expect(secondEntered).toBe(false);
 
     releaseFirst.resolve();
-    expect(await first).toBe('fidelity');
-    expect(await second).toBe('wells-fargo');
+    expect(await first).toBe('first');
+    expect(await second).toBe('second');
     expect(secondEntered).toBe(true);
   });
 

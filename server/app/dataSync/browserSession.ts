@@ -81,7 +81,7 @@ type InteractiveBrowserLeaseOwner = {
 const interactiveBrowserLockName = '.interactive-browser.lock';
 
 function interactiveBrowserLockPath(profilePath: string): string {
-  return join(dirname(resolve(profilePath)), interactiveBrowserLockName);
+  return join(resolve(profilePath), interactiveBrowserLockName);
 }
 
 function fileSystemErrorCode(error: unknown): string | null {
