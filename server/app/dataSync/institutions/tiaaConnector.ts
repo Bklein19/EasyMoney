@@ -21,124 +21,22 @@ function tiaaAccounts(accounts: readonly SyncAccountCoverage[]): SyncAccountCove
   return accounts.filter(matchesTiaaAccount);
 }
 
-function routingKeyFromFileName(fileName: string): string | null {
-  const activity = fileName.match(
-    /^tiaa-retirement-annuity-\d{4}-account-([a-f0-9]{12})-\d{4}-\d{2}-\d{2}-to-/i,
-  );
-  if (activity?.[1]) return activity[1].toLowerCase();
-  const statement = fileName.match(
-    /^tiaa-\d{4}-\d{2}-\d{2}-retirement-q[1-4]-\d{4}-([a-f0-9]{12})\.pdf$/i,
-  );
-  return statement?.[1]?.toLowerCase() ?? null;
-}
-
-function localRoutingKeys(account: SyncAccountCoverage): Set<string> {
-  return new Set(account.artifactFileNames
-    .map(routingKeyFromFileName)
-    .filter((value): value is string => Boolean(value)));
-}
-
-function isCalendarYear(value: string): boolean {
-  return /^(?:19|20)\d{2}$/.test(value);
-}
-
-function identityTokens(value: string): Set<string> {
-  const normalized = value.toLowerCase();
-  const tokens = new Set<string>();
-  for (const token of normalized.match(/[a-z0-9]{4,}/g) ?? []) {
-    if (!/\d/.test(token) || isCalendarYear(token)) continue;
-    tokens.add(token);
-    const digits = token.replace(/\D/g, '');
-    if (digits.length >= 4) {
-      if (!isCalendarYear(digits)) tokens.add(digits);
-      tokens.add(digits.slice(-4));
-    }
-  }
-  return tokens;
-}
-
-function legacyArtifactIdentityTokens(fileName: string): Set<string> {
-  const tokens = new Set<string>();
-  const activity = fileName.match(/tiaa-cref([a-z0-9]+)/i)?.[1];
-  const statement = fileName.match(
-    /^tiaa-\d{4}-\d{2}-\d{2}-retirement-q[1-4]-\d{4}-(\d+)\.pdf$/i,
-  )?.[1];
-  for (const value of [activity, statement]) {
-    if (!value) continue;
-    for (const token of identityTokens(value)) tokens.add(token);
-  }
-  return tokens;
-}
-
-function localIdentityTokens(account: SyncAccountCoverage): Set<string> {
-  const tokens = new Set<string>();
-  const values = [
-    account.name,
-    account.sourceAccountName,
-    ...account.sourceAccountNames,
-    ...account.accountAliases,
-  ].filter((value): value is string => Boolean(value?.trim()));
-  for (const value of values) {
-    for (const token of identityTokens(value)) tokens.add(token);
-  }
-  for (const fileName of account.artifactFileNames) {
-    for (const token of legacyArtifactIdentityTokens(fileName)) tokens.add(token);
-  }
-  return tokens;
-}
-
-function remoteIdentityTokens(remoteAccountId: string): Set<string> {
-  return identityTokens(remoteAccountId);
-}
-
-function matchesRemoteIdentity(account: SyncAccountCoverage, remoteAccountId: string): boolean {
-  const local = localIdentityTokens(account);
-  return [...remoteIdentityTokens(remoteAccountId)].some(token => local.has(token));
-}
-
 export function routeTiaaArtifacts(
   artifacts: readonly TiaaDownloadedArtifact[],
-  accounts: readonly SyncAccountCoverage[],
 ): RoutedSyncArtifact[] {
-  if (artifacts.length === 0) return [];
-  if (accounts.length === 0) throw new Error('No active TIAA account is available for downloaded data');
-
-  const routingKeys = [...new Set(artifacts.map(artifact => artifact.account.routingKey))];
-  const accountIdByRoutingKey = new Map<string, number>();
-  const usedAccountIds = new Set<number>();
-
-  for (const routingKey of routingKeys) {
-    const routedArtifacts = artifacts.filter(artifact => artifact.account.routingKey === routingKey);
-    const remoteAccountIds = [...new Set(routedArtifacts
-      .map(artifact => artifact.account.remoteAccountId)
-      .filter((value): value is string => Boolean(value)))];
-    if (remoteAccountIds.length > 1) {
-      throw new Error('TIAA artifacts disagree about their remote account identity');
+  return artifacts.map(artifact => {
+    if (artifact.account.remoteAccounts.length === 0) {
+      throw new Error('A TIAA artifact exposes no parser-backed account claims');
     }
-
-    let matches = accounts.filter(account => localRoutingKeys(account).has(routingKey));
-    if (matches.length === 0 && remoteAccountIds[0]) {
-      matches = accounts.filter(account => matchesRemoteIdentity(account, remoteAccountIds[0]!));
+    const claimKeys = artifact.account.remoteAccounts.map(account => account.claimKey.trim());
+    if (claimKeys.some(value => !value) || new Set(claimKeys).size !== claimKeys.length) {
+      throw new Error('A TIAA artifact exposes ambiguous parser-backed account claims');
     }
-    if (matches.length === 0 && routingKeys.length === 1 && accounts.length === 1) {
-      matches = [accounts[0]!];
-    }
-    if (matches.length !== 1) {
-      throw new Error('A TIAA remote account has no unambiguous local account route');
-    }
-
-    const accountId = matches[0]!.id;
-    if (usedAccountIds.has(accountId)) {
-      throw new Error('Multiple TIAA remote accounts map to the same local account');
-    }
-    usedAccountIds.add(accountId);
-    accountIdByRoutingKey.set(routingKey, accountId);
-  }
-
-  return artifacts.map(artifact => ({
-    fileName: artifact.fileName,
-    accountId: accountIdByRoutingKey.get(artifact.account.routingKey)!,
-  }));
+    return {
+      fileName: artifact.fileName,
+      accountRoutes: claimKeys.map(remoteAccountId => ({ remoteAccountId })),
+    };
+  });
 }
 
 function combinedTiaaWindow(context: SyncConnectorRunContext, accounts: SyncAccountCoverage[]) {
@@ -202,13 +100,14 @@ export function createTiaaConnector(runSync: TiaaSyncRunner = runTiaaSync) {
         through,
         session: 'tiaa-catchup',
       }, event => reportTiaaProgress(context, event));
-      const routed = routeTiaaArtifacts(result.artifacts, accounts);
+      const routed = routeTiaaArtifacts(result.artifacts);
 
       context.report({
         type: 'phase',
         message: `Validated ${routed.length} TIAA artifact${routed.length === 1 ? '' : 's'}`,
         data: {
           accountsDiscovered: result.accountsDiscovered,
+          accountSelectionsDiscovered: result.accountSelectionsDiscovered,
           activityPeriodsDiscovered: result.activityPeriodsDiscovered,
           statementsDiscovered: result.statementsDiscovered,
           emptyActivityExports: result.emptyActivityExports,

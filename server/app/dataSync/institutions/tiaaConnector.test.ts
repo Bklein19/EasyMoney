@@ -5,9 +5,11 @@ import type { SyncEvent } from '../protocol.ts';
 import type {
   TiaaDownloadedArtifact,
   TiaaProgressEvent,
+  TiaaRemoteAccountIdentity,
   TiaaSyncConfig,
   TiaaSyncResult,
 } from './tiaa.ts';
+import { tiaaActivityRemoteAccount } from './tiaa.ts';
 import {
   createTiaaConnector,
   matchesTiaaAccount,
@@ -36,9 +38,8 @@ function account(id: number, overrides: Partial<SyncAccountCoverage> = {}): Sync
 }
 
 function artifact(
-  routingKey: string,
-  remoteAccountId: string | null,
   fileName: string,
+  remoteAccounts: TiaaRemoteAccountIdentity[],
   artifactType: TiaaDownloadedArtifact['artifactType'] = 'activity',
 ): TiaaDownloadedArtifact {
   return {
@@ -47,10 +48,12 @@ function artifact(
     kind: artifactType === 'activity' ? 'csv' : 'pdf',
     artifactType,
     parserId: artifactType === 'activity' ? 'tiaa-activity-csv' : 'tiaa-statement-pdf',
-    account: { routingKey, remoteAccountId },
+    account: { routingKey: 'aaaaaaaaaaaa', remoteAccounts },
     coveredFrom: '2026-01-01',
     coveredThrough: '2026-06-30',
     size: 1_000,
+    transactionCount: 2,
+    balanceCount: artifactType === 'statement' ? 1 : 0,
     source: 'downloaded',
   };
 }
@@ -58,7 +61,10 @@ function artifact(
 function result(artifacts: TiaaDownloadedArtifact[]): TiaaSyncResult {
   return {
     artifacts,
-    accountsDiscovered: new Set(artifacts.map(item => item.account.routingKey)).size,
+    accountsDiscovered: new Set(artifacts.flatMap(item =>
+      item.account.remoteAccounts.map(remote => remote.claimKey)
+    )).size,
+    accountSelectionsDiscovered: 1,
     activityPeriodsDiscovered: 2,
     statementsDiscovered: artifacts.filter(item => item.artifactType === 'statement').length,
     emptyActivityExports: 1,
@@ -93,66 +99,30 @@ describe('TIAA connector targeting', () => {
 });
 
 describe('TIAA artifact routing', () => {
-  test('routes multiple remote accounts using stable artifact keys and explicit local identity', () => {
-    const firstKey = 'aaaaaaaaaaaa';
-    const secondKey = 'bbbbbbbbbbbb';
-    const accounts = [
-      account(10, {
-        artifactFileNames: [
-          `tiaa-retirement-annuity-2025-account-${firstKey}-2025-01-01-to-2025-12-31.csv`,
-        ],
-      }),
-      account(20, { accountAliases: ['TIAA-CREF account ending 2222'] }),
-    ];
-    const artifacts = [
-      artifact(firstKey, 'RET1111', 'first.csv'),
-      artifact(firstKey, 'RET1111', 'first-statement.pdf', 'statement'),
-      artifact(secondKey, 'RETIREMENT-2222', 'second.csv'),
-    ];
-
-    expect(routeTiaaArtifacts(artifacts, accounts)).toEqual([
-      { fileName: 'first.csv', accountId: 10 },
-      { fileName: 'first-statement.pdf', accountId: 10 },
-      { fileName: 'second.csv', accountId: 20 },
-    ]);
+  test('routes every consolidated parser claim independently without forcing a destination', () => {
+    const claims = [tiaaActivityRemoteAccount('RET123'), tiaaActivityRemoteAccount('RET456')];
+    expect(routeTiaaArtifacts([artifact('activity.csv', claims)])).toEqual([{
+      fileName: 'activity.csv',
+      accountRoutes: [
+        { remoteAccountId: 'TIAA||Retirement Annuity RET123' },
+        { remoteAccountId: 'TIAA||Retirement Annuity RET456' },
+      ],
+    }]);
   });
 
-  test('uses old account-identifying filenames without logging or exposing the identity', () => {
-    expect(routeTiaaArtifacts([
-      artifact('cccccccccccc', 'Tiaa-Cref12345678', 'activity.csv'),
-    ], [
-      account(30, { artifactFileNames: ['tiaa-retirement-annuity-Tiaa-Cref12345678-2025.csv'] }),
-      account(40, { accountAliases: ['TIAA-CREF account ending 9999'] }),
-    ])).toEqual([{ fileName: 'activity.csv', accountId: 30 }]);
-  });
-
-  test('permits only the unambiguous single-account fallback', () => {
-    const downloaded = [artifact('aaaaaaaaaaaa', null, 'statement.pdf', 'statement')];
-    expect(routeTiaaArtifacts(downloaded, [account(10)]))
-      .toEqual([{ fileName: 'statement.pdf', accountId: 10 }]);
-    expect(() => routeTiaaArtifacts(downloaded, [account(10), account(20)]))
-      .toThrow('no unambiguous local account route');
-  });
-
-  test('rejects conflicting identities and many-to-one account collapse', () => {
-    expect(() => routeTiaaArtifacts([
-      artifact('aaaaaaaaaaaa', 'RET1111', 'first.csv'),
-      artifact('aaaaaaaaaaaa', 'RET2222', 'second.csv'),
-    ], [account(10)])).toThrow('artifacts disagree');
-
-    expect(() => routeTiaaArtifacts([
-      artifact('aaaaaaaaaaaa', 'RET1111', 'first.csv'),
-      artifact('bbbbbbbbbbbb', 'RET1111', 'second.csv'),
-    ], [account(10, { accountAliases: ['TIAA RET1111'] })]))
-      .toThrow('Multiple TIAA remote accounts map to the same local account');
+  test('fails closed for missing or ambiguous parser claim keys', () => {
+    expect(() => routeTiaaArtifacts([artifact('empty.csv', [])]))
+      .toThrow('no parser-backed account claims');
+    const claim = tiaaActivityRemoteAccount('RET123');
+    expect(() => routeTiaaArtifacts([artifact('duplicate.csv', [claim, claim])]))
+      .toThrow('ambiguous parser-backed account claims');
   });
 });
 
 describe('TIAA connector execution', () => {
-  test('combines activity and balance windows, translates PII-free progress, and routes artifacts', async () => {
+  test('combines activity and balance windows, translates PII-free progress, and preserves claim routes', async () => {
     const calls: TiaaSyncConfig[] = [];
     const events: Array<Omit<SyncEvent, 'runId' | 'timestamp'>> = [];
-    const routingKey = 'aaaaaaaaaaaa';
     const connector = createTiaaConnector(async (
       config: TiaaSyncConfig,
       progress: (event: TiaaProgressEvent) => void = () => {},
@@ -164,61 +134,45 @@ describe('TIAA connector execution', () => {
         message: 'TIAA account discovery is complete',
         elapsedMs: 125,
         phaseElapsedMs: 25,
-        data: { accounts: 1 },
+        data: { accountSelections: 1, sourceAccounts: 2 },
       });
-      return result([artifact(routingKey, 'RET1111', 'activity.csv')]);
+      return result([artifact('activity.csv', [
+        tiaaActivityRemoteAccount('RET123'),
+        tiaaActivityRemoteAccount('RET456'),
+      ])]);
     });
     const accounts = [account(10, {
       latestFactDate: '2026-08-10',
       latestBalanceDate: '2026-06-30',
-      artifactFileNames: [
-        `tiaa-retirement-annuity-2025-account-${routingKey}-2025-01-01-to-2025-12-31.csv`,
-      ],
     })];
 
-    await expect(connector.run(runContext(accounts, event => events.push(event)))).resolves.toEqual([
-      { fileName: 'activity.csv', accountId: 10 },
-    ]);
+    await expect(connector.run(runContext(accounts, event => events.push(event)))).resolves.toEqual([{
+      fileName: 'activity.csv',
+      accountRoutes: [
+        { remoteAccountId: 'TIAA||Retirement Annuity RET123' },
+        { remoteAccountId: 'TIAA||Retirement Annuity RET456' },
+      ],
+    }]);
     expect(calls).toEqual([{
       outputDir: '/tmp/tiaa-connector-test',
       from: '2026-06-23',
       through: '2026-08-24',
       session: 'tiaa-catchup',
     }]);
-    expect(events).toEqual([
-      {
-        type: 'phase',
-        message: 'Opening TIAA',
-        data: {
-          goal: 'current',
-          accountCount: 1,
-          from: '2026-06-23',
-          through: '2026-08-24',
-        },
+    expect(events.at(-1)).toEqual({
+      type: 'phase',
+      message: 'Validated 1 TIAA artifact',
+      data: {
+        accountsDiscovered: 2,
+        accountSelectionsDiscovered: 1,
+        activityPeriodsDiscovered: 2,
+        statementsDiscovered: 0,
+        emptyActivityExports: 1,
+        timingsMs: { authentication: 10, validation: 30 },
       },
-      {
-        type: 'phase',
-        message: 'TIAA account discovery is complete',
-        data: {
-          phase: 'account-discovery',
-          state: 'completed',
-          elapsedMs: 125,
-          phaseElapsedMs: 25,
-          accounts: 1,
-        },
-      },
-      {
-        type: 'phase',
-        message: 'Validated 1 TIAA artifact',
-        data: {
-          accountsDiscovered: 1,
-          activityPeriodsDiscovered: 2,
-          statementsDiscovered: 0,
-          emptyActivityExports: 1,
-          timingsMs: { authentication: 10, validation: 30 },
-        },
-      },
-    ]);
+    });
+    expect(JSON.stringify(events)).not.toContain('RET123');
+    expect(JSON.stringify(events)).not.toContain('RET456');
   });
 
   test('fails before opening a browser when no local TIAA account exists', async () => {

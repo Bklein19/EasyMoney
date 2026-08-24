@@ -13,6 +13,12 @@ export const meta: ParserMeta = {
 
 const ACCOUNT = "Retirement Annuity";
 
+export function tiaaActivitySourceAccountName(remoteAccountId: string): string {
+  const normalized = remoteAccountId.replace(/\s+/g, " ").trim();
+  if (!normalized) throw new Error("TIAA activity account identity is empty");
+  return `${ACCOUNT} ${normalized}`;
+}
+
 function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
@@ -89,17 +95,18 @@ export default async function parse(filePath: string): Promise<ParseResult> {
     const action = get(row, "Action");
     const security = get(row, "Security");
     const description = [action, security].filter(Boolean).join(" | ");
+    const accountId = get(row, "AccountId");
 
     transactions.push(
       makeTx({
         date: isoDate(dateRaw),
         amount_cents: cents(amount),
         description,
-        account: ACCOUNT,
+        account: tiaaActivitySourceAccountName(accountId),
         institution: "TIAA",
         raw: {
           source: "tiaa-csv",
-          accountId: get(row, "AccountId"),
+          accountId,
           action,
           security,
           price: get(row, "Price"),

@@ -1354,7 +1354,7 @@ test('TIAA activity adapter parses retirement CSV rows', async () => {
       amountCents: 10000,
       description: 'Contribution | TIAA Traditional',
       institution: 'TIAA',
-      account: 'Retirement Annuity',
+      account: 'Retirement Annuity RET123',
       sourceRole: 'activity',
     });
   } finally {
