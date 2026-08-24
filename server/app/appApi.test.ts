@@ -3890,6 +3890,72 @@ test('catch-up rejects conflicting destinations for repeated remote identities',
   ]);
 });
 
+test('catch-up rejects one auto decision when repeated remote claims resolve to different accounts', async () => {
+  const firstAccountId = Number(insertRow('accounts', {
+    name: 'First Automatic Destination',
+    institution: 'Example Institution',
+    type: 'investment',
+    currentBalance: 0,
+    status: 'active',
+  }));
+  const secondAccountId = Number(insertRow('accounts', {
+    name: 'Second Automatic Destination',
+    institution: 'Example Institution',
+    type: 'investment',
+    currentBalance: 0,
+    status: 'active',
+  }));
+  const first = stageConsolidatedSyncFacts([
+    { remoteAccountId: 'remote:conflicting-auto', accountName: 'First Automatic Download' },
+  ], 'conflicting-auto-activity.csv');
+  const second = stageConsolidatedSyncFacts([
+    { remoteAccountId: 'remote:conflicting-auto', accountName: 'Second Automatic Download' },
+  ], 'conflicting-auto-statement.pdf', 'statement');
+  const firstArtifact = buildSyncArtifactReview({
+    importFileId: first.importFileId,
+    fileName: first.fileName,
+    status: 'ready',
+    accountRoutes: [{ remoteAccountId: 'remote:conflicting-auto', accountId: firstAccountId }],
+  });
+  const secondArtifact = buildSyncArtifactReview({
+    importFileId: second.importFileId,
+    fileName: second.fileName,
+    status: 'ready',
+    accountRoutes: [{ remoteAccountId: 'remote:conflicting-auto', accountId: secondAccountId }],
+  });
+  const review = {
+    runId: 'sync-conflicting-auto-destination',
+    institutionId: 'bank-of-america' as const,
+    downloaded: 2,
+    readyToImport: 2,
+    alreadyImported: 0,
+    artifacts: [firstArtifact, secondArtifact],
+  };
+  await saveAwaitingSyncReview(review);
+
+  await expect(caller.dataSync.confirm({
+    runId: review.runId,
+    accountMappings: [{
+      sourceAccountId: first.sourceAccountIds[0]!,
+      mode: 'auto',
+    }],
+  })).rejects.toThrow(
+    'Remote account remote:conflicting-auto has no single safe automatic destination',
+  );
+
+  expect(getDb().prepare('SELECT accountId FROM sourceAccounts ORDER BY id').all()).toEqual([
+    { accountId: null },
+    { accountId: null },
+  ]);
+  expect(getDb().prepare('SELECT status FROM importFiles ORDER BY id').all()).toEqual([
+    { status: 'previewed' },
+    { status: 'previewed' },
+  ]);
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM accountAliases').get()).toEqual({ count: 0 });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
+  expect((await caller.dataSync.status({ runId: review.runId }))?.status).toBe('awaiting-confirmation');
+});
+
 test('failed catch-up confirmation rolls back earlier account creation, links, and artifacts', async () => {
   const first = stageConsolidatedSyncFacts([
     { remoteAccountId: 'remote:rollback-first', accountName: 'Rollback First Account' },

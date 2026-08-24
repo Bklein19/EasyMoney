@@ -10,6 +10,10 @@ import {
   rebuildLedgerReadModel,
 } from '../imports.ts';
 import { importParserDisplayName } from '../importParsers/index.ts';
+import {
+  commonSafeSyncAccountDestination,
+  syncClaimRequiresExplicitMapping,
+} from './accountMapping.ts';
 import type { SyncArtifactAccountRoute } from './connector.ts';
 import type {
   SyncAccountMappingDecision,
@@ -239,7 +243,7 @@ function reviewWarnings(claims: SyncAccountClaim[]): string[] {
       warnings.push(`${claim.accountName || 'A newly discovered source account'} needs an account mapping before import.`);
       continue;
     }
-    if (claimRequiresExplicitMapping(claim)) {
+    if (syncClaimRequiresExplicitMapping(claim)) {
       warnings.push(`${claim.accountName || 'A source account'} needs an explicit account choice before import.`);
     }
     const account = destinationAccount(claim.resolvedAccountId, { allowArchived: true });
@@ -250,10 +254,6 @@ function reviewWarnings(claims: SyncAccountClaim[]): string[] {
     }
   }
   return warnings;
-}
-
-function claimRequiresExplicitMapping(claim: SyncAccountClaim): boolean {
-  return claim.requiresExplicitMapping ?? claim.resolution !== 'connector';
 }
 
 export function buildSyncArtifactReview(options: {
@@ -374,7 +374,7 @@ function explicitMappingForClaim(
   mapping: SyncAccountMappingDecision,
 ): SyncAccountMappingDecision {
   if (mapping.mode === 'auto') {
-    if (claimRequiresExplicitMapping(claim)) {
+    if (syncClaimRequiresExplicitMapping(claim)) {
       throw new Error(`Source account ${claim.sourceAccountId} requires an explicit account choice.`);
     }
     if (!claim.resolvedAccountId || claim.resolution === 'ambiguous' || claim.resolution === 'archived-match') {
@@ -495,9 +495,9 @@ function validatedSyncAccountMappings(
   const validatedBySourceId = new Map<number, PlannedSyncAccountMapping>();
   for (const [remoteAccountId, groupedClaims] of claimsByRemoteId) {
     const requestedMappings = requestedByRemoteId.get(remoteAccountId) ?? [];
-    if (groupedClaims.some(claimRequiresExplicitMapping) &&
-      requestedMappings.some(mapping => mapping.mode === 'auto')) {
-      throw new Error(`Remote account ${remoteAccountId} requires an explicit existing or create choice.`);
+    const commonAutoDestination = commonSafeSyncAccountDestination(groupedClaims);
+    if (requestedMappings.some(mapping => mapping.mode === 'auto') && commonAutoDestination === null) {
+      throw new Error(`Remote account ${remoteAccountId} has no single safe automatic destination; choose an existing account or create one.`);
     }
 
     let canonical: SyncAccountMappingDecision;
@@ -512,23 +512,13 @@ function validatedSyncAccountMappings(
       }
       canonical = validated[0]!;
     } else {
-      const candidates = groupedClaims.map(claim => claim.resolvedAccountId &&
-        claim.resolvedAccountStatus !== 'archived' &&
-        claim.resolution !== 'ambiguous' &&
-        !claimRequiresExplicitMapping(claim)
-        ? claim.resolvedAccountId
-        : null);
-      if (candidates.some(accountId => accountId === null)) {
+      if (commonAutoDestination === null) {
         throw new Error('Resolve every source account before confirming the catch-up.');
-      }
-      const accountIds = [...new Set(candidates as number[])];
-      if (accountIds.length !== 1) {
-        throw new Error(`Remote account ${remoteAccountId} maps to multiple local accounts.`);
       }
       canonical = {
         sourceAccountId: groupedClaims[0]!.sourceAccountId,
         mode: 'existing',
-        accountId: accountIds[0]!,
+        accountId: commonAutoDestination,
       };
     }
 

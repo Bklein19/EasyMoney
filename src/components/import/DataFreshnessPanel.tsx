@@ -12,6 +12,10 @@ import type {
   SyncTarget,
 } from '../../../server/app/dataSync/types.ts';
 import { syncArtifactSubtitle, syncArtifactTitle } from './syncArtifactLabels.ts';
+import {
+  syncClaimRequiresExplicitMapping,
+} from '../../../server/app/dataSync/accountMapping.ts';
+import { syncAccountGroupAutoDestination } from './syncAccountMapping.ts';
 
 type FreshnessStatus = 'current' | 'due' | 'stale' | 'no-data' | 'closed';
 interface FreshnessAccount {
@@ -69,10 +73,6 @@ function syncAccountIdentityKey(claim: SyncAccountClaim) {
   return claim.remoteAccountId;
 }
 
-function syncClaimRequiresExplicitMapping(claim: SyncAccountClaim) {
-  return claim.requiresExplicitMapping ?? claim.resolution !== 'connector';
-}
-
 function syncAccountDraft(claim: SyncAccountClaim): SyncAccountDraft {
   const name = claim.accountName && claim.accountName !== 'Selected account' ? claim.accountName : '';
   const normalized = `${name} ${claim.institution || ''}`.toLowerCase();
@@ -102,11 +102,7 @@ function initialSyncMappingChoice(claim: SyncAccountClaim): SyncMappingChoice {
 
 function initialSyncGroupMappingChoice(claims: SyncAccountClaim[]): SyncMappingChoice {
   const representative = syncAccountGroupClaim(claims);
-  if (claims.some(syncClaimRequiresExplicitMapping)) {
-    return { mode: 'needs-selection', accountId: '', account: syncAccountDraft(representative) };
-  }
-  const resolvedIds = [...new Set(claims.map(claim => claim.resolvedAccountId))];
-  if (resolvedIds.length !== 1 || resolvedIds[0] === null) {
+  if (syncAccountGroupAutoDestination(claims) === null) {
     return { mode: 'needs-selection', accountId: '', account: syncAccountDraft(representative) };
   }
   return initialSyncMappingChoice(representative);
@@ -114,7 +110,7 @@ function initialSyncGroupMappingChoice(claims: SyncAccountClaim[]): SyncMappingC
 
 function syncAccountGroupClaim(claims: SyncAccountClaim[]): SyncAccountClaim {
   const representative = claims[0]!;
-  return claims.some(syncClaimRequiresExplicitMapping)
+  return syncAccountGroupAutoDestination(claims) === null
     ? { ...representative, requiresExplicitMapping: true }
     : representative;
 }
@@ -523,7 +519,7 @@ function SyncReviewPanel({
   }, [readyClaims]);
   const explicitMappingIdentityKeys = useMemo(() => new Set(
     readyClaimGroups
-      .filter(([, claims]) => claims.some(syncClaimRequiresExplicitMapping))
+      .filter(([, claims]) => syncAccountGroupAutoDestination(claims) === null)
       .map(([identityKey]) => identityKey),
   ), [readyClaimGroups]);
   const [mappingChoices, setMappingChoices] = useState<SyncMappingChoices>(() => Object.fromEntries(
