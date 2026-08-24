@@ -468,28 +468,190 @@ export async function waitForInteractiveAuthentication(
   page: Page,
   deadline: number,
   options: Pick<RunOptions, 'isAuthenticated' | 'waitUntilAuthenticated'> = {},
-): Promise<void> {
+  context?: Pick<BrowserContext, 'pages' | 'on' | 'off'>,
+): Promise<Page> {
   const isAuthenticated = options.isAuthenticated ?? hasDefaultAuthentication;
   const waitUntilAuthenticated = options.waitUntilAuthenticated ?? waitUntilDefaultAuthentication;
 
-  if (page.isClosed()) throw new Error('The browser was closed before authentication completed');
-  if (await isAuthenticated(page)) return;
+  const browserContext = context ?? (
+    typeof (page as Partial<Page>).context === 'function'
+      ? page.context()
+      : undefined
+  );
+  if (!browserContext) {
+    if (page.isClosed()) throw new Error('The browser was closed before authentication completed');
+    if (await isAuthenticated(page)) return page;
 
-  const timeoutMs = deadline - Date.now();
-  if (timeoutMs <= 0) throw new Error('Authentication timed out');
+    const timeoutMs = deadline - Date.now();
+    if (timeoutMs <= 0) throw new Error('Authentication timed out');
 
+    try {
+      await waitUntilAuthenticated(page, timeoutMs);
+    } catch (error) {
+      if (isClosedContextError(error)) throw new Error('The browser was closed before authentication completed');
+      if (error instanceof Error && error.name === 'TimeoutError') throw new Error('Authentication timed out');
+      throw error;
+    }
+
+    if (page.isClosed()) throw new Error('The browser was closed before authentication completed');
+    if (!await isAuthenticated(page)) {
+      throw new Error('Authentication state changed without completing sign-in');
+    }
+    return page;
+  }
+
+  let rejectContextClosed: ((error: Error) => void) | undefined;
+  const handleContextClose = () => rejectContextClosed?.(
+    new Error('The browser was closed before authentication completed'),
+  );
+  const contextClosed = new Promise<never>((_resolve, reject) => {
+    rejectContextClosed = reject;
+    browserContext.on('close', handleContextClose);
+  });
+
+  let activePage: Page | null = newestOpenPage(browserContext, page);
   try {
-    await waitUntilAuthenticated(page, timeoutMs);
-  } catch (error) {
-    if (isClosedContextError(error)) throw new Error('The browser was closed before authentication completed');
-    if (error instanceof Error && error.name === 'TimeoutError') throw new Error('Authentication timed out');
-    throw error;
-  }
+    while (true) {
+      const timeoutMs = deadline - Date.now();
+      if (timeoutMs <= 0) throw new Error('Authentication timed out');
 
-  if (page.isClosed()) throw new Error('The browser was closed before authentication completed');
-  if (!await isAuthenticated(page)) {
-    throw new Error('Authentication state changed without completing sign-in');
+      if (!activePage) {
+        const observer = observeAuthenticationPageChange(browserContext, undefined, timeoutMs);
+        try {
+          const outcome = await Promise.race([observer.promise, contextClosed]);
+          if (outcome.type === 'timeout') throw new Error('Authentication timed out');
+          activePage = newestOpenPage(
+            browserContext,
+            outcome.type === 'page' ? outcome.page : undefined,
+          );
+        } finally {
+          observer.dispose();
+        }
+        continue;
+      }
+
+      if (activePage.isClosed()) {
+        activePage = newestOpenPage(browserContext);
+        continue;
+      }
+      if (await Promise.race([
+        Promise.resolve().then(() => isAuthenticated(activePage!)),
+        contextClosed,
+      ])) return activePage;
+
+      const pageAtWaitStart = activePage;
+      const observer = observeAuthenticationPageChange(browserContext, pageAtWaitStart, timeoutMs);
+      const newestAfterObserving = newestOpenPage(browserContext, pageAtWaitStart);
+      if (newestAfterObserving && newestAfterObserving !== pageAtWaitStart) {
+        observer.dispose();
+        activePage = newestAfterObserving;
+        continue;
+      }
+      if (pageAtWaitStart.isClosed()) {
+        observer.dispose();
+        activePage = newestOpenPage(browserContext);
+        continue;
+      }
+
+      let outcome: AuthenticationWaitOutcome;
+      try {
+        outcome = await Promise.race([
+          Promise.resolve()
+            .then(() => waitUntilAuthenticated(pageAtWaitStart, timeoutMs))
+            .then((): AuthenticationWaitOutcome => ({ type: 'authentication-changed' }))
+            .catch((error): AuthenticationWaitOutcome => ({ type: 'wait-error', error })),
+          observer.promise,
+          contextClosed,
+        ]);
+      } finally {
+        observer.dispose();
+      }
+
+      if (outcome.type === 'timeout') throw new Error('Authentication timed out');
+      if (outcome.type === 'page' || outcome.type === 'page-closed') {
+        activePage = newestOpenPage(
+          browserContext,
+          outcome.type === 'page' ? outcome.page : undefined,
+        );
+        continue;
+      }
+
+      const newestPage = newestOpenPage(browserContext, pageAtWaitStart);
+      if (newestPage && newestPage !== pageAtWaitStart) {
+        activePage = newestPage;
+        continue;
+      }
+      if (outcome.type === 'wait-error') {
+        if (pageAtWaitStart.isClosed() || isClosedContextError(outcome.error)) {
+          activePage = newestOpenPage(browserContext);
+          continue;
+        }
+        if (outcome.error instanceof Error && outcome.error.name === 'TimeoutError') {
+          throw new Error('Authentication timed out');
+        }
+        throw outcome.error;
+      }
+
+      if (pageAtWaitStart.isClosed()) {
+        activePage = newestOpenPage(browserContext);
+        continue;
+      }
+      if (!await Promise.race([
+        Promise.resolve().then(() => isAuthenticated(pageAtWaitStart)),
+        contextClosed,
+      ])) {
+        throw new Error('Authentication state changed without completing sign-in');
+      }
+      return pageAtWaitStart;
+    }
+  } finally {
+    rejectContextClosed = undefined;
+    browserContext.off('close', handleContextClose);
   }
+}
+
+type AuthenticationWaitOutcome =
+  | { type: 'authentication-changed' }
+  | { type: 'wait-error'; error: unknown }
+  | { type: 'page'; page: Page }
+  | { type: 'page-closed' }
+  | { type: 'timeout' };
+
+function newestOpenPage(
+  context: Pick<BrowserContext, 'pages'>,
+  preferred?: Page,
+): Page | null {
+  const pages = context.pages().filter(candidate => !candidate.isClosed());
+  return pages.at(-1) ?? (preferred && !preferred.isClosed() ? preferred : null);
+}
+
+function observeAuthenticationPageChange(
+  context: Pick<BrowserContext, 'on' | 'off'>,
+  page: Page | undefined,
+  timeoutMs: number,
+): { promise: Promise<AuthenticationWaitOutcome>; dispose: () => void } {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let resolveOutcome: ((outcome: AuthenticationWaitOutcome) => void) | undefined;
+  const promise = new Promise<AuthenticationWaitOutcome>(resolve => {
+    resolveOutcome = resolve;
+  });
+  const finish = (outcome: AuthenticationWaitOutcome) => resolveOutcome?.(outcome);
+  const handlePage = (nextPage: Page) => finish({ type: 'page', page: nextPage });
+  const handlePageClose = () => finish({ type: 'page-closed' });
+
+  context.on('page', handlePage);
+  page?.on('close', handlePageClose);
+  timeout = setTimeout(() => finish({ type: 'timeout' }), timeoutMs);
+
+  return {
+    promise,
+    dispose: () => {
+      resolveOutcome = undefined;
+      context.off('page', handlePage);
+      page?.off('close', handlePageClose);
+      if (timeout) clearTimeout(timeout);
+    },
+  };
 }
 
 function isClosedContextError(error: unknown): boolean {
@@ -544,13 +706,14 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
       headless,
     },
   }, async (page, context) => {
+    let activePage = page;
     const deadline = Date.now() + (options.authenticationTimeoutMs ?? 10 * 60_000);
     const isAuthenticated = options.isAuthenticated ?? hasDefaultAuthentication;
     const checkpointAuthentication = async () => {
       if (!(session.persistAuthentication ?? true)) return;
       let authenticated = false;
       try {
-        authenticated = await isAuthenticated(page);
+        authenticated = await isAuthenticated(activePage);
       } catch {
         return;
       }
@@ -560,23 +723,23 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
       if (!persisted) console.warn(`Could not checkpoint authentication for ${session.name}.`);
     };
     let result = decodeInstitutionBrowserProgramResult<T>(await program(
-      page,
+      activePage,
       reportProgress,
       options.programBindings ?? {},
     ));
     if (result.status === 'login-required' && allowInteractiveAuthentication) {
       await showAuthenticationChapter(
-        page,
+        activePage,
         result.action ?? `Complete login and MFA for ${session.name}. EasyMoney will continue automatically.`,
       );
       console.log(`Authentication required in ${session.name}. Complete login and MFA in the open browser.`);
     }
     while (allowInteractiveAuthentication && result.status === 'login-required' && Date.now() < deadline) {
-      await waitForInteractiveAuthentication(page, deadline, options);
+      activePage = await waitForInteractiveAuthentication(activePage, deadline, options, context);
       await checkpointAuthentication();
       reportProgress('Authentication complete. Continuing downloads.');
       result = decodeInstitutionBrowserProgramResult<T>(await program(
-        page,
+        activePage,
         reportProgress,
         options.programBindings ?? {},
       ));
@@ -585,7 +748,7 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
       throw new Error(`Authentication timed out in ${session.name}`);
     }
     if (result.status !== 'login-required') await checkpointAuthentication();
-    if (result.status === 'complete') await showSyncCompletionChapter(page, options);
+    if (result.status === 'complete') await showSyncCompletionChapter(activePage, options);
     return result;
   });
 

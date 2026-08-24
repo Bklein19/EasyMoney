@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { EventEmitter } from 'node:events';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -254,6 +255,73 @@ describe('Playwright session helper', () => {
     await waiting;
 
     expect(title).toContain('Accounts Overview');
+  });
+
+  test('follows a replacement page when an institution closes its login page', async () => {
+    const contextEvents = new EventEmitter();
+    const originalEvents = new EventEmitter();
+    const replacementEvents = new EventEmitter();
+    let originalClosed = false;
+    let pages: Page[] = [];
+    const originalPage = Object.assign(originalEvents, {
+      context: () => context,
+      isClosed: () => originalClosed,
+      url: () => 'https://login.example.test/',
+    }) as unknown as Page;
+    const replacementPage = Object.assign(replacementEvents, {
+      context: () => context,
+      isClosed: () => false,
+      url: () => 'https://example.test/accounts',
+    }) as unknown as Page;
+    const context = Object.assign(contextEvents, {
+      pages: () => pages,
+    });
+    pages = [originalPage];
+
+    const waiting = waitForInteractiveAuthentication(
+      originalPage,
+      Date.now() + 5_000,
+      {
+        isAuthenticated: async currentPage => currentPage === replacementPage,
+        waitUntilAuthenticated: async () => new Promise<void>(() => {}),
+      },
+      context as never,
+    );
+    await Promise.resolve();
+
+    pages = [replacementPage];
+    contextEvents.emit('page', replacementPage);
+    originalClosed = true;
+    originalEvents.emit('close');
+
+    expect(await waiting).toBe(replacementPage);
+  });
+
+  test('still rejects when the browser context closes during authentication', async () => {
+    const contextEvents = new EventEmitter();
+    const pageEvents = new EventEmitter();
+    const page = Object.assign(pageEvents, {
+      context: () => context,
+      isClosed: () => false,
+      url: () => 'https://login.example.test/',
+    }) as unknown as Page;
+    const context = Object.assign(contextEvents, {
+      pages: () => [page],
+    });
+
+    const waiting = waitForInteractiveAuthentication(
+      page,
+      Date.now() + 5_000,
+      {
+        isAuthenticated: async () => false,
+        waitUntilAuthenticated: async () => new Promise<void>(() => {}),
+      },
+      context as never,
+    );
+    await Promise.resolve();
+    contextEvents.emit('close');
+
+    await expect(waiting).rejects.toThrow('browser was closed before authentication completed');
   });
 
   test('decodes the typed institution browser status contract', () => {
