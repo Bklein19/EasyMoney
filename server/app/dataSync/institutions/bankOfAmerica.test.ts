@@ -1,0 +1,167 @@
+import { describe, expect, test } from 'bun:test';
+import type { Page } from 'playwright';
+
+import {
+  bankOfAmericaCardActivityRequest,
+  bankOfAmericaCardActivityJobs,
+  bankOfAmericaDepositActivityRequest,
+  bankOfAmericaStatementIndexRequests,
+  discoverBankOfAmericaAccounts,
+  hasBankOfAmericaCreditCardActivity,
+  isBankOfAmericaAuthenticatedPage,
+  openBankOfAmericaAccount,
+  parseBankOfAmericaArgs,
+} from './bankOfAmerica.ts';
+
+describe('Bank of America institution integration', () => {
+  test('parses CLI arguments', () => {
+    expect(parseBankOfAmericaArgs([
+      '--output-dir', '/tmp/catchup',
+      '--through', '2026-08-16',
+      '--checking-from', '2026-08-01',
+      '--savings-from', '2026-07-01',
+      '--card-from', '2026-06-01',
+      '--session', 'test-profile',
+      '--scope', 'checking',
+      '--dry-run',
+    ])).toEqual({
+      outputDir: '/tmp/catchup',
+      through: '2026-08-16',
+      checkingFrom: '2026-08-01',
+      savingsFrom: '2026-07-01',
+      cardFrom: '2026-06-01',
+      session: 'test-profile',
+      scope: 'checking',
+      dryRun: true,
+    });
+  });
+
+  test('recognizes Accounts Overview even when the URL remains signIn.go', async () => {
+    const page = {
+      url: () => 'https://secure.bankofamerica.com/myaccounts/signin/signIn.go',
+      title: async () => 'Bank of America | Online Banking | Accounts Overview',
+      locator: () => ({ count: async () => 0 }),
+    } as unknown as Page;
+
+    expect(await isBankOfAmericaAuthenticatedPage(page)).toBe(true);
+  });
+
+  test('treats a header-only credit card export as no new activity', () => {
+    const header = 'Posted Date,Reference Number,Payee,Address,Amount\r\n';
+    expect(hasBankOfAmericaCreditCardActivity(header)).toBe(false);
+    expect(hasBankOfAmericaCreditCardActivity(`${header}08/20/2026,1,EXAMPLE SHOP,,\"-12.34\"\r\n`)).toBe(true);
+  });
+
+  test('builds account-specific direct credit-card download targets', () => {
+    expect(bankOfAmericaCardActivityJobs([
+      { label: 'Select a period', value: '' },
+      { label: 'Current transactions', value: '/card/current?' },
+      { label: 'Statement Period Ending Aug 15, 2026', value: '/card/august?' },
+      { label: 'Statement Period Ending Jul 15, 2026', value: '/card/july?' },
+      { label: 'Statement Period Ending Jun 15, 2026', value: '/card/june?' },
+    ], 'format=excel', '2026-07-01', '2026-08-22', '4321')).toEqual([
+      {
+        label: 'Current transactions',
+        filename: 'bofa-credit-card-4321-current-to-2026-08-22.csv',
+        target: '/card/current?format=excel',
+      },
+      {
+        label: 'Statement Period Ending Aug 15, 2026',
+        filename: 'bofa-credit-card-4321-period-ending-2026-08-15.csv',
+        target: '/card/august?format=excel',
+      },
+      {
+        label: 'Statement Period Ending Jul 15, 2026',
+        filename: 'bofa-credit-card-4321-period-ending-2026-07-15.csv',
+        target: '/card/july?format=excel',
+      },
+    ]);
+  });
+
+  test('discovers every account link and deduplicates responsive-layout copies', async () => {
+    const links = [
+      { label: 'Adv Plus Banking \u2022\u2022\u2022\u2022 1111', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=checking-a&target=deposit' },
+      { label: 'Advantage Savings - 2222', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=savings-a&target=deposit' },
+      { label: 'Money Market - 3333', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=deposit-a&target=deposit' },
+      { label: 'Travel Rewards Visa - 4444', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=card-a&target=card' },
+      { label: 'Cash Rewards Credit Card - 5555', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=card-b&target=card' },
+      { label: 'Adv Plus Banking \u2022\u2022\u2022\u2022 1111', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=checking-a&target=deposit' },
+    ];
+    const page = {
+      url: () => 'https://secure.bankofamerica.com/myaccounts/signin/signIn.go',
+      locator: () => ({
+        first: () => ({ waitFor: async () => {} }),
+        evaluateAll: async () => links,
+      }),
+    } as unknown as Page;
+
+    const kinds = ['checking', 'savings', 'savings', 'credit-card', 'credit-card'] as const;
+    expect(await discoverBankOfAmericaAccounts(page)).toEqual(links.slice(0, 5).map((link, index) => ({
+      kind: kinds[index],
+      last4: link.label.slice(-4),
+      label: link.label,
+      destination: link.destination,
+    })));
+  });
+
+  test('rejects ambiguous account identities instead of mixing their artifacts', async () => {
+    const links = [
+      { label: 'Travel Rewards Visa - 4444', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=card-a&target=card' },
+      { label: 'Cash Rewards Credit Card - 4444', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=card-b&target=card' },
+    ];
+    const page = {
+      url: () => 'https://secure.bankofamerica.com/myaccounts/signin/signIn.go',
+      locator: () => ({
+        first: () => ({ waitFor: async () => {} }),
+        evaluateAll: async () => links,
+      }),
+    } as unknown as Page;
+
+    await expect(discoverBankOfAmericaAccounts(page)).rejects.toThrow(
+      'Multiple Bank of America credit-card accounts end in the same four digits',
+    );
+  });
+
+  test('constructs authenticated API requests from opaque account links', () => {
+    const destination = 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=opaque-token&target=deposit';
+    expect(bankOfAmericaDepositActivityRequest(destination, '2026-08-01', '2026-08-22')).toMatchObject({
+      url: 'https://secure.bankofamerica.com/ogateway/addapi/v1/download/form/transaction',
+      method: 'POST',
+      multipart: {
+        'payload.accountToken': 'opaque-token',
+        'payload.txnSearchCriteria.startDate': '08/01/2026',
+        'payload.txnSearchCriteria.endDate': '08/22/2026',
+      },
+    });
+    expect(bankOfAmericaStatementIndexRequests(destination, '2025-12-01', '2026-08-22')).toEqual([
+      expect.objectContaining({ data: expect.objectContaining({ adx: 'opaque-token', year: '2025' }) }),
+      expect.objectContaining({ data: expect.objectContaining({ adx: 'opaque-token', year: '2026' }) }),
+    ]);
+    expect(bankOfAmericaCardActivityRequest(
+      '/myaccounts/details/card/download-transactions.go?adx=opaque-card',
+      'https://secure.bankofamerica.com/myaccounts/details/card/account-details/',
+    )).toMatchObject({
+      method: 'GET',
+      url: 'https://secure.bankofamerica.com/myaccounts/details/card/download-transactions.go?adx=opaque-card',
+    });
+  });
+
+  test('opens a captured account destination without returning through sign-in', async () => {
+    const navigations: Array<{ destination: string; options: unknown }> = [];
+    const page = {
+      goto: async (destination: string, options: unknown) => {
+        navigations.push({ destination, options });
+      },
+    } as unknown as Page;
+
+    await openBankOfAmericaAccount(
+      page,
+      'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?kind=card',
+    );
+
+    expect(navigations).toEqual([{
+      destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?kind=card',
+      options: { waitUntil: 'domcontentloaded', timeout: 30_000 },
+    }]);
+  });
+});
