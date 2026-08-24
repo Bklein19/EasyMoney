@@ -1,8 +1,13 @@
 import { expect, test } from 'bun:test';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Page } from 'playwright';
+
+import {
+  playwrightAuthStatePath,
+  playwrightSessionStoragePath,
+} from '../browserSession.ts';
 
 import {
   assertVanguardArtifactAccount,
@@ -14,6 +19,7 @@ import {
   parseVanguardStatementApiResponse,
   runVanguardProfilesConcurrently,
   safeVanguardError,
+  transitionVanguardToInteractiveAuthentication,
   validateVanguardArtifact,
   vanguardApiResponseRequiresAuthentication,
   vanguardActivityApiRequest,
@@ -84,11 +90,67 @@ test('Vanguard API redirects to login require interactive authentication', () =>
   expect(vanguardApiResponseRequiresAuthentication(response(
     302,
     'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
+    'https://investor.vanguard.com/my-account/log-on',
+  ))).toBe(true);
+  expect(vanguardApiResponseRequiresAuthentication(response(
+    302,
+    'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
   ))).toBe(true);
   expect(vanguardApiResponseRequiresAuthentication(response(
     200,
     'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
   ))).toBe(false);
+});
+
+test('Vanguard expired API auth leaves stale portfolio UI for a genuine sign-in page', async () => {
+  const profilePath = await mkdtemp(join(tmpdir(), 'vanguard-expired-auth-'));
+  const authStatePath = playwrightAuthStatePath(profilePath);
+  const sessionStoragePath = playwrightSessionStoragePath(profilePath);
+  await writeFile(authStatePath, '{"cookies":[]}');
+  await writeFile(sessionStoragePath, '{}');
+
+  let url = 'https://investor.vanguard.com/en/investor/portfolio/dashboard';
+  let authenticationFields = false;
+  const calls: string[] = [];
+  const page = {
+    url: () => url,
+    locator: () => ({ count: async () => authenticationFields ? 1 : 0 }),
+    getByRole: () => ({ count: async () => url.includes('/portfolio/') ? 1 : 0 }),
+    context: () => ({
+      clearCookies: async () => { calls.push('clear-cookies'); },
+    }),
+    evaluate: async () => { calls.push('clear-storage'); },
+    goto: async (nextUrl: string, options: unknown) => {
+      calls.push(`goto:${nextUrl}:${JSON.stringify(options)}`);
+      url = 'https://logon.vanguard.com/logon';
+      authenticationFields = true;
+      return null;
+    },
+  } as unknown as Page;
+
+  try {
+    expect(await isVanguardAuthenticatedPage(page)).toBe(true);
+    const result = await transitionVanguardToInteractiveAuthentication(page, {
+      session: 'vanguard-catchup',
+      accountHolder: 'Example One',
+      profilePath,
+    });
+
+    expect(result).toEqual({
+      status: 'login-required',
+      action: 'Sign in to Vanguard for Example One and complete MFA. EasyMoney will continue automatically.',
+    });
+    expect(calls).toEqual([
+      'clear-cookies',
+      'clear-storage',
+      'goto:https://investor.vanguard.com/my-account/log-on:{"waitUntil":"domcontentloaded"}',
+    ]);
+    expect(await isVanguardAuthenticatedPage(page)).toBe(false);
+    expect(await stat(authStatePath).catch(() => null)).toBeNull();
+    expect(await stat(sessionStoragePath).catch(() => null)).toBeNull();
+  } finally {
+    await rm(profilePath, { recursive: true, force: true });
+  }
 });
 
 test('Vanguard diagnostics discard request call logs and secrets', () => {

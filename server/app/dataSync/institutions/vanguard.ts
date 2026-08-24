@@ -7,7 +7,10 @@ import { vanguardActivityCsvParser } from '../../importParsers/vanguardActivityC
 import { parseCsvRows } from '../../importParsers/csvRows.ts';
 import { vanguardStatementParser } from '../../importParsers/vanguardStatement.ts';
 import {
+  playwrightAuthStatePath,
   playwrightHasSavedAuthentication,
+  playwrightProfilePath,
+  playwrightSessionStoragePath,
   runInstitutionBrowserProgram,
 } from '../browserSession.ts';
 
@@ -24,6 +27,10 @@ const STATEMENT_PDF_API_URL =
   'https://personal1.vanguard.com/usa/api/lah-statements-consumer/statements/pdf';
 const AUTHENTICATED_PATH_PATTERN = '^/en/investor/portfolio(?:/|$)';
 const AUTHENTICATION_REQUIRED = 'VANGUARD_AUTHENTICATION_REQUIRED';
+const AUTHENTICATION_FIELD_SELECTOR = [
+  'input[type="password"]:visible',
+  'input[autocomplete="username"]:visible',
+].join(', ');
 
 export type VanguardAccountKind = 'brokerage' | 'roth-ira' | 'traditional-ira';
 export type VanguardArtifactType = 'activity' | 'statement';
@@ -183,8 +190,8 @@ function isVanguardHost(hostname: string): boolean {
 function isVanguardLoginUrl(value: string): boolean {
   try {
     const url = new URL(value);
-    return /^(?:login|logon)\.vanguard\.com$/i.test(url.hostname) ||
-      /\/(?:login|logon|sign-in|authenticate|authorize)(?:\/|$)/i.test(url.pathname);
+    return /^(?:login|log[-_]?on)\.vanguard\.com$/i.test(url.hostname) ||
+      /\/(?:login|log[-_]?on|sign[-_]?in|authenticate|authorize)(?:\/|$)/i.test(url.pathname);
   } catch {
     return true;
   }
@@ -195,14 +202,49 @@ export function isVanguardAuthenticatedPath(pathname: string): boolean {
 }
 
 export async function isVanguardAuthenticatedPage(page: Page): Promise<boolean> {
-  const authenticationFields = await page.locator(
-    'input[type="password"]:visible, input[autocomplete="username"]:visible',
-  ).count() > 0;
+  const authenticationFields = await page.locator(AUTHENTICATION_FIELD_SELECTOR).count() > 0;
   if (authenticationFields) return false;
   const url = new URL(page.url());
   if (isVanguardAuthenticatedPath(url.pathname)) return true;
   if (!isVanguardHost(url.hostname) || isVanguardLoginUrl(url.toString())) return false;
   return await page.getByRole('link', { name: /^Log off$/i }).count() > 0;
+}
+
+async function prepareVanguardInteractiveAuthentication(
+  page: Page,
+  profile: Pick<VanguardSyncProfile, 'session'> & { profilePath?: string },
+): Promise<void> {
+  validateProfileLabel(profile.session);
+  const profilePath = resolve(profile.profilePath ?? playwrightProfilePath(profile.session));
+  await Promise.all([
+    rm(playwrightAuthStatePath(profilePath), { force: true }),
+    rm(playwrightSessionStoragePath(profilePath), { force: true }),
+  ]);
+  await page.context().clearCookies();
+  try {
+    await page.evaluate(() => {
+      localStorage.clear();
+      sessionStorage.clear();
+    });
+  } catch {
+    // Cookie removal is authoritative; storage may be inaccessible during navigation.
+  }
+  await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
+  const hasAuthenticationFields = await page.locator(AUTHENTICATION_FIELD_SELECTOR).count() > 0;
+  if (!isVanguardLoginUrl(page.url()) && !hasAuthenticationFields) {
+    throw new Error('Vanguard did not open a fresh sign-in page after authentication expired');
+  }
+}
+
+export async function transitionVanguardToInteractiveAuthentication(
+  page: Page,
+  profile: Pick<VanguardSyncProfile, 'session' | 'accountHolder'> & { profilePath?: string },
+): Promise<{ status: 'login-required'; action: string }> {
+  await prepareVanguardInteractiveAuthentication(page, profile);
+  return {
+    status: 'login-required',
+    action: vanguardAuthenticationAction(profile),
+  };
 }
 
 export async function waitUntilVanguardAuthenticated(page: Page, timeoutMs: number): Promise<void> {
@@ -914,6 +956,7 @@ export function safeVanguardError(error: unknown): string {
 async function executeVanguardProfile(
   page: Page,
   profile: VanguardSyncProfile,
+  profilePath: string,
   pending: ArtifactJob[],
   through: string,
   progress: VanguardProgress,
@@ -1084,16 +1127,29 @@ async function executeVanguardProfile(
   } catch (error) {
     const message = String(error instanceof Error ? error.message : error);
     if (message.includes(AUTHENTICATION_REQUIRED) || isVanguardLoginUrl(page.url())) {
+      let authenticationRequired: { status: 'login-required'; action: string };
+      try {
+        authenticationRequired = await transitionVanguardToInteractiveAuthentication(page, {
+          session: profile.session,
+          accountHolder: profile.accountHolder,
+          profilePath,
+        });
+      } catch (resetError) {
+        progress(
+          'profile',
+          'sync',
+          'error',
+          `Vanguard sync failed for ${profile.accountHolder}`,
+        );
+        return { status: 'error', message: safeVanguardError(resetError) };
+      }
       progress(
         'authentication',
         'authentication',
         'waiting',
         `Waiting for Vanguard authentication for ${profile.accountHolder}`,
       );
-      return {
-        status: 'login-required',
-        action: authenticationAction,
-      };
+      return authenticationRequired;
     }
     progress(
       'profile',
@@ -1132,7 +1188,8 @@ async function runProfile(
     return [];
   }
 
-  const hasSavedAuthentication = await playwrightHasSavedAuthentication(profile.session);
+  const profilePath = playwrightProfilePath(profile.session);
+  const hasSavedAuthentication = await playwrightHasSavedAuthentication(profile.session, profilePath);
   progress(
     'authentication',
     'authentication',
@@ -1150,7 +1207,7 @@ async function runProfile(
     unavailable: string[];
     accountCount: number;
   }>(
-    { name: profile.session, startUrl: LOGIN_URL },
+    { name: profile.session, startUrl: LOGIN_URL, profilePath },
     browserProgram(),
     {
       completionDescription: `Vanguard (${profile.accountHolder}) downloads are complete.`,
@@ -1169,7 +1226,7 @@ async function runProfile(
       },
       programBindings: {
         execute: (page: Page) =>
-          executeVanguardProfile(page, profile, pending, config.through, progress),
+          executeVanguardProfile(page, profile, profilePath, pending, config.through, progress),
       },
     },
   );
