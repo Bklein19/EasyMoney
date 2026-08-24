@@ -1,4 +1,5 @@
 import { getDb } from '../database.ts';
+import { importDownloadSuggestions } from './importParsers/index.ts';
 
 const STALE_AFTER_DAYS = 45;
 const DUE_AFTER_DAYS = 30;
@@ -74,54 +75,6 @@ function statusFor(daysSinceLatestFact: number | null): DataFreshnessStatus {
 function freshnessStatusFor(accountStatus: string | null, daysSinceLatestFact: number | null): DataFreshnessStatus {
   if (accountStatus === 'closed') return 'closed';
   return statusFor(daysSinceLatestFact);
-}
-
-function supportedDownloadsFor(institution: string | null, accountType: string) {
-  const normalizedInstitution = String(institution || '').toLowerCase();
-  const normalizedType = String(accountType || '').toLowerCase();
-  const downloads = new Set<string>();
-
-  if (['checking', 'savings', 'cash'].includes(normalizedType)) {
-    downloads.add('Activity CSV');
-  }
-  if (['investment', 'retirement', 'brokerage'].includes(normalizedType)) {
-    downloads.add('Activity export');
-    downloads.add('Statement PDF');
-  }
-
-  if (normalizedInstitution.includes('bank of america')) {
-    downloads.add('Activity CSV');
-    downloads.add('Statement PDF');
-  } else if (normalizedInstitution.includes('chase')) {
-    downloads.add('Credit-card activity CSV');
-  } else if (normalizedInstitution.includes('wells fargo')) {
-    downloads.add('Activity CSV');
-    downloads.add('Statement PDF');
-  } else if (normalizedInstitution.includes('vanguard')) {
-    downloads.add('Activity PDF');
-    downloads.add('Statement PDF');
-  } else if (normalizedInstitution.includes('fidelity')) {
-    downloads.add('Statement PDF');
-    downloads.add('Investment report PDF');
-  } else if (normalizedInstitution.includes('merrill')) {
-    downloads.add('Activity CSV');
-    downloads.add('Statement PDF');
-  } else if (normalizedInstitution.includes('morgan stanley')) {
-    downloads.add('Activity PDF');
-    downloads.add('Statement PDF');
-  } else if (normalizedInstitution.includes('tiaa')) {
-    downloads.add('Activity CSV');
-    downloads.add('Statement PDF');
-  } else if (normalizedInstitution.includes('marcus')) {
-    downloads.add('Statement PDF');
-  } else if (normalizedInstitution.includes('robinhood')) {
-    downloads.add('Statement PDF');
-    downloads.add('Banking or credit-card CSV');
-  } else if (normalizedInstitution.includes('sequoia')) {
-    downloads.add('Statement PDF');
-  }
-
-  return Array.from(downloads);
 }
 
 function downloadWindowFor(account: DataFreshnessAccount, today: string) {
@@ -307,7 +260,7 @@ export function getDataFreshnessReport(options: { today?: string } = {}) {
       latestParserName: row.latestParserName,
       latestSourceType: row.latestSourceType,
       latestImportedAt: row.latestImportedAt,
-      suggestedDownloads: supportedDownloadsFor(row.institution, row.accountType),
+      suggestedDownloads: importDownloadSuggestions(row.institution, row.accountType),
     };
   });
 

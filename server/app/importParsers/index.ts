@@ -57,6 +57,45 @@ export const IMPORT_PARSERS: AppImportParser[] = [
   ...easyMoneyCsvProfileParsers,
 ];
 
+function normalizedInstitution(value: string | null): string {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function parserSupportsAccountType(parser: AppImportParser, accountType: string): boolean {
+  const normalizedType = accountType.toLowerCase();
+  const creditAccount = /credit|card/.test(normalizedType);
+  const creditParser = /credit-card|\bcard\b/.test(parser.id);
+  if (creditAccount) return creditParser || parser.sourceType === 'statement';
+  return !creditParser;
+}
+
+function parserDownloadLabel(parser: AppImportParser): string {
+  const extension = parser.id.match(/-(csv|pdf|html)$/)?.[1]?.toUpperCase();
+  const source = parser.sourceType === 'statement'
+    ? /investment-report/.test(parser.id) ? 'Investment report' : 'Statement'
+    : /credit-card/.test(parser.id) ? 'Credit-card activity' : 'Activity';
+  return extension ? `${source} ${extension}` : source;
+}
+
+export function importDownloadSuggestions(institution: string | null, accountType: string): string[] {
+  const accountInstitution = normalizedInstitution(institution);
+  const suggestions = new Set<string>();
+  const normalizedType = accountType.toLowerCase();
+  if (['checking', 'savings', 'cash'].includes(normalizedType)) suggestions.add('Activity CSV');
+  if (['investment', 'retirement', 'brokerage'].includes(normalizedType)) {
+    suggestions.add('Activity export');
+    suggestions.add('Statement PDF');
+  }
+  for (const parser of IMPORT_PARSERS) {
+    const parserInstitution = normalizedInstitution(parser.institution);
+    if (!accountInstitution || !parserInstitution) continue;
+    if (!accountInstitution.includes(parserInstitution) && !parserInstitution.includes(accountInstitution)) continue;
+    if (!parserSupportsAccountType(parser, accountType)) continue;
+    suggestions.add(parserDownloadLabel(parser));
+  }
+  return [...suggestions];
+}
+
 function originalImportFileName(fileName: string) {
   return fileName.replace(/^[0-9a-f]{64}-/, '');
 }
