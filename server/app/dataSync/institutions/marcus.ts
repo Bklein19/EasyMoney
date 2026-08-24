@@ -6,6 +6,7 @@ import type { AppImportParser, AppImportParseResult } from '../../importTypes.ts
 import {
   playwrightHasSavedAuthentication,
   runInstitutionBrowserProgram,
+  type InstitutionBrowserProgramResult,
 } from '../browserSession.ts';
 import { reportSyncStep } from '../observability.ts';
 import type { SyncReporter } from '../types.ts';
@@ -714,22 +715,32 @@ async function syncAuthenticatedMarcus(
   };
 }
 
-function browserProgram(): string {
-  return `async (page, _reportProgress, bindings) => {
-    try {
-      const authenticated = await bindings.openDocuments(page);
-      if (!authenticated) {
-        return JSON.stringify({
-          status: 'login-required',
-          action: 'Sign in to Marcus and complete MFA. EasyMoney will continue automatically.',
-        });
-      }
-      const result = await bindings.sync(page);
-      return JSON.stringify({ status: 'complete', result });
-    } catch (error) {
-      return JSON.stringify({ status: 'error', message: bindings.safeError(error) });
+export async function executeMarcusBrowser(
+  page: Page,
+  config: MarcusSyncConfig,
+  report: SyncReporter,
+  parser: MarcusParserLike,
+): Promise<InstitutionBrowserProgramResult<MarcusBrowserResult>> {
+  try {
+    if (!await isMarcusAuthenticatedPage(page) || !await openMarcusDocuments(page)) {
+      return {
+        status: 'login-required',
+        action: 'Sign in to Marcus and complete MFA. EasyMoney will continue automatically.',
+      };
     }
-  }`;
+    return {
+      status: 'complete',
+      result: await syncAuthenticatedMarcus(page, config, report, parser),
+    };
+  } catch (error) {
+    return { status: 'error', message: safeMarcusError(error) };
+  }
+}
+
+function browserProgram(): string {
+  return `async (page, _reportProgress, bindings) => JSON.stringify(
+    await bindings.execute(page)
+  )`;
 }
 
 export async function runMarcusSync(
@@ -783,9 +794,12 @@ export async function runMarcusSync(
         data: { step: 'browser-session-wait' },
       }),
       programBindings: {
-        openDocuments: openMarcusDocuments,
-        safeError: safeMarcusError,
-        sync: (page: Page) => syncAuthenticatedMarcus(page, { ...config, outputDir }, report, dependencies.parser),
+        execute: (page: Page) => executeMarcusBrowser(
+          page,
+          { ...config, outputDir },
+          report,
+          dependencies.parser,
+        ),
       },
     },
   ));

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import type { Page } from 'playwright';
 import {
   buildMarcusRemoteCatalog,
+  executeMarcusBrowser,
   fetchMarcusDocumentBytes,
   isMarcusAuthenticatedPath,
   mapMarcusRemoteAccounts,
@@ -237,6 +238,24 @@ test('Marcus authenticated routes exclude login and challenge paths', () => {
   expect(isMarcusAuthenticatedPath('/us/en/documents')).toBe(true);
   expect(isMarcusAuthenticatedPath('/us/en/login')).toBe(false);
   expect(isMarcusAuthenticatedPath('/us/en/accounts/verify-identity')).toBe(false);
+});
+
+test('Marcus waits for authentication before navigating to the documents route', async () => {
+  let navigations = 0;
+  const page = {
+    url: () => 'https://www.marcus.com/us/en/login',
+    goto: async () => { navigations += 1; },
+  } as unknown as Page;
+
+  expect(await executeMarcusBrowser(page, {
+    outputDir: '/tmp/marcus-auth-order-test',
+    through: '2026-06-30',
+    accounts: [plannedSavingsAccount()],
+  }, () => {}, fakeParser())).toEqual({
+    status: 'login-required',
+    action: 'Sign in to Marcus and complete MFA. EasyMoney will continue automatically.',
+  });
+  expect(navigations).toBe(0);
 });
 
 test('Marcus downloads verified document URLs through the authenticated request context', async () => {
