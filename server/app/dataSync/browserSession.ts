@@ -18,6 +18,7 @@ type SessionOptions = {
   startUrl: string;
   profilePath?: string;
   persistAuthentication?: boolean;
+  savedAuthenticationMode?: 'headless' | 'headed';
   onInteractiveBrowserWait?: (message: string) => void;
   contextOptions?: NonNullable<Parameters<typeof chromium.launchPersistentContext>[1]>;
   launchArgs?: string[];
@@ -208,6 +209,7 @@ export function institutionBrowserLaunchStrategy(options: {
   hasSavedAuthentication: boolean;
   persistAuthentication?: boolean;
   requestedHeadless?: boolean;
+  savedAuthenticationMode?: 'headless' | 'headed';
 }): InstitutionBrowserLaunchStrategy {
   if (options.requestedHeadless !== undefined) {
     return {
@@ -216,7 +218,9 @@ export function institutionBrowserLaunchStrategy(options: {
     };
   }
 
-  const initialHeadless = (options.persistAuthentication ?? true) && options.hasSavedAuthentication;
+  const initialHeadless = (options.persistAuthentication ?? true) &&
+    options.hasSavedAuthentication &&
+    options.savedAuthenticationMode !== 'headed';
   return {
     initialHeadless,
     allowHeadedAuthenticationFallback: initialHeadless,
@@ -471,6 +475,7 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     hasSavedAuthentication,
     persistAuthentication: session.persistAuthentication,
     requestedHeadless: session.contextOptions?.headless,
+    savedAuthenticationMode: session.savedAuthenticationMode,
   });
 
   const runAttempt = async (headless: boolean, allowInteractiveAuthentication: boolean) => withPlaywrightPage({

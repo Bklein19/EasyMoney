@@ -105,6 +105,16 @@ describe('Playwright session helper', () => {
     });
   });
 
+  test('can reuse saved authentication in headed Chrome for sites that reject headless sessions', () => {
+    expect(institutionBrowserLaunchStrategy({
+      hasSavedAuthentication: true,
+      savedAuthenticationMode: 'headed',
+    })).toEqual({
+      initialHeadless: false,
+      allowHeadedAuthenticationFallback: false,
+    });
+  });
+
   test('serializes interactive sign-in browsers across institution profiles', async () => {
     const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-lease-'));
     temporaryDirectories.push(root);
