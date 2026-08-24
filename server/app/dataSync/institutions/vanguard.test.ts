@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Page } from 'playwright';
+import { chromium, type Page } from 'playwright';
 
 import {
   playwrightAuthStatePath,
@@ -12,6 +12,7 @@ import {
 import {
   assertVanguardArtifactAccount,
   createVanguardProgress,
+  discoverVanguardAccounts,
   isVanguardAuthenticatedPage,
   isVanguardAuthenticatedPath,
   mapVanguardRemoteAccounts,
@@ -23,6 +24,7 @@ import {
   validateVanguardArtifact,
   vanguardApiResponseRequiresAuthentication,
   vanguardActivityApiRequest,
+  vanguardBrowserFetchInPage,
   vanguardActivityCsvFromEnvelope,
   vanguardAuthenticationAction,
   vanguardAccountLast4FromText,
@@ -77,9 +79,10 @@ test('Vanguard API redirects to login require interactive authentication', () =>
     url: string,
     location?: string,
   ) => ({
-    status: () => status,
-    url: () => url,
-    headers: (): Record<string, string> => location ? { location } : {},
+    status,
+    url,
+    headers: (location ? { location } : {}) as Record<string, string>,
+    redirected: false,
   });
 
   expect(vanguardApiResponseRequiresAuthentication(response(
@@ -100,6 +103,116 @@ test('Vanguard API redirects to login require interactive authentication', () =>
     200,
     'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
   ))).toBe(false);
+  expect(vanguardApiResponseRequiresAuthentication({
+    status: 0,
+    url: 'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
+    headers: {},
+    redirected: true,
+  })).toBe(true);
+});
+
+test('Vanguard browser transport handles a relative redirect and response cookie in Chromium', async () => {
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    async fetch(request) {
+      const url = new URL(request.url);
+      if (url.pathname === '/api') {
+        return new Response(null, {
+          status: 302,
+          headers: {
+            location: '/login',
+            'set-cookie': 'fixture-session=rotated; Path=/; SameSite=Lax',
+          },
+        });
+      }
+      if (url.pathname === '/binary') {
+        const validRequest = request.method === 'POST' &&
+          request.headers.get('x-fixture-request') === 'preserved' &&
+          request.headers.get('cookie')?.includes('fixture-session=rotated') &&
+          await request.text() === '{"request":"body"}';
+        return new Response(validRequest ? Uint8Array.from([0, 1, 254, 255]) : 'invalid request', {
+          status: validRequest ? 200 : 400,
+          headers: { 'content-type': 'application/octet-stream' },
+        });
+      }
+      return new Response('<!doctype html><title>Fixture</title>', {
+        headers: { 'content-type': 'text/html' },
+      });
+    },
+  });
+  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  try {
+    const origin = `http://127.0.0.1:${server.port}`;
+    const page = await browser.newPage();
+    await page.goto(`${origin}/app`);
+    const fixtureRequest = {
+      url: `${origin}/api`,
+      method: 'GET',
+    } as const;
+    const response = await page.evaluate(vanguardBrowserFetchInPage, fixtureRequest);
+
+    expect(response.status).toBe(0);
+    expect(response.redirected).toBe(true);
+    expect(response.headers['set-cookie']).toBeUndefined();
+    expect(await page.evaluate(() => document.cookie.includes('fixture-session=rotated'))).toBe(true);
+
+    const binaryResponse = await page.evaluate(vanguardBrowserFetchInPage, {
+      url: `${origin}/binary`,
+      method: 'POST',
+      body: '{"request":"body"}',
+      headers: {
+        'content-type': 'application/json',
+        'x-fixture-request': 'preserved',
+      },
+    } as const);
+    expect(binaryResponse.status).toBe(200);
+    expect(binaryResponse.url).toBe(`${origin}/binary`);
+    expect(binaryResponse.headers['content-type']).toBe('application/octet-stream');
+    expect([...Buffer.from(binaryResponse.bodyBase64, 'base64')]).toEqual([0, 1, 254, 255]);
+  } finally {
+    await browser.close();
+    server.stop(true);
+  }
+}, 20_000);
+
+test('Vanguard account discovery moves browser fetch onto the authenticated API application origin', async () => {
+  let url = 'https://investor.vanguard.com/en/investor/portfolio/dashboard';
+  const navigations: string[] = [];
+  const requests: unknown[] = [];
+  const body = JSON.stringify({
+    accounts: [apiAccount('1111', 'Brokerage account', 'Individual brokerage')],
+  });
+  const page = {
+    url: () => url,
+    isClosed: () => false,
+    goto: async (nextUrl: string) => {
+      navigations.push(nextUrl);
+      url = nextUrl;
+      return null;
+    },
+    evaluate: async (_operation: unknown, request: unknown) => {
+      requests.push(request);
+      return {
+        status: 200,
+        url: 'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
+        headers: { 'content-type': 'application/json' },
+        bodyBase64: Buffer.from(body).toString('base64'),
+        redirected: false,
+      };
+    },
+  } as unknown as Page;
+
+  const accounts = await discoverVanguardAccounts(page);
+
+  expect(navigations).toEqual([
+    'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofx-welcome',
+  ]);
+  expect(requests).toEqual([{
+    url: 'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
+    method: 'GET',
+  }]);
+  expect(accounts.map(account => account.accountLast4)).toEqual(['1111']);
 });
 
 test('Vanguard expired API auth leaves stale portfolio UI for a genuine sign-in page', async () => {
@@ -623,7 +736,9 @@ test('Vanguard validates activity signature, account identity, and the matching 
 test('Vanguard institution code uses direct requests and no fixed browser sleeps', async () => {
   const source = await Bun.file(new URL('./vanguard.ts', import.meta.url)).text();
 
-  expect(source).toContain('page.context().request');
+  expect(source).toContain('page.evaluate(vanguardBrowserFetchInPage');
+  expect(source).toContain("credentials: 'include'");
+  expect(source).not.toContain('page.context().request');
   expect(source).not.toContain('waitForTimeout');
   expect(source).not.toContain("waitForEvent('download'");
   expect(source).not.toContain('.setChecked(');

@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, extname, resolve } from 'node:path';
 
-import type { APIRequestContext, APIResponse, Page } from 'playwright';
+import type { Page } from 'playwright';
 
 import { vanguardActivityCsvParser } from '../../importParsers/vanguardActivityCsv.ts';
 import { parseCsvRows } from '../../importParsers/csvRows.ts';
@@ -96,6 +96,14 @@ export interface VanguardApiRequest {
   method: 'GET' | 'POST';
   body?: string;
   headers?: Record<string, string>;
+}
+
+export interface VanguardBrowserApiResponse {
+  status: number;
+  url: string;
+  headers: Record<string, string>;
+  bodyBase64: string;
+  redirected: boolean;
 }
 
 export type VanguardProgressPhase =
@@ -781,41 +789,142 @@ function vanguardAuthenticationResponse(value: string): boolean {
 }
 
 export function vanguardApiResponseRequiresAuthentication(
-  response: Pick<APIResponse, 'headers' | 'status' | 'url'>,
+  response: Pick<VanguardBrowserApiResponse, 'headers' | 'redirected' | 'status' | 'url'>,
 ): boolean {
-  const status = response.status();
+  const status = response.status;
+  if (response.redirected || status === 0) return true;
   if (status === 401 || status === 403) return true;
   if (status >= 300 && status < 400) {
-    const location = response.headers().location;
+    const location = response.headers.location;
     if (!location) return true;
     try {
-      const redirect = new URL(location, response.url());
+      const redirect = new URL(location, response.url);
       return isVanguardLoginUrl(redirect.toString()) || !isVanguardHost(redirect.hostname);
     } catch {
       return true;
     }
   }
-  return vanguardAuthenticationResponse(response.url());
+  return vanguardAuthenticationResponse(response.url);
+}
+
+export async function vanguardBrowserFetchInPage(
+  request: VanguardApiRequest,
+): Promise<VanguardBrowserApiResponse> {
+  const headers = new Headers(request.headers ?? {});
+  const requestedReferrer = headers.get('referer');
+  headers.delete('referer');
+  let referrer: string | undefined;
+  if (requestedReferrer) {
+    try {
+      const parsedReferrer = new URL(requestedReferrer, location.href);
+      if (parsedReferrer.origin === location.origin) referrer = parsedReferrer.toString();
+    } catch {
+      // Browser fetch will provide the current document as the safe referrer.
+    }
+  }
+
+  const response = await fetch(request.url, {
+    method: request.method,
+    headers,
+    ...(request.body ? { body: request.body } : {}),
+    ...(referrer ? { referrer } : {}),
+    credentials: 'include',
+    redirect: 'manual',
+  });
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  let binary = '';
+  const chunkSize = 32_768;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  const responseHeaders: Record<string, string> = {};
+  response.headers.forEach((value, name) => {
+    responseHeaders[name.toLowerCase()] = value;
+  });
+  return {
+    status: response.status,
+    url: response.url || request.url,
+    headers: responseHeaders,
+    bodyBase64: btoa(binary),
+    redirected: response.redirected || response.type === 'opaqueredirect' || response.status === 0,
+  };
+}
+
+function vanguardApiPageUrl(request: VanguardApiRequest): string {
+  const referer = Object.entries(request.headers ?? {})
+    .find(([name]) => name.toLowerCase() === 'referer')?.[1];
+  return referer ?? ACTIVITY_REFERER_URL;
+}
+
+async function fetchVanguardApiResponse(
+  page: Page,
+  request: VanguardApiRequest,
+): Promise<VanguardBrowserApiResponse> {
+  const target = new URL(request.url);
+  if (target.protocol !== 'https:' || !isVanguardHost(target.hostname)) {
+    throw new Error('Vanguard API request targeted an unapproved host');
+  }
+  const apiPage = new URL(vanguardApiPageUrl(request));
+  if (apiPage.protocol !== 'https:' || !isVanguardHost(apiPage.hostname)) {
+    throw new Error('Vanguard API request has an unapproved application origin');
+  }
+
+  let current: URL | null = null;
+  try {
+    current = new URL(page.url());
+  } catch {
+    // A new or replaced page is navigated to the approved application below.
+  }
+  if (page.isClosed()) throw new Error(AUTHENTICATION_REQUIRED);
+  if (current?.origin !== apiPage.origin) {
+    await page.goto(apiPage.toString(), { waitUntil: 'domcontentloaded' });
+    current = new URL(page.url());
+  }
+  if (isVanguardLoginUrl(current.toString())) throw new Error(AUTHENTICATION_REQUIRED);
+  if (!isVanguardHost(current.hostname) ||
+      (current.origin !== apiPage.origin && current.origin !== target.origin)) {
+    throw new Error('Vanguard did not open the approved API application');
+  }
+
+  try {
+    const response = await page.evaluate(vanguardBrowserFetchInPage, request);
+    return {
+      ...response,
+      url: new URL(response.url, request.url).toString(),
+    };
+  } catch (error) {
+    if (page.isClosed() || isVanguardLoginUrl(page.url())) {
+      throw new Error(AUTHENTICATION_REQUIRED);
+    }
+    throw new Error('Vanguard browser API request could not be completed', { cause: error });
+  }
+}
+
+function vanguardApiResponseBody(response: VanguardBrowserApiResponse): Buffer {
+  return Buffer.from(response.bodyBase64, 'base64');
+}
+
+function vanguardApiResponseJson(response: VanguardBrowserApiResponse): unknown {
+  try {
+    return JSON.parse(vanguardApiResponseBody(response).toString('utf8')) as unknown;
+  } catch {
+    throw new Error('Vanguard API response did not contain valid JSON');
+  }
 }
 
 async function saveVanguardArtifact(
-  requestContext: APIRequestContext,
+  page: Page,
   request: VanguardApiRequest,
   job: ArtifactJob,
 ): Promise<void> {
-  const response = await requestContext.fetch(request.url, {
-    method: request.method,
-    maxRedirects: 0,
-    ...(request.body ? { data: request.body } : {}),
-    ...(request.headers ? { headers: request.headers } : {}),
-  });
+  const response = await fetchVanguardApiResponse(page, request);
   if (vanguardApiResponseRequiresAuthentication(response)) {
     throw new Error(AUTHENTICATION_REQUIRED);
   }
-  if (!response.ok()) {
-    throw new Error(`Vanguard ${job.format.toUpperCase()} request failed with status ${response.status()}`);
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Vanguard ${job.format.toUpperCase()} request failed with status ${response.status}`);
   }
-  const contentType = response.headers()['content-type']?.toLowerCase() ?? '';
+  const contentType = response.headers['content-type']?.toLowerCase() ?? '';
   const validContentType = job.format === 'pdf'
     ? contentType.includes('pdf') || contentType.includes('octet-stream')
     : contentType.includes('csv') || contentType.includes('excel') ||
@@ -824,7 +933,7 @@ async function saveVanguardArtifact(
     if (contentType.includes('html')) throw new Error(AUTHENTICATION_REQUIRED);
     throw new Error(`Vanguard ${job.format.toUpperCase()} response has an unexpected content type`);
   }
-  await writeFile(job.targetPath, await response.body());
+  await writeFile(job.targetPath, vanguardApiResponseBody(response));
   try {
     await validateVanguardArtifact(
       job.targetPath,
@@ -838,28 +947,23 @@ async function saveVanguardArtifact(
 }
 
 async function saveVanguardActivityArtifact(
-  requestContext: APIRequestContext,
+  page: Page,
   request: VanguardApiRequest,
   job: ArtifactJob,
 ): Promise<void> {
-  const response = await requestContext.fetch(request.url, {
-    method: request.method,
-    maxRedirects: 0,
-    ...(request.body ? { data: request.body } : {}),
-    ...(request.headers ? { headers: request.headers } : {}),
-  });
+  const response = await fetchVanguardApiResponse(page, request);
   if (vanguardApiResponseRequiresAuthentication(response)) {
     throw new Error(AUTHENTICATION_REQUIRED);
   }
-  if (!response.ok()) {
-    throw new Error(`Vanguard CSV request failed with status ${response.status()}`);
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Vanguard CSV request failed with status ${response.status}`);
   }
-  const responseContentType = response.headers()['content-type']?.toLowerCase() ?? '';
+  const responseContentType = response.headers['content-type']?.toLowerCase() ?? '';
   if (!responseContentType.includes('json')) {
     if (responseContentType.includes('html')) throw new Error(AUTHENTICATION_REQUIRED);
     throw new Error('Vanguard activity API response has an unexpected content type');
   }
-  const csv = vanguardActivityCsvFromEnvelope(await response.json());
+  const csv = vanguardActivityCsvFromEnvelope(vanguardApiResponseJson(response));
   await writeFile(job.targetPath, csv);
   try {
     await validateVanguardArtifact(
@@ -874,14 +978,18 @@ async function saveVanguardActivityArtifact(
 }
 
 export async function discoverVanguardAccounts(page: Page): Promise<VanguardRemoteAccount[]> {
-  const response = await page.context().request.get(ACCOUNTS_API_URL, { maxRedirects: 0 });
+  const response = await fetchVanguardApiResponse(page, {
+    url: ACCOUNTS_API_URL,
+    method: 'GET',
+  });
   if (vanguardApiResponseRequiresAuthentication(response)) {
     throw new Error(AUTHENTICATION_REQUIRED);
   }
-  if (!response.ok() || !/json/i.test(response.headers()['content-type'] ?? '')) {
-    throw new Error(`Vanguard account API request failed with status ${response.status()}`);
+  if (response.status < 200 || response.status >= 300 ||
+      !/json/i.test(response.headers['content-type'] ?? '')) {
+    throw new Error(`Vanguard account API request failed with status ${response.status}`);
   }
-  return parseVanguardAccountApiResponse(await response.json());
+  return parseVanguardAccountApiResponse(vanguardApiResponseJson(response));
 }
 
 async function activityRequestForAccount(
@@ -904,25 +1012,22 @@ async function activityRequestForAccount(
 }
 
 async function discoverVanguardStatements(
-  requestContext: APIRequestContext,
+  page: Page,
   years: string[],
   accountRoutes: VanguardStatementAccountRoute[],
 ): Promise<VanguardRemoteStatement[]> {
   const statements: VanguardRemoteStatement[] = [];
   for (const year of years) {
     const request = vanguardStatementListRequest(year);
-    const response = await requestContext.fetch(request.url, {
-      method: request.method,
-      headers: request.headers,
-      maxRedirects: 0,
-    });
+    const response = await fetchVanguardApiResponse(page, request);
     if (vanguardApiResponseRequiresAuthentication(response)) {
       throw new Error(AUTHENTICATION_REQUIRED);
     }
-    if (!response.ok() || !/json/i.test(response.headers()['content-type'] ?? '')) {
-      throw new Error(`Vanguard statement API request failed with status ${response.status()}`);
+    if (response.status < 200 || response.status >= 300 ||
+        !/json/i.test(response.headers['content-type'] ?? '')) {
+      throw new Error(`Vanguard statement API request failed with status ${response.status}`);
     }
-    statements.push(...parseVanguardStatementApiResponse(await response.json(), accountRoutes));
+    statements.push(...parseVanguardStatementApiResponse(vanguardApiResponseJson(response), accountRoutes));
   }
   return statements;
 }
@@ -1038,7 +1143,7 @@ async function executeVanguardProfile(
         `Downloading Vanguard activity ${index + 1} of ${activityJobs.length}`,
         { artifactIndex: index + 1, artifactCount: activityJobs.length },
       );
-      await saveVanguardActivityArtifact(page.context().request, request, job);
+      await saveVanguardActivityArtifact(page, request, job);
       progress(
         downloadKey,
         'activity-download',
@@ -1064,7 +1169,7 @@ async function executeVanguardProfile(
       );
       const years = [...new Set(statementJobs.map(job => job.statementDate!.slice(0, 4)))].sort();
       const statements = await discoverVanguardStatements(
-        page.context().request,
+        page,
         years,
         vanguardStatementAccountRoutes(profile.accounts, mappedAccounts),
       );
@@ -1093,7 +1198,7 @@ async function executeVanguardProfile(
           `Downloading Vanguard statement ${index + 1} of ${statementJobs.length}`,
           { artifactIndex: index + 1, artifactCount: statementJobs.length },
         );
-        await saveVanguardArtifact(page.context().request, statement.request, job);
+        await saveVanguardArtifact(page, statement.request, job);
         progress(
           downloadKey,
           'statement-download',
