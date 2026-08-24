@@ -1,7 +1,7 @@
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, extname, resolve } from 'node:path';
 
-import type { APIRequestContext, Page } from 'playwright';
+import type { APIRequestContext, APIResponse, Page } from 'playwright';
 
 import { vanguardActivityCsvParser } from '../../importParsers/vanguardActivityCsv.ts';
 import { parseCsvRows } from '../../importParsers/csvRows.ts';
@@ -738,6 +738,24 @@ function vanguardAuthenticationResponse(value: string): boolean {
   }
 }
 
+export function vanguardApiResponseRequiresAuthentication(
+  response: Pick<APIResponse, 'headers' | 'status' | 'url'>,
+): boolean {
+  const status = response.status();
+  if (status === 401 || status === 403) return true;
+  if (status >= 300 && status < 400) {
+    const location = response.headers().location;
+    if (!location) return true;
+    try {
+      const redirect = new URL(location, response.url());
+      return isVanguardLoginUrl(redirect.toString()) || !isVanguardHost(redirect.hostname);
+    } catch {
+      return true;
+    }
+  }
+  return vanguardAuthenticationResponse(response.url());
+}
+
 async function saveVanguardArtifact(
   requestContext: APIRequestContext,
   request: VanguardApiRequest,
@@ -745,10 +763,11 @@ async function saveVanguardArtifact(
 ): Promise<void> {
   const response = await requestContext.fetch(request.url, {
     method: request.method,
+    maxRedirects: 0,
     ...(request.body ? { data: request.body } : {}),
     ...(request.headers ? { headers: request.headers } : {}),
   });
-  if (vanguardAuthenticationResponse(response.url()) || response.status() === 401 || response.status() === 403) {
+  if (vanguardApiResponseRequiresAuthentication(response)) {
     throw new Error(AUTHENTICATION_REQUIRED);
   }
   if (!response.ok()) {
@@ -783,10 +802,11 @@ async function saveVanguardActivityArtifact(
 ): Promise<void> {
   const response = await requestContext.fetch(request.url, {
     method: request.method,
+    maxRedirects: 0,
     ...(request.body ? { data: request.body } : {}),
     ...(request.headers ? { headers: request.headers } : {}),
   });
-  if (vanguardAuthenticationResponse(response.url()) || response.status() === 401 || response.status() === 403) {
+  if (vanguardApiResponseRequiresAuthentication(response)) {
     throw new Error(AUTHENTICATION_REQUIRED);
   }
   if (!response.ok()) {
@@ -812,8 +832,8 @@ async function saveVanguardActivityArtifact(
 }
 
 export async function discoverVanguardAccounts(page: Page): Promise<VanguardRemoteAccount[]> {
-  const response = await page.context().request.get(ACCOUNTS_API_URL);
-  if (vanguardAuthenticationResponse(response.url()) || response.status() === 401 || response.status() === 403) {
+  const response = await page.context().request.get(ACCOUNTS_API_URL, { maxRedirects: 0 });
+  if (vanguardApiResponseRequiresAuthentication(response)) {
     throw new Error(AUTHENTICATION_REQUIRED);
   }
   if (!response.ok() || !/json/i.test(response.headers()['content-type'] ?? '')) {
@@ -852,8 +872,9 @@ async function discoverVanguardStatements(
     const response = await requestContext.fetch(request.url, {
       method: request.method,
       headers: request.headers,
+      maxRedirects: 0,
     });
-    if (vanguardAuthenticationResponse(response.url()) || response.status() === 401 || response.status() === 403) {
+    if (vanguardApiResponseRequiresAuthentication(response)) {
       throw new Error(AUTHENTICATION_REQUIRED);
     }
     if (!response.ok() || !/json/i.test(response.headers()['content-type'] ?? '')) {
@@ -875,11 +896,19 @@ function statementForJob(
   return exact[0] ?? null;
 }
 
-function safeVanguardError(error: unknown): string {
-  return String(error instanceof Error ? error.message : error)
+export function safeVanguardError(error: unknown): string {
+  const raw = String(error instanceof Error ? error.message : error)
+    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  const summary = raw.split(/\bCall log:/i, 1)[0]?.trim() || 'Vanguard request failed';
+  if (/timeout \d+ms exceeded/i.test(summary)) return 'Vanguard request timed out';
+  if (/(?:^|\s)(?:cookie|set-cookie|authorization|x-xsrf-token)\s*:/i.test(summary)) {
+    return 'Vanguard request failed';
+  }
+  return summary
     .replace(/https?:\/\/\S+/g, '<redacted-url>')
     .replace(/\b[a-f0-9]{16,}\b/gi, '<redacted-id>')
-    .replace(/\b\d{4,}\b/g, '<digits>');
+    .replace(/\b\d{4,}\b/g, '<digits>')
+    .slice(0, 500);
 }
 
 async function executeVanguardProfile(

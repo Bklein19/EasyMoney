@@ -13,7 +13,9 @@ import {
   parseVanguardAccountApiResponse,
   parseVanguardStatementApiResponse,
   runVanguardProfilesConcurrently,
+  safeVanguardError,
   validateVanguardArtifact,
+  vanguardApiResponseRequiresAuthentication,
   vanguardActivityApiRequest,
   vanguardActivityCsvFromEnvelope,
   vanguardAuthenticationAction,
@@ -61,6 +63,46 @@ test('Vanguard authentication recognizes the signed-in download center', async (
   } as unknown as Page;
 
   expect(await isVanguardAuthenticatedPage(page)).toBe(true);
+});
+
+test('Vanguard API redirects to login require interactive authentication', () => {
+  const response = (
+    status: number,
+    url: string,
+    location?: string,
+  ) => ({
+    status: () => status,
+    url: () => url,
+    headers: (): Record<string, string> => location ? { location } : {},
+  });
+
+  expect(vanguardApiResponseRequiresAuthentication(response(
+    302,
+    'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
+    'https://logon.vanguard.com/logon',
+  ))).toBe(true);
+  expect(vanguardApiResponseRequiresAuthentication(response(
+    302,
+    'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
+  ))).toBe(true);
+  expect(vanguardApiResponseRequiresAuthentication(response(
+    200,
+    'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
+  ))).toBe(false);
+});
+
+test('Vanguard diagnostics discard request call logs and secrets', () => {
+  const message = [
+    'Timeout 30000ms exceeded.',
+    'Call log:',
+    '- cookie: session=private-token',
+    '- authorization: Bearer private-token',
+  ].join('\n');
+
+  expect(safeVanguardError(new Error(message))).toBe('Vanguard request timed out');
+  expect(safeVanguardError(new Error('cookie: session=private-token'))).toBe(
+    'Vanguard request failed',
+  );
 });
 
 test('Vanguard authentication copy identifies the intended account holder', () => {
