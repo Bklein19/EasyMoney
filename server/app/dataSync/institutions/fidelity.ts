@@ -51,7 +51,6 @@ export interface FidelitySyncConfig {
   from: string;
   through: string;
   session?: string;
-  allowInteractiveAuthentication?: boolean;
 }
 
 export interface FidelityAccountCandidate {
@@ -68,6 +67,7 @@ export interface FidelityAccountIdentity {
   kind: FidelityAccountKind;
   accountKey: string;
   last4: string | null;
+  label?: string;
 }
 
 export interface FidelityRemoteAccount extends FidelityAccountIdentity {
@@ -154,6 +154,27 @@ type FidelityBrowserResult = {
   skipped: string[];
 };
 
+export type FidelitySurfaceDiscovery =
+  | {
+    surface: FidelitySurface;
+    status: 'accounts';
+    accounts: FidelityRemoteAccount[];
+  }
+  | {
+    surface: FidelitySurface;
+    status: 'no-accounts' | 'authentication-required' | 'institution-unavailable';
+    accounts: [];
+  };
+
+export interface FidelityResolvedSurfaces {
+  retailAccounts: FidelityRemoteAccount[];
+  netBenefitsAccounts: FidelityRemoteAccount[];
+  skipped: string[];
+}
+
+class FidelityAuthenticationRequiredError extends Error {}
+class FidelityInstitutionUnavailableError extends Error {}
+
 function normalizedAccountLabel(value: string): string {
   return value
     .replace(/\$-?[\d,]+(?:\.\d{2})?/g, '')
@@ -212,6 +233,7 @@ export function fidelityAccountsFromCandidates(candidates: FidelityAccountCandid
       kind: accountKind(`${label} ${candidate.href ?? ''}`),
       accountKey,
       last4: accountLast4(`${label} ${candidate.value ?? ''}`),
+      label,
       selection: {
         controlIndex: candidate.controlIndex ?? candidateIndex,
         href: candidate.href ?? null,
@@ -438,7 +460,6 @@ function safeConfig(config: FidelitySyncConfig): Required<FidelitySyncConfig> {
     ...config,
     outputDir: resolve(config.outputDir),
     session: config.session ?? DEFAULT_SESSION,
-    allowInteractiveAuthentication: config.allowInteractiveAuthentication ?? false,
   };
 }
 
@@ -477,9 +498,6 @@ async function reportStep<T>(
     throw error;
   }
 }
-
-class FidelityAuthenticationRequiredError extends Error {}
-class FidelityInstitutionUnavailableError extends Error {}
 
 function fidelityAuthenticationRoute(url: URL): boolean {
   return /(?:login|logon|sign[-_]?in|authenticate|authorization|oauth|sso|auth)/i.test(
@@ -530,9 +548,14 @@ export async function waitUntilFidelityAuthenticated(page: Page, timeoutMs: numb
   if (state === 'institution-unavailable') throw new FidelityInstitutionUnavailableError('institution-unavailable');
 }
 
-type PageGate = 'ready' | 'authentication-required' | 'institution-unavailable';
+type PageGate = 'ready' | 'no-accounts' | 'authentication-required' | 'institution-unavailable';
 
-async function navigateToFidelityPage(page: Page, url: string, readySelector: string): Promise<PageGate> {
+async function navigateToFidelityPage(
+  page: Page,
+  url: string,
+  readySelector: string,
+  options: { missingControlsMeanNoAccounts?: boolean } = {},
+): Promise<PageGate> {
   try {
     await page.goto(url, { waitUntil: 'commit', timeout: 30_000 });
   } catch {}
@@ -551,6 +574,7 @@ async function navigateToFidelityPage(page: Page, url: string, readySelector: st
   } catch {
     if (await pageShowsInstitutionUnavailable(page)) return 'institution-unavailable';
     if (!fidelityAuthenticatedRoute(currentUrl)) return 'authentication-required';
+    if (options.missingControlsMeanNoAccounts) return 'no-accounts';
     throw new Error('Fidelity page controls did not become available');
   }
   return 'ready';
@@ -559,6 +583,7 @@ async function navigateToFidelityPage(page: Page, url: string, readySelector: st
 function assertGate(gate: PageGate): void {
   if (gate === 'authentication-required') throw new FidelityAuthenticationRequiredError('authentication-required');
   if (gate === 'institution-unavailable') throw new FidelityInstitutionUnavailableError('institution-unavailable');
+  if (gate === 'no-accounts') throw new Error('Fidelity account surface has no accounts');
 }
 
 async function accountCandidatesFromLocator(
@@ -604,12 +629,12 @@ export async function discoverFidelityRetailAccounts(page: Page): Promise<Fideli
   const gate = await navigateToFidelityPage(page, FIDELITY_ACTIVITY_URL, [
     '#account-selector',
     'button[aria-label="account selector"]',
-  ].join(','));
+  ].join(','), { missingControlsMeanNoAccounts: true });
+  if (gate === 'no-accounts') return [];
   assertGate(gate);
   const accounts = fidelityAccountsFromCandidates(
     await accountCandidatesFromLocator(await openRetailAccountSelector(page), 'retail'),
   );
-  if (accounts.length === 0) throw new Error('Fidelity did not expose any retail accounts');
   return accounts;
 }
 
@@ -620,7 +645,13 @@ const netBenefitsAccountControlSelector = [
 ].join(',');
 
 export async function discoverFidelityNetBenefitsAccounts(page: Page): Promise<FidelityRemoteAccount[]> {
-  const gate = await navigateToFidelityPage(page, FIDELITY_NETBENEFITS_URL, netBenefitsAccountControlSelector);
+  const gate = await navigateToFidelityPage(
+    page,
+    FIDELITY_NETBENEFITS_URL,
+    netBenefitsAccountControlSelector,
+    { missingControlsMeanNoAccounts: true },
+  );
+  if (gate === 'no-accounts') return [];
   assertGate(gate);
   const raw = await accountCandidatesFromLocator(page.locator(netBenefitsAccountControlSelector), 'netbenefits');
   const candidates = raw.filter(candidate => (
@@ -628,6 +659,63 @@ export async function discoverFidelityNetBenefitsAccounts(page: Page): Promise<F
     || Boolean(candidate.remoteId)
   ));
   return fidelityAccountsFromCandidates(candidates);
+}
+
+async function discoverFidelitySurface(
+  surface: FidelitySurface,
+  operation: () => Promise<FidelityRemoteAccount[]>,
+): Promise<FidelitySurfaceDiscovery> {
+  try {
+    const accounts = await operation();
+    return accounts.length > 0
+      ? { surface, status: 'accounts', accounts }
+      : { surface, status: 'no-accounts', accounts: [] };
+  } catch (error) {
+    if (error instanceof FidelityAuthenticationRequiredError) {
+      return { surface, status: 'authentication-required', accounts: [] };
+    }
+    if (error instanceof FidelityInstitutionUnavailableError) {
+      return { surface, status: 'institution-unavailable', accounts: [] };
+    }
+    throw error;
+  }
+}
+
+export function resolveFidelitySurfaceDiscoveries(
+  discoveries: readonly FidelitySurfaceDiscovery[],
+): FidelityResolvedSurfaces {
+  const bySurface = new Map(discoveries.map(discovery => [discovery.surface, discovery]));
+  if (discoveries.length !== 2 || bySurface.size !== 2 || !bySurface.has('retail') || !bySurface.has('netbenefits')) {
+    throw new Error('Fidelity surface discovery must report retail and NetBenefits exactly once');
+  }
+  const retail = bySurface.get('retail')!;
+  const netBenefits = bySurface.get('netbenefits')!;
+  const results = [retail, netBenefits];
+
+  if (results.every(result => result.status === 'authentication-required')) {
+    throw new FidelityAuthenticationRequiredError('authentication-required');
+  }
+  if (results.every(result => result.status === 'institution-unavailable')) {
+    throw new FidelityInstitutionUnavailableError('institution-unavailable');
+  }
+
+  const retailAccounts = retail.status === 'accounts' ? retail.accounts : [];
+  const netBenefitsAccounts = netBenefits.status === 'accounts' ? netBenefits.accounts : [];
+  if (retailAccounts.length + netBenefitsAccounts.length === 0) {
+    throw new Error('Fidelity did not expose accounts on an available surface');
+  }
+
+  const skipped = results.flatMap(result => {
+    if (result.status === 'accounts') return [];
+    const name = result.surface === 'retail' ? 'retail' : 'NetBenefits';
+    if (result.status === 'no-accounts') return [`Fidelity ${name} has no accounts`];
+    if (result.status === 'authentication-required') {
+      return [`Fidelity ${name} is not available to this login`];
+    }
+    return [`Fidelity ${name} is temporarily unavailable`];
+  });
+
+  return { retailAccounts, netBenefitsAccounts, skipped };
 }
 
 function safeReplayHeaders(headers: Record<string, string>): Record<string, string> {
@@ -928,34 +1016,44 @@ async function runAuthenticatedFidelity(
   config: Required<FidelitySyncConfig>,
   report: FidelityProgressReporter,
 ): Promise<FidelityBrowserResult> {
-  const retailAccounts = await reportStep(
+  const retailDiscovery = await reportStep(
     report,
     'retail-discovery',
     'retail-accounts',
     'Discovering Fidelity retail accounts',
-    () => discoverFidelityRetailAccounts(page),
+    () => discoverFidelitySurface('retail', () => discoverFidelityRetailAccounts(page)),
   );
-  const netBenefitsAccounts = await reportStep(
+  const netBenefitsDiscovery = await reportStep(
     report,
     'netbenefits-discovery',
     'netbenefits-accounts',
     'Discovering Fidelity retirement accounts',
-    () => discoverFidelityNetBenefitsAccounts(page),
+    () => discoverFidelitySurface('netbenefits', () => discoverFidelityNetBenefitsAccounts(page)),
   );
+  const { retailAccounts, netBenefitsAccounts, skipped } = resolveFidelitySurfaceDiscoveries([
+    retailDiscovery,
+    netBenefitsDiscovery,
+  ]);
   const accounts = [...retailAccounts, ...netBenefitsAccounts];
-  const artifacts = await downloadRetailActivity(page, config, retailAccounts, report);
+  const artifacts = retailAccounts.length > 0
+    ? await downloadRetailActivity(page, config, retailAccounts, report)
+    : [];
   const statementPlans = await reportStep(
     report,
     'artifact-discovery',
     'statements',
     'Discovering Fidelity statements',
     async () => [
-      ...await discoverRetailDocumentPlans(page, retailAccounts, config.from, config.through),
-      ...await discoverNetBenefitsDocumentPlans(page, netBenefitsAccounts, config.from, config.through),
+      ...(retailAccounts.length > 0
+        ? await discoverRetailDocumentPlans(page, retailAccounts, config.from, config.through)
+        : []),
+      ...(netBenefitsAccounts.length > 0
+        ? await discoverNetBenefitsDocumentPlans(page, netBenefitsAccounts, config.from, config.through)
+        : []),
     ],
   );
   artifacts.push(...await downloadStatementPlans(page, config.outputDir, statementPlans, report));
-  return { status: 'complete', accountsDiscovered: accounts.length, artifacts, skipped: [] };
+  return { status: 'complete', accountsDiscovered: accounts.length, artifacts, skipped };
 }
 
 const fidelityBrowserProgram = `async (page, _reportProgress, bindings) => {
@@ -988,7 +1086,6 @@ export async function runFidelitySync(
         startUrl: FIDELITY_START_URL,
         contextOptions: {
           downloadsPath: config.outputDir,
-          ...(config.allowInteractiveAuthentication ? {} : { headless: true }),
         },
       },
       fidelityBrowserProgram,

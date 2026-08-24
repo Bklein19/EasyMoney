@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -9,8 +9,10 @@ import {
   fidelityDirectRequestUrl,
   fidelityStatementPlans,
   isFidelityInstitutionUnavailableText,
+  resolveFidelitySurfaceDiscoveries,
   validateFidelityArtifact,
   type FidelityAccountIdentity,
+  type FidelityRemoteAccount,
 } from './fidelity.ts';
 
 const retailAccount: FidelityAccountIdentity = {
@@ -19,6 +21,24 @@ const retailAccount: FidelityAccountIdentity = {
   accountKey: 'retail-account',
   last4: '1234',
 };
+
+function remoteAccount(
+  surface: FidelityRemoteAccount['surface'],
+  accountKey: string,
+): FidelityRemoteAccount {
+  return {
+    surface,
+    kind: surface === 'retail' ? 'brokerage' : 'retirement',
+    accountKey,
+    last4: surface === 'retail' ? '1234' : '5678',
+    label: surface === 'retail' ? 'Brokerage 1234' : 'Workplace plan 5678',
+    selection: {
+      controlIndex: 0,
+      href: null,
+      label: surface === 'retail' ? 'Brokerage 1234' : 'Workplace plan 5678',
+    },
+  };
+}
 
 describe('Fidelity account discovery', () => {
   test('discovers every supported account candidate dynamically', () => {
@@ -77,6 +97,44 @@ describe('Fidelity account discovery', () => {
       { surface: 'retail', label: 'Brokerage 1234', remoteId: 'one' },
       { surface: 'retail', label: 'Roth IRA 1234', remoteId: 'two' },
     ])).toThrow('Multiple Fidelity retail accounts share one routing suffix');
+  });
+
+  test('continues with retail accounts when NetBenefits has no accounts', () => {
+    const retail = remoteAccount('retail', 'retail-one');
+    expect(resolveFidelitySurfaceDiscoveries([
+      { surface: 'retail', status: 'accounts', accounts: [retail] },
+      { surface: 'netbenefits', status: 'no-accounts', accounts: [] },
+    ])).toEqual({
+      retailAccounts: [retail],
+      netBenefitsAccounts: [],
+      skipped: ['Fidelity NetBenefits has no accounts'],
+    });
+  });
+
+  test('continues with workplace accounts when retail is unavailable to the login', () => {
+    const workplace = remoteAccount('netbenefits', 'workplace-one');
+    expect(resolveFidelitySurfaceDiscoveries([
+      { surface: 'retail', status: 'authentication-required', accounts: [] },
+      { surface: 'netbenefits', status: 'accounts', accounts: [workplace] },
+    ])).toEqual({
+      retailAccounts: [],
+      netBenefitsAccounts: [workplace],
+      skipped: ['Fidelity retail is not available to this login'],
+    });
+  });
+
+  test('requires login only when both surfaces require authentication', () => {
+    expect(() => resolveFidelitySurfaceDiscoveries([
+      { surface: 'retail', status: 'authentication-required', accounts: [] },
+      { surface: 'netbenefits', status: 'authentication-required', accounts: [] },
+    ])).toThrow('authentication-required');
+  });
+
+  test('reports institution-wide maintenance only when both surfaces are unavailable', () => {
+    expect(() => resolveFidelitySurfaceDiscoveries([
+      { surface: 'retail', status: 'institution-unavailable', accounts: [] },
+      { surface: 'netbenefits', status: 'institution-unavailable', accounts: [] },
+    ])).toThrow('institution-unavailable');
   });
 });
 
@@ -178,4 +236,11 @@ test('recognizes Fidelity maintenance separately from authentication failures', 
   )).toBe(true);
   expect(isFidelityInstitutionUnavailableText('Scheduled maintenance is in progress.')).toBe(true);
   expect(isFidelityInstitutionUnavailableText('Enter your username and password.')).toBe(false);
+});
+
+test('Fidelity institution code uses direct requests and no fixed browser sleeps', async () => {
+  const source = await readFile(new URL('./fidelity.ts', import.meta.url), 'utf8');
+  expect(source).toContain('page.context().request.fetch');
+  expect(source).not.toMatch(/waitForTimeout|Bun\.sleep|setTimeout\s*\(/);
+  expect(source).not.toContain('allowInteractiveAuthentication');
 });
