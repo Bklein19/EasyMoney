@@ -13,6 +13,7 @@ import {
   selectSequoiaFundDuration,
   sequoiaFundAccountsFromOptions,
   sequoiaFundActivityRequest,
+  sequoiaFundBrowserSession,
   selectSequoiaFundActivityExportForm,
   sequoiaFundStatementJobs,
   validateSequoiaFundArtifact,
@@ -320,4 +321,18 @@ test('Sequoia Fund institution code uses direct requests and no fixed browser wa
   expect(source).toContain('page.context().request');
   expect(source).not.toContain('waitForTimeout');
   expect(source).not.toContain("waitForEvent('download'");
+});
+
+test('Sequoia Fund always starts headed without reading or writing saved authentication', async () => {
+  expect(sequoiaFundBrowserSession('sequoia-fund-catchup', '/private/tmp/fixture-profile')).toEqual({
+    name: 'sequoia-fund-catchup',
+    startUrl: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/index',
+    profilePath: '/private/tmp/fixture-profile',
+    persistAuthentication: false,
+    contextOptions: { headless: false },
+  });
+
+  const source = await Bun.file(new URL('./sequoiaFund.ts', import.meta.url)).text();
+  expect(source).not.toContain('playwrightHasSavedAuthentication');
+  expect(source).toContain('cachedAuthentication: false');
 });

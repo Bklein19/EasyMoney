@@ -10,10 +10,7 @@ import {
   sequoiaFundSourceAccountName,
 } from '../../importParsers/sequoiaFundIdentity.ts';
 import { sequoiaFundStatementParser } from '../../importParsers/sequoiaFundStatement.ts';
-import {
-  playwrightHasSavedAuthentication,
-  runInstitutionBrowserProgram,
-} from '../browserSession.ts';
+import { runInstitutionBrowserProgram } from '../browserSession.ts';
 
 const sequoiaFundHost = 'secureaccountview.com';
 const sequoiaFundClientPath = '/BFWeb/clients/sequoiafund';
@@ -47,7 +44,6 @@ export type SequoiaFundSyncConfig = {
   through: string;
   session?: string;
   profilePath?: string;
-  headless?: boolean;
 };
 
 export type SequoiaFundArtifactKind = 'activity' | 'statement';
@@ -72,6 +68,16 @@ export type SequoiaFundSyncResult = {
   activityCount: number;
   statementCount: number;
 };
+
+export function sequoiaFundBrowserSession(name: string, profilePath?: string) {
+  return {
+    name,
+    startUrl: sequoiaFundLoginUrl,
+    ...(profilePath ? { profilePath } : {}),
+    persistAuthentication: false,
+    contextOptions: { headless: false },
+  } as const;
+}
 
 export type SequoiaFundSelectOption = {
   label: string;
@@ -966,19 +972,13 @@ export async function runSequoiaFundSync(
 
   const progress = createProgress(onProgress);
   const authenticationKey = 'authentication';
-  const hasSavedAuthentication = await playwrightHasSavedAuthentication(session, config.profilePath);
   progress(authenticationKey, 'authentication', 'start', 'Checking Sequoia Fund authentication', {
-    cachedAuthentication: hasSavedAuthentication,
+    cachedAuthentication: false,
   });
   let authenticationWaiting = false;
   const startedAt = performance.now();
   const result = await runInstitutionBrowserProgram<SequoiaFundSyncResult>(
-    {
-      name: session,
-      startUrl: sequoiaFundLoginUrl,
-      ...(config.profilePath ? { profilePath: config.profilePath } : {}),
-      ...(config.headless === undefined ? {} : { contextOptions: { headless: config.headless } }),
-    },
+    sequoiaFundBrowserSession(session, config.profilePath),
     browserProgram(),
     {
       completionDescription: 'Sequoia Fund downloads are complete.',
