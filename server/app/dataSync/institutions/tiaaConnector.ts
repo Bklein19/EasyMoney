@@ -1,5 +1,5 @@
 import type {
-  RoutedSyncArtifact,
+  MultiAccountSyncArtifact,
   SyncAccountCoverage,
   SyncConnector,
   SyncConnectorRunContext,
@@ -23,7 +23,7 @@ function tiaaAccounts(accounts: readonly SyncAccountCoverage[]): SyncAccountCove
 
 export function routeTiaaArtifacts(
   artifacts: readonly TiaaDownloadedArtifact[],
-): RoutedSyncArtifact[] {
+): MultiAccountSyncArtifact[] {
   return artifacts.map(artifact => {
     if (artifact.account.remoteAccounts.length === 0) {
       throw new Error('A TIAA artifact exposes no parser-backed account claims');

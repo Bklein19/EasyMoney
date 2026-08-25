@@ -9,6 +9,7 @@ process.env.EASYMONEY_SYNC_ROOT = path.join(os.tmpdir(), `easymoney-sync-runs-${
 
 const { appRouter } = await import('./router.ts');
 const { getDb, initDatabase, insertRow } = await import('../database.ts');
+const { hashImportContent } = await import('./imports.ts');
 const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
 const { buildSyncArtifactReview, stageSyncArtifact } = await import('./dataSync/review.ts');
 const { stageSyncArtifactManifest } = await import('./dataSync/staging.ts');
@@ -92,7 +93,7 @@ function csvFromRows(rows: string[]) {
 
 async function saveAwaitingSyncReview(review: {
   runId: string;
-  institutionId: 'bank-of-america' | 'vanguard' | 'sequoia-fund';
+  institutionId: 'bank-of-america' | 'vanguard' | 'sequoia-fund' | 'tiaa';
   downloaded: number;
   readyToImport: number;
   alreadyImported: number;
@@ -116,6 +117,30 @@ async function saveAwaitingSyncReview(review: {
 }
 
 let consolidatedSyncFixtureSequence = 0;
+
+const SYNTHETIC_TIAA_ACCOUNT_IDS = [
+  'SYNTH001',
+  'SYNTH002',
+  'SYNTH003',
+  'SYNTH004',
+  'SYNTH005',
+  'SYNTH006',
+] as const;
+
+function syntheticTiaaActivityCsv(date: string) {
+  return [
+    'Date,AccountId,Action,Security,Price,Quantity,Amount,Text,Memo,Commission',
+    ...SYNTHETIC_TIAA_ACCOUNT_IDS.map((accountId, index) =>
+      `${date},${accountId},Contribution,Synthetic Fund ${index + 1},1.00,10,${index + 1}.00,Synthetic contribution,,0`
+    ),
+  ].join('\n');
+}
+
+function syntheticTiaaActivityRoutes() {
+  return SYNTHETIC_TIAA_ACCOUNT_IDS.map(accountId => ({
+    remoteAccountId: `TIAA||Retirement Annuity ${accountId}`,
+  }));
+}
 
 function stageConsolidatedSyncFacts(claims: Array<{
   remoteAccountId: string;
@@ -3487,6 +3512,24 @@ test('Vanguard sync targets survive reversible unimport provenance', async () =>
   });
 });
 
+test('TIAA has one app catch-up target for any active local TIAA account', async () => {
+  insertRow('accounts', {
+    name: 'Synthetic 403(b)',
+    institution: 'TIAA',
+    type: 'investment',
+    accountHolder: 'Synthetic Holder',
+    currentBalance: 0,
+    currency: 'USD',
+    status: 'active',
+  });
+
+  expect(await caller.dataSync.targets()).toEqual([{
+    id: 'tiaa',
+    institutionId: 'tiaa',
+    label: 'TIAA',
+  }]);
+});
+
 test('institution catch-up stages reviewable claims before explicit confirmation', async () => {
   const accountId = Number(insertRow('accounts', {
     name: 'Primary Checking',
@@ -3667,6 +3710,269 @@ test('independent sync previews arbitrate identical content once at confirmation
       JOIN sourceFiles sf ON sf.id = sa.sourceFileId
       WHERE sf.status = 'committed'
     `).all()).toEqual([{ accountId: firstAccountId }]);
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('TIAA worker staging keeps six repeated activity identities and one statement identity distinct', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Synthetic 403(b)',
+    institution: 'TIAA',
+    type: 'investment',
+    accountHolder: 'Synthetic Holder',
+    currentBalance: 0,
+    currency: 'USD',
+    status: 'active',
+  }));
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-tiaa-routes-'));
+  const activityFiles = [
+    {
+      fileName: 'tiaa-retirement-annuity-2026-period-one.csv',
+      text: syntheticTiaaActivityCsv('01/05/2026'),
+    },
+    {
+      fileName: 'tiaa-retirement-annuity-2026-period-two.csv',
+      text: syntheticTiaaActivityCsv('07/05/2026'),
+    },
+  ];
+
+  try {
+    const manifestArtifacts = [];
+    for (const activity of activityFiles) {
+      const bytes = new TextEncoder().encode(activity.text);
+      await fs.promises.writeFile(path.join(directory, activity.fileName), bytes);
+      manifestArtifacts.push({
+        fileName: activity.fileName,
+        accountRoutes: syntheticTiaaActivityRoutes(),
+        sizeBytes: bytes.byteLength,
+        sha256: new Bun.CryptoHasher('sha256').update(bytes).digest('hex'),
+      });
+    }
+    const stagedActivity = await stageSyncArtifactManifest({
+      protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+      runId: 'sync-tiaa-grouped-identities',
+      institutionId: 'tiaa',
+      artifacts: manifestArtifacts,
+    }, directory, () => {});
+    const statement = stageConsolidatedSyncFacts([{
+      remoteAccountId: 'TIAA||Retirement Annuity',
+      accountName: 'Retirement Annuity',
+      amountCents: 125_00,
+      balanceCents: 900_000_00,
+    }], 'tiaa-2026-06-30-retirement-q2-2026-acde1234abcd.pdf', 'statement');
+    const statementReview = buildSyncArtifactReview({
+      importFileId: statement.importFileId,
+      fileName: statement.fileName,
+      status: 'ready',
+      accountRoutes: [{ remoteAccountId: 'TIAA||Retirement Annuity' }],
+    });
+    const artifacts = [...stagedActivity.review.artifacts, statementReview];
+    const claims = artifacts.flatMap(artifact => artifact.accountClaims);
+    const claimsByRemoteId = new Map<string, (typeof claims)[number]>();
+    for (const claim of claims) claimsByRemoteId.set(claim.remoteAccountId, claim);
+
+    expect(stagedActivity.review.artifacts.map(artifact => artifact.accountClaims.length)).toEqual([6, 6]);
+    expect(claims).toHaveLength(13);
+    expect([...claimsByRemoteId.keys()].sort()).toEqual([
+      'TIAA||Retirement Annuity',
+      ...SYNTHETIC_TIAA_ACCOUNT_IDS.map(accountId => `TIAA||Retirement Annuity ${accountId}`),
+    ].sort());
+    expect(claimsByRemoteId.size).toBe(7);
+    expect(claims.every(claim => claim.requiresExplicitMapping)).toBe(true);
+
+    const review = {
+      runId: 'sync-tiaa-grouped-identities',
+      institutionId: 'tiaa' as const,
+      downloaded: 3,
+      readyToImport: 3,
+      alreadyImported: 0,
+      artifacts,
+    };
+    await saveAwaitingSyncReview(review);
+    const confirmed = await caller.dataSync.confirm({
+      runId: review.runId,
+      accountMappings: [...claimsByRemoteId.values()].map(claim => ({
+        sourceAccountId: claim.sourceAccountId,
+        mode: 'existing' as const,
+        accountId,
+      })),
+    });
+
+    expect(confirmed).toMatchObject({
+      status: 'complete',
+      result: {
+        recordedTransactionFacts: 13,
+        recordedBalanceFacts: 1,
+        skippedArtifacts: 0,
+      },
+    });
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM sourceAccounts WHERE accountId = ?').get(accountId))
+      .toEqual({ count: 13 });
+    expect(getDb().prepare("SELECT COUNT(*) AS count FROM importFiles WHERE status = 'committed'").get())
+      .toEqual({ count: 3 });
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('TIAA manifest staging discards earlier previews when a later artifact fails', async () => {
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-tiaa-partial-'));
+  const fileName = 'tiaa-retirement-annuity-2026-period-one.csv';
+  const text = syntheticTiaaActivityCsv('01/05/2026');
+  const bytes = new TextEncoder().encode(text);
+  await fs.promises.writeFile(path.join(directory, fileName), bytes);
+
+  try {
+    await expect(stageSyncArtifactManifest({
+      protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+      runId: 'sync-tiaa-partial-staging',
+      institutionId: 'tiaa',
+      artifacts: [{
+        fileName,
+        accountRoutes: syntheticTiaaActivityRoutes(),
+        sizeBytes: bytes.byteLength,
+        sha256: new Bun.CryptoHasher('sha256').update(bytes).digest('hex'),
+      }, {
+        fileName: 'tiaa-retirement-annuity-2026-missing.csv',
+        accountRoutes: syntheticTiaaActivityRoutes(),
+        sizeBytes: 1,
+        sha256: '0'.repeat(64),
+      }],
+    }, directory, () => {})).rejects.toThrow();
+
+    expect(getDb().prepare('SELECT status FROM importFiles').all()).toEqual([{ status: 'discarded' }]);
+    expect(getDb().prepare('SELECT status FROM sourceFiles').all()).toEqual([{ status: 'discarded' }]);
+    expect(getDb().prepare("SELECT COUNT(*) AS count FROM importFiles WHERE status = 'previewed'").get())
+      .toEqual({ count: 0 });
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM accounts').get()).toEqual({ count: 0 });
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('TIAA committed duplicate reuse ignores obsolete stored parser identities', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Synthetic 403(b)',
+    institution: 'TIAA',
+    type: 'investment',
+    currentBalance: 0,
+    currency: 'USD',
+    status: 'active',
+  }));
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-tiaa-committed-'));
+  const fileName = 'tiaa-retirement-annuity-2026-current.csv';
+  const text = syntheticTiaaActivityCsv('01/05/2026');
+  const bytes = new TextEncoder().encode(text);
+  const contentHash = hashImportContent(text, bytes);
+  await fs.promises.writeFile(path.join(directory, fileName), bytes);
+  const importFileId = Number(insertRow('importFiles', {
+    fileName: 'legacy-tiaa-activity.csv',
+    contentHash,
+    parserName: 'tiaa-activity-csv',
+    sourceType: 'activity-export',
+    institution: 'TIAA',
+    status: 'committed',
+  }));
+  const sourceFileId = Number(insertRow('sourceFiles', {
+    importFileId,
+    fileName: 'legacy-tiaa-activity.csv',
+    contentHash,
+    parserName: 'tiaa-activity-csv',
+    sourceType: 'activity-export',
+    institution: 'TIAA',
+    status: 'committed',
+  }));
+  insertRow('sourceAccounts', {
+    sourceFileId,
+    accountId,
+    institution: 'TIAA',
+    sourceAccountKey: 'TIAA||Retirement Annuity',
+    sourceAccountName: 'Retirement Annuity',
+  });
+
+  try {
+    const staged = await stageSyncArtifactManifest({
+      protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+      runId: 'sync-tiaa-committed-duplicate',
+      institutionId: 'tiaa',
+      artifacts: [{
+        fileName,
+        accountRoutes: syntheticTiaaActivityRoutes(),
+        sizeBytes: bytes.byteLength,
+        sha256: new Bun.CryptoHasher('sha256').update(bytes).digest('hex'),
+      }],
+    }, directory, () => {});
+
+    expect(staged.createdImportFileIds).toEqual([]);
+    expect(staged.review).toMatchObject({
+      readyToImport: 0,
+      alreadyImported: 1,
+      artifacts: [{
+        importFileId,
+        status: 'already-imported',
+        accountClaims: [{ remoteAccountId: 'TIAA||Retirement Annuity' }],
+      }],
+    });
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM importFiles').get()).toEqual({ count: 1 });
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('TIAA re-download leaves an inactive legacy import untouched and stages new parser claims', async () => {
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-tiaa-unimported-'));
+  const fileName = 'tiaa-retirement-annuity-2026-current.csv';
+  const text = syntheticTiaaActivityCsv('01/05/2026');
+  const bytes = new TextEncoder().encode(text);
+  const contentHash = hashImportContent(text, bytes);
+  await fs.promises.writeFile(path.join(directory, fileName), bytes);
+  const legacyImportFileId = Number(insertRow('importFiles', {
+    fileName: 'legacy-tiaa-activity.csv',
+    contentHash,
+    parserName: 'tiaa-activity-csv',
+    sourceType: 'activity-export',
+    institution: 'TIAA',
+    status: 'unimported',
+  }));
+  const legacySourceFileId = Number(insertRow('sourceFiles', {
+    importFileId: legacyImportFileId,
+    fileName: 'legacy-tiaa-activity.csv',
+    contentHash,
+    parserName: 'tiaa-activity-csv',
+    sourceType: 'activity-export',
+    institution: 'TIAA',
+    status: 'unimported',
+  }));
+  insertRow('sourceAccounts', {
+    sourceFileId: legacySourceFileId,
+    institution: 'TIAA',
+    sourceAccountKey: 'TIAA||Retirement Annuity',
+    sourceAccountName: 'Retirement Annuity',
+  });
+
+  try {
+    const staged = await stageSyncArtifactManifest({
+      protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+      runId: 'sync-tiaa-unimported-redownload',
+      institutionId: 'tiaa',
+      artifacts: [{
+        fileName,
+        accountRoutes: syntheticTiaaActivityRoutes(),
+        sizeBytes: bytes.byteLength,
+        sha256: new Bun.CryptoHasher('sha256').update(bytes).digest('hex'),
+      }],
+    }, directory, () => {});
+
+    expect(staged.review.artifacts[0]!.accountClaims).toHaveLength(6);
+    expect(staged.review.artifacts[0]!.accountClaims.every(claim => claim.requiresExplicitMapping)).toBe(true);
+    expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(legacyImportFileId))
+      .toEqual({ status: 'unimported' });
+    expect(getDb().prepare('SELECT status FROM sourceFiles WHERE id = ?').get(legacySourceFileId))
+      .toEqual({ status: 'unimported' });
+    expect(getDb().prepare("SELECT COUNT(*) AS count FROM importFiles WHERE status = 'previewed'").get())
+      .toEqual({ count: 1 });
   } finally {
     await fs.promises.rm(directory, { recursive: true, force: true });
   }

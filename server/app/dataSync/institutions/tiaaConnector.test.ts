@@ -110,6 +110,26 @@ describe('TIAA artifact routing', () => {
     }]);
   });
 
+  test('keeps six activity identities separate from the aggregate statement identity', () => {
+    const activityClaims = ['SYNTH001', 'SYNTH002', 'SYNTH003', 'SYNTH004', 'SYNTH005', 'SYNTH006']
+      .map(tiaaActivityRemoteAccount);
+    const statementClaim: TiaaRemoteAccountIdentity = {
+      routingKey: 'bbbbbbbbbbbb',
+      remoteAccountId: 'Retirement Annuity',
+      sourceAccountName: 'Retirement Annuity',
+      claimKey: 'TIAA||Retirement Annuity',
+    };
+    const routed = routeTiaaArtifacts([
+      artifact('activity.csv', activityClaims),
+      artifact('statement.pdf', [statementClaim], 'statement'),
+    ]);
+    const identities = routed.flatMap(item => item.accountRoutes.map(route => route.remoteAccountId));
+
+    expect(identities).toHaveLength(7);
+    expect(new Set(identities).size).toBe(7);
+    expect(identities).toContain('TIAA||Retirement Annuity');
+  });
+
   test('fails closed for missing or ambiguous parser claim keys', () => {
     expect(() => routeTiaaArtifacts([artifact('empty.csv', [])]))
       .toThrow('no parser-backed account claims');
@@ -159,6 +179,7 @@ describe('TIAA connector execution', () => {
       through: '2026-08-24',
       session: 'tiaa-catchup',
     }]);
+    expect(calls[0]).not.toHaveProperty('headless');
     expect(events.at(-1)).toEqual({
       type: 'phase',
       message: 'Validated 1 TIAA artifact',
