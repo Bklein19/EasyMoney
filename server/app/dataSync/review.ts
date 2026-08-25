@@ -299,7 +299,7 @@ export function buildSyncArtifactReview(options: {
     accountClaims: accounts,
     transactionSamples: transactions.slice(0, 6),
     balanceClaims: balances.slice(0, 12),
-    warnings: reviewWarnings(accounts),
+    warnings: options.status === 'ready' ? reviewWarnings(accounts) : [],
   };
 }
 

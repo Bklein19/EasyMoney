@@ -77,4 +77,17 @@ describe('data sync architecture', () => {
     expect(dependencies).not.toContain('server/app/dataSync/review.ts');
     expect(readFileSync(entrypoint, 'utf8')).not.toMatch(/initDatabase|closeDatabase|getDb/);
   });
+
+  test('keeps the bundled sync worker free of application database code', async () => {
+    const result = await Bun.build({
+      entrypoints: [resolve(repositoryRoot, 'scripts/sync.ts')],
+      target: 'bun',
+    });
+    expect(result.success).toBe(true);
+    const bundle = await result.outputs[0]!.text();
+
+    expect(bundle).not.toContain('server/database.ts');
+    expect(bundle).not.toContain('bun:sqlite');
+    expect(bundle).not.toMatch(/function getDb\b|initDatabase\s*\(/);
+  });
 });

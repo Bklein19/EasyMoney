@@ -3913,6 +3913,7 @@ test('TIAA committed duplicate reuse ignores obsolete stored parser identities',
         importFileId,
         status: 'already-imported',
         accountClaims: [{ remoteAccountId: 'TIAA||Retirement Annuity' }],
+        warnings: [],
       }],
     });
     expect(getDb().prepare('SELECT COUNT(*) AS count FROM importFiles').get()).toEqual({ count: 1 });
