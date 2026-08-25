@@ -85,10 +85,9 @@ const rpc = BrowserView.defineRPC<EasyMoneyDesktopRpc>({
   },
 });
 
-new BrowserWindow({
+const mainWindow = new BrowserWindow({
   title: 'EasyMoney',
   titleBarStyle: 'hiddenInset',
-  trafficLightOffset: { x: 16, y: 26 },
   url: 'views://mainview/index.html',
   rpc,
   frame: {
@@ -98,6 +97,10 @@ new BrowserWindow({
     y: 80,
   },
 });
+
+if (process.platform === 'darwin') {
+  mainWindow.setWindowButtonPosition(20, 20);
+}
 
 Electrobun.events.on('before-quit', () => {
   databaseModule.closeDatabase();
