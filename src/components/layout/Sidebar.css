@@ -96,7 +96,7 @@ body.sidebar-resizing {
   flex: 0 0 52px;
   height: 52px;
   margin-top: 42px;
-  padding: 0 var(--space-5);
+  padding: 0 var(--space-4);
 }
 
 .sidebar-brand {
@@ -142,6 +142,10 @@ body.sidebar-resizing {
   transition: padding var(--transition-base);
 }
 
+.easymoney-desktop .sidebar-nav {
+  padding-inline: var(--space-2);
+}
+
 .sidebar-nav-item {
   display: flex;
   flex-direction: column;
@@ -166,6 +170,10 @@ body.sidebar-resizing {
   text-decoration: none;
   min-height: 34px;
   min-width: 0;
+}
+
+.easymoney-desktop .sidebar-link {
+  padding-inline: var(--space-2);
 }
 
 .sidebar-link:hover {

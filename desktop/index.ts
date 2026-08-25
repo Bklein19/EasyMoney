@@ -99,7 +99,7 @@ const mainWindow = new BrowserWindow({
 });
 
 if (process.platform === 'darwin') {
-  mainWindow.setWindowButtonPosition(20, 20);
+  mainWindow.setWindowButtonPosition(16, 16);
 }
 
 Electrobun.events.on('before-quit', () => {
