@@ -1,15 +1,17 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Page } from 'playwright';
+import type { BrowserContext, Page } from 'playwright';
 
 import {
   checkAuthenticationForCheckpoint,
   closeBrowserContext,
   decodeInstitutionBrowserProgramResult,
   institutionBrowserLaunchStrategy,
+  institutionStartPage,
+  launchPersistentContextWithDeadline,
   openInstitutionStartPage,
   persistBrowserAuthentication,
   playwrightAuthStatePath,
@@ -17,11 +19,14 @@ import {
   playwrightProfilePath,
   playwrightSessionStoragePath,
   restoreBrowserAuthentication,
+  runInstitutionBrowserProgram,
   runWhileBrowserOpen,
   showAuthenticationChapter,
   showSyncCompletionChapter,
   waitForInteractiveAuthentication,
   withInteractiveBrowserLease,
+  withPlaywrightPage,
+  withTransientBrowserProfile,
 } from './dataSync/browserSession.ts';
 
 const temporaryDirectories: string[] = [];
@@ -100,6 +105,55 @@ describe('Playwright session helper', () => {
     expect(navigated).toBe(false);
   });
 
+  test('creates a fresh fallback page before closing restored pages', async () => {
+    const events: string[] = [];
+    const restoredPage = {
+      isClosed: () => false,
+      close: async () => {
+        events.push('close-restored');
+      },
+    } as unknown as Page;
+    const freshPage = { isClosed: () => false } as unknown as Page;
+    const context = {
+      pages: () => [restoredPage],
+      newPage: async () => {
+        events.push('create-fresh');
+        return freshPage;
+      },
+    } as unknown as Pick<BrowserContext, 'newPage' | 'pages'>;
+
+    expect(await institutionStartPage(context, true)).toBe(freshPage);
+    expect(events).toEqual(['create-fresh', 'close-restored']);
+  });
+
+  test('continues with the fresh page when a restored page never finishes closing', async () => {
+    const restoredPage = {
+      isClosed: () => false,
+      close: () => new Promise<void>(() => {}),
+    } as unknown as Page;
+    const freshPage = { isClosed: () => false } as unknown as Page;
+    const context = {
+      pages: () => [restoredPage],
+      newPage: async () => freshPage,
+    } as unknown as Pick<BrowserContext, 'newPage' | 'pages'>;
+
+    const startedAt = performance.now();
+    expect(await institutionStartPage(context, true, 10, 10)).toBe(freshPage);
+    expect(performance.now() - startedAt).toBeLessThan(250);
+  });
+
+  test('does not hang when opening the first page after browser launch never settles', async () => {
+    const context = {
+      pages: () => [],
+      newPage: () => new Promise<Page>(() => {}),
+    } as unknown as Pick<BrowserContext, 'newPage' | 'pages'>;
+
+    const startedAt = performance.now();
+    await expect(institutionStartPage(context, false, 10))
+      .rejects.toThrow('Timed out opening an institution browser page');
+    expect(performance.now() - startedAt).toBeLessThan(250);
+  });
+
   test('uses saved authentication headlessly with a headed login fallback', () => {
     expect(institutionBrowserLaunchStrategy({ hasSavedAuthentication: true })).toEqual({
       initialHeadless: true,
@@ -109,6 +163,242 @@ describe('Playwright session helper', () => {
       initialHeadless: false,
       allowHeadedAuthenticationFallback: false,
     });
+  });
+
+  test('uses a fresh transient profile for the cached-auth probe and the canonical profile for fallback', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-profile-split-'));
+    temporaryDirectories.push(root);
+    const canonicalProfilePath = join(root, 'profiles', 'tiaa-catchup');
+    const transientRoot = join(root, 'transient');
+    await mkdir(canonicalProfilePath, { recursive: true });
+    await writeFile(playwrightAuthStatePath(canonicalProfilePath), JSON.stringify({ cookies: [], origins: [] }));
+
+    const attempts: Array<{
+      headless: boolean;
+      profilePath: string;
+      authenticationProfilePath: string;
+      interactiveLeaseProfilePath: string;
+      forceStartUrl: boolean;
+    }> = [];
+    let transientProfilePath = '';
+    let transientProfileMode = 0;
+    const fakeWithPlaywrightPage: typeof withPlaywrightPage = async (sessionOptions, operation) => {
+      const headless = sessionOptions.contextOptions?.headless ?? false;
+      attempts.push({
+        headless,
+        profilePath: sessionOptions.profilePath ?? '',
+        authenticationProfilePath: sessionOptions.authenticationProfilePath ?? '',
+        interactiveLeaseProfilePath: sessionOptions.interactiveLeaseProfilePath ?? '',
+        forceStartUrl: sessionOptions.forceStartUrl ?? false,
+      });
+      const context = new EventEmitter();
+      const page = Object.assign(new EventEmitter(), {
+        headlessProbe: headless,
+        isClosed: () => false,
+        context: () => context,
+        screencast: { showChapter: async () => {} },
+      }) as unknown as Page;
+      Object.assign(context, { pages: () => [page] });
+      return operation(page, context as unknown as BrowserContext);
+    };
+    const fakeWithTransientBrowserProfile: typeof withTransientBrowserProfile = async operation =>
+      withTransientBrowserProfile(async profilePath => {
+        transientProfilePath = profilePath;
+        transientProfileMode = (await stat(profilePath)).mode & 0o777;
+        return operation(profilePath);
+      }, { temporaryRoot: transientRoot });
+
+    const result = await runInstitutionBrowserProgram(
+      {
+        name: 'tiaa-catchup',
+        startUrl: 'https://example.test/start',
+        profilePath: canonicalProfilePath,
+      },
+      `async page => JSON.stringify({ status: page.headlessProbe ? 'login-required' : 'complete' })`,
+      {
+        completionDescription: 'Downloads complete.',
+        isAuthenticated: async () => false,
+      },
+      {
+        withPlaywrightPage: fakeWithPlaywrightPage,
+        withTransientBrowserProfile: fakeWithTransientBrowserProfile,
+      },
+    );
+
+    expect(result.status).toBe('complete');
+    expect(transientProfilePath).not.toBe(canonicalProfilePath);
+    expect(transientProfileMode).toBe(0o700);
+    expect(attempts).toEqual([
+      {
+        headless: true,
+        profilePath: transientProfilePath,
+        authenticationProfilePath: canonicalProfilePath,
+        interactiveLeaseProfilePath: canonicalProfilePath,
+        forceStartUrl: false,
+      },
+      {
+        headless: false,
+        profilePath: canonicalProfilePath,
+        authenticationProfilePath: canonicalProfilePath,
+        interactiveLeaseProfilePath: canonicalProfilePath,
+        forceStartUrl: true,
+      },
+    ]);
+    expect(await stat(transientProfilePath).then(() => true, () => false)).toBe(false);
+  });
+
+  test('checkpoints a successful transient probe to canonical authentication state only', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-canonical-auth-'));
+    temporaryDirectories.push(root);
+    const canonicalProfilePath = join(root, 'profiles', 'vanguard-catchup');
+    const transientRoot = join(root, 'transient');
+    await mkdir(canonicalProfilePath, { recursive: true });
+    await writeFile(playwrightAuthStatePath(canonicalProfilePath), JSON.stringify({ old: true }));
+    await writeFile(playwrightSessionStoragePath(canonicalProfilePath), JSON.stringify({
+      'https://stale.example.test': { stale: 'state' },
+    }));
+
+    const authenticationState = { cookies: [{ name: 'session', value: 'fresh' }], origins: [] };
+    let transientProfilePath = '';
+    let transientAuthStateWasWritten = false;
+    const fakeWithPlaywrightPage: typeof withPlaywrightPage = async (sessionOptions, operation) => {
+      const context = new EventEmitter();
+      const page = Object.assign(new EventEmitter(), {
+        isClosed: () => false,
+        context: () => context,
+        evaluate: async () => ({
+          origin: 'https://accounts.example.test',
+          entries: { authenticatedFlow: 'fresh-resume-token' },
+        }),
+        screencast: { showChapter: async () => {} },
+      }) as unknown as Page;
+      Object.assign(context, {
+        pages: () => [page],
+        storageState: async (options: unknown) => {
+          expect(options).toEqual({ indexedDB: true });
+          return authenticationState;
+        },
+      });
+      const result = await operation(page, context as unknown as BrowserContext);
+      transientAuthStateWasWritten = await stat(playwrightAuthStatePath(sessionOptions.profilePath ?? ''))
+        .then(() => true, () => false);
+      return result;
+    };
+    const fakeWithTransientBrowserProfile: typeof withTransientBrowserProfile = async operation =>
+      withTransientBrowserProfile(profilePath => {
+        transientProfilePath = profilePath;
+        return operation(profilePath);
+      }, { temporaryRoot: transientRoot });
+
+    const result = await runInstitutionBrowserProgram(
+      {
+        name: 'vanguard-catchup',
+        startUrl: 'https://example.test/start',
+        profilePath: canonicalProfilePath,
+      },
+      `async () => JSON.stringify({ status: 'complete' })`,
+      {
+        completionDescription: 'Downloads complete.',
+        isAuthenticated: async () => true,
+      },
+      {
+        withPlaywrightPage: fakeWithPlaywrightPage,
+        withTransientBrowserProfile: fakeWithTransientBrowserProfile,
+      },
+    );
+
+    expect(result.status).toBe('complete');
+    expect(transientAuthStateWasWritten).toBe(false);
+    expect(JSON.parse(await readFile(playwrightAuthStatePath(canonicalProfilePath), 'utf8')))
+      .toEqual(authenticationState);
+    expect(JSON.parse(await readFile(playwrightSessionStoragePath(canonicalProfilePath), 'utf8'))).toEqual({
+      'https://accounts.example.test': { authenticatedFlow: 'fresh-resume-token' },
+    });
+    expect(await stat(transientProfilePath).then(() => true, () => false)).toBe(false);
+  });
+
+  test('uses a transient headed profile and canonical lease identity when authentication caching is disabled', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-no-auth-cache-'));
+    temporaryDirectories.push(root);
+    const canonicalProfilePath = join(root, 'profiles', 'sequoia-fund-catchup');
+    const transientRoot = join(root, 'transient');
+    const savedAuthentication = JSON.stringify({ existing: 'authentication' });
+    const savedSessionStorage = JSON.stringify({
+      'https://accounts.example.test': { existing: 'session' },
+    });
+    await mkdir(canonicalProfilePath, { recursive: true });
+    await writeFile(playwrightAuthStatePath(canonicalProfilePath), savedAuthentication);
+    await writeFile(playwrightSessionStoragePath(canonicalProfilePath), savedSessionStorage);
+
+    let transientProfilePath = '';
+    let storageStateCalls = 0;
+    const attempts: Array<{
+      headless: boolean;
+      profilePath: string;
+      authenticationProfilePath: string;
+      interactiveLeaseProfilePath: string;
+      forceStartUrl: boolean;
+    }> = [];
+    const fakeWithPlaywrightPage: typeof withPlaywrightPage = async (sessionOptions, operation) => {
+      attempts.push({
+        headless: sessionOptions.contextOptions?.headless ?? false,
+        profilePath: sessionOptions.profilePath ?? '',
+        authenticationProfilePath: sessionOptions.authenticationProfilePath ?? '',
+        interactiveLeaseProfilePath: sessionOptions.interactiveLeaseProfilePath ?? '',
+        forceStartUrl: sessionOptions.forceStartUrl ?? false,
+      });
+      const context = new EventEmitter();
+      const page = Object.assign(new EventEmitter(), {
+        isClosed: () => false,
+        context: () => context,
+        screencast: { showChapter: async () => {} },
+      }) as unknown as Page;
+      Object.assign(context, {
+        pages: () => [page],
+        storageState: async () => {
+          storageStateCalls += 1;
+          return { cookies: [], origins: [] };
+        },
+      });
+      return operation(page, context as unknown as BrowserContext);
+    };
+    const fakeWithTransientBrowserProfile: typeof withTransientBrowserProfile = async operation =>
+      withTransientBrowserProfile(profilePath => {
+        transientProfilePath = profilePath;
+        return operation(profilePath);
+      }, { temporaryRoot: transientRoot });
+
+    const result = await runInstitutionBrowserProgram(
+      {
+        name: 'sequoia-fund-catchup',
+        startUrl: 'https://example.test/start',
+        profilePath: canonicalProfilePath,
+        persistAuthentication: false,
+      },
+      `async () => JSON.stringify({ status: 'complete' })`,
+      {
+        completionDescription: 'Downloads complete.',
+        isAuthenticated: async () => true,
+      },
+      {
+        withPlaywrightPage: fakeWithPlaywrightPage,
+        withTransientBrowserProfile: fakeWithTransientBrowserProfile,
+      },
+    );
+
+    expect(result.status).toBe('complete');
+    expect(transientProfilePath).not.toBe(canonicalProfilePath);
+    expect(attempts).toEqual([{
+      headless: false,
+      profilePath: transientProfilePath,
+      authenticationProfilePath: canonicalProfilePath,
+      interactiveLeaseProfilePath: canonicalProfilePath,
+      forceStartUrl: false,
+    }]);
+    expect(storageStateCalls).toBe(0);
+    expect(await readFile(playwrightAuthStatePath(canonicalProfilePath), 'utf8')).toBe(savedAuthentication);
+    expect(await readFile(playwrightSessionStoragePath(canonicalProfilePath), 'utf8')).toBe(savedSessionStorage);
+    expect(await stat(transientProfilePath).then(() => true, () => false)).toBe(false);
   });
 
   test('allows interactive sign-in browsers for different profiles to run concurrently', async () => {
@@ -515,6 +805,29 @@ describe('Playwright session helper', () => {
     expect(performance.now() - startedAt).toBeLessThan(250);
   });
 
+  test('bounds a browser launch that settles late and closes its eventual context once', async () => {
+    const launch = Promise.withResolvers<BrowserContext>();
+    const lateContextClosed = Promise.withResolvers<void>();
+    let closeCalls = 0;
+    const lateContext = {
+      close: async () => {
+        closeCalls += 1;
+        lateContextClosed.resolve();
+      },
+    } as unknown as BrowserContext;
+
+    const startedAt = performance.now();
+    await expect(launchPersistentContextWithDeadline(
+      () => launch.promise,
+      { sessionName: 'tiaa-catchup', timeoutMs: 10 },
+    )).rejects.toThrow('Timed out opening the tiaa-catchup browser');
+    expect(performance.now() - startedAt).toBeLessThan(250);
+
+    launch.resolve(lateContext);
+    await lateContextClosed.promise;
+    expect(closeCalls).toBe(1);
+  });
+
   test('does not hang saving authentication after Chrome exits', async () => {
     const context = {
       storageState: () => new Promise<never>(() => {}),
@@ -575,9 +888,11 @@ describe('Playwright session helper', () => {
     const profilePath = await mkdtemp(join(tmpdir(), 'easymoney-playwright-session-storage-'));
     temporaryDirectories.push(profilePath);
     const authStatePath = playwrightAuthStatePath(profilePath);
+    const authenticationState = { cookies: [], origins: [] };
     const context = {
-      storageState: async ({ path }: { path: string }) => {
-        await writeFile(path, JSON.stringify({ cookies: [], origins: [] }));
+      storageState: async (options: unknown) => {
+        expect(options).toEqual({ indexedDB: true });
+        return authenticationState;
       },
       pages: () => [{
         isClosed: () => false,
@@ -589,9 +904,27 @@ describe('Playwright session helper', () => {
     };
 
     expect(await persistBrowserAuthentication(context as never, authStatePath)).toBe(true);
+    expect(JSON.parse(await readFile(authStatePath, 'utf8'))).toEqual(authenticationState);
     expect(JSON.parse(await readFile(playwrightSessionStoragePath(profilePath), 'utf8'))).toEqual({
       'https://accounts.example.test': { authenticatedFlow: 'resume-token' },
     });
+  });
+
+  test('removes stale saved session storage when the browser has none', async () => {
+    const profilePath = await mkdtemp(join(tmpdir(), 'easymoney-playwright-stale-session-storage-'));
+    temporaryDirectories.push(profilePath);
+    const authStatePath = playwrightAuthStatePath(profilePath);
+    const sessionStoragePath = playwrightSessionStoragePath(profilePath);
+    await writeFile(sessionStoragePath, JSON.stringify({
+      'https://stale.example.test': { stale: 'value' },
+    }));
+    const context = {
+      storageState: async () => ({ cookies: [], origins: [] }),
+      pages: () => [],
+    };
+
+    expect(await persistBrowserAuthentication(context as never, authStatePath)).toBe(true);
+    expect(await stat(sessionStoragePath).then(() => true, () => false)).toBe(false);
   });
 
   test('restores session storage before reopening the institution page', async () => {

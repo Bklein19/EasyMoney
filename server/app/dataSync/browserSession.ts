@@ -1,6 +1,6 @@
-import { chmod, mkdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { dirname, join, posix, resolve, win32 } from 'node:path';
+import { chmod, mkdir, mkdtemp, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { homedir, tmpdir } from 'node:os';
+import { basename, dirname, join, posix, resolve, win32 } from 'node:path';
 
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 
@@ -17,7 +17,11 @@ type SessionOptions = {
   name: string;
   startUrl: string;
   profilePath?: string;
+  authenticationProfilePath?: string;
+  interactiveLeaseProfilePath?: string;
+  forceStartUrl?: boolean;
   persistAuthentication?: boolean;
+  browserLaunchTimeoutMs?: number;
   onInteractiveBrowserWait?: (message: string) => void;
   contextOptions?: NonNullable<Parameters<typeof chromium.launchPersistentContext>[1]>;
   launchArgs?: string[];
@@ -62,6 +66,21 @@ export function playwrightAuthStatePath(profilePath: string): string {
 
 export function playwrightSessionStoragePath(profilePath: string): string {
   return resolve(profilePath, '.easymoney-session-storage.json');
+}
+
+export async function withTransientBrowserProfile<T>(
+  operation: (profilePath: string) => Promise<T>,
+  options: { temporaryRoot?: string } = {},
+): Promise<T> {
+  const temporaryRoot = resolve(options.temporaryRoot ?? tmpdir());
+  await mkdir(temporaryRoot, { recursive: true });
+  const profilePath = await mkdtemp(join(temporaryRoot, '.easymoney-headless-profile-'));
+  if (process.platform !== 'win32') await chmod(profilePath, 0o700);
+  try {
+    return await operation(profilePath);
+  } finally {
+    await rm(profilePath, { recursive: true, force: true });
+  }
 }
 
 type InteractiveBrowserLeaseOptions = {
@@ -256,9 +275,64 @@ export async function openInstitutionStartPage(
   page: Pick<Page, 'goto' | 'url'>,
   startUrl: string,
   restoredAuthentication: boolean,
+  forceStartUrl = false,
 ): Promise<void> {
-  if (page.url() !== 'about:blank' && !restoredAuthentication) return;
+  if (!forceStartUrl && page.url() !== 'about:blank' && !restoredAuthentication) return;
   await page.goto(startUrl, { waitUntil: 'domcontentloaded' });
+}
+
+const defaultBrowserLaunchTimeoutMs = 30_000;
+const browserLaunchWatchdogGraceMs = 1_000;
+const restoredPageCloseTimeoutMs = 1_000;
+
+async function settleBeforeBrowserDeadline<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+  errorMessage: string,
+): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+export async function institutionStartPage(
+  context: Pick<BrowserContext, 'newPage' | 'pages'>,
+  forceFreshPage = false,
+  timeoutMs = defaultBrowserLaunchTimeoutMs,
+  closeTimeoutMs = restoredPageCloseTimeoutMs,
+): Promise<Page> {
+  const existingPages = context.pages().filter(page => !page.isClosed());
+  if (!forceFreshPage) {
+    return existingPages[0] ?? settleBeforeBrowserDeadline(
+      context.newPage(),
+      timeoutMs,
+      'Timed out opening an institution browser page',
+    );
+  }
+
+  const freshPage = await settleBeforeBrowserDeadline(
+    context.newPage(),
+    timeoutMs,
+    'Timed out opening a fresh institution browser page',
+  );
+  try {
+    await settleBeforeBrowserDeadline(
+      Promise.allSettled(existingPages.map(page => page.close())),
+      closeTimeoutMs,
+      'Timed out closing restored institution browser pages',
+    );
+  } catch {
+    console.warn('Timed out closing a restored institution browser page; continuing in the fresh page.');
+  }
+  return freshPage;
 }
 
 export function institutionBrowserLaunchStrategy(options: {
@@ -291,39 +365,93 @@ export async function withPlaywrightPage<T>(
   operation: (page: Page, context: BrowserContext) => Promise<T>,
 ): Promise<T> {
   const profilePath = resolve(options.profilePath ?? playwrightProfilePath(options.name));
+  const authenticationProfilePath = resolve(options.authenticationProfilePath ?? profilePath);
+  const interactiveLeaseProfilePath = resolve(options.interactiveLeaseProfilePath ?? profilePath);
   await mkdir(profilePath, { recursive: true });
 
   if (options.contextOptions?.headless !== true) {
     return withInteractiveBrowserLease({
-      profilePath,
+      profilePath: interactiveLeaseProfilePath,
       sessionName: options.name,
       onWait: options.onInteractiveBrowserWait,
-    }, () => launchPlaywrightPage({ ...options, profilePath }, operation));
+    }, () => launchPlaywrightPage({ ...options, profilePath, authenticationProfilePath }, operation));
   }
 
-  return launchPlaywrightPage({ ...options, profilePath }, operation);
+  return launchPlaywrightPage({ ...options, profilePath, authenticationProfilePath }, operation);
+}
+
+export async function launchPersistentContextWithDeadline(
+  launch: () => Promise<BrowserContext>,
+  options: {
+    sessionName: string;
+    timeoutMs?: number;
+    closeLateContext?: (context: BrowserContext) => Promise<unknown>;
+  },
+): Promise<BrowserContext> {
+  const timeoutMs = options.timeoutMs ?? defaultBrowserLaunchTimeoutMs;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error('Browser launch timeout must be a positive number');
+  }
+
+  const launchPromise = Promise.resolve().then(launch);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let deadlineExpired = false;
+  const timeoutError = () => new Error(`Timed out opening the ${options.sessionName} browser`);
+
+  try {
+    return await Promise.race([
+      launchPromise,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          deadlineExpired = true;
+          reject(timeoutError());
+        }, timeoutMs);
+      }),
+    ]);
+  } catch (error) {
+    if (deadlineExpired) {
+      const closeLateContext = options.closeLateContext ?? (async context => {
+        await closeBrowserContext(context);
+      });
+      void launchPromise.then(closeLateContext).catch(() => {});
+      throw timeoutError();
+    }
+    if (error instanceof Error && error.name === 'TimeoutError') throw timeoutError();
+    throw error;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 async function launchPlaywrightPage<T>(
-  options: SessionOptions & { profilePath: string },
+  options: SessionOptions & { profilePath: string; authenticationProfilePath: string },
   operation: (page: Page, context: BrowserContext) => Promise<T>,
 ): Promise<T> {
   const profilePath = options.profilePath;
+  const authenticationProfilePath = options.authenticationProfilePath;
   const persistAuthentication = options.persistAuthentication ?? true;
+  const browserLaunchTimeoutMs = options.browserLaunchTimeoutMs ?? defaultBrowserLaunchTimeoutMs;
 
   const hasSavedAuthentication = persistAuthentication &&
-    await fileExists(playwrightAuthStatePath(profilePath));
+    await fileExists(playwrightAuthStatePath(authenticationProfilePath));
 
   let context: BrowserContext;
   try {
-    context = await chromium.launchPersistentContext(profilePath, {
-      channel: 'chrome',
-      headless: options.contextOptions?.headless ?? false,
-      acceptDownloads: true,
-      chromiumSandbox: true,
-      ...options.contextOptions,
-      args: [...(options.contextOptions?.args ?? []), ...(options.launchArgs ?? [])],
-    });
+    context = await launchPersistentContextWithDeadline(
+      () => chromium.launchPersistentContext(profilePath, {
+        channel: 'chrome',
+        headless: options.contextOptions?.headless ?? false,
+        acceptDownloads: true,
+        chromiumSandbox: true,
+        ...options.contextOptions,
+        timeout: browserLaunchTimeoutMs,
+        args: [...(options.contextOptions?.args ?? []), ...(options.launchArgs ?? [])],
+      }),
+      {
+        sessionName: options.name,
+        timeoutMs: browserLaunchTimeoutMs + browserLaunchWatchdogGraceMs,
+      },
+    );
   } catch (error) {
     if (isLockedProfileError(error)) {
       throw new Error(`The ${options.name} browser profile is already open. Close that browser window, then rerun.`);
@@ -332,9 +460,9 @@ async function launchPlaywrightPage<T>(
   }
 
   try {
-    if (hasSavedAuthentication) await restoreBrowserAuthentication(context, profilePath);
-    const page = context.pages()[0] ?? await context.newPage();
-    await openInstitutionStartPage(page, options.startUrl, hasSavedAuthentication);
+    if (hasSavedAuthentication) await restoreBrowserAuthentication(context, authenticationProfilePath);
+    const page = await institutionStartPage(context, options.forceStartUrl, browserLaunchTimeoutMs);
+    await openInstitutionStartPage(page, options.startUrl, hasSavedAuthentication, options.forceStartUrl);
     return await runWhileBrowserOpen(context, () => operation(page, context));
   } finally {
     const closed = await closeBrowserContext(context);
@@ -401,6 +529,25 @@ async function captureSessionStorage(
   return Object.fromEntries(valid.map(snapshot => [snapshot.origin, snapshot.entries]));
 }
 
+async function replacePrivateJson(path: string, value: unknown): Promise<void> {
+  const temporaryPath = join(dirname(path), `.${basename(path)}.${crypto.randomUUID()}.partial`);
+  await mkdir(dirname(path), { recursive: true });
+  try {
+    await writeFile(temporaryPath, JSON.stringify(value), { mode: 0o600 });
+    if (process.platform !== 'win32') await chmod(temporaryPath, 0o600);
+    try {
+      await rename(temporaryPath, path);
+    } catch (error) {
+      const code = fileSystemErrorCode(error);
+      if (process.platform !== 'win32' || (code !== 'EEXIST' && code !== 'EPERM')) throw error;
+      await rm(path, { force: true });
+      await rename(temporaryPath, path);
+    }
+  } finally {
+    await rm(temporaryPath, { force: true });
+  }
+}
+
 export async function persistBrowserAuthentication(
   context: Pick<BrowserContext, 'pages' | 'storageState'>,
   authStatePath: string,
@@ -408,24 +555,35 @@ export async function persistBrowserAuthentication(
 ): Promise<boolean> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
-    const persisted = await Promise.race([
+    const snapshot = await Promise.race([
       Promise.resolve()
         .then(async () => {
-          await context.storageState({ path: authStatePath, indexedDB: true });
+          const authenticationState = await context.storageState({ indexedDB: true });
           const sessionStorage = await captureSessionStorage(context);
-          if (sessionStorage) {
-            const sessionStoragePath = playwrightSessionStoragePath(dirname(authStatePath));
-            await writeFile(sessionStoragePath, JSON.stringify(sessionStorage), { mode: 0o600 });
-            if (process.platform !== 'win32') await chmod(sessionStoragePath, 0o600);
-          }
-        })
-        .then(() => true),
-      new Promise<false>(resolveTimeout => {
-        timeout = setTimeout(() => resolveTimeout(false), timeoutMs);
+          return { authenticationState, sessionStorage };
+        }),
+      new Promise<null>(resolveTimeout => {
+        timeout = setTimeout(() => resolveTimeout(null), timeoutMs);
       }),
     ]);
-    if (!persisted) return false;
-    if (process.platform !== 'win32') await chmod(authStatePath, 0o600);
+    if (!snapshot) return false;
+    if (timeout) {
+      clearTimeout(timeout);
+      timeout = undefined;
+    }
+
+    await replacePrivateJson(authStatePath, snapshot.authenticationState);
+    const sessionStoragePath = playwrightSessionStoragePath(dirname(authStatePath));
+    try {
+      if (snapshot.sessionStorage) {
+        await replacePrivateJson(sessionStoragePath, snapshot.sessionStorage);
+      } else {
+        await rm(sessionStoragePath, { force: true });
+      }
+    } catch (error) {
+      await rm(authStatePath, { force: true });
+      throw error;
+    }
     return true;
   } catch (error) {
     if (!isClosedContextError(error)) {
@@ -821,10 +979,16 @@ export async function showAuthenticationChapter(page: Page, action: string): Pro
   await page.screencast.hideOverlays();
 }
 
+type InstitutionBrowserProgramDependencies = {
+  withPlaywrightPage: typeof withPlaywrightPage;
+  withTransientBrowserProfile: typeof withTransientBrowserProfile;
+};
+
 export async function runInstitutionBrowserProgram<T extends Record<string, unknown>>(
   session: SessionOptions,
   code: string,
   options: RunOptions,
+  dependencyOverrides: Partial<InstitutionBrowserProgramDependencies> = {},
 ): Promise<InstitutionBrowserProgramResult<T>> {
   // Browser programs are repository-owned strings retained from the former CLI runner.
   const program = Function(`"use strict"; return (${code});`)() as (
@@ -832,9 +996,13 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     reportProgress: (message: string) => void,
     bindings: Record<string, unknown>,
   ) => Promise<unknown>;
+  const runWithPlaywrightPage = dependencyOverrides.withPlaywrightPage ?? withPlaywrightPage;
+  const runWithTransientBrowserProfile = dependencyOverrides.withTransientBrowserProfile ??
+    withTransientBrowserProfile;
   const reportProgress = options.onProgress ?? (() => {});
+  const canonicalProfilePath = resolve(session.profilePath ?? playwrightProfilePath(session.name));
   const hasSavedAuthentication = (session.persistAuthentication ?? true)
-    ? await playwrightHasSavedAuthentication(session.name, session.profilePath)
+    ? await playwrightHasSavedAuthentication(session.name, canonicalProfilePath)
     : false;
   const launchStrategy = institutionBrowserLaunchStrategy({
     hasSavedAuthentication,
@@ -842,8 +1010,17 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     requestedHeadless: session.contextOptions?.headless,
   });
 
-  const runAttempt = async (headless: boolean, allowInteractiveAuthentication: boolean) => withPlaywrightPage({
+  const runAttempt = async (
+    headless: boolean,
+    allowInteractiveAuthentication: boolean,
+    browserProfilePath = canonicalProfilePath,
+    forceStartUrl = false,
+  ) => runWithPlaywrightPage({
     ...session,
+    profilePath: browserProfilePath,
+    authenticationProfilePath: canonicalProfilePath,
+    interactiveLeaseProfilePath: canonicalProfilePath,
+    forceStartUrl,
     onInteractiveBrowserWait: reportProgress,
     contextOptions: {
       ...session.contextOptions,
@@ -861,8 +1038,10 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
         options.authenticationCheckpointTimeoutMs,
       );
       if (!authenticated) return;
-      const profilePath = resolve(session.profilePath ?? playwrightProfilePath(session.name));
-      const persisted = await persistBrowserAuthentication(context, playwrightAuthStatePath(profilePath));
+      const persisted = await persistBrowserAuthentication(
+        context,
+        playwrightAuthStatePath(canonicalProfilePath),
+      );
       if (!persisted) console.warn(`Could not checkpoint authentication for ${session.name}.`);
     };
     let result = decodeInstitutionBrowserProgramResult<T>(await program(
@@ -898,14 +1077,21 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     return result;
   });
 
-  const initialResult = await runAttempt(
-    launchStrategy.initialHeadless,
-    !launchStrategy.initialHeadless,
-  );
+  if (session.persistAuthentication === false) {
+    return runWithTransientBrowserProfile(profilePath => runAttempt(
+      launchStrategy.initialHeadless,
+      !launchStrategy.initialHeadless,
+      profilePath,
+    ));
+  }
+
+  const initialResult = launchStrategy.allowHeadedAuthenticationFallback
+    ? await runWithTransientBrowserProfile(profilePath => runAttempt(true, false, profilePath))
+    : await runAttempt(launchStrategy.initialHeadless, !launchStrategy.initialHeadless);
   if (initialResult.status !== 'login-required' || !launchStrategy.allowHeadedAuthenticationFallback) {
     return initialResult;
   }
 
   console.log(`Saved authentication for ${session.name} needs attention. Opening the browser for login or MFA.`);
-  return runAttempt(false, true);
+  return runAttempt(false, true, canonicalProfilePath, true);
 }
