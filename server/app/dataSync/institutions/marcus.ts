@@ -13,11 +13,10 @@ import type { SyncReporter } from '../types.ts';
 import type { APIResponse, BrowserContext, Page, Request } from 'playwright';
 
 const LOGIN_URL = 'https://www.marcus.com/us/en/login';
-const CAPTURE_START_URL = 'about:blank';
 const ACCOUNTS_URL = 'https://www.marcus.com/us/en/accounts';
 const DOCUMENTS_URL = 'https://www.marcus.com/us/en/documents';
 const MARCUS_ORIGIN = 'https://www.marcus.com';
-const MARCUS_COS_PATH = '/api/cos';
+const MARCUS_COS_PATH_PATTERN = /^\/api\/cos\/?$/;
 const MARCUS_COS_QUERY_KEY = 'operations';
 const MARCUS_ACCOUNTS_REQUEST_MARKER = 'savingsAccountsInput';
 const MARCUS_DOCUMENTS_REQUEST_MARKER = 'savingsDocumentList';
@@ -594,6 +593,21 @@ function getMarcusCatalogRequestCapture(page: Page): MarcusCatalogRequestCapture
   return capture;
 }
 
+export function prepareMarcusCatalogCapture(page: Page): void {
+  getMarcusCatalogRequestCapture(page);
+}
+
+async function settleMarcusCatalogBootstrap(
+  page: Page,
+  capture: MarcusCatalogRequestCapture,
+): Promise<void> {
+  if (capture.accounts && capture.documents) return;
+  await Promise.race([
+    capture.captured,
+    page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => {}),
+  ]);
+}
+
 export function isMarcusApiCatalogRequest(
   request: MarcusCatalogRequestLike,
   operation: MarcusApiCatalogOperation,
@@ -608,7 +622,7 @@ export function isMarcusApiCatalogRequest(
   if (
     request.method() !== 'POST' ||
     url.origin !== MARCUS_ORIGIN ||
-    url.pathname !== MARCUS_COS_PATH ||
+    !MARCUS_COS_PATH_PATTERN.test(url.pathname) ||
     queryKeys.length !== 1 ||
     queryKeys[0] !== MARCUS_COS_QUERY_KEY
   ) {
@@ -649,8 +663,16 @@ async function waitForMarcusCatalogRequests(
 ): Promise<{ accounts: Request; documents: Request } | null> {
   const capture = getMarcusCatalogRequestCapture(page);
   try {
-    if (!await openMarcusAuthenticatedRoute(page, ACCOUNTS_URL, 'accounts')) return null;
-    if (!await openMarcusAuthenticatedRoute(page, DOCUMENTS_URL, 'documents')) return null;
+    if (!await isMarcusAuthenticatedPage(page)) return null;
+    await settleMarcusCatalogBootstrap(page, capture);
+    if (!capture.accounts) {
+      if (!await openMarcusAuthenticatedRoute(page, ACCOUNTS_URL, 'accounts')) return null;
+      await settleMarcusCatalogBootstrap(page, capture);
+    }
+    if (!capture.documents) {
+      if (!await openMarcusAuthenticatedRoute(page, DOCUMENTS_URL, 'documents')) return null;
+      await settleMarcusCatalogBootstrap(page, capture);
+    }
     if (!capture.accounts || !capture.documents) {
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
@@ -1007,7 +1029,8 @@ export async function runMarcusSync(
   }, () => dependencies.runBrowserProgram<MarcusBrowserResult>(
     {
       name: session,
-      startUrl: CAPTURE_START_URL,
+      startUrl: DOCUMENTS_URL,
+      beforeStartNavigation: prepareMarcusCatalogCapture,
       ...(config.profilePath ? { profilePath: config.profilePath } : {}),
       ...(!allowInteractiveAuthentication ? { contextOptions: { headless: true } } : {}),
     },

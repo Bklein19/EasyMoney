@@ -252,6 +252,7 @@ describe('Playwright session helper', () => {
       }),
     });
     const origin = `http://127.0.0.1:${server.port}`;
+    let capturedStartNavigation = false;
 
     try {
       await withPlaywrightPage({
@@ -261,6 +262,11 @@ describe('Playwright session helper', () => {
         persistAuthentication: false,
         browserLaunchTimeoutMs: 30_000,
         contextOptions: { headless: true },
+        beforeStartNavigation: page => {
+          page.once('request', request => {
+            if (request.url() === `${origin}/page-navigation`) capturedStartNavigation = true;
+          });
+        },
       }, async (page, context) => {
         const navigatorUserAgent = await page.evaluate(() => navigator.userAgent);
         const pageRequest = JSON.parse(await page.locator('body').innerText()) as { userAgent: string };
@@ -272,6 +278,7 @@ describe('Playwright session helper', () => {
         expect(await page.evaluate(() => navigator.webdriver)).toBe(false);
         expect(pageRequest.userAgent).toBe(navigatorUserAgent);
         expect(contextRequestBody.userAgent).toBe(navigatorUserAgent);
+        expect(capturedStartNavigation).toBe(true);
       });
     } finally {
       await server.stop(true);

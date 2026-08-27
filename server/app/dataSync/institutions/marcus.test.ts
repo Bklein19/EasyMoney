@@ -363,6 +363,9 @@ test('Marcus recognizes only the two observed catalog operation request shapes',
   });
   expect(isMarcusApiCatalogRequest(request(), 'accounts')).toBe(true);
   expect(isMarcusApiCatalogRequest(request({
+    url: 'https://www.marcus.com/api/cos/?operations=Catalog',
+  }), 'accounts')).toBe(true);
+  expect(isMarcusApiCatalogRequest(request({
     postData: '{"query":"savingsDocumentList"}',
   }), 'documents')).toBe(true);
   expect(isMarcusApiCatalogRequest(request({ method: 'GET' }), 'accounts')).toBe(false);
@@ -371,6 +374,9 @@ test('Marcus recognizes only the two observed catalog operation request shapes',
   }), 'accounts')).toBe(false);
   expect(isMarcusApiCatalogRequest(request({
     url: 'https://www.marcus.com/api/cos?operations=Catalog&extra=1',
+  }), 'accounts')).toBe(false);
+  expect(isMarcusApiCatalogRequest(request({
+    url: 'https://www.marcus.com/api/cos//?operations=Catalog',
   }), 'accounts')).toBe(false);
   expect(isMarcusApiCatalogRequest(request({ postData: '{"variables":{}}' }), 'accounts')).toBe(false);
 });
@@ -456,6 +462,7 @@ test('Marcus spans observed account and document routes when capturing catalog r
       for (const listener of listeners) listener(request);
     },
     locator: () => ({ count: async () => 0 }),
+    waitForLoadState: async () => {},
     context: () => context,
   } as unknown as Page;
 
@@ -479,7 +486,7 @@ test('Marcus authenticated routes exclude login and challenge paths', () => {
   expect(isMarcusAuthenticatedPath('/us/en/accounts/verify-identity')).toBe(false);
 });
 
-test('Marcus begins catalog capture before waiting for authentication', async () => {
+test('Marcus begins catalog capture without leaving the authentication page', async () => {
   const listeners = new Set<(request: never) => void>();
   const navigations: string[] = [];
   let currentUrl = 'about:blank';
@@ -504,7 +511,7 @@ test('Marcus begins catalog capture before waiting for authentication', async ()
     status: 'login-required',
     action: 'Sign in to Marcus and complete MFA. EasyMoney will continue automatically.',
   });
-  expect(navigations).toEqual(['https://www.marcus.com/us/en/accounts']);
+  expect(navigations).toEqual([]);
   expect(listeners.size).toBe(1);
 });
 
@@ -647,12 +654,20 @@ test('Marcus reports missing auth without launching Chrome', async () => {
 
 test('Marcus cached-auth probes stay headless when interactive auth is not granted', async () => {
   const outputDir = await mkdtemp(join(tmpdir(), 'marcus-headless-test-'));
-  let browserSession: { startUrl: string; contextOptions?: { headless?: boolean } } | undefined;
+  let browserSession: {
+    startUrl: string;
+    beforeStartNavigation?: (page: Page) => void | Promise<void>;
+    contextOptions?: { headless?: boolean };
+  } | undefined;
   let authenticationRecoveryUrl: string | undefined;
   const dependencies: MarcusSyncDependencies = {
     hasSavedAuthentication: async () => true,
     runBrowserProgram: (async (
-      session: { startUrl: string; contextOptions?: { headless?: boolean } },
+      session: {
+        startUrl: string;
+        beforeStartNavigation?: (page: Page) => void | Promise<void>;
+        contextOptions?: { headless?: boolean };
+      },
       _code: string,
       options: { authenticationRecoveryUrl?: string },
     ) => {
@@ -673,7 +688,8 @@ test('Marcus cached-auth probes stay headless when interactive auth is not grant
       reason: 'expired',
     });
     expect(browserSession?.contextOptions?.headless).toBe(true);
-    expect(browserSession?.startUrl).toBe('about:blank');
+    expect(browserSession?.startUrl).toBe('https://www.marcus.com/us/en/documents');
+    expect(browserSession?.beforeStartNavigation).toBeFunction();
     expect(authenticationRecoveryUrl).toBe('https://www.marcus.com/us/en/login');
   } finally {
     await rm(outputDir, { recursive: true, force: true });

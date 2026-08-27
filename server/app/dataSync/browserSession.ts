@@ -18,6 +18,7 @@ type PersistentContextOptions = NonNullable<Parameters<typeof chromium.launchPer
 type SessionOptions = {
   name: string;
   startUrl: string;
+  beforeStartNavigation?: (page: Page, context: BrowserContext) => void | Promise<void>;
   profilePath?: string;
   authenticationProfilePath?: string;
   interactiveLeaseProfilePath?: string;
@@ -610,9 +611,16 @@ async function launchPlaywrightPage<T>(
       context,
       profilePath,
       async () => {
-        if (hasSavedAuthentication) await restoreBrowserAuthentication(context, authenticationProfilePath);
-        const page = await institutionStartPage(context, options.forceStartUrl, browserLaunchTimeoutMs);
-        await openInstitutionStartPage(page, options.startUrl, hasSavedAuthentication, options.forceStartUrl);
+    if (hasSavedAuthentication) await restoreBrowserAuthentication(context, authenticationProfilePath);
+    const page = await institutionStartPage(context, options.forceStartUrl, browserLaunchTimeoutMs);
+    if (options.beforeStartNavigation) {
+      await settleBeforeBrowserDeadline(
+        Promise.resolve(options.beforeStartNavigation(page, context)),
+        browserLaunchTimeoutMs,
+        `Timed out preparing the ${options.name} browser page`,
+      );
+    }
+    await openInstitutionStartPage(page, options.startUrl, hasSavedAuthentication, options.forceStartUrl);
         return operation(page, context);
       },
     );
