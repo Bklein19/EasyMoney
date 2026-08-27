@@ -590,6 +590,11 @@ type MarcusCatalogRequestCapture = {
 
 const marcusCatalogRequestCaptures = new WeakMap<BrowserContext, MarcusCatalogRequestCapture>();
 
+function isUsableMarcusCatalogResponse(response: Response): boolean {
+  return response.ok() &&
+    (response.headers()['content-type']?.toLowerCase().includes('json') ?? false);
+}
+
 function getMarcusCatalogRequestCapture(page: Page): MarcusCatalogRequestCapture {
   const context = page.context();
   const existing = marcusCatalogRequestCaptures.get(context);
@@ -599,6 +604,7 @@ function getMarcusCatalogRequestCapture(page: Page): MarcusCatalogRequestCapture
   const captured = new Promise<void>(resolve => { resolveCaptured = resolve; });
   let capture: MarcusCatalogRequestCapture;
   const onResponse = (response: Response) => {
+    if (!isUsableMarcusCatalogResponse(response)) return;
     const request = response.request();
     if (!capture.accounts && isMarcusApiCatalogRequest(request, 'accounts')) {
       capture.accounts = response;
@@ -678,6 +684,15 @@ export async function readMarcusApiPayload(response: Response): Promise<unknown>
   }
 }
 
+function isMarcusDocumentsPage(page: Page): boolean {
+  try {
+    const url = new URL(page.url());
+    return url.origin === MARCUS_ORIGIN && /^\/us\/en\/documents(?:\/|$)/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
 async function waitForMarcusCatalogResponses(
   page: Page,
 ): Promise<{ accounts: Response; documents: Response } | null> {
@@ -711,6 +726,11 @@ async function waitForMarcusCatalogResponses(
     }
     if (!capture.accounts || !capture.documents) {
       throw missingMarcusCatalogRequestError(capture.accounts, capture.documents);
+    }
+    if (isMarcusDocumentsPage(page)) {
+      if (!await isMarcusAuthenticatedPage(page)) return null;
+    } else if (!await openMarcusAuthenticatedRoute(page, DOCUMENTS_URL, 'documents')) {
+      return null;
     }
     const requests = { accounts: capture.accounts, documents: capture.documents };
     capture.dispose();

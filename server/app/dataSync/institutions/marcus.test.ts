@@ -18,6 +18,7 @@ import {
   marcusStatementDateFromText,
   marcusStatementPeriodDateFromDownloadDate,
   planMarcusCatalog,
+  prepareMarcusCatalogCapture,
   readMarcusApiPayload,
   runMarcusSync,
   validateMarcusPdfSignature,
@@ -469,6 +470,178 @@ test('Marcus spans observed account and document routes when capturing catalog r
   expect(catalog).toMatchObject({
     accounts: [{ kind: 'savings', last4: '1111', availableArtifactCount: 1 }],
     documents: [{ statementDate: '2026-06-30' }],
+  });
+  expect(listeners.size).toBe(0);
+});
+
+test('Marcus returns to documents after a documents-first partial capture needs the accounts fallback', async () => {
+  type CatalogResponse = Parameters<typeof readMarcusApiPayload>[0];
+  const listeners = new Set<(response: CatalogResponse) => void>();
+  const navigations: string[] = [];
+  let currentUrl = 'https://www.marcus.com/us/en/documents';
+  const accountsRequest = {
+    method: () => 'POST',
+    postData: () => JSON.stringify({ variables: { savingsAccountsInput: {} } }),
+    url: () => 'https://www.marcus.com/api/cos?operations=Accounts',
+  };
+  const documentsRequest = {
+    method: () => 'POST',
+    postData: () => JSON.stringify({ query: 'savingsDocumentList' }),
+    url: () => 'https://www.marcus.com/api/cos?operations=Documents',
+  };
+  const accountsResponse = {
+    request: () => accountsRequest,
+    ok: () => true,
+    status: () => 200,
+    headers: () => ({ 'content-type': 'application/json' }),
+    json: async () => [{ data: { savings: { accounts: [{
+      accountId: 'remote-a',
+      accountNumberLastFour: '1111',
+      formattedAccountName: 'Online Savings Account',
+    }] } } }],
+  } as unknown as CatalogResponse;
+  const documentsResponse = {
+    request: () => documentsRequest,
+    ok: () => true,
+    status: () => 200,
+    headers: () => ({ 'content-type': 'application/json' }),
+    json: async () => ({ data: { data: { savingsDocumentList: { response: [{
+      accountId: 'remote-a',
+      createdDate: '2026-07-01T12:00:00Z',
+      fileName: 'Savings document.pdf',
+      links: [{ link: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-a' }],
+    }] } } } }),
+  } as unknown as CatalogResponse;
+  const emit = (response: CatalogResponse) => {
+    for (const listener of listeners) listener(response);
+  };
+  const context = {
+    on: (_event: 'response', listener: (response: CatalogResponse) => void) => listeners.add(listener),
+    off: (_event: 'response', listener: (response: CatalogResponse) => void) => listeners.delete(listener),
+  };
+  const page = {
+    url: () => currentUrl,
+    goto: async (url: string) => {
+      currentUrl = url;
+      navigations.push(url);
+      emit(url.endsWith('/accounts') ? accountsResponse : documentsResponse);
+    },
+    locator: () => ({ count: async () => 0 }),
+    waitForLoadState: async () => {},
+    context: () => context,
+  } as unknown as Page;
+
+  prepareMarcusCatalogCapture(page);
+  emit(documentsResponse);
+  const catalog = await discoverMarcusRemoteCatalog(page);
+
+  expect(navigations).toEqual([
+    'https://www.marcus.com/us/en/accounts',
+    'https://www.marcus.com/us/en/documents',
+  ]);
+  expect(currentUrl).toBe('https://www.marcus.com/us/en/documents');
+  expect(catalog).toMatchObject({
+    accounts: [{ sourceAccountKey: 'marcus:savings:1111' }],
+    documents: [{ statementDate: '2026-06-30', downloadDate: '2026-07-01' }],
+  });
+  expect(listeners.size).toBe(0);
+});
+
+test('Marcus ignores stale 401 and non-JSON catalog responses before later valid JSON responses', async () => {
+  type CatalogResponse = Parameters<typeof readMarcusApiPayload>[0];
+  const listeners = new Set<(response: CatalogResponse) => void>();
+  const navigations: string[] = [];
+  let currentUrl = 'https://www.marcus.com/us/en/dashboard';
+  const request = (operation: 'accounts' | 'documents') => ({
+    method: () => 'POST',
+    postData: () => operation === 'accounts'
+      ? JSON.stringify({ variables: { savingsAccountsInput: {} } })
+      : JSON.stringify({ query: 'savingsDocumentList' }),
+    url: () => `https://www.marcus.com/api/cos?operations=${operation}`,
+  });
+  const accountsRequest = request('accounts');
+  const documentsRequest = request('documents');
+  const response = (
+    catalogRequest: ReturnType<typeof request>,
+    options: { status: number; contentType: string; payload: unknown },
+  ) => ({
+    request: () => catalogRequest,
+    ok: () => options.status >= 200 && options.status < 300,
+    status: () => options.status,
+    headers: () => ({ 'content-type': options.contentType }),
+    json: async () => options.payload,
+  }) as unknown as CatalogResponse;
+  const staleAccounts = response(accountsRequest, {
+    status: 401,
+    contentType: 'application/json',
+    payload: { error: 'unauthorized' },
+  });
+  const staleDocuments = response(documentsRequest, {
+    status: 401,
+    contentType: 'application/json',
+    payload: { error: 'unauthorized' },
+  });
+  const nonJsonAccounts = response(accountsRequest, {
+    status: 200,
+    contentType: 'text/html',
+    payload: '<html>challenge</html>',
+  });
+  const nonJsonDocuments = response(documentsRequest, {
+    status: 200,
+    contentType: 'text/html',
+    payload: '<html>challenge</html>',
+  });
+  const validAccounts = response(accountsRequest, {
+    status: 200,
+    contentType: 'application/json; charset=utf-8',
+    payload: [{ data: { savings: { accounts: [{
+      accountId: 'remote-a',
+      accountNumberLastFour: '1111',
+      formattedAccountName: 'Online Savings Account',
+    }] } } }],
+  });
+  const validDocuments = response(documentsRequest, {
+    status: 200,
+    contentType: 'application/json; charset=utf-8',
+    payload: { data: { data: { savingsDocumentList: { response: [{
+      accountId: 'remote-a',
+      createdDate: '2026-07-01T12:00:00Z',
+      fileName: 'Savings document.pdf',
+      links: [{ link: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-a' }],
+    }] } } } },
+  });
+  const emit = (catalogResponse: CatalogResponse) => {
+    for (const listener of listeners) listener(catalogResponse);
+  };
+  const context = {
+    on: (_event: 'response', listener: (catalogResponse: CatalogResponse) => void) => listeners.add(listener),
+    off: (_event: 'response', listener: (catalogResponse: CatalogResponse) => void) => listeners.delete(listener),
+  };
+  const page = {
+    url: () => currentUrl,
+    goto: async (url: string) => {
+      currentUrl = url;
+      navigations.push(url);
+    },
+    locator: () => ({ count: async () => 0 }),
+    waitForLoadState: async () => {
+      emit(nonJsonAccounts);
+      emit(nonJsonDocuments);
+      emit(validAccounts);
+      emit(validDocuments);
+    },
+    context: () => context,
+  } as unknown as Page;
+
+  prepareMarcusCatalogCapture(page);
+  emit(staleAccounts);
+  emit(staleDocuments);
+  const catalog = await discoverMarcusRemoteCatalog(page);
+
+  expect(navigations).toEqual(['https://www.marcus.com/us/en/documents']);
+  expect(catalog).toMatchObject({
+    accounts: [{ sourceAccountKey: 'marcus:savings:1111' }],
+    documents: [{ statementDate: '2026-06-30', downloadDate: '2026-07-01' }],
   });
   expect(listeners.size).toBe(0);
 });
