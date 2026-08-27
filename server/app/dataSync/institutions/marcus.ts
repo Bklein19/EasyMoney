@@ -1107,6 +1107,7 @@ export async function runMarcusSync(
     },
     browserProgram(),
     {
+      allowInteractiveAuthentication,
       completionDescription: 'Marcus downloads are complete.',
       authenticationRecoveryUrl: LOGIN_URL,
       isAuthenticated: isMarcusAuthenticatedPage,

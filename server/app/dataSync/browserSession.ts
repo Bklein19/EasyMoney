@@ -31,6 +31,7 @@ type SessionOptions = {
 };
 
 type RunOptions = {
+  allowInteractiveAuthentication?: boolean;
   authenticationTimeoutMs?: number;
   authenticationCheckpointTimeoutMs?: number;
   authenticationRecoveryUrl?: string;
@@ -1300,6 +1301,8 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
       headless,
     },
   }, async (page, context) => {
+    const interactiveAuthenticationEnabled = allowInteractiveAuthentication &&
+      (options.allowInteractiveAuthentication ?? true);
     let activePage = page;
     const deadline = Date.now() + (options.authenticationTimeoutMs ?? 10 * 60_000);
     const isAuthenticated = options.isAuthenticated ?? hasDefaultAuthentication;
@@ -1323,14 +1326,14 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
       reportProgress,
       options.programBindings ?? {},
     ));
-    if (result.status === 'login-required' && allowInteractiveAuthentication) {
+    if (result.status === 'login-required' && interactiveAuthenticationEnabled) {
       await showAuthenticationChapter(
         activePage,
         result.action ?? `Complete login and MFA for ${session.name}. EasyMoney will continue automatically.`,
       );
       console.log(`Authentication required in ${session.name}. Complete login and MFA in the open browser.`);
     }
-    while (allowInteractiveAuthentication && result.status === 'login-required' && Date.now() < deadline) {
+    while (interactiveAuthenticationEnabled && result.status === 'login-required' && Date.now() < deadline) {
       activePage = await waitForInteractiveAuthentication(activePage, deadline, {
         ...options,
         authenticationRecoveryUrl: options.authenticationRecoveryUrl ?? session.startUrl,
@@ -1346,7 +1349,7 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
         options.programBindings ?? {},
       ));
     }
-    if (allowInteractiveAuthentication && result.status === 'login-required') {
+    if (interactiveAuthenticationEnabled && result.status === 'login-required') {
       throw new Error(`Authentication timed out in ${session.name}`);
     }
     if (result.status !== 'login-required') await checkpointAuthentication();
@@ -1387,7 +1390,11 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     : launchStrategy.initialHeadless
       ? await runAttempt(true, false)
       : await runInteractiveAttemptWithResume(() => runAttempt(false, true));
-  if (initialResult.status !== 'login-required' || !launchStrategy.allowHeadedAuthenticationFallback) {
+  if (
+    initialResult.status !== 'login-required' ||
+    !launchStrategy.allowHeadedAuthenticationFallback ||
+    options.allowInteractiveAuthentication === false
+  ) {
     return initialResult;
   }
 

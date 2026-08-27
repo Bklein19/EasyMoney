@@ -868,7 +868,7 @@ test('Marcus reports missing auth without launching Chrome', async () => {
   }
 });
 
-test('Marcus cached-auth probes stay headed because the saved profile is rejected headlessly', async () => {
+test('Marcus stale cached-auth probes stay headed without enabling interactive authentication', async () => {
   const outputDir = await mkdtemp(join(tmpdir(), 'marcus-headed-test-'));
   let browserSession: {
     startUrl: string;
@@ -876,6 +876,7 @@ test('Marcus cached-auth probes stay headed because the saved profile is rejecte
     contextOptions?: { headless?: boolean };
   } | undefined;
   let authenticationRecoveryUrl: string | undefined;
+  let runnerAllowsInteractiveAuthentication: boolean | undefined;
   const dependencies: MarcusSyncDependencies = {
     hasSavedAuthentication: async () => true,
     runBrowserProgram: (async (
@@ -885,10 +886,14 @@ test('Marcus cached-auth probes stay headed because the saved profile is rejecte
         contextOptions?: { headless?: boolean };
       },
       _code: string,
-      options: { authenticationRecoveryUrl?: string },
+      options: {
+        allowInteractiveAuthentication?: boolean;
+        authenticationRecoveryUrl?: string;
+      },
     ) => {
       browserSession = session;
       authenticationRecoveryUrl = options.authenticationRecoveryUrl;
+      runnerAllowsInteractiveAuthentication = options.allowInteractiveAuthentication;
       return { status: 'login-required' };
     }) as MarcusSyncDependencies['runBrowserProgram'],
     parser: fakeParser(),
@@ -907,6 +912,7 @@ test('Marcus cached-auth probes stay headed because the saved profile is rejecte
     expect(browserSession?.startUrl).toBe('https://www.marcus.com/us/en/documents');
     expect(browserSession?.beforeStartNavigation).toBeFunction();
     expect(authenticationRecoveryUrl).toBe('https://www.marcus.com/us/en/login');
+    expect(runnerAllowsInteractiveAuthentication).toBe(false);
   } finally {
     await rm(outputDir, { recursive: true, force: true });
   }

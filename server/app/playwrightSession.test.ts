@@ -559,6 +559,57 @@ describe('Playwright session helper', () => {
     expect(transientAttempts).toBe(0);
   });
 
+  test('returns a headed login requirement without waiting when interactive authentication is disabled', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-headed-noninteractive-'));
+    temporaryDirectories.push(root);
+    const canonicalProfilePath = join(root, 'profiles', 'headed-noninteractive');
+    await mkdir(canonicalProfilePath, { recursive: true });
+
+    const programCalls = { value: 0 };
+    let authenticationWaits = 0;
+    let authenticationChapters = 0;
+    const fakeWithPlaywrightPage: typeof withPlaywrightPage = async (sessionOptions, operation) => {
+      expect(sessionOptions.contextOptions?.headless).toBe(false);
+      const context = new EventEmitter();
+      const page = Object.assign(new EventEmitter(), {
+        context: () => context,
+        bringToFront: async () => { authenticationChapters += 1; },
+        waitForTimeout: async () => {},
+        screencast: { showChapter: async () => {}, hideOverlays: async () => {} },
+      }) as unknown as Page;
+      Object.assign(context, { pages: () => [page] });
+      return operation(page, context as unknown as BrowserContext);
+    };
+
+    const result = await runInstitutionBrowserProgram(
+      {
+        name: 'headed-noninteractive',
+        startUrl: 'https://example.test/account',
+        profilePath: canonicalProfilePath,
+        contextOptions: { headless: false },
+      },
+      `async (_page, _reportProgress, bindings) => {
+        bindings.programCalls.value += 1;
+        return JSON.stringify({ status: 'login-required' });
+      }`,
+      {
+        allowInteractiveAuthentication: false,
+        completionDescription: 'Downloads complete.',
+        programBindings: { programCalls },
+        waitUntilAuthenticated: async () => { authenticationWaits += 1; },
+      },
+      {
+        withPlaywrightPage: fakeWithPlaywrightPage,
+        withTransientBrowserProfile: async operation => operation(join(root, 'unexpected-transient')),
+      },
+    );
+
+    expect(result).toEqual({ status: 'login-required' });
+    expect(programCalls.value).toBe(1);
+    expect(authenticationWaits).toBe(0);
+    expect(authenticationChapters).toBe(0);
+  });
+
   test('does not retry after a failed checkpoint or connector error', async () => {
     const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-failed-checkpoint-'));
     temporaryDirectories.push(root);
