@@ -539,6 +539,17 @@ async function openMarcusAuthenticatedRoute(
 
 type MarcusCatalogRequestLike = Pick<Request, 'method' | 'postData' | 'url'>;
 
+function missingMarcusCatalogRequestError(
+  accounts: Request | undefined,
+  documents: Request | undefined,
+): Error {
+  const missing = [
+    ...(!accounts ? ['account'] : []),
+    ...(!documents ? ['document'] : []),
+  ].join(' and ');
+  return new Error(`Marcus ${missing} metadata API request did not load`);
+}
+
 export function isMarcusApiCatalogRequest(
   request: MarcusCatalogRequestLike,
   operation: MarcusApiCatalogOperation,
@@ -612,7 +623,7 @@ async function waitForMarcusCatalogRequests(
           captured,
           new Promise<never>((_resolve, reject) => {
             timeout = setTimeout(
-              () => reject(new Error('Marcus metadata API requests did not load')),
+              () => reject(missingMarcusCatalogRequestError(accounts, documents)),
               30_000,
             );
           }),
@@ -621,13 +632,7 @@ async function waitForMarcusCatalogRequests(
         if (timeout) clearTimeout(timeout);
       }
     }
-    if (!accounts || !documents) {
-      const missing = [
-        ...(!accounts ? ['account'] : []),
-        ...(!documents ? ['document'] : []),
-      ].join(' and ');
-      throw new Error(`Marcus ${missing} metadata API request did not load`);
-    }
+    if (!accounts || !documents) throw missingMarcusCatalogRequestError(accounts, documents);
     return { accounts, documents };
   } finally {
     page.off('request', onRequest);
