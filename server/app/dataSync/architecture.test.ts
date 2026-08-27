@@ -43,6 +43,17 @@ function dependencyClosure(entrypoint: string): string[] {
 }
 
 describe('data sync architecture', () => {
+  test('keeps AutomationControlled suppression in the shared browser launcher', () => {
+    const violations = [...new Bun.Glob('institutions/*.ts').scanSync({
+      cwd: dataSyncDirectory,
+      absolute: true,
+    })]
+      .filter(file => !file.endsWith('.test.ts'))
+      .filter(file => readFileSync(file, 'utf8').includes('AutomationControlled'));
+
+    expect(violations.map(displayPath)).toEqual([]);
+  });
+
   test('keeps concrete connector imports inside the registry composition root', () => {
     const violations = sharedDataSyncFiles().filter(file =>
       /(?:from|import\()\s*['"][^'"]*\/institutions\//.test(readFileSync(file, 'utf8'))

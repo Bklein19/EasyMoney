@@ -11,6 +11,8 @@ import {
   createCachedNormalChromeUserAgent,
   decodeInstitutionBrowserProgramResult,
   deriveNormalChromeUserAgent,
+  institutionAutomationControlledLaunchArgument,
+  institutionBrowserLaunchArguments,
   institutionBrowserContextOptions,
   institutionBrowserLaunchStrategy,
   institutionStartPage,
@@ -155,6 +157,22 @@ describe('Playwright session helper', () => {
     )).toBe('Mozilla/5.0 AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36');
   });
 
+  test('suppresses AutomationControlled for every institution browser launch', () => {
+    expect(institutionAutomationControlledLaunchArgument)
+      .toBe('--disable-blink-features=AutomationControlled');
+    expect(institutionBrowserLaunchArguments()).toEqual([
+      '--disable-blink-features=AutomationControlled',
+    ]);
+    expect(institutionBrowserLaunchArguments(
+      ['--window-size=1200,800', '--disable-blink-features=MediaRouter'],
+      ['--disable-blink-features', 'AutomationControlled,Translate', '--start-maximized'],
+    )).toEqual([
+      '--disable-blink-features=AutomationControlled,MediaRouter,Translate',
+      '--window-size=1200,800',
+      '--start-maximized',
+    ]);
+  });
+
   test('caches one successful normal Chrome user-agent derivation', async () => {
     let calls = 0;
     const normalChromeUserAgent = createCachedNormalChromeUserAgent(async () => {
@@ -249,6 +267,7 @@ describe('Playwright session helper', () => {
 
         expect(navigatorUserAgent).toContain(' Chrome/');
         expect(navigatorUserAgent).not.toContain('HeadlessChrome/');
+        expect(await page.evaluate(() => navigator.webdriver)).toBe(false);
         expect(pageRequest.userAgent).toBe(navigatorUserAgent);
         expect(contextRequestBody.userAgent).toBe(navigatorUserAgent);
       });

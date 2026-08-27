@@ -1141,7 +1141,6 @@ export async function runTiaaSync(
       name: normalizedConfig.session!,
       startUrl: authenticationEntry.url,
       profilePath: normalizedConfig.profilePath,
-      launchArgs: ['--disable-blink-features=AutomationControlled'],
       contextOptions: {
         ...(normalizedConfig.headless === undefined ? {} : { headless: normalizedConfig.headless }),
       },

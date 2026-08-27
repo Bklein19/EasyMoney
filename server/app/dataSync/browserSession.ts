@@ -286,6 +286,45 @@ export async function openInstitutionStartPage(
 const defaultBrowserLaunchTimeoutMs = 30_000;
 const browserLaunchWatchdogGraceMs = 1_000;
 const restoredPageCloseTimeoutMs = 1_000;
+export const institutionAutomationControlledLaunchArgument =
+  '--disable-blink-features=AutomationControlled';
+
+export function institutionBrowserLaunchArguments(
+  ...argumentGroups: Array<readonly string[] | undefined>
+): string[] {
+  const blinkFeatures = new Set(['AutomationControlled']);
+  const launchArguments: string[] = [];
+
+  for (const group of argumentGroups) {
+    if (!group) continue;
+    for (let index = 0; index < group.length; index += 1) {
+      const argument = group[index]!;
+      let features: string | undefined;
+      if (argument === '--disable-blink-features') {
+        const nextArgument = group[index + 1];
+        if (nextArgument && !nextArgument.startsWith('--')) {
+          features = nextArgument;
+          index += 1;
+        }
+      } else if (argument.startsWith('--disable-blink-features=')) {
+        features = argument.slice('--disable-blink-features='.length);
+      } else {
+        launchArguments.push(argument);
+        continue;
+      }
+
+      for (const feature of (features ?? '').split(',')) {
+        const normalized = feature.trim();
+        if (normalized) blinkFeatures.add(normalized);
+      }
+    }
+  }
+
+  return [
+    `--disable-blink-features=${[...blinkFeatures].join(',')}`,
+    ...launchArguments,
+  ];
+}
 
 export function normalizeHeadlessUserAgent(userAgent: string): string {
   return userAgent.replace(/\bHeadlessChrome\//, 'Chrome/');
@@ -314,6 +353,7 @@ export async function deriveNormalChromeUserAgent(
     headless: true,
     chromiumSandbox: true,
     timeout: timeoutMs,
+    args: institutionBrowserLaunchArguments(),
   }));
   const closeBrowser = () => {
     if (!browser) return Promise.resolve();
@@ -551,7 +591,7 @@ async function launchPlaywrightPage<T>(
         chromiumSandbox: true,
         ...contextOptions,
         timeout: browserLaunchTimeoutMs,
-        args: [...(contextOptions.args ?? []), ...(options.launchArgs ?? [])],
+        args: institutionBrowserLaunchArguments(contextOptions.args, options.launchArgs),
       }),
       {
         sessionName: options.name,
