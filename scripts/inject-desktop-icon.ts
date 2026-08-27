@@ -1,6 +1,5 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { desktopBunVersion } from './runtimeVersions.ts';
 
 if (process.env.ELECTROBUN_OS === 'macos') {
   const wrapperBundle = process.env.ELECTROBUN_WRAPPER_BUNDLE_PATH;
@@ -16,24 +15,4 @@ if (process.env.ELECTROBUN_OS === 'macos') {
   const destination = path.join(bundle, 'Contents', 'Resources', 'AppIcon.icns');
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   fs.copyFileSync(source, destination);
-
-  // The post-wrap bundle is the small self-extracting launcher. The Bun
-  // runtime lives in the inner application bundle checked during post-build.
-  if (!wrapperBundle) {
-    const runtime = path.join(bundle, 'Contents', 'MacOS', 'bun');
-    const version = Bun.spawnSync([runtime, '--version'], {
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    if (version.exitCode !== 0) {
-      throw new Error(`Bundled Bun version check failed: ${version.stderr.toString().trim()}`);
-    }
-
-    const bundledBunVersion = version.stdout.toString().trim();
-    if (bundledBunVersion !== desktopBunVersion) {
-      throw new Error(
-        `Bundled Bun version ${bundledBunVersion} does not match configured ${desktopBunVersion}`,
-      );
-    }
-  }
 }

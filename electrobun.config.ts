@@ -1,5 +1,4 @@
 import type { ElectrobunConfig } from 'electrobun';
-import { desktopBunVersion } from './scripts/runtimeVersions.ts';
 
 export default {
   app: {
@@ -9,7 +8,6 @@ export default {
     description: 'Local-first personal finance',
   },
   build: {
-    bunVersion: desktopBunVersion,
     bun: {
       entrypoint: 'desktop/index.ts',
     },
