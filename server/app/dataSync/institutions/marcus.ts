@@ -585,14 +585,19 @@ type MarcusCatalogRequestCapture = {
   accounts?: Response;
   documents?: Response;
   captured: Promise<void>;
+  active: boolean;
   dispose: () => void;
 };
 
 const marcusCatalogRequestCaptures = new WeakMap<BrowserContext, MarcusCatalogRequestCapture>();
 
-function isUsableMarcusCatalogResponse(response: Response): boolean {
-  return response.ok() &&
-    (response.headers()['content-type']?.toLowerCase().includes('json') ?? false);
+function hasMarcusCatalogPayloadShape(
+  payload: unknown,
+  operation: MarcusApiCatalogOperation,
+): boolean {
+  return operation === 'accounts'
+    ? apiAccounts(payload) !== null
+    : apiDocuments(payload) !== null;
 }
 
 function getMarcusCatalogRequestCapture(page: Page): MarcusCatalogRequestCapture {
@@ -604,20 +609,41 @@ function getMarcusCatalogRequestCapture(page: Page): MarcusCatalogRequestCapture
   const captured = new Promise<void>(resolve => { resolveCaptured = resolve; });
   let capture: MarcusCatalogRequestCapture;
   const onResponse = (response: Response) => {
-    if (!isUsableMarcusCatalogResponse(response)) return;
     const request = response.request();
-    if (!capture.accounts && isMarcusApiCatalogRequest(request, 'accounts')) {
-      capture.accounts = response;
-    }
-    if (!capture.documents && isMarcusApiCatalogRequest(request, 'documents')) {
-      capture.documents = response;
-    }
-    if (capture.accounts && capture.documents) resolveCaptured?.();
+    const capturesAccounts = !capture.accounts && isMarcusApiCatalogRequest(request, 'accounts');
+    const capturesDocuments = !capture.documents && isMarcusApiCatalogRequest(request, 'documents');
+    if (!capturesAccounts && !capturesDocuments) return;
+    void (async () => {
+      let payload: unknown;
+      try {
+        payload = await readMarcusApiPayload(response);
+      } catch {
+        return;
+      }
+      if (!capture.active) return;
+      if (
+        capturesAccounts &&
+        !capture.accounts &&
+        hasMarcusCatalogPayloadShape(payload, 'accounts')
+      ) {
+        capture.accounts = response;
+      }
+      if (
+        capturesDocuments &&
+        !capture.documents &&
+        hasMarcusCatalogPayloadShape(payload, 'documents')
+      ) {
+        capture.documents = response;
+      }
+      if (capture.accounts && capture.documents) resolveCaptured?.();
+    })();
   };
   capture = {
     context,
     captured,
+    active: true,
     dispose: () => {
+      capture.active = false;
       resolveCaptured = undefined;
       context.off('response', onResponse);
       if (marcusCatalogRequestCaptures.get(context) === capture) {

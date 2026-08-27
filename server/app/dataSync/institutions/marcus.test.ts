@@ -646,6 +646,81 @@ test('Marcus ignores stale 401 and non-JSON catalog responses before later valid
   expect(listeners.size).toBe(0);
 });
 
+test('Marcus replaces 200 error and wrong-operation catalog payloads with later valid payloads', async () => {
+  type CatalogResponse = Parameters<typeof readMarcusApiPayload>[0];
+  const listeners = new Set<(response: CatalogResponse) => void>();
+  const navigations: string[] = [];
+  let currentUrl = 'https://www.marcus.com/us/en/dashboard';
+  const request = (operation: 'accounts' | 'documents') => ({
+    method: () => 'POST',
+    postData: () => operation === 'accounts'
+      ? JSON.stringify({ variables: { savingsAccountsInput: {} } })
+      : JSON.stringify({ query: 'savingsDocumentList' }),
+    url: () => `https://www.marcus.com/api/cos?operations=${operation}`,
+  });
+  const accountsRequest = request('accounts');
+  const documentsRequest = request('documents');
+  const response = (catalogRequest: ReturnType<typeof request>, payload: unknown) => ({
+    request: () => catalogRequest,
+    ok: () => true,
+    status: () => 200,
+    headers: () => ({ 'content-type': 'application/json; charset=utf-8' }),
+    json: async () => payload,
+  }) as unknown as CatalogResponse;
+  const accountsPayload = [{ data: { savings: { accounts: [{
+    accountId: 'remote-a',
+    accountNumberLastFour: '1111',
+    formattedAccountName: 'Online Savings Account',
+  }] } } }];
+  const documentsPayload = { data: { data: { savingsDocumentList: { response: [{
+    accountId: 'remote-a',
+    createdDate: '2026-07-01T12:00:00Z',
+    fileName: 'Savings document.pdf',
+    links: [{ link: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-a' }],
+  }] } } } };
+  const invalidResponses = [
+    response(accountsRequest, { errors: [{ message: 'account catalog unavailable' }] }),
+    response(documentsRequest, { errors: [{ message: 'document catalog unavailable' }] }),
+    response(accountsRequest, documentsPayload),
+    response(documentsRequest, accountsPayload),
+  ];
+  const validAccounts = response(accountsRequest, accountsPayload);
+  const validDocuments = response(documentsRequest, documentsPayload);
+  const emit = (catalogResponse: CatalogResponse) => {
+    for (const listener of listeners) listener(catalogResponse);
+  };
+  const context = {
+    on: (_event: 'response', listener: (catalogResponse: CatalogResponse) => void) => listeners.add(listener),
+    off: (_event: 'response', listener: (catalogResponse: CatalogResponse) => void) => listeners.delete(listener),
+  };
+  const page = {
+    url: () => currentUrl,
+    goto: async (url: string) => {
+      currentUrl = url;
+      navigations.push(url);
+    },
+    locator: () => ({ count: async () => 0 }),
+    waitForLoadState: async () => {
+      emit(validAccounts);
+      emit(validDocuments);
+    },
+    context: () => context,
+  } as unknown as Page;
+
+  prepareMarcusCatalogCapture(page);
+  for (const invalidResponse of invalidResponses) emit(invalidResponse);
+  await Promise.resolve();
+  await Promise.resolve();
+  const catalog = await discoverMarcusRemoteCatalog(page);
+
+  expect(navigations).toEqual(['https://www.marcus.com/us/en/documents']);
+  expect(catalog).toMatchObject({
+    accounts: [{ sourceAccountKey: 'marcus:savings:1111' }],
+    documents: [{ statementDate: '2026-06-30', downloadDate: '2026-07-01' }],
+  });
+  expect(listeners.size).toBe(0);
+});
+
 test('Marcus authenticated routes exclude login and challenge paths', () => {
   expect(isMarcusAuthenticatedPath('/us/en/accounts/overview')).toBe(true);
   expect(isMarcusAuthenticatedPath('/us/en/documents')).toBe(true);
