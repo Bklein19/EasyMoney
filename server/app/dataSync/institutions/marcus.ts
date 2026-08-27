@@ -10,12 +10,13 @@ import {
 } from '../browserSession.ts';
 import { reportSyncStep } from '../observability.ts';
 import type { SyncReporter } from '../types.ts';
-import type { APIResponse, BrowserContext, Page, Request } from 'playwright';
+import type { APIResponse, BrowserContext, Page, Request, Response } from 'playwright';
 
 const LOGIN_URL = 'https://www.marcus.com/us/en/login';
 const ACCOUNTS_URL = 'https://www.marcus.com/us/en/accounts';
 const DOCUMENTS_URL = 'https://www.marcus.com/us/en/documents';
 const MARCUS_ORIGIN = 'https://www.marcus.com';
+const MARCUS_DOCUMENT_ORIGIN = 'https://prod.savingsexperienceservice.cft.site.gs.com';
 const MARCUS_COS_PATH_PATTERN = /^\/api\/cos\/?$/;
 const MARCUS_COS_QUERY_KEY = 'operations';
 const MARCUS_ACCOUNTS_REQUEST_MARKER = 'savingsAccountsInput';
@@ -26,7 +27,7 @@ const AUTHENTICATION_FIELD_SELECTOR = [
   'input[autocomplete="current-password"]:visible',
 ].join(',');
 const LOGIN_PATH_PATTERN = /(?:login|logon|sign[-_]?in|authenticate|challenge|verify|mfa|otp)/i;
-const DOCUMENT_PATH_PATTERN = /^\/api\/savings\/api\/[^/]+\/accounts\/document\/[^/]+\/?$/;
+const DOCUMENT_PATH_PATTERN = /^\/api\/v1\/accounts\/document\/[^/]+\/?$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export const MARCUS_PROFILE_NAME = 'marcus-catchup';
@@ -265,7 +266,7 @@ function isSupportedStatementMetadata(value: string): boolean {
 export function marcusDocumentRequest(href: string): MarcusApiRequest {
   const url = new URL(href, DOCUMENTS_URL);
   if (
-    url.origin !== MARCUS_ORIGIN ||
+    url.origin !== MARCUS_DOCUMENT_ORIGIN ||
     !DOCUMENT_PATH_PATTERN.test(url.pathname) ||
     url.search !== '' ||
     url.hash !== ''
@@ -385,14 +386,22 @@ export function marcusMetadataFromApiPayloads(
     if (!remoteKey || !account || !createdDate || !fileName) {
       throw new Error('Marcus document API identity is unavailable');
     }
-    const requests = validApiDocumentLinks(record?.links);
-    if (requests.length !== 1) {
-      throw new Error('Marcus document API did not expose one verified statement link');
+    const documentText = `${fileName} ${createdDate}`;
+    let href = '';
+    if (account.identity.kind === 'savings' && isSupportedStatementMetadata(documentText)) {
+      const requests = validApiDocumentLinks(record?.links);
+      if (requests.length === 0) {
+        throw new Error('Marcus document API did not expose a verified statement link');
+      }
+      if (requests.length > 1) {
+        throw new Error('Marcus document API exposed multiple verified statement links');
+      }
+      href = requests[0]!.url;
     }
     documents.push({
-      href: requests[0]!.url,
+      href,
       accountText: account.text,
-      documentText: `${fileName} ${createdDate}`,
+      documentText,
       remoteKey,
     });
   }
@@ -540,8 +549,8 @@ async function openMarcusAuthenticatedRoute(
 type MarcusCatalogRequestLike = Pick<Request, 'method' | 'postData' | 'url'>;
 
 function missingMarcusCatalogRequestError(
-  accounts: Request | undefined,
-  documents: Request | undefined,
+  accounts: Response | undefined,
+  documents: Response | undefined,
 ): Error {
   const missing = [
     ...(!accounts ? ['account'] : []),
@@ -552,8 +561,8 @@ function missingMarcusCatalogRequestError(
 
 type MarcusCatalogRequestCapture = {
   context: BrowserContext;
-  accounts?: Request;
-  documents?: Request;
+  accounts?: Response;
+  documents?: Response;
   captured: Promise<void>;
   dispose: () => void;
 };
@@ -568,12 +577,13 @@ function getMarcusCatalogRequestCapture(page: Page): MarcusCatalogRequestCapture
   let resolveCaptured: (() => void) | undefined;
   const captured = new Promise<void>(resolve => { resolveCaptured = resolve; });
   let capture: MarcusCatalogRequestCapture;
-  const onRequest = (request: Request) => {
+  const onResponse = (response: Response) => {
+    const request = response.request();
     if (!capture.accounts && isMarcusApiCatalogRequest(request, 'accounts')) {
-      capture.accounts = request;
+      capture.accounts = response;
     }
     if (!capture.documents && isMarcusApiCatalogRequest(request, 'documents')) {
-      capture.documents = request;
+      capture.documents = response;
     }
     if (capture.accounts && capture.documents) resolveCaptured?.();
   };
@@ -582,13 +592,13 @@ function getMarcusCatalogRequestCapture(page: Page): MarcusCatalogRequestCapture
     captured,
     dispose: () => {
       resolveCaptured = undefined;
-      context.off('request', onRequest);
+      context.off('response', onResponse);
       if (marcusCatalogRequestCaptures.get(context) === capture) {
         marcusCatalogRequestCaptures.delete(context);
       }
     },
   };
-  context.on('request', onRequest);
+  context.on('response', onResponse);
   marcusCatalogRequestCaptures.set(context, capture);
   return capture;
 }
@@ -634,33 +644,22 @@ export function isMarcusApiCatalogRequest(
   return request.postData()?.includes(marker) ?? false;
 }
 
-export async function fetchMarcusApiPayload(page: Page, request: Request): Promise<unknown> {
-  let response: APIResponse;
-  try {
-    response = await page.context().request.fetch(request, {
-      maxRedirects: 0,
-      timeout: 30_000,
-    });
-  } catch {
-    throw new Error('Marcus metadata API request failed');
+export async function readMarcusApiPayload(response: Response): Promise<unknown> {
+  if (!response.ok()) {
+    throw new Error(`Marcus metadata API response failed with status ${response.status()}`);
   }
+  const contentType = response.headers()['content-type']?.toLowerCase() ?? '';
+  if (!contentType.includes('json')) throw new Error('Marcus metadata API response was not JSON');
   try {
-    if (!response.ok()) throw new Error('Marcus metadata API request was rejected');
-    const contentType = response.headers()['content-type']?.toLowerCase() ?? '';
-    if (!contentType.includes('json')) throw new Error('Marcus metadata API response was not JSON');
-    try {
-      return await response.json();
-    } catch {
-      throw new Error('Marcus metadata API response was invalid');
-    }
-  } finally {
-    await disposeResponse(response);
+    return await response.json();
+  } catch {
+    throw new Error('Marcus metadata API response was invalid');
   }
 }
 
-async function waitForMarcusCatalogRequests(
+async function waitForMarcusCatalogResponses(
   page: Page,
-): Promise<{ accounts: Request; documents: Request } | null> {
+): Promise<{ accounts: Response; documents: Response } | null> {
   const capture = getMarcusCatalogRequestCapture(page);
   try {
     if (!await isMarcusAuthenticatedPage(page)) return null;
@@ -702,12 +701,12 @@ async function waitForMarcusCatalogRequests(
 }
 
 export async function discoverMarcusRemoteCatalog(page: Page): Promise<MarcusRemoteCatalog | null> {
-  const requests = await waitForMarcusCatalogRequests(page);
-  if (!requests) return null;
-  const accountPayload = await fetchMarcusApiPayload(page, requests.accounts);
-  const documentPayload = requests.documents === requests.accounts
+  const responses = await waitForMarcusCatalogResponses(page);
+  if (!responses) return null;
+  const accountPayload = await readMarcusApiPayload(responses.accounts);
+  const documentPayload = responses.documents === responses.accounts
     ? accountPayload
-    : await fetchMarcusApiPayload(page, requests.documents);
+    : await readMarcusApiPayload(responses.documents);
   return buildMarcusRemoteCatalogFromApi(accountPayload, documentPayload);
 }
 

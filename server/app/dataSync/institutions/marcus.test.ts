@@ -9,7 +9,6 @@ import {
   buildMarcusRemoteCatalog,
   discoverMarcusRemoteCatalog,
   executeMarcusBrowser,
-  fetchMarcusApiPayload,
   fetchMarcusDocumentBytes,
   isMarcusApiCatalogRequest,
   isMarcusAuthenticatedPath,
@@ -18,6 +17,7 @@ import {
   marcusDocumentRequest,
   marcusStatementDateFromText,
   planMarcusCatalog,
+  readMarcusApiPayload,
   runMarcusSync,
   validateMarcusPdfSignature,
   validateMarcusStatementArtifact,
@@ -107,25 +107,25 @@ test('Marcus discovers every savings and deposit account while selecting every s
     { text: 'Online Savings Account **** 1111', remoteKey: 'remote-a' },
   ], [
     {
-      href: '/api/savings/api/v1/accounts/document/document-a',
+      href: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-a',
       accountText: 'Online Savings Account **** 1111',
       documentText: 'June 1, 2026 Statement',
       remoteKey: 'remote-a',
     },
     {
-      href: '/api/savings/api/v1/accounts/document/document-a',
+      href: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-a',
       accountText: 'Online Savings Account **** 1111',
       documentText: 'June 1, 2026 Statement',
       remoteKey: 'remote-a',
     },
     {
-      href: '/api/savings/api/v1/accounts/document/document-b',
+      href: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-b',
       accountText: 'High-Yield CD - 2222',
       documentText: 'June 1, 2026 Statement',
       remoteKey: 'remote-b',
     },
     {
-      href: '/api/savings/api/v1/accounts/document/tax-document',
+      href: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/tax-document',
       accountText: 'Online Savings Account **** 1111',
       documentText: '2026 1099 tax document',
       remoteKey: 'remote-a',
@@ -152,7 +152,7 @@ test('Marcus discovers every savings and deposit account while selecting every s
     account: savingsAccount(),
     artifactType: 'statement-pdf',
     statementDate: '2026-06-01',
-    request: { method: 'GET', url: 'https://www.marcus.com/api/savings/api/v1/accounts/document/document-a' },
+    request: { method: 'GET', url: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-a' },
   });
   expect(catalog.unsupportedArtifactCount).toBe(2);
 });
@@ -185,19 +185,19 @@ test('Marcus builds a dynamic account and document catalog from the observed API
               accountId: 'remote-a',
               createdDate: '2026-06-30T12:00:00Z',
               fileName: 'June 2026 Statement.pdf',
-              links: [{ link: '/api/savings/api/v1/accounts/document/document-a' }],
+              links: [{ link: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-a' }],
             },
             {
               accountId: 'remote-b',
               createdDate: '2026-06-30T12:00:00Z',
               fileName: 'June 2026 Statement.pdf',
-              links: [{ link: '/api/savings/api/v1/accounts/document/document-b' }],
+              links: [{ link: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-b' }],
             },
             {
               accountId: 'remote-a',
               createdDate: '2026-01-31T12:00:00Z',
               fileName: '2026 1099 tax document.pdf',
-              links: [{ link: '/api/savings/api/v1/accounts/document/tax-document' }],
+              links: [{ link: '/us/en/documents' }],
             },
           ],
         },
@@ -226,7 +226,7 @@ test('Marcus builds a dynamic account and document catalog from the observed API
     statementDate: '2026-06-30',
     request: {
       method: 'GET',
-      url: 'https://www.marcus.com/api/savings/api/v1/accounts/document/document-a',
+      url: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-a',
     },
   }]);
   expect(catalog.unsupportedArtifactCount).toBe(2);
@@ -250,7 +250,7 @@ test('Marcus rejects malformed or ambiguous API account and document identities'
     accountId: 'unknown-account',
     createdDate: '2026-06-30',
     fileName: 'June 2026 Statement.pdf',
-    links: [{ link: '/api/savings/api/v1/accounts/document/document-a' }],
+    links: [{ link: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-a' }],
   }]))).toThrow('document API identity is unavailable');
   expect(() => buildMarcusRemoteCatalogFromApi(accounts([{
     accountId: 'remote-a',
@@ -261,10 +261,10 @@ test('Marcus rejects malformed or ambiguous API account and document identities'
     createdDate: '2026-06-30',
     fileName: 'June 2026 Statement.pdf',
     links: [
-      { link: '/api/savings/api/v1/accounts/document/document-a' },
-      { link: '/api/savings/api/v1/accounts/document/document-b' },
+      { link: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-a' },
+      { link: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-b' },
     ],
-  }]))).toThrow('one verified statement link');
+  }]))).toThrow('multiple verified statement links');
 });
 
 test('Marcus rejects routing ambiguity rather than mixing remote accounts or statements', () => {
@@ -275,12 +275,12 @@ test('Marcus rejects routing ambiguity rather than mixing remote accounts or sta
 
   expect(() => buildMarcusRemoteCatalog([], [
     {
-      href: '/api/savings/api/v1/accounts/document/document-a',
+      href: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-a',
       accountText: 'Online Savings Account **** 1111',
       documentText: 'June 1, 2026 Statement',
     },
     {
-      href: '/api/savings/api/v1/accounts/document/document-b',
+      href: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-b',
       accountText: 'Online Savings Account **** 1111',
       documentText: 'June 1, 2026 Statement',
     },
@@ -307,17 +307,17 @@ test('Marcus maps discovered accounts to exact local identities without account-
 test('Marcus selects only mapped documents inside each account-specific catch-up window', () => {
   const catalog = buildMarcusRemoteCatalog([], [
     {
-      href: '/api/savings/api/v1/accounts/document/savings-a-june',
+      href: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/savings-a-june',
       accountText: 'Online Savings Account **** 1111',
       documentText: 'June 30, 2026 Statement',
     },
     {
-      href: '/api/savings/api/v1/accounts/document/savings-b-may',
+      href: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/savings-b-may',
       accountText: 'Online Savings Account **** 2222',
       documentText: 'May 31, 2026 Statement',
     },
     {
-      href: '/api/savings/api/v1/accounts/document/unmapped-june',
+      href: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/unmapped-june',
       accountText: 'Online Savings Account **** 3333',
       documentText: 'June 30, 2026 Statement',
     },
@@ -338,16 +338,16 @@ test('Marcus selects only mapped documents inside each account-specific catch-up
 });
 
 test('Marcus permits only the verified authenticated document route', () => {
-  expect(marcusDocumentRequest('/api/savings/api/v1/accounts/document/opaque-document')).toEqual({
+  expect(marcusDocumentRequest('https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/opaque-document')).toEqual({
     method: 'GET',
-    url: 'https://www.marcus.com/api/savings/api/v1/accounts/document/opaque-document',
+    url: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/opaque-document',
   });
-  expect(() => marcusDocumentRequest('https://example.com/api/savings/api/v1/accounts/document/opaque-document')).toThrow(
+  expect(() => marcusDocumentRequest('https://example.com/api/v1/accounts/document/opaque-document')).toThrow(
     'destination is invalid',
   );
   expect(() => marcusDocumentRequest('/us/en/login')).toThrow('destination is invalid');
   expect(() => marcusDocumentRequest(
-    '/api/savings/api/v1/accounts/document/opaque-document?token=secret',
+    'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/opaque-document?token=secret',
   )).toThrow('destination is invalid');
 });
 
@@ -381,41 +381,26 @@ test('Marcus recognizes only the two observed catalog operation request shapes',
   expect(isMarcusApiCatalogRequest(request({ postData: '{"variables":{}}' }), 'accounts')).toBe(false);
 });
 
-test('Marcus replays observed API requests through the authenticated request context', async () => {
-  const request = {} as Parameters<typeof fetchMarcusApiPayload>[1];
-  const calls: Array<{ request: unknown; options: unknown }> = [];
-  let disposed = false;
-  const page = {
-    context: () => ({
-      request: {
-        fetch: async (capturedRequest: unknown, options: unknown) => {
-          calls.push({ request: capturedRequest, options });
-          return {
-            ok: () => true,
-            headers: () => ({ 'content-type': 'application/json; charset=utf-8' }),
-            json: async () => ({ data: { safe: true } }),
-            dispose: async () => { disposed = true; },
-          };
-        },
-      },
-    }),
-  } as unknown as Page;
+test('Marcus parses the observed authenticated API response without a rejected duplicate replay', async () => {
+  const response = {
+    ok: () => true,
+    status: () => 200,
+    headers: () => ({ 'content-type': 'application/json; charset=utf-8' }),
+    json: async () => ({ data: { safe: true } }),
+  } as unknown as Parameters<typeof readMarcusApiPayload>[0];
 
-  await expect(fetchMarcusApiPayload(page, request)).resolves.toEqual({ data: { safe: true } });
-  expect(calls).toEqual([{
-    request,
-    options: { maxRedirects: 0, timeout: 30_000 },
-  }]);
-  expect(disposed).toBe(true);
+  await expect(readMarcusApiPayload(response)).resolves.toEqual({ data: { safe: true } });
 });
 
 test('Marcus spans observed account and document routes when capturing catalog requests', async () => {
-  type RequestListener = (request: {
-    method: () => string;
-    postData: () => string;
-    url: () => string;
+  type ResponseListener = (response: {
+    request: () => {
+      method: () => string;
+      postData: () => string;
+      url: () => string;
+    };
   }) => void;
-  const listeners = new Set<RequestListener>();
+  const listeners = new Set<ResponseListener>();
   const navigations: string[] = [];
   let currentUrl = 'https://www.marcus.com/us/en/dashboard';
   const accountsRequest = {
@@ -428,38 +413,40 @@ test('Marcus spans observed account and document routes when capturing catalog r
     postData: () => JSON.stringify({ query: 'savingsDocumentList' }),
     url: () => 'https://www.marcus.com/api/cos?operations=Documents',
   };
-  const payloads = new Map<unknown, unknown>([
-    [accountsRequest, [{ data: { savings: { accounts: [{
+  const accountsResponse = {
+    request: () => accountsRequest,
+    ok: () => true,
+    status: () => 200,
+    headers: () => ({ 'content-type': 'application/json' }),
+    json: async () => [{ data: { savings: { accounts: [{
       accountId: 'remote-a',
       accountNumberLastFour: '1111',
       formattedAccountName: 'Online Savings Account',
-    }] } } }]],
-    [documentsRequest, { data: { data: { savingsDocumentList: { response: [{
+    }] } } }],
+  };
+  const documentsResponse = {
+    request: () => documentsRequest,
+    ok: () => true,
+    status: () => 200,
+    headers: () => ({ 'content-type': 'application/json' }),
+    json: async () => ({ data: { data: { savingsDocumentList: { response: [{
       accountId: 'remote-a',
       createdDate: '2026-06-30T12:00:00Z',
       fileName: 'June 2026 Statement.pdf',
-      links: [{ link: '/api/savings/api/v1/accounts/document/document-a' }],
-    }] } } } }],
-  ]);
+      links: [{ link: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-a' }],
+    }] } } } }),
+  };
   const context = {
-    on: (_event: 'request', listener: RequestListener) => listeners.add(listener),
-    off: (_event: 'request', listener: RequestListener) => listeners.delete(listener),
-    request: {
-      fetch: async (request: unknown) => ({
-        ok: () => true,
-        headers: () => ({ 'content-type': 'application/json' }),
-        json: async () => payloads.get(request),
-        dispose: async () => {},
-      }),
-    },
+    on: (_event: 'response', listener: ResponseListener) => listeners.add(listener),
+    off: (_event: 'response', listener: ResponseListener) => listeners.delete(listener),
   };
   const page = {
     url: () => currentUrl,
     goto: async (url: string) => {
       currentUrl = url;
       navigations.push(url);
-      const request = url.endsWith('/accounts') ? accountsRequest : documentsRequest;
-      for (const listener of listeners) listener(request);
+      const response = url.endsWith('/accounts') ? accountsResponse : documentsResponse;
+      for (const listener of listeners) listener(response);
     },
     locator: () => ({ count: async () => 0 }),
     waitForLoadState: async () => {},
@@ -537,12 +524,12 @@ test('Marcus downloads verified document URLs through the authenticated request 
 
   const bytes = await fetchMarcusDocumentBytes(
     page,
-    marcusDocumentRequest('/api/savings/api/v1/accounts/document/opaque-document'),
+    marcusDocumentRequest('https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/opaque-document'),
   );
 
   expect(bytes).toEqual(validPdf);
   expect(calls).toEqual([{
-    url: 'https://www.marcus.com/api/savings/api/v1/accounts/document/opaque-document',
+    url: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/opaque-document',
     options: { method: 'GET', maxRedirects: 5, timeout: 30_000 },
   }]);
   expect(disposed).toBe(true);
