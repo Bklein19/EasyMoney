@@ -8,24 +8,30 @@ export default {
     description: 'Local-first personal finance',
   },
   build: {
+    mainProcess: 'bun',
     bun: {
       entrypoint: 'desktop/index.ts',
     },
-    views: {
-      mainview: {
-        entrypoint: 'src/main.tsx',
-        reactCompiler: true,
-      },
-    },
     copy: {
-      'desktop/index.html': 'views/mainview/index.html',
+      dist: 'views/mainview',
       'desktop-dist/sync.js': 'bun/sync.js',
-      'public/favicon.svg': 'views/mainview/favicon.svg',
     },
-    watch: ['server', 'scripts/sync.ts', 'scripts/build-desktop-sync.ts', 'scripts/inject-desktop-icon.ts'],
+    watch: [
+      'desktop',
+      'index.html',
+      'public',
+      'server',
+      'src',
+      'scripts/sync.ts',
+      'scripts/build-client.ts',
+      'scripts/build-desktop-assets.ts',
+      'scripts/build-desktop-sync.ts',
+    ],
+    watchIgnore: ['dist/**', 'desktop-dist/**'],
     mac: {
       bundleCEF: false,
       createDmg: false,
+      icons: 'assets/icon.iconset',
     },
     linux: {
       bundleCEF: false,
@@ -37,8 +43,6 @@ export default {
     },
   },
   scripts: {
-    preBuild: 'scripts/build-desktop-sync.ts',
-    postBuild: 'scripts/inject-desktop-icon.ts',
-    postWrap: 'scripts/inject-desktop-icon.ts',
+    preBuild: 'scripts/build-desktop-assets.ts',
   },
 } satisfies ElectrobunConfig;

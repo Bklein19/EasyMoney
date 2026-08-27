@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import Electrobun, { ApplicationMenu, BrowserView, BrowserWindow, Utils } from 'electrobun/bun';
+import Electrobun, { ApplicationMenu, BrowserView, BrowserWindow, Utils } from 'electrobun/main';
 import {
   callTRPCProcedure,
   getTRPCErrorFromUnknown,

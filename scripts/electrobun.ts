@@ -5,6 +5,7 @@ const projectRoot = path.resolve(import.meta.dir, '..');
 const bootstrap = path.join(projectRoot, 'node_modules', 'electrobun', 'bin', 'electrobun.cjs');
 const args = process.argv.slice(2);
 const environment = { ...process.env };
+environment.EASYMONEY_BUN_EXECUTABLE ||= process.execPath;
 
 function databaseFromMainWorktree() {
   const result = Bun.spawnSync(['git', 'worktree', 'list', '--porcelain'], {
@@ -46,4 +47,22 @@ const child = Bun.spawn([process.execPath, bootstrap, ...args], {
 process.on('SIGINT', () => child.kill('SIGINT'));
 process.on('SIGTERM', () => child.kill('SIGTERM'));
 
-process.exit(await child.exited);
+const exitCode = await child.exited;
+
+if (exitCode === 0 && args[0] === 'build') {
+  const environmentArgument = args.find(argument => argument.startsWith('--env=')) ?? '--env=stable';
+  const verifier = Bun.spawn([
+    process.execPath,
+    path.join(projectRoot, 'scripts', 'verify-electrobun-bundle.ts'),
+    environmentArgument,
+  ], {
+    cwd: projectRoot,
+    env: environment,
+    stdin: 'inherit',
+    stdout: 'inherit',
+    stderr: 'inherit',
+  });
+  process.exit(await verifier.exited);
+}
+
+process.exit(exitCode);
