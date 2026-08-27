@@ -218,6 +218,9 @@ describe('TIAA parser claim identity', () => {
     expect(source).toContain('/secure/account-statements/api/type');
     expect(source).toContain('/private/ahstatementsui/getreport');
     expect(source).toContain('fetch(destination');
+    expect(source).not.toContain('normalizeHeadlessUserAgent');
+    expect(source).not.toContain('normalChromeUserAgent');
+    expect(source).not.toContain('chromium.launch');
     expect(source).not.toContain('page.context().request');
     expect(source).not.toContain('waitForTimeout(');
   });

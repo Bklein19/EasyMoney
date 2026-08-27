@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
-import { chromium, type Page, type Request, type Response } from 'playwright';
+import type { Page, Request, Response } from 'playwright';
 
 import { parseCsvRows } from '../../importParsers/csvRows.ts';
 import parseTiaaActivity, {
@@ -182,27 +182,6 @@ type TiaaAuthenticationEntry = {
 
 class TiaaAuthenticationRequiredError extends Error {
   override name = 'TiaaAuthenticationRequiredError';
-}
-
-let normalChromeUserAgentPromise: Promise<string> | null = null;
-
-async function normalChromeUserAgent(): Promise<string> {
-  normalChromeUserAgentPromise ??= (async () => {
-    const browser = await chromium.launch({ channel: 'chrome', headless: true, chromiumSandbox: true });
-    try {
-      const version = browser.version();
-      if (!/^\d+(?:\.\d+){3}$/.test(version)) throw new Error('Installed Chrome version is unavailable');
-      const platform = process.platform === 'darwin'
-        ? 'Macintosh; Intel Mac OS X 10_15_7'
-        : process.platform === 'win32'
-          ? 'Windows NT 10.0; Win64; x64'
-          : 'X11; Linux x86_64';
-      return `Mozilla/5.0 (${platform}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${version} Safari/537.36`;
-    } finally {
-      await browser.close();
-    }
-  })();
-  return normalChromeUserAgentPromise;
 }
 
 function isIsoDate(value: string): boolean {
@@ -1155,7 +1134,6 @@ export async function runTiaaSync(
   await mkdir(normalizedConfig.outputDir, { recursive: true });
   const progress = createProgressTracker(onProgress);
   progress.start('authentication', 'Checking the cached TIAA authentication');
-  const userAgent = await normalChromeUserAgent();
   const authenticationEntry = tiaaAuthenticationEntry(normalizedConfig.artifactTypes!);
 
   const result = await runInstitutionBrowserProgram<BrowserRunResult>(
@@ -1165,7 +1143,6 @@ export async function runTiaaSync(
       profilePath: normalizedConfig.profilePath,
       launchArgs: ['--disable-blink-features=AutomationControlled'],
       contextOptions: {
-        userAgent,
         ...(normalizedConfig.headless === undefined ? {} : { headless: normalizedConfig.headless }),
       },
     },

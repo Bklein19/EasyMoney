@@ -335,6 +335,38 @@ export async function institutionStartPage(
   return freshPage;
 }
 
+export function normalizeHeadlessUserAgent(userAgent: string): string {
+  return userAgent.replace('HeadlessChrome/', 'Chrome/');
+}
+
+export function requiresFreshInstitutionPage(options: {
+  forceStartUrl?: boolean;
+  headless: boolean;
+}): boolean {
+  return options.forceStartUrl === true || options.headless;
+}
+
+export async function runWithNormalizedHeadlessUserAgent<T>(
+  page: Page,
+  context: Pick<BrowserContext, 'newCDPSession'>,
+  headless: boolean,
+  operation: () => Promise<T>,
+): Promise<T> {
+  if (!headless) return operation();
+
+  const userAgent = await page.evaluate(() => navigator.userAgent);
+  const normalizedUserAgent = normalizeHeadlessUserAgent(userAgent);
+  if (normalizedUserAgent === userAgent) return operation();
+
+  const session = await context.newCDPSession(page);
+  try {
+    await session.send('Network.setUserAgentOverride', { userAgent: normalizedUserAgent });
+    return await operation();
+  } finally {
+    await session.detach().catch(() => {});
+  }
+}
+
 export function institutionBrowserLaunchStrategy(options: {
   hasSavedAuthentication: boolean;
   persistAuthentication?: boolean;
@@ -431,6 +463,7 @@ async function launchPlaywrightPage<T>(
   const authenticationProfilePath = options.authenticationProfilePath;
   const persistAuthentication = options.persistAuthentication ?? true;
   const browserLaunchTimeoutMs = options.browserLaunchTimeoutMs ?? defaultBrowserLaunchTimeoutMs;
+  const headless = options.contextOptions?.headless ?? false;
 
   const hasSavedAuthentication = persistAuthentication &&
     await fileExists(playwrightAuthStatePath(authenticationProfilePath));
@@ -440,7 +473,7 @@ async function launchPlaywrightPage<T>(
     context = await launchPersistentContextWithDeadline(
       () => chromium.launchPersistentContext(profilePath, {
         channel: 'chrome',
-        headless: options.contextOptions?.headless ?? false,
+        headless,
         acceptDownloads: true,
         chromiumSandbox: true,
         ...options.contextOptions,
@@ -461,9 +494,19 @@ async function launchPlaywrightPage<T>(
 
   try {
     if (hasSavedAuthentication) await restoreBrowserAuthentication(context, authenticationProfilePath);
-    const page = await institutionStartPage(context, options.forceStartUrl, browserLaunchTimeoutMs);
-    await openInstitutionStartPage(page, options.startUrl, hasSavedAuthentication, options.forceStartUrl);
-    return await runWhileBrowserOpen(context, () => operation(page, context));
+    const page = await institutionStartPage(context, requiresFreshInstitutionPage({
+      forceStartUrl: options.forceStartUrl,
+      headless,
+    }), browserLaunchTimeoutMs);
+    return await runWithNormalizedHeadlessUserAgent(
+      page,
+      context,
+      headless,
+      async () => {
+        await openInstitutionStartPage(page, options.startUrl, hasSavedAuthentication, options.forceStartUrl);
+        return await runWhileBrowserOpen(context, () => operation(page, context));
+      },
+    );
   } finally {
     const closed = await closeBrowserContext(context);
     if (!closed) console.warn(`Timed out closing the ${options.name} browser context after Chrome exited.`);

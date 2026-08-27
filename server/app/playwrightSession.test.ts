@@ -12,6 +12,7 @@ import {
   institutionBrowserLaunchStrategy,
   institutionStartPage,
   launchPersistentContextWithDeadline,
+  normalizeHeadlessUserAgent,
   openInstitutionStartPage,
   persistBrowserAuthentication,
   playwrightAuthStatePath,
@@ -19,7 +20,9 @@ import {
   playwrightProfilePath,
   playwrightSessionStoragePath,
   restoreBrowserAuthentication,
+  requiresFreshInstitutionPage,
   runInstitutionBrowserProgram,
+  runWithNormalizedHeadlessUserAgent,
   runWhileBrowserOpen,
   showAuthenticationChapter,
   showSyncCompletionChapter,
@@ -140,6 +143,103 @@ describe('Playwright session helper', () => {
     const startedAt = performance.now();
     expect(await institutionStartPage(context, true, 10, 10)).toBe(freshPage);
     expect(performance.now() - startedAt).toBeLessThan(250);
+  });
+
+  test('normalizes only the HeadlessChrome user-agent token', () => {
+    expect(normalizeHeadlessUserAgent(
+      'Mozilla/5.0 AppleWebKit/537.36 HeadlessChrome/151.0.0.0 Safari/537.36',
+    )).toBe('Mozilla/5.0 AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36');
+    expect(normalizeHeadlessUserAgent(
+      'Mozilla/5.0 AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36',
+    )).toBe('Mozilla/5.0 AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36');
+  });
+
+  test('keeps the normalized user agent attached before navigation and through the operation', async () => {
+    const events: string[] = [];
+    const session = {
+      send: async (method: string, params: { userAgent: string }) => {
+        events.push(`${method}:${params.userAgent.includes('HeadlessChrome/') ? 'headless' : 'normal'}`);
+      },
+      detach: async () => {
+        events.push('detach');
+      },
+    };
+    const page = {
+      evaluate: async () => {
+        events.push('evaluate-user-agent');
+        return 'Mozilla/5.0 HeadlessChrome/151.0.0.0 Safari/537.36';
+      },
+    } as unknown as Page;
+    const context = {
+      newCDPSession: async () => {
+        events.push('open-session');
+        return session;
+      },
+    } as unknown as BrowserContext;
+
+    await expect(runWithNormalizedHeadlessUserAgent(page, context, true, async () => {
+      events.push('navigate-start-url');
+      events.push('run-institution');
+      return 'complete';
+    })).resolves.toBe('complete');
+    expect(events).toEqual([
+      'evaluate-user-agent',
+      'open-session',
+      'Network.setUserAgentOverride:normal',
+      'navigate-start-url',
+      'run-institution',
+      'detach',
+    ]);
+  });
+
+  test('releases the normalized user-agent session when the institution operation fails', async () => {
+    const events: string[] = [];
+    const page = {
+      evaluate: async () => 'Mozilla/5.0 HeadlessChrome/151.0.0.0 Safari/537.36',
+    } as unknown as Page;
+    const context = {
+      newCDPSession: async () => ({
+        send: async () => events.push('override'),
+        detach: async () => events.push('detach'),
+      }),
+    } as unknown as BrowserContext;
+
+    await expect(runWithNormalizedHeadlessUserAgent(page, context, true, async () => {
+      events.push('operation');
+      throw new Error('observed failure');
+    })).rejects.toThrow('observed failure');
+    expect(events).toEqual(['override', 'operation', 'detach']);
+  });
+
+  test('leaves headed and already-normal browser identities alone', async () => {
+    const events: string[] = [];
+    const headedPage = {
+      evaluate: async () => {
+        throw new Error('headed sessions must not read browser identity');
+      },
+    } as unknown as Page;
+    const normalPage = {
+      evaluate: async () => 'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36',
+    } as unknown as Page;
+    const context = {
+      newCDPSession: async () => {
+        throw new Error('a normal browser identity must not open a CDP session');
+      },
+    } as unknown as BrowserContext;
+
+    await runWithNormalizedHeadlessUserAgent(headedPage, context, false, async () => {
+      events.push('headed-operation');
+    });
+    await runWithNormalizedHeadlessUserAgent(normalPage, context, true, async () => {
+      events.push('normal-operation');
+    });
+    expect(events).toEqual(['headed-operation', 'normal-operation']);
+  });
+
+  test('uses a fresh page for every headless session or explicit headed start', () => {
+    expect(requiresFreshInstitutionPage({ headless: true })).toBe(true);
+    expect(requiresFreshInstitutionPage({ headless: false })).toBe(false);
+    expect(requiresFreshInstitutionPage({ headless: false, forceStartUrl: true })).toBe(true);
   });
 
   test('does not hang when opening the first page after browser launch never settles', async () => {
