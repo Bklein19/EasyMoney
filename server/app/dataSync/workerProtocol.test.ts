@@ -53,6 +53,36 @@ test('runtime execution plans round-trip through the strict stdin protocol', () 
   }))).toThrow('unsupported institution connector');
 });
 
+test('the registered Fidelity institution is accepted by the typed worker protocol', () => {
+  const plan: SyncExecutionPlan = {
+    ...executionPlan(),
+    runId: 'sync-fidelity-test',
+    institutionId: 'fidelity',
+    connectionId: undefined,
+  };
+
+  expect(parseSyncExecutionPlan(serializeSyncExecutionPlan(plan))).toEqual(plan);
+  expect(parseSyncWorkerMessage(JSON.stringify({
+    protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+    kind: 'manifest',
+    manifest: {
+      protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+      runId: plan.runId,
+      institutionId: 'fidelity',
+      artifacts: [],
+    },
+  }))).toEqual({
+    protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+    kind: 'manifest',
+    manifest: {
+      protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+      runId: plan.runId,
+      institutionId: 'fidelity',
+      artifacts: [],
+    },
+  });
+});
+
 test('worker manifests reject path-shaped artifacts before parent staging', () => {
   expect(() => parseSyncWorkerMessage(JSON.stringify({
     protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,

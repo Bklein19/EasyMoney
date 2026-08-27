@@ -1,11 +1,13 @@
 import type { SyncConnector } from './connector.ts';
 import { bankOfAmericaConnector } from './institutions/bankOfAmericaConnector.ts';
+import { fidelityConnector } from './institutions/fidelityConnector.ts';
 import { sequoiaFundConnector } from './institutions/sequoiaFundConnector.ts';
 import { tiaaConnector } from './institutions/tiaaConnector.ts';
 import { vanguardConnector } from './institutions/vanguardConnector.ts';
 
 export const syncConnectors = [
   bankOfAmericaConnector,
+  fidelityConnector,
   vanguardConnector,
   sequoiaFundConnector,
   tiaaConnector,

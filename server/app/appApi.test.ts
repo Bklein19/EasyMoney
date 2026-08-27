@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import type { SyncInstitutionId } from './dataSync/types.ts';
+
 process.env.EASYMONEY_DB_PATH = path.join(os.tmpdir(), `easymoney-app-api-${process.pid}.sqlite`);
 process.env.EASYMONEY_SYNC_ROOT = path.join(os.tmpdir(), `easymoney-sync-runs-${process.pid}`);
 
@@ -93,7 +95,7 @@ function csvFromRows(rows: string[]) {
 
 async function saveAwaitingSyncReview(review: {
   runId: string;
-  institutionId: 'bank-of-america' | 'vanguard' | 'sequoia-fund' | 'tiaa';
+  institutionId: SyncInstitutionId;
   downloaded: number;
   readyToImport: number;
   alreadyImported: number;
@@ -3527,6 +3529,38 @@ test('TIAA has one app catch-up target for any active local TIAA account', async
     id: 'tiaa',
     institutionId: 'tiaa',
     label: 'TIAA',
+  }]);
+});
+
+test('Fidelity local accounts expose exactly one registered app catch-up menu target', async () => {
+  insertRow('accounts', {
+    name: 'Synthetic account at another institution',
+    institution: 'Different Institution',
+    type: 'investment',
+    accountHolder: 'Synthetic Holder',
+    currentBalance: 0,
+    currency: 'USD',
+    status: 'active',
+  });
+
+  expect((await caller.dataSync.targets()).filter(target => target.institutionId === 'fidelity')).toEqual([]);
+
+  for (const name of ['Synthetic brokerage', 'Synthetic retirement plan']) {
+    insertRow('accounts', {
+      name,
+      institution: 'Fidelity Investments',
+      type: 'investment',
+      accountHolder: 'Synthetic Holder',
+      currentBalance: 0,
+      currency: 'USD',
+      status: 'active',
+    });
+  }
+
+  expect((await caller.dataSync.targets()).filter(target => target.institutionId === 'fidelity')).toEqual([{
+    id: 'fidelity',
+    institutionId: 'fidelity',
+    label: 'Fidelity (Synthetic Holder)',
   }]);
 });
 
