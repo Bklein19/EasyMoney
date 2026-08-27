@@ -10,12 +10,15 @@ import {
 } from '../browserSession.ts';
 import { reportSyncStep } from '../observability.ts';
 import type { SyncReporter } from '../types.ts';
-import type { APIResponse, Page } from 'playwright';
+import type { APIResponse, Page, Request } from 'playwright';
 
 const LOGIN_URL = 'https://www.marcus.com/us/en/login';
 const DOCUMENTS_URL = 'https://www.marcus.com/us/en/documents';
 const MARCUS_ORIGIN = 'https://www.marcus.com';
-const DOCUMENT_LINK_SELECTOR = 'a[href*="/accounts/document/"]';
+const MARCUS_COS_PATH = '/api/cos';
+const MARCUS_COS_QUERY_KEY = 'operations';
+const MARCUS_ACCOUNTS_REQUEST_MARKER = 'savingsAccountsInput';
+const MARCUS_DOCUMENTS_REQUEST_MARKER = 'savingsDocumentList';
 const AUTHENTICATION_FIELD_SELECTOR = [
   'input[type="password"]:visible',
   'input[autocomplete="username"]:visible',
@@ -100,6 +103,8 @@ export interface MarcusDocumentMetadata {
   documentText: string;
   remoteKey?: string | null;
 }
+
+export type MarcusApiCatalogOperation = 'accounts' | 'documents';
 
 export interface MarcusApiRequest {
   method: 'GET';
@@ -241,7 +246,7 @@ export function marcusStatementDateFromText(value: string): string | null {
     return `${slashDate[3]}-${slashDate[1]!.padStart(2, '0')}-${slashDate[2]!.padStart(2, '0')}`;
   }
 
-  const isoDate = text.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
+  const isoDate = text.match(/\b(\d{4})-(\d{2})-(\d{2})(?!\d)/);
   if (isoDate) return `${isoDate[1]}-${isoDate[2]}-${isoDate[3]}`;
 
   const namedDate = text.match(
@@ -258,10 +263,154 @@ function isSupportedStatementMetadata(value: string): boolean {
 
 export function marcusDocumentRequest(href: string): MarcusApiRequest {
   const url = new URL(href, DOCUMENTS_URL);
-  if (url.origin !== MARCUS_ORIGIN || !DOCUMENT_PATH_PATTERN.test(url.pathname)) {
+  if (
+    url.origin !== MARCUS_ORIGIN ||
+    !DOCUMENT_PATH_PATTERN.test(url.pathname) ||
+    url.search !== '' ||
+    url.hash !== ''
+  ) {
     throw new Error('Marcus document destination is invalid');
   }
   return { method: 'GET', url: url.toString() };
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function apiPayloadRoots(payload: unknown): Record<string, unknown>[] {
+  const values = Array.isArray(payload) ? payload : [payload];
+  return values.map(objectValue).filter((value): value is Record<string, unknown> => value !== null);
+}
+
+function apiAccounts(payload: unknown): unknown[] | null {
+  for (const root of apiPayloadRoots(payload)) {
+    const data = objectValue(root.data);
+    const savings = objectValue(data?.savings);
+    if (Array.isArray(savings?.accounts)) return savings.accounts;
+  }
+  return null;
+}
+
+function apiDocuments(payload: unknown): unknown[] | null {
+  for (const root of apiPayloadRoots(payload)) {
+    const outerData = objectValue(root.data);
+    const data = objectValue(outerData?.data);
+    const list = objectValue(data?.savingsDocumentList);
+    if (Array.isArray(list?.response)) return list.response;
+  }
+  return null;
+}
+
+function apiAccountIdentity(record: Record<string, unknown>): MarcusAccountIdentity | null {
+  const last4 = stringValue(record.accountNumberLastFour);
+  if (!last4 || !/^\d{4}$/.test(last4)) return null;
+  const identityText = [
+    record.accountName,
+    record.formattedAccountName,
+    record.type,
+    record.productName,
+    record.accountType,
+  ].map(stringValue).filter((value): value is string => value !== null).join(' ');
+  const kind = accountKindFromText(identityText);
+  if (!kind) return null;
+  return {
+    kind,
+    last4,
+    sourceAccountKey: `marcus:${kind}:${last4}`,
+    parserAccountName: kind === 'savings' ? `Online Savings - ${last4}` : null,
+  };
+}
+
+function canonicalApiAccountText(identity: MarcusAccountIdentity): string {
+  return identity.kind === 'savings'
+    ? `Online Savings Account ending in ${identity.last4}`
+    : `Certificate of Deposit ending in ${identity.last4}`;
+}
+
+function validApiDocumentLinks(value: unknown): MarcusApiRequest[] {
+  if (!Array.isArray(value)) return [];
+  const requests = new Map<string, MarcusApiRequest>();
+  for (const candidate of value) {
+    const link = stringValue(objectValue(candidate)?.link);
+    if (!link) continue;
+    try {
+      const request = marcusDocumentRequest(link);
+      requests.set(request.url, request);
+    } catch {
+      // The response may contain unrelated links. Only the live statement route is eligible.
+    }
+  }
+  return [...requests.values()];
+}
+
+export function marcusMetadataFromApiPayloads(
+  accountPayload: unknown,
+  documentPayload: unknown,
+): { accounts: MarcusAccountMetadata[]; documents: MarcusDocumentMetadata[] } {
+  const accountRecords = apiAccounts(accountPayload);
+  const documentRecords = apiDocuments(documentPayload);
+  if (!accountRecords) throw new Error('Marcus account API response shape is invalid');
+  if (!documentRecords) throw new Error('Marcus document API response shape is invalid');
+
+  const accountsByRemoteKey = new Map<string, { identity: MarcusAccountIdentity; text: string }>();
+  for (const value of accountRecords) {
+    const record = objectValue(value);
+    const remoteKey = stringValue(record?.accountId);
+    const identity = record ? apiAccountIdentity(record) : null;
+    if (!remoteKey || !identity) throw new Error('Marcus account API identity is unavailable');
+    const text = canonicalApiAccountText(identity);
+    const existing = accountsByRemoteKey.get(remoteKey);
+    if (existing && existing.identity.sourceAccountKey !== identity.sourceAccountKey) {
+      throw new Error('Marcus account API exposed a conflicting remote identity');
+    }
+    accountsByRemoteKey.set(remoteKey, { identity, text });
+  }
+  if (accountsByRemoteKey.size === 0) throw new Error('Marcus account API exposed no accounts');
+
+  const documents: MarcusDocumentMetadata[] = [];
+  for (const value of documentRecords) {
+    const record = objectValue(value);
+    const remoteKey = stringValue(record?.accountId);
+    const account = remoteKey ? accountsByRemoteKey.get(remoteKey) : null;
+    const createdDate = stringValue(record?.createdDate);
+    const fileName = stringValue(record?.fileName);
+    if (!remoteKey || !account || !createdDate || !fileName) {
+      throw new Error('Marcus document API identity is unavailable');
+    }
+    const requests = validApiDocumentLinks(record?.links);
+    if (requests.length !== 1) {
+      throw new Error('Marcus document API did not expose one verified statement link');
+    }
+    documents.push({
+      href: requests[0]!.url,
+      accountText: account.text,
+      documentText: `${fileName} ${createdDate}`,
+      remoteKey,
+    });
+  }
+
+  return {
+    accounts: [...accountsByRemoteKey.entries()].map(([remoteKey, account]) => ({
+      text: account.text,
+      remoteKey,
+    })),
+    documents,
+  };
+}
+
+export function buildMarcusRemoteCatalogFromApi(
+  accountPayload: unknown,
+  documentPayload: unknown,
+): MarcusRemoteCatalog {
+  const metadata = marcusMetadataFromApiPayloads(accountPayload, documentPayload);
+  return buildMarcusRemoteCatalog(metadata.accounts, metadata.documents);
 }
 
 function addAccount(
@@ -383,82 +532,104 @@ async function openMarcusDocuments(page: Page): Promise<boolean> {
   return isMarcusAuthenticatedPage(page);
 }
 
-async function expandMarcusDocumentList(page: Page): Promise<void> {
-  const links = page.locator(DOCUMENT_LINK_SELECTOR);
-  await links.first().waitFor({ state: 'attached', timeout: 30_000 }).catch(() => {
-    throw new Error('Marcus document metadata did not load');
-  });
+type MarcusCatalogRequestLike = Pick<Request, 'method' | 'postData' | 'url'>;
 
-  const loadMore = page.getByRole('button', { name: /^(?:load|show|view) more(?: documents| statements)?$/i }).first();
-  for (let iteration = 0; iteration < 100; iteration += 1) {
-    if (await loadMore.count() === 0 || !await loadMore.isVisible() || await loadMore.isDisabled()) return;
-    const previousCount = await links.count();
-    await loadMore.click();
-    await links.nth(previousCount).waitFor({ state: 'attached', timeout: 30_000 }).catch(async () => {
-      if (await loadMore.isVisible() && !await loadMore.isDisabled()) {
-        throw new Error('Marcus document pagination did not advance');
-      }
-    });
+export function isMarcusApiCatalogRequest(
+  request: MarcusCatalogRequestLike,
+  operation: MarcusApiCatalogOperation,
+): boolean {
+  let url: URL;
+  try {
+    url = new URL(request.url());
+  } catch {
+    return false;
   }
-  throw new Error('Marcus document pagination did not terminate');
+  const queryKeys = [...url.searchParams.keys()];
+  if (
+    request.method() !== 'POST' ||
+    url.origin !== MARCUS_ORIGIN ||
+    url.pathname !== MARCUS_COS_PATH ||
+    queryKeys.length !== 1 ||
+    queryKeys[0] !== MARCUS_COS_QUERY_KEY
+  ) {
+    return false;
+  }
+  const marker = operation === 'accounts'
+    ? MARCUS_ACCOUNTS_REQUEST_MARKER
+    : MARCUS_DOCUMENTS_REQUEST_MARKER;
+  return request.postData()?.includes(marker) ?? false;
 }
 
-async function collectMarcusMetadata(page: Page): Promise<{
-  accounts: MarcusAccountMetadata[];
-  documents: MarcusDocumentMetadata[];
-}> {
+export async function fetchMarcusApiPayload(page: Page, request: Request): Promise<unknown> {
+  let response: APIResponse;
   try {
-    await expandMarcusDocumentList(page);
-    const documents = await page.locator(DOCUMENT_LINK_SELECTOR).evaluateAll(elements => {
-      const normalize = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim();
-      const hasAccountIdentity = (value: string) =>
-        /\b(?:savings|deposit|cd)\b/i.test(value) &&
-        (/(?:account|ending in)\D{0,16}\d{4,}\b/i.test(value) || /(?:[*x\u2022]\s*){2,}\d{4}\b/i.test(value) || /[-:]\s*\d{4}\b/.test(value));
-      const hasDocumentDate = (value: string) =>
-        /\b\d{1,2}\/\d{1,2}\/\d{4}\b/.test(value) ||
-        /\b\d{4}-\d{2}-\d{2}\b/.test(value) ||
-        /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)(?:\s+\d{1,2},)?\s+\d{4}\b/i.test(value);
-
-      return elements.map(element => {
-        let accountText = '';
-        let documentText = normalize(element.textContent);
-        let remoteKey: string | null = null;
-        for (let node: Element | null = element; node; node = node.parentElement) {
-          const text = normalize(node.textContent).slice(0, 4_000);
-          if (!documentText || hasDocumentDate(text)) documentText = text;
-          if (!accountText && hasAccountIdentity(text)) accountText = text;
-          remoteKey ??= node.getAttribute('data-account-id') ??
-            node.getAttribute('data-account-key') ??
-            node.getAttribute('data-account-number');
-          if (accountText && hasDocumentDate(documentText)) break;
-        }
-        return {
-          href: new URL(element.getAttribute('href') ?? '', location.href).toString(),
-          accountText,
-          documentText,
-          remoteKey,
-        };
-      });
+    response = await page.context().request.fetch(request, {
+      maxRedirects: 0,
+      timeout: 30_000,
     });
-
-    const accounts = await page.locator([
-      'option',
-      '[role="option"]',
-      '[role="tab"]',
-      '[data-account-id]',
-      '[data-account-key]',
-      '[data-account-number]',
-    ].join(',')).evaluateAll(elements => elements.map(element => ({
-      text: (element.textContent ?? '').replace(/\s+/g, ' ').trim(),
-      remoteKey: element.getAttribute('data-account-id') ??
-        element.getAttribute('data-account-key') ??
-        element.getAttribute('data-account-number'),
-    })));
-    return { accounts, documents };
-  } catch (error) {
-    if (error instanceof Error && error.message.startsWith('Marcus ')) throw error;
-    throw new Error('Marcus account and document discovery failed');
+  } catch {
+    throw new Error('Marcus metadata API request failed');
   }
+  try {
+    if (!response.ok()) throw new Error('Marcus metadata API request was rejected');
+    const contentType = response.headers()['content-type']?.toLowerCase() ?? '';
+    if (!contentType.includes('json')) throw new Error('Marcus metadata API response was not JSON');
+    try {
+      return await response.json();
+    } catch {
+      throw new Error('Marcus metadata API response was invalid');
+    }
+  } finally {
+    await disposeResponse(response);
+  }
+}
+
+async function waitForMarcusCatalogRequests(
+  page: Page,
+): Promise<{ accounts: Request; documents: Request } | null> {
+  let accounts: Request | undefined;
+  let documents: Request | undefined;
+  let resolveCaptured: (() => void) | undefined;
+  const captured = new Promise<void>(resolve => { resolveCaptured = resolve; });
+  const onRequest = (request: Request) => {
+    if (!accounts && isMarcusApiCatalogRequest(request, 'accounts')) accounts = request;
+    if (!documents && isMarcusApiCatalogRequest(request, 'documents')) documents = request;
+    if (accounts && documents) resolveCaptured?.();
+  };
+  page.on('request', onRequest);
+  try {
+    if (!await openMarcusDocuments(page)) return null;
+    if (!accounts || !documents) {
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          captured,
+          new Promise<never>((_resolve, reject) => {
+            timeout = setTimeout(
+              () => reject(new Error('Marcus metadata API requests did not load')),
+              30_000,
+            );
+          }),
+        ]);
+      } finally {
+        if (timeout) clearTimeout(timeout);
+      }
+    }
+    if (!accounts || !documents) throw new Error('Marcus metadata API requests did not load');
+    return { accounts, documents };
+  } finally {
+    page.off('request', onRequest);
+  }
+}
+
+export async function discoverMarcusRemoteCatalog(page: Page): Promise<MarcusRemoteCatalog | null> {
+  const requests = await waitForMarcusCatalogRequests(page);
+  if (!requests) return null;
+  const accountPayload = await fetchMarcusApiPayload(page, requests.accounts);
+  const documentPayload = requests.documents === requests.accounts
+    ? accountPayload
+    : await fetchMarcusApiPayload(page, requests.documents);
+  return buildMarcusRemoteCatalogFromApi(accountPayload, documentPayload);
 }
 
 function documentIsInRange(document: MarcusCatalogDocument, from: string, through: string): boolean {
@@ -649,12 +820,8 @@ async function syncAuthenticatedMarcus(
   config: MarcusSyncConfig,
   report: SyncReporter,
   parser: MarcusParserLike,
+  catalog: MarcusRemoteCatalog,
 ): Promise<Extract<MarcusSyncResult, { status: 'complete' }>> {
-  const metadata = await reportSyncStep(report, {
-    step: 'discover-metadata',
-    message: 'Discovering Marcus accounts and documents',
-  }, () => collectMarcusMetadata(page));
-  const catalog = buildMarcusRemoteCatalog(metadata.accounts, metadata.documents);
   const plan = planMarcusCatalog(catalog, config.accounts, config.through);
   report({
     type: 'phase',
@@ -722,7 +889,17 @@ export async function executeMarcusBrowser(
   parser: MarcusParserLike,
 ): Promise<InstitutionBrowserProgramResult<MarcusBrowserResult>> {
   try {
-    if (!await isMarcusAuthenticatedPage(page) || !await openMarcusDocuments(page)) {
+    if (!await isMarcusAuthenticatedPage(page)) {
+      return {
+        status: 'login-required',
+        action: 'Sign in to Marcus and complete MFA. EasyMoney will continue automatically.',
+      };
+    }
+    const catalog = await reportSyncStep(report, {
+      step: 'discover-metadata',
+      message: 'Discovering Marcus accounts and documents',
+    }, () => discoverMarcusRemoteCatalog(page));
+    if (!catalog) {
       return {
         status: 'login-required',
         action: 'Sign in to Marcus and complete MFA. EasyMoney will continue automatically.',
@@ -730,7 +907,7 @@ export async function executeMarcusBrowser(
     }
     return {
       status: 'complete',
-      result: await syncAuthenticatedMarcus(page, config, report, parser),
+      result: await syncAuthenticatedMarcus(page, config, report, parser, catalog),
     };
   } catch (error) {
     return { status: 'error', message: safeMarcusError(error) };

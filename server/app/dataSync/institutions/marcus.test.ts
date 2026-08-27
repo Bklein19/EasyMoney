@@ -5,9 +5,12 @@ import { join } from 'node:path';
 
 import type { Page } from 'playwright';
 import {
+  buildMarcusRemoteCatalogFromApi,
   buildMarcusRemoteCatalog,
   executeMarcusBrowser,
+  fetchMarcusApiPayload,
   fetchMarcusDocumentBytes,
+  isMarcusApiCatalogRequest,
   isMarcusAuthenticatedPath,
   mapMarcusRemoteAccounts,
   marcusAccountIdentityFromText,
@@ -92,6 +95,7 @@ test('Marcus account and date metadata parsing is account-count agnostic', () =>
     'Online Savings Account **** 1111 Online Savings Account **** 2222',
   )).toBeNull();
   expect(marcusStatementDateFromText('Statement date 6/30/2026')).toBe('2026-06-30');
+  expect(marcusStatementDateFromText('Created 2026-06-30T12:00:00Z')).toBe('2026-06-30');
   expect(marcusStatementDateFromText('June 2026 Statement')).toBe('2026-06-01');
 });
 
@@ -150,6 +154,116 @@ test('Marcus discovers every savings and deposit account while selecting every s
     request: { method: 'GET', url: 'https://www.marcus.com/api/savings/api/v1/accounts/document/document-a' },
   });
   expect(catalog.unsupportedArtifactCount).toBe(2);
+});
+
+test('Marcus builds a dynamic account and document catalog from the observed API shapes', () => {
+  const catalog = buildMarcusRemoteCatalogFromApi([{
+    data: {
+      savings: {
+        accounts: [
+          {
+            accountId: 'remote-b',
+            accountNumberLastFour: '2222',
+            productName: 'High-Yield CD',
+          },
+          {
+            accountId: 'remote-a',
+            accountNumberLastFour: '1111',
+            formattedAccountName: 'Online Savings Account',
+          },
+        ],
+      },
+    },
+  }], {
+    data: {
+      data: {
+        savingsDocumentList: {
+          error: null,
+          response: [
+            {
+              accountId: 'remote-a',
+              createdDate: '2026-06-30T12:00:00Z',
+              fileName: 'June 2026 Statement.pdf',
+              links: [{ link: '/api/savings/api/v1/accounts/document/document-a' }],
+            },
+            {
+              accountId: 'remote-b',
+              createdDate: '2026-06-30T12:00:00Z',
+              fileName: 'June 2026 Statement.pdf',
+              links: [{ link: '/api/savings/api/v1/accounts/document/document-b' }],
+            },
+            {
+              accountId: 'remote-a',
+              createdDate: '2026-01-31T12:00:00Z',
+              fileName: '2026 1099 tax document.pdf',
+              links: [{ link: '/api/savings/api/v1/accounts/document/tax-document' }],
+            },
+          ],
+        },
+      },
+    },
+  });
+
+  expect(catalog.accounts).toEqual([
+    {
+      kind: 'deposit',
+      last4: '2222',
+      sourceAccountKey: 'marcus:deposit:2222',
+      parserAccountName: null,
+      supportedArtifactTypes: [],
+      availableArtifactCount: 0,
+    },
+    {
+      ...savingsAccount(),
+      supportedArtifactTypes: ['statement-pdf'],
+      availableArtifactCount: 1,
+    },
+  ]);
+  expect(catalog.documents).toEqual([{
+    account: savingsAccount(),
+    artifactType: 'statement-pdf',
+    statementDate: '2026-06-30',
+    request: {
+      method: 'GET',
+      url: 'https://www.marcus.com/api/savings/api/v1/accounts/document/document-a',
+    },
+  }]);
+  expect(catalog.unsupportedArtifactCount).toBe(2);
+});
+
+test('Marcus rejects malformed or ambiguous API account and document identities', () => {
+  const accounts = (records: unknown[]) => [{ data: { savings: { accounts: records } } }];
+  const documents = (records: unknown[]) => ({
+    data: { data: { savingsDocumentList: { response: records } } },
+  });
+  expect(() => buildMarcusRemoteCatalogFromApi(accounts([{
+    accountId: 'remote-a',
+    accountNumberLastFour: '111',
+    productName: 'Online Savings Account',
+  }]), documents([]))).toThrow('account API identity is unavailable');
+  expect(() => buildMarcusRemoteCatalogFromApi(accounts([{
+    accountId: 'remote-a',
+    accountNumberLastFour: '1111',
+    productName: 'Online Savings Account',
+  }]), documents([{
+    accountId: 'unknown-account',
+    createdDate: '2026-06-30',
+    fileName: 'June 2026 Statement.pdf',
+    links: [{ link: '/api/savings/api/v1/accounts/document/document-a' }],
+  }]))).toThrow('document API identity is unavailable');
+  expect(() => buildMarcusRemoteCatalogFromApi(accounts([{
+    accountId: 'remote-a',
+    accountNumberLastFour: '1111',
+    productName: 'Online Savings Account',
+  }]), documents([{
+    accountId: 'remote-a',
+    createdDate: '2026-06-30',
+    fileName: 'June 2026 Statement.pdf',
+    links: [
+      { link: '/api/savings/api/v1/accounts/document/document-a' },
+      { link: '/api/savings/api/v1/accounts/document/document-b' },
+    ],
+  }]))).toThrow('one verified statement link');
 });
 
 test('Marcus rejects routing ambiguity rather than mixing remote accounts or statements', () => {
@@ -231,6 +345,61 @@ test('Marcus permits only the verified authenticated document route', () => {
     'destination is invalid',
   );
   expect(() => marcusDocumentRequest('/us/en/login')).toThrow('destination is invalid');
+  expect(() => marcusDocumentRequest(
+    '/api/savings/api/v1/accounts/document/opaque-document?token=secret',
+  )).toThrow('destination is invalid');
+});
+
+test('Marcus recognizes only the two observed catalog operation request shapes', () => {
+  const request = (overrides: {
+    method?: string;
+    url?: string;
+    postData?: string | null;
+  } = {}) => ({
+    method: () => overrides.method ?? 'POST',
+    url: () => overrides.url ?? 'https://www.marcus.com/api/cos?operations=Catalog',
+    postData: () => overrides.postData ?? '{"variables":{"savingsAccountsInput":{}}}',
+  });
+  expect(isMarcusApiCatalogRequest(request(), 'accounts')).toBe(true);
+  expect(isMarcusApiCatalogRequest(request({
+    postData: '{"query":"savingsDocumentList"}',
+  }), 'documents')).toBe(true);
+  expect(isMarcusApiCatalogRequest(request({ method: 'GET' }), 'accounts')).toBe(false);
+  expect(isMarcusApiCatalogRequest(request({
+    url: 'https://example.com/api/cos?operations=Catalog',
+  }), 'accounts')).toBe(false);
+  expect(isMarcusApiCatalogRequest(request({
+    url: 'https://www.marcus.com/api/cos?operations=Catalog&extra=1',
+  }), 'accounts')).toBe(false);
+  expect(isMarcusApiCatalogRequest(request({ postData: '{"variables":{}}' }), 'accounts')).toBe(false);
+});
+
+test('Marcus replays observed API requests through the authenticated request context', async () => {
+  const request = {} as Parameters<typeof fetchMarcusApiPayload>[1];
+  const calls: Array<{ request: unknown; options: unknown }> = [];
+  let disposed = false;
+  const page = {
+    context: () => ({
+      request: {
+        fetch: async (capturedRequest: unknown, options: unknown) => {
+          calls.push({ request: capturedRequest, options });
+          return {
+            ok: () => true,
+            headers: () => ({ 'content-type': 'application/json; charset=utf-8' }),
+            json: async () => ({ data: { safe: true } }),
+            dispose: async () => { disposed = true; },
+          };
+        },
+      },
+    }),
+  } as unknown as Page;
+
+  await expect(fetchMarcusApiPayload(page, request)).resolves.toEqual({ data: { safe: true } });
+  expect(calls).toEqual([{
+    request,
+    options: { maxRedirects: 0, timeout: 30_000 },
+  }]);
+  expect(disposed).toBe(true);
 });
 
 test('Marcus authenticated routes exclude login and challenge paths', () => {
