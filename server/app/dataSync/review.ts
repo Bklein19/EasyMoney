@@ -317,7 +317,7 @@ export async function stageSyncArtifactWithProvenance(
       throw new Error(`Downloaded artifact changed before review: ${fileName}`);
     }
   }
-  const text = /\.(?:csv|txt)$/i.test(fileName) ? new TextDecoder().decode(fileBytes) : '';
+  const text = /\.(?:csv|json|txt)$/i.test(fileName) ? new TextDecoder().decode(fileBytes) : '';
   const contentHash = hashImportContent(text, fileBytes);
   const existing = getDb().prepare(`
     SELECT id, status

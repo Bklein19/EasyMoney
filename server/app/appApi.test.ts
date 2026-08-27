@@ -3637,6 +3637,50 @@ test('institution catch-up stages reviewable claims before explicit confirmation
   }
 });
 
+test('institution catch-up stages parser-backed Fidelity activity JSON', async () => {
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-fidelity-json-review-'));
+  const fileName = 'fidelity-retail-brokerage-1234-activity-2026-07-01-to-2026-07-31.json';
+  const filePath = path.join(directory, fileName);
+  const text = JSON.stringify({
+    errors: [],
+    data: {
+      transactions: [{
+        acctNum: 'Z00001234',
+        date: Date.parse('2026-07-15T00:00:00.000Z') / 1_000,
+        amtDetail: { net: 12.34 },
+        description: `Example activity ${'detail '.repeat(1_000)}`,
+      }],
+    },
+  });
+  expect(text.length).toBeGreaterThan(4_096);
+  await fs.promises.writeFile(filePath, text);
+
+  try {
+    const artifact = await stageSyncArtifact({
+      path: filePath,
+      accountRoutes: [{ remoteAccountId: 'fidelity:Z00001234' }],
+    });
+    expect(artifact).toMatchObject({
+      fileName,
+      status: 'ready',
+      parserName: 'fidelity-activity-api-json',
+      transactionCount: 1,
+      balanceCount: 0,
+      coveredFrom: '2026-07-15',
+      coveredTo: '2026-07-15',
+    });
+    expect(artifact.accountClaims).toEqual([expect.objectContaining({
+      remoteAccountId: 'fidelity:Z00001234',
+      accountName: 'Fidelity account ending in 1234',
+      resolution: 'auto-create',
+      requiresExplicitMapping: true,
+      transactionCount: 1,
+    })]);
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('independent sync previews arbitrate identical content once at confirmation', async () => {
   const firstAccountId = Number(insertRow('accounts', {
     name: 'First Synthetic Checking',

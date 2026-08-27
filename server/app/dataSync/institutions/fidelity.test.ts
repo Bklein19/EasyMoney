@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import type { Download } from 'playwright';
 
 import {
+  assertFidelityActivityHistoryRequest,
+  assertFidelityActivityResponseAccount,
   assertFidelityStatementControlBijection,
   assertUniqueFidelityRoutingSuffixes,
   decodeFidelityStatementDocument,
@@ -17,6 +19,7 @@ import {
   fidelityStatementYearTraversal,
   filterFidelityRetailActivityAccounts,
   isFidelityAuthenticatedPage,
+  isFidelityActivityHistoryRequestUrl,
   isFidelityInstitutionUnavailableText,
   isFidelityRetailActivityUrl,
   isFidelityStatementDownloadRequestUrl,
@@ -37,6 +40,7 @@ const retailAccount: FidelityAccountIdentity = {
   surface: 'retail',
   kind: 'brokerage',
   accountKey: 'retail-account',
+  remoteAccountId: 'fidelity:Z00001234',
   last4: '1234',
 };
 
@@ -48,6 +52,10 @@ function remoteAccount(
     surface,
     kind: surface === 'retail' ? 'brokerage' : 'retirement',
     accountKey,
+    remoteAccountId: surface === 'retail'
+      ? 'fidelity:Z00001234'
+      : 'fidelity:netbenefits:workplace-one',
+    siteAccountId: surface === 'retail' ? 'Z00001234' : 'workplace-one',
     last4: surface === 'retail' ? '1234' : '5678',
     label: surface === 'retail' ? 'Brokerage 1234' : 'Workplace plan 5678',
     selection: {
@@ -110,15 +118,33 @@ describe('Fidelity account discovery', () => {
     ]);
   });
 
-  test('rejects ambiguous routing suffixes only after activity capability filtering', async () => {
+  test('keeps exact activity identities distinct even when display suffixes match', async () => {
     const accounts = fidelityAccountsFromCandidates([
-      { surface: 'retail', label: 'Brokerage 1234', remoteId: 'one' },
-      { surface: 'retail', label: 'Roth IRA 1234', remoteId: 'two' },
+      { surface: 'retail', label: 'Brokerage 1234', remoteId: 'first' },
+      { surface: 'retail', label: 'Roth IRA 1234', remoteId: 'second' },
     ]);
     await expect(filterFidelityRetailActivityAccounts(accounts, async () => true))
-      .rejects.toThrow('Multiple Fidelity retail accounts share one routing suffix');
+      .resolves.toHaveLength(2);
     await expect(filterFidelityRetailActivityAccounts(accounts, async account => account.kind !== 'ira'))
       .resolves.toHaveLength(1);
+  });
+
+  test('uses exact-identity keys to keep same-kind same-suffix activity files distinct', () => {
+    const accounts = fidelityAccountsFromCandidates([
+      { surface: 'retail', label: 'Brokerage 1111', remoteId: 'Z00001111' },
+      { surface: 'retail', label: 'Brokerage 1111', remoteId: 'Y00001111' },
+    ]);
+    const fileNames = accounts.map(account => fidelityArtifactFileName(
+      account,
+      'activity-json',
+      '2026-07-01',
+      '2026-07-31',
+    ));
+
+    expect(accounts.map(account => account.kind)).toEqual(['brokerage', 'brokerage']);
+    expect(accounts.map(account => account.last4)).toEqual(['1111', '1111']);
+    expect(new Set(fileNames).size).toBe(2);
+    expect(fileNames.every((fileName, index) => fileName.includes(accounts[index]!.accountKey))).toBe(true);
   });
 
   test('deduplicates only semantically identical responsive account controls', () => {
@@ -133,7 +159,7 @@ describe('Fidelity account discovery', () => {
     expect(() => assertUniqueFidelityRoutingSuffixes(fidelityAccountsFromCandidates([
       { surface: 'retail', label: 'Brokerage 1234', remoteId: 'first' },
       { surface: 'retail', label: 'Roth IRA 1234', remoteId: 'second' },
-    ]))).toThrow('Multiple Fidelity retail accounts share one routing suffix');
+    ]))).not.toThrow();
   });
 
   test('keeps only dynamically proven retail activity accounts', async () => {
@@ -278,6 +304,104 @@ describe('Fidelity direct requests', () => {
 });
 
 describe('Fidelity statement contracts', () => {
+  test('binds the activity history request to the exact endpoint, selected account, and dates', () => {
+    const url = 'https://digital.fidelity.com/ftgw/digital/activityapi/api/v1/transactions/history';
+    const body = {
+      filter: {
+        accounts: [{ acctNum: 'Z00001234', acctName: 'Example brokerage', acctType: 'BROKERAGE' }],
+        searchCriteriaDetail: {
+          txnFromDate: Date.parse('2026-07-01T04:00:00.000Z') / 1_000,
+          txnToDate: Date.parse('2026-07-31T04:00:00.000Z') / 1_000,
+          includeBasketNames: true,
+          includeCoreFundSettlementTransactions: false,
+        },
+      },
+    };
+    const request = { url, method: 'POST', postData: JSON.stringify(body) };
+    const expected = { siteAccountId: 'Z00001234', from: '2026-07-01', through: '2026-07-31' };
+
+    expect(isFidelityActivityHistoryRequestUrl(url)).toBe(true);
+    expect(() => assertFidelityActivityHistoryRequest(request, expected)).not.toThrow();
+    expect(() => assertFidelityActivityHistoryRequest({
+      ...request,
+      url: `${url}?account=Z00001234`,
+    }, expected)).toThrow('endpoint is invalid');
+    expect(() => assertFidelityActivityHistoryRequest({
+      ...request,
+      url: 'https://example.com/transactions/history',
+    }, expected)).toThrow('endpoint is invalid');
+    expect(() => assertFidelityActivityHistoryRequest({
+      ...request,
+      url: 'https://digital.fidelity.com/another/api/transactions/history',
+    }, expected)).toThrow('endpoint is invalid');
+    expect(() => assertFidelityActivityHistoryRequest({
+      ...request,
+      url: 'https://www.fidelity.com/ftgw/digital/activityapi/api/v1/transactions/history',
+    }, expected)).toThrow('endpoint is invalid');
+    expect(() => assertFidelityActivityHistoryRequest({ ...request, method: 'GET' }, expected))
+      .toThrow('endpoint is invalid');
+    expect(() => assertFidelityActivityHistoryRequest({
+      ...request,
+      postData: JSON.stringify({
+        ...body,
+        filter: { ...body.filter, accounts: [{ ...body.filter.accounts[0], acctNum: 'Z00005678' }] },
+      }),
+    }, expected)).toThrow('does not match');
+    expect(() => assertFidelityActivityHistoryRequest(request, { ...expected, from: '2026-07-02' }))
+      .toThrow('does not match');
+    expect(() => assertFidelityActivityHistoryRequest({
+      ...request,
+      postData: JSON.stringify({
+        ...body,
+        filter: {
+          ...body.filter,
+          searchCriteriaDetail: {
+            ...body.filter.searchCriteriaDetail,
+            txnFromDate: Date.parse('2026-07-01T00:00:00.000Z') / 1_000,
+          },
+        },
+      }),
+    }, expected)).toThrow('does not match');
+
+    expect(() => assertFidelityActivityHistoryRequest({
+      ...request,
+      postData: JSON.stringify({
+        ...body,
+        filter: {
+          ...body.filter,
+          searchCriteriaDetail: {
+            ...body.filter.searchCriteriaDetail,
+            txnFromDate: Date.parse('2026-01-01T05:00:00.000Z') / 1_000,
+            txnToDate: Date.parse('2026-01-31T05:00:00.000Z') / 1_000,
+          },
+        },
+      }),
+    }, { ...expected, from: '2026-01-01', through: '2026-01-31' })).not.toThrow();
+  });
+
+  test('requires every API activity row to match the exact selected raw and canonical account identity', () => {
+    const transaction = {
+      acctNum: 'Z00001234',
+      date: Date.parse('2026-07-15T00:00:00.000Z') / 1_000,
+      amtDetail: { net: 12.34 },
+      description: 'Example activity',
+    };
+    const bytes = new TextEncoder().encode(JSON.stringify({
+      errors: [],
+      data: { transactions: [transaction] },
+    }));
+    const expected = { siteAccountId: 'Z00001234', remoteAccountId: 'fidelity:Z00001234' };
+    expect(() => assertFidelityActivityResponseAccount(bytes, expected)).not.toThrow();
+    expect(() => assertFidelityActivityResponseAccount(new TextEncoder().encode(JSON.stringify({
+      errors: [],
+      data: { transactions: [transaction, { ...transaction, acctNum: 'Z00005678' }] },
+    })), expected)).toThrow('does not match');
+    expect(() => assertFidelityActivityResponseAccount(new TextEncoder().encode(JSON.stringify({
+      errors: [],
+      data: { transactions: [{ ...transaction, acctNum: 'Z00-001234' }] },
+    })), expected)).toThrow('does not match');
+  });
+
   test('parses exact account and document identities from statement list metadata', () => {
     expect(parseFidelityStatementList({
       statement: {
@@ -503,6 +627,45 @@ describe('Fidelity replay authentication', () => {
 });
 
 describe('Fidelity artifact validation', () => {
+  test('validates raw activity JSON with exact parser-backed account identity', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'easymoney-fidelity-json-test-'));
+    const fileName = fidelityArtifactFileName(retailAccount, 'activity-json', '2026-07-01', '2026-07-31');
+    const path = join(directory, fileName);
+    await writeFile(path, JSON.stringify({
+      errors: [],
+      data: {
+        transactions: [{
+          acctNum: 'Z00001234',
+          date: Date.parse('2026-07-15T00:00:00.000Z') / 1_000,
+          amtDetail: { net: 12.34 },
+          description: 'Example activity',
+        }],
+      },
+    }));
+
+    try {
+      await expect(validateFidelityArtifact(path, {
+        artifactType: 'activity-json',
+        fileName,
+        account: retailAccount,
+        coveredFrom: '2026-07-01',
+        coveredThrough: '2026-07-31',
+      })).resolves.toMatchObject({
+        parserId: 'fidelity-activity-api-json',
+        transactionCount: 1,
+        balanceCount: 0,
+        sourceAccounts: [{
+          remoteAccountId: 'fidelity:Z00001234',
+          sourceAccountName: 'Fidelity account ending in 1234',
+        }],
+        coveredFrom: '2026-07-01',
+        coveredThrough: '2026-07-31',
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test('validates a downloaded activity CSV with the Fidelity parser', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'easymoney-fidelity-test-'));
     await mkdir(directory, { recursive: true });

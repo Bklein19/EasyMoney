@@ -6,8 +6,12 @@ import type { APIResponse, Download, Locator, Page, Request } from 'playwright';
 import { extractText, getDocumentProxy } from 'unpdf';
 
 import { fidelity401kParser } from '../../importParsers/fidelity401k.ts';
-import { fidelityRemoteAccountId } from '../../importParsers/fidelityAccountIdentity.ts';
+import {
+  fidelityRemoteAccountId,
+  fidelityRetailActivityRemoteAccountId,
+} from '../../importParsers/fidelityAccountIdentity.ts';
 import { fidelityActivityParser } from '../../importParsers/fidelityActivity.ts';
+import { fidelityActivityApiParser } from '../../importParsers/fidelityActivityApi.ts';
 import { fidelityInvestmentReportParser } from '../../importParsers/fidelityInvestmentReport.ts';
 import { fidelityNetBenefitsStatementParser } from '../../importParsers/fidelityNetBenefitsStatement.ts';
 import { fidelityPortfolioStatementParser } from '../../importParsers/fidelityPortfolioStatement.ts';
@@ -19,6 +23,7 @@ const FIDELITY_NETBENEFITS_URL = 'https://nb.fidelity.com/public/nb/default/home
 const FIDELITY_START_URL = 'data:text/html,<title>EasyMoney Fidelity connector</title>';
 const DEFAULT_SESSION = 'fidelity-catchup';
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const FIDELITY_TIME_ZONE = 'America/New_York';
 const DOM_AUTHENTICATION_FIELDS = [
   'input[type="password"]',
   'input[autocomplete="username"]',
@@ -38,7 +43,7 @@ export type FidelityAccountKind =
   | 'retirement'
   | 'stock-plan'
   | 'other';
-export type FidelityArtifactType = 'activity-csv' | 'statement-pdf' | 'statement-html';
+export type FidelityArtifactType = 'activity-csv' | 'activity-json' | 'statement-pdf' | 'statement-html';
 export type FidelitySyncPhase =
   | 'authentication'
   | 'retail-discovery'
@@ -60,6 +65,7 @@ export interface FidelityAccountCandidate {
   href?: string | null;
   value?: string | null;
   remoteId?: string | null;
+  elementId?: string | null;
   controlIndex?: number;
 }
 
@@ -67,11 +73,13 @@ export interface FidelityAccountIdentity {
   surface: FidelitySurface;
   kind: FidelityAccountKind;
   accountKey: string;
+  remoteAccountId: string;
   last4: string | null;
   label?: string;
 }
 
 export interface FidelityRemoteAccount extends FidelityAccountIdentity {
+  siteAccountId: string;
   selection: {
     controlIndex: number;
     href: string | null;
@@ -165,10 +173,6 @@ type FidelityReplayRequest = {
   postData?: Buffer;
 };
 
-type FidelityDownloadSource =
-  | { kind: 'direct-request'; request: FidelityReplayRequest }
-  | { kind: 'browser-download'; download: Download };
-
 type FidelityBrowserResult = {
   status: 'complete';
   accountsDiscovered: number;
@@ -230,7 +234,7 @@ function accountKind(value: string): FidelityAccountKind {
   return 'other';
 }
 
-function remoteIdentity(candidate: FidelityAccountCandidate, label: string): string {
+function siteIdentity(candidate: FidelityAccountCandidate): string | null {
   if (candidate.remoteId?.trim()) return candidate.remoteId.trim();
   if (candidate.value?.trim()) return candidate.value.trim();
   if (candidate.href) {
@@ -238,12 +242,25 @@ function remoteIdentity(candidate: FidelityAccountCandidate, label: string): str
       const url = new URL(candidate.href, 'https://www.fidelity.com/');
       for (const name of ['account', 'accountId', 'accountNumber', 'acct', 'plan', 'planId']) {
         const value = url.searchParams.get(name);
-        if (value) return `${name}:${value}`;
+        if (value) return value;
       }
-      return `${url.hostname}${url.pathname}:${label}`;
     } catch {}
   }
-  return label;
+  return candidate.elementId?.trim() || null;
+}
+
+function candidateRemoteIdentity(candidate: FidelityAccountCandidate): {
+  siteAccountId: string;
+  remoteAccountId: string;
+} {
+  const siteAccountId = siteIdentity(candidate);
+  if (!siteAccountId || !/^[A-Za-z0-9][A-Za-z0-9_-]{3,127}$/.test(siteAccountId)) {
+    throw new Error('Fidelity control is missing a stable site account identity');
+  }
+  const exactRetailIdentity = fidelityRetailActivityRemoteAccountId(siteAccountId);
+  const remoteAccountId = exactRetailIdentity
+    ?? `fidelity:${candidate.surface === 'retail' ? 'retail-control' : 'netbenefits'}:${siteAccountId}`;
+  return { siteAccountId, remoteAccountId };
 }
 
 function opaqueAccountKey(surface: FidelitySurface, identity: string): string {
@@ -255,12 +272,14 @@ export function fidelityAccountsFromCandidates(candidates: FidelityAccountCandid
   for (const [candidateIndex, candidate] of candidates.entries()) {
     const label = normalizedAccountLabel(candidate.label);
     if (!label || /^(?:all accounts?|select an? account)$/i.test(label)) continue;
-    const identity = remoteIdentity(candidate, label);
-    const accountKey = opaqueAccountKey(candidate.surface, identity);
+    const identity = candidateRemoteIdentity(candidate);
+    const accountKey = opaqueAccountKey(candidate.surface, identity.remoteAccountId);
     const account: FidelityRemoteAccount = {
       surface: candidate.surface,
       kind: accountKind(`${label} ${candidate.href ?? ''}`),
       accountKey,
+      remoteAccountId: identity.remoteAccountId,
+      siteAccountId: identity.siteAccountId,
       last4: accountLast4(`${label} ${candidate.value ?? ''}`),
       label,
       selection: {
@@ -272,7 +291,9 @@ export function fidelityAccountsFromCandidates(candidates: FidelityAccountCandid
     const existing = accounts.get(accountKey);
     if (existing) {
       if (existing.surface !== account.surface || existing.kind !== account.kind
-          || existing.last4 !== account.last4 || existing.label !== account.label) {
+          || existing.remoteAccountId !== account.remoteAccountId
+          || existing.siteAccountId !== account.siteAccountId
+          || existing.last4 !== account.last4) {
         throw new Error('Fidelity controls expose conflicting account identity');
       }
       continue;
@@ -288,10 +309,9 @@ export function assertUniqueFidelityRoutingSuffixes(
 ): void {
   const routableIdentities = new Set<string>();
   for (const account of accounts) {
-    if (!account.last4) continue;
-    const identity = `${account.surface}:${account.last4}`;
+    const identity = account.remoteAccountId;
     if (routableIdentities.has(identity)) {
-      throw new Error(`Multiple Fidelity ${account.surface} accounts share one routing suffix`);
+      throw new Error(`Multiple Fidelity ${account.surface} accounts share one remote identity`);
     }
     routableIdentities.add(identity);
   }
@@ -309,6 +329,9 @@ export function fidelityArtifactFileName(
 ): string {
   const slug = accountSlug(account);
   if (artifactType === 'activity-csv') return `fidelity-${slug}-${from}-to-${through}-activity.csv`;
+  if (artifactType === 'activity-json') {
+    return `fidelity-${account.surface}-${account.kind}-${account.accountKey}-activity-${from}-to-${through}.json`;
+  }
   if (artifactType === 'statement-html') return `fidelity-401k-${account.last4 ?? account.accountKey}-${through.slice(0, 7)}.html`;
   return `fidelity-${slug}-${through}-statement.pdf`;
 }
@@ -341,6 +364,123 @@ export function isFidelityStatementListRequestUrl(value: string): boolean {
       && /\/accounts\/communications\/financial-documents\/statements\/?$/i.test(url.pathname);
   } catch {
     return false;
+  }
+}
+
+export function isFidelityActivityHistoryRequestUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:'
+      && url.hostname.toLowerCase() === 'digital.fidelity.com'
+      && url.pathname === '/ftgw/digital/activityapi/api/v1/transactions/history'
+      && !url.search
+      && !url.hash;
+  } catch {
+    return false;
+  }
+}
+
+function isValidIsoDate(value: string): boolean {
+  if (!DATE_PATTERN.test(value)) return false;
+  const milliseconds = Date.parse(`${value}T00:00:00.000Z`);
+  return Number.isFinite(milliseconds)
+    && new Date(milliseconds).toISOString().slice(0, 10) === value;
+}
+
+function isFidelityActivityDayBoundary(value: unknown, expectedDate: string): boolean {
+  if (!isValidIsoDate(expectedDate) || typeof value !== 'number' || !Number.isInteger(value)) return false;
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: FIDELITY_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(value * 1_000)).map(part => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}` === expectedDate
+    && parts.hour === '00'
+    && parts.minute === '00'
+    && parts.second === '00';
+}
+
+function fidelityActivityHistoryRequestAccountId(request: {
+  url: string;
+  method: string;
+  postData?: string | Uint8Array | null;
+}): string | null {
+  if (request.method.toUpperCase() !== 'POST' || !isFidelityActivityHistoryRequestUrl(request.url)) return null;
+  try {
+    const text = typeof request.postData === 'string'
+      ? request.postData
+      : request.postData ? Buffer.from(request.postData).toString('utf8') : '';
+    const value = JSON.parse(text) as unknown;
+    const root = value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : null;
+    const filter = root?.filter && typeof root.filter === 'object' && !Array.isArray(root.filter)
+      ? root.filter as Record<string, unknown>
+      : null;
+    const accounts = filter?.accounts;
+    if (!Array.isArray(accounts) || accounts.length !== 1
+        || !accounts[0] || typeof accounts[0] !== 'object' || Array.isArray(accounts[0])) return null;
+    const accountId = (accounts[0] as Record<string, unknown>).acctNum;
+    return typeof accountId === 'string' && accountId.trim() ? accountId.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+export function assertFidelityActivityHistoryRequest(
+  request: {
+    url: string;
+    method: string;
+    postData?: string | Uint8Array | null;
+  },
+  expected: {
+    siteAccountId: string;
+    from: string;
+    through: string;
+  },
+): void {
+  if (request.method.toUpperCase() !== 'POST'
+      || !isFidelityActivityHistoryRequestUrl(request.url)) {
+    throw new Error('Fidelity activity history request endpoint is invalid');
+  }
+  let value: unknown;
+  try {
+    const text = typeof request.postData === 'string'
+      ? request.postData
+      : request.postData ? Buffer.from(request.postData).toString('utf8') : '';
+    value = JSON.parse(text) as unknown;
+  } catch {
+    throw new Error('Fidelity activity history request body is invalid');
+  }
+  const root = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+  const filter = root?.filter && typeof root.filter === 'object' && !Array.isArray(root.filter)
+    ? root.filter as Record<string, unknown>
+    : null;
+  const accounts = filter?.accounts;
+  const criteria = filter?.searchCriteriaDetail && typeof filter.searchCriteriaDetail === 'object'
+    && !Array.isArray(filter.searchCriteriaDetail)
+    ? filter.searchCriteriaDetail as Record<string, unknown>
+    : null;
+  const account = Array.isArray(accounts) && accounts.length === 1
+    && accounts[0] && typeof accounts[0] === 'object' && !Array.isArray(accounts[0])
+    ? accounts[0] as Record<string, unknown>
+    : null;
+  if (!account || account.acctNum !== expected.siteAccountId
+      || typeof account.acctName !== 'string' || !account.acctName.trim()
+      || typeof account.acctType !== 'string' || !account.acctType.trim()
+      || !criteria
+      || !isFidelityActivityDayBoundary(criteria.txnFromDate, expected.from)
+      || !isFidelityActivityDayBoundary(criteria.txnToDate, expected.through)
+      || typeof criteria.includeBasketNames !== 'boolean'
+      || typeof criteria.includeCoreFundSettlementTransactions !== 'boolean') {
+    throw new Error('Fidelity activity history request does not match the selected account and date range');
   }
 }
 
@@ -455,7 +595,9 @@ export function verifyFidelityActivityAccounts(
   const verified: FidelityVerifiedActivityAccount[] = [];
   const seenAccountKeys = new Set<string>();
   const seenRemoteAccountIds = new Set<string>();
-  for (const artifact of artifacts.filter(item => item.artifactType === 'activity-csv')) {
+  for (const artifact of artifacts.filter(item => (
+    item.artifactType === 'activity-csv' || item.artifactType === 'activity-json'
+  ))) {
     const account = accountByKey.get(artifact.account.accountKey);
     if (!account || seenAccountKeys.has(account.accountKey) || artifact.sourceAccounts.length > 1) {
       throw new Error('Fidelity activity artifact account identity is ambiguous');
@@ -467,6 +609,9 @@ export function verifyFidelityActivityAccounts(
       throw new Error('Fidelity activity artifact account identity is ambiguous');
     }
     const sourceAccount = artifact.sourceAccounts[0]!;
+    if (sourceAccount.remoteAccountId !== account.remoteAccountId) {
+      throw new Error('Fidelity activity parser identity does not match the selected account');
+    }
     const parserLast4 = sourceAccount.remoteAccountId.replace(/^fidelity:/, '').replace(/\D/g, '').slice(-4);
     if (account.last4 && parserLast4 !== account.last4) {
       throw new Error('Fidelity activity parser identity does not match the selected account');
@@ -532,7 +677,7 @@ function parsedCoverage(
   parsed: AppImportParseResult,
   plan: Pick<FidelityArtifactPlan, 'artifactType' | 'coveredFrom' | 'coveredThrough'>,
 ): Pick<FidelityArtifactPlan, 'coveredFrom' | 'coveredThrough'> {
-  if (plan.artifactType === 'activity-csv') {
+  if (plan.artifactType === 'activity-csv' || plan.artifactType === 'activity-json') {
     return { coveredFrom: plan.coveredFrom, coveredThrough: plan.coveredThrough };
   }
   const dates = [
@@ -564,6 +709,12 @@ function parserForArtifact(
     }
     return fidelityActivityParser;
   }
+  if (artifactType === 'activity-json') {
+    if (!fidelityActivityApiParser.matches({ fileName, headers: [], sample })) {
+      throw new Error('Fidelity activity API artifact did not match the EasyMoney parser');
+    }
+    return fidelityActivityApiParser;
+  }
   if (artifactType === 'statement-html') {
     if (!fidelity401kParser.matches({ fileName, headers: [], sample })) {
       throw new Error('Fidelity HTML statement did not match the EasyMoney parser');
@@ -592,7 +743,9 @@ export async function validateFidelityArtifact(
   if (!metadata.isFile() || metadata.size < 16) throw new Error('Fidelity artifact is empty or too small');
   const expectedExtension = plan.artifactType === 'activity-csv'
     ? '.csv'
-    : plan.artifactType === 'statement-pdf' ? '.pdf' : '.html';
+    : plan.artifactType === 'activity-json'
+      ? '.json'
+      : plan.artifactType === 'statement-pdf' ? '.pdf' : '.html';
   if (extname(plan.fileName).toLowerCase() !== expectedExtension) {
     throw new Error('Fidelity artifact has the wrong extension');
   }
@@ -615,13 +768,15 @@ export async function validateFidelityArtifact(
     filePath: path,
     fileBytes: bytes,
   });
-  if (plan.artifactType !== 'activity-csv' && parsed.balances.length === 0) {
+  if (plan.artifactType !== 'activity-csv' && plan.artifactType !== 'activity-json'
+      && parsed.balances.length === 0) {
     throw new Error('Fidelity statement parser produced no balance');
   }
   const sourceAccounts = parserSourceAccountClaims(parsed);
   const transactionCount = parsed.transactions.filter(Boolean).length;
   if (sourceAccounts.length === 0
-      && !(plan.artifactType === 'activity-csv' && transactionCount === 0 && parsed.balances.length === 0)) {
+      && !((plan.artifactType === 'activity-csv' || plan.artifactType === 'activity-json')
+        && transactionCount === 0 && parsed.balances.length === 0)) {
     throw new Error('Fidelity parser produced no stable account identity');
   }
   const coverage = parsedCoverage(parsed, plan);
@@ -636,7 +791,7 @@ export async function validateFidelityArtifact(
 }
 
 function safeConfig(config: FidelitySyncConfig): Required<FidelitySyncConfig> {
-  if (!DATE_PATTERN.test(config.from) || !DATE_PATTERN.test(config.through) || config.from > config.through) {
+  if (!isValidIsoDate(config.from) || !isValidIsoDate(config.through) || config.from > config.through) {
     throw new Error('Fidelity sync dates must be an ordered YYYY-MM-DD range');
   }
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(config.session ?? DEFAULT_SESSION)) {
@@ -820,6 +975,7 @@ async function accountCandidatesFromLocator(
         ?? htmlElement.dataset.account
         ?? htmlElement.dataset.planId
         ?? null,
+      elementId: htmlElement.id || null,
       controlIndex,
     };
   }), surface);
@@ -1082,88 +1238,6 @@ function replayRequestFromBrowserRequest(request: Request): FidelityReplayReques
   };
 }
 
-async function replayRequestFromControl(control: Locator, pageUrl: string): Promise<FidelityReplayRequest | null> {
-  const metadata = await control.evaluate((element, baseUrl) => {
-    const htmlElement = element as HTMLElement;
-    const anchor = element instanceof HTMLAnchorElement ? element : element.closest('a');
-    const directUrl = anchor?.href
-      ?? htmlElement.dataset.downloadUrl
-      ?? htmlElement.dataset.url
-      ?? htmlElement.getAttribute('formaction');
-    if (directUrl && !directUrl.startsWith('javascript:') && !directUrl.startsWith('blob:')) {
-      return { url: new URL(directUrl, baseUrl).toString(), method: 'GET', body: null, contentType: null };
-    }
-    const form = element.closest('form') as HTMLFormElement | null;
-    if (!form) return null;
-    const params = new URLSearchParams();
-    for (const [name, value] of new FormData(form).entries()) {
-      if (typeof value === 'string') params.append(name, value);
-    }
-    return {
-      url: new URL(form.action || baseUrl, baseUrl).toString(),
-      method: (form.method || 'GET').toUpperCase(),
-      body: params.toString(),
-      contentType: form.enctype === 'multipart/form-data' ? null : 'application/x-www-form-urlencoded',
-    };
-  }, pageUrl);
-  if (!metadata) return null;
-  const request: FidelityReplayRequest = {
-    url: fidelityDirectRequestUrl(metadata.url, pageUrl),
-    method: metadata.method,
-  };
-  if (metadata.body && metadata.method !== 'GET') request.postData = Buffer.from(metadata.body);
-  if (metadata.contentType) request.headers = { 'content-type': metadata.contentType };
-  if (metadata.body && metadata.method === 'GET') {
-    const url = new URL(request.url);
-    for (const [name, value] of new URLSearchParams(metadata.body)) url.searchParams.append(name, value);
-    request.url = fidelityDirectRequestUrl(url.toString());
-  }
-  return request;
-}
-
-async function captureDownloadSource(
-  page: Page,
-  trigger: () => Promise<void>,
-  requestMatches?: (request: Request) => boolean,
-): Promise<FidelityDownloadSource> {
-  const observed: Request[] = [];
-  const observe = (request: Request) => observed.push(request);
-  page.on('request', observe);
-  let download: Download | null = null;
-  try {
-    const downloadEvent = page.waitForEvent('download', { timeout: 30_000 });
-    await trigger();
-    download = await downloadEvent;
-    const request = [...observed].reverse().find(candidate => requestMatches
-      ? requestMatches(candidate)
-      : candidate.url() === download?.url());
-    if (request) {
-      await download.cancel();
-      return { kind: 'direct-request', request: replayRequestFromBrowserRequest(request) };
-    }
-    let downloadUrl: URL;
-    try {
-      downloadUrl = new URL(download.url());
-    } catch {
-      throw new Error('Fidelity download destination is invalid');
-    }
-    if (downloadUrl.protocol === 'blob:') {
-      return { kind: 'browser-download', download };
-    }
-    const replayRequest = {
-      url: fidelityDirectRequestUrl(downloadUrl.toString()),
-      method: 'GET',
-    };
-    await download.cancel();
-    return { kind: 'direct-request', request: replayRequest };
-  } catch {
-    if (download) await download.cancel().catch(() => {});
-    throw new Error('Fidelity download request metadata was unavailable');
-  } finally {
-    page.off('request', observe);
-  }
-}
-
 async function executeFidelityRequest(page: Page, request: FidelityReplayRequest): Promise<APIResponse> {
   try {
     const response = await page.context().request.fetch(request.url, {
@@ -1197,10 +1271,44 @@ function responseMatchesArtifact(response: APIResponse, artifactType: FidelityAr
   if (artifactType === 'activity-csv') {
     return contentType.includes('csv') || contentType.includes('excel') || contentType.includes('octet-stream');
   }
+  if (artifactType === 'activity-json') return contentType.includes('json');
   if (artifactType === 'statement-pdf') {
     return contentType.includes('pdf') || contentType.includes('octet-stream');
   }
   return contentType.includes('html') || contentType.includes('text/plain');
+}
+
+export function assertFidelityActivityResponseAccount(
+  bytes: Uint8Array,
+  expected: Pick<FidelityRemoteAccount, 'remoteAccountId' | 'siteAccountId'>,
+): void {
+  let value: unknown;
+  try {
+    value = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+  } catch {
+    throw new Error('Fidelity activity API response is not valid JSON');
+  }
+  const root = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+  const errors = root?.errors;
+  const data = root?.data && typeof root.data === 'object' && !Array.isArray(root.data)
+    ? root.data as Record<string, unknown>
+    : null;
+  if (!root || (errors !== undefined && errors !== null
+      && (!Array.isArray(errors) || errors.length > 0)) || !Array.isArray(data?.transactions)) {
+    throw new Error('Fidelity activity API response structure is invalid');
+  }
+  for (const transaction of data.transactions) {
+    const item = transaction && typeof transaction === 'object' && !Array.isArray(transaction)
+      ? transaction as Record<string, unknown>
+      : null;
+    const siteAccountId = typeof item?.acctNum === 'string' ? item.acctNum.trim() : '';
+    if (!siteAccountId || siteAccountId !== expected.siteAccountId
+        || fidelityRetailActivityRemoteAccountId(siteAccountId) !== expected.remoteAccountId) {
+      throw new Error('Fidelity activity API response account does not match the selected account');
+    }
+  }
 }
 
 async function artifactBytesFromResponse(
@@ -1226,12 +1334,36 @@ async function downloadAndValidatePlan(
   const targetPath = join(outputDir, plan.fileName);
   try {
     const existing = await validateFidelityArtifact(targetPath, plan);
+    if (plan.artifactType === 'activity-json') {
+      const siteAccountId = 'siteAccountId' in plan.account && typeof plan.account.siteAccountId === 'string'
+        ? plan.account.siteAccountId
+        : null;
+      if (!siteAccountId) {
+        throw new Error('Fidelity activity plan is missing the selected site account identity');
+      }
+      assertFidelityActivityResponseAccount(new Uint8Array(await readFile(targetPath)), {
+        remoteAccountId: plan.account.remoteAccountId,
+        siteAccountId,
+      });
+    }
     return { ...plan, path: targetPath, ...existing };
   } catch {}
 
   const response = await executeFidelityRequest(page, request);
   if (!response.ok()) throw new Error(`Fidelity direct request returned status ${response.status()}`);
   const bytes = await artifactBytesFromResponse(response, plan.artifactType);
+  if (plan.artifactType === 'activity-json') {
+    const siteAccountId = 'siteAccountId' in plan.account && typeof plan.account.siteAccountId === 'string'
+      ? plan.account.siteAccountId
+      : null;
+    if (!siteAccountId) {
+      throw new Error('Fidelity activity plan is missing the selected site account identity');
+    }
+    assertFidelityActivityResponseAccount(bytes, {
+      remoteAccountId: plan.account.remoteAccountId,
+      siteAccountId,
+    });
+  }
   const temporaryPath = join(outputDir, `.${plan.fileName}.${randomUUID()}.partial`);
   try {
     await writeFile(temporaryPath, bytes, { mode: 0o600 });
@@ -1247,30 +1379,64 @@ async function selectRetailAccount(page: Page, account: FidelityRemoteAccount): 
   const controls = await openRetailAccountSelector(page);
   const control = controls.nth(account.selection.controlIndex);
   await control.waitFor({ state: 'attached', timeout: 30_000 });
+  const responsePromise = page.waitForResponse(response => (
+    fidelityActivityHistoryRequestAccountId({
+      url: response.url(),
+      method: response.request().method(),
+      postData: response.request().postDataBuffer(),
+    }) === account.siteAccountId
+  ), { timeout: 60_000 });
   await control.click();
+  const response = await responsePromise;
+  await response.finished();
+  const headers = response.headers();
+  const bodyText = headers['content-type']?.toLowerCase().includes('html')
+    ? await response.text().catch(() => '')
+    : null;
+  if (fidelityResponseRequiresAuthentication({
+    status: response.status(),
+    url: response.url(),
+    headers,
+    bodyText,
+  })) {
+    throw new FidelityAuthenticationRequiredError('authentication-required');
+  }
+  if (!response.ok()) throw new Error(`Fidelity account selection returned status ${response.status()}`);
   await page.getByRole('button', { name: /Open time filter/i }).waitFor({ state: 'visible', timeout: 30_000 });
 }
 
-async function setRetailActivityRange(page: Page, from: string, through: string): Promise<void> {
+async function setRetailActivityRange(
+  page: Page,
+  account: FidelityRemoteAccount,
+  from: string,
+  through: string,
+): Promise<FidelityReplayRequest> {
   await page.getByRole('button', { name: /Open time filter/i }).click();
   await page.getByText('Custom', { exact: true }).click();
   await page.locator('#input-from-date').fill(from);
   await page.locator('#input-to-date').fill(through);
   const apply = page.getByRole('button', { name: 'Apply', exact: true });
+  const requestPromise = page.waitForRequest(request => {
+    try {
+      assertFidelityActivityHistoryRequest({
+        url: request.url(),
+        method: request.method(),
+        postData: request.postDataBuffer(),
+      }, { siteAccountId: account.siteAccountId, from, through });
+      return true;
+    } catch {
+      return false;
+    }
+  }, { timeout: 60_000 });
   await apply.click();
+  const request = await requestPromise;
   await page.locator('#input-from-date:visible').waitFor({ state: 'hidden', timeout: 30_000 });
-}
-
-async function activityRequest(page: Page): Promise<FidelityDownloadSource> {
-  await page.getByRole('button', { name: 'Download', exact: true }).click();
-  const csv = page.getByRole('button', { name: 'Download as CSV', exact: true })
-    .or(page.getByRole('link', { name: 'Download as CSV', exact: true }))
-    .first();
-  await csv.waitFor({ state: 'visible', timeout: 30_000 });
-  const direct = await replayRequestFromControl(csv, page.url());
-  return direct
-    ? { kind: 'direct-request', request: direct }
-    : captureDownloadSource(page, () => csv.click());
+  assertFidelityActivityHistoryRequest({
+    url: request.url(),
+    method: request.method(),
+    postData: request.postDataBuffer(),
+  }, { siteAccountId: account.siteAccountId, from, through });
+  return replayRequestFromBrowserRequest(request);
 }
 
 export async function saveAndValidateFidelityBrowserDownload(
@@ -1312,8 +1478,8 @@ async function downloadRetailActivity(
     ].join(','));
     assertGate(gate);
     const plan: FidelityArtifactPlan = {
-      artifactType: 'activity-csv',
-      fileName: fidelityArtifactFileName(account, 'activity-csv', config.from, config.through),
+      artifactType: 'activity-json',
+      fileName: fidelityArtifactFileName(account, 'activity-json', config.from, config.through),
       account,
       coveredFrom: config.from,
       coveredThrough: config.through,
@@ -1325,11 +1491,8 @@ async function downloadRetailActivity(
       'Downloading Fidelity activity',
       async () => {
         await selectRetailAccount(page, account);
-        await setRetailActivityRange(page, config.from, config.through);
-        const source = await activityRequest(page);
-        return source.kind === 'direct-request'
-          ? downloadAndValidatePlan(page, config.outputDir, plan, source.request)
-          : saveAndValidateFidelityBrowserDownload(source.download, config.outputDir, plan);
+        const request = await setRetailActivityRange(page, account, config.from, config.through);
+        return downloadAndValidatePlan(page, config.outputDir, plan, request);
       },
       { surface: account.surface, artifactType: plan.artifactType, index: index + 1, total: accounts.length },
     );
@@ -1492,6 +1655,7 @@ function statementPlan(
       surface: 'retail',
       kind: 'other',
       accountKey: opaqueAccountKey('retail', document.remoteAccountId),
+      remoteAccountId: document.remoteAccountId,
       last4: null,
       label: 'Fidelity statement account',
     },

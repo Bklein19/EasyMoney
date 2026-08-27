@@ -19,6 +19,15 @@ export function fidelityRemoteAccountId(value: string): string | null {
   return accountNumber ? `fidelity:${accountNumber}` : null;
 }
 
+export function fidelityRetailActivityRemoteAccountId(value: string): string | null {
+  const normalized = value.trim();
+  const accountNumber = /^[A-Z0-9]+(?:-[A-Z0-9]+)*$/i.test(normalized)
+    ? fidelityRemoteAccountId(normalized)
+    : null;
+  if (accountNumber) return accountNumber;
+  return /^\d{5}$/.test(normalized) ? `fidelity:retail-token:${normalized}` : null;
+}
+
 export function withFidelityRemoteAccountIds(result: AppImportParseResult): AppImportParseResult {
   return {
     ...result,

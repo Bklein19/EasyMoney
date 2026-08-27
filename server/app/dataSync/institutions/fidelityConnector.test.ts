@@ -48,19 +48,20 @@ function artifact(
   overrides: Partial<FidelityDownloadedArtifact> = {},
 ): FidelityDownloadedArtifact {
   return {
-    artifactType: 'activity-csv',
+    artifactType: 'activity-json',
     fileName,
     account: {
       surface: 'retail',
       kind: 'brokerage',
       accountKey,
+      remoteAccountId: `fidelity:Z0000${last4 ?? '0000'}`,
       last4,
       label: last4 ? `Brokerage ${last4}` : 'Brokerage account',
     },
     coveredFrom: '2026-07-01',
     coveredThrough: '2026-08-20',
     path: `/tmp/${fileName}`,
-    parserId: 'fidelity-activity-csv',
+    parserId: 'fidelity-activity-api-json',
     transactionCount: 1,
     balanceCount: 0,
     contentHash: 'a'.repeat(64),
@@ -140,18 +141,20 @@ describe('Fidelity connector execution', () => {
       });
       return {
         ...completeResult([
-          artifact('retail-one', '1111', 'fidelity-retail-brokerage-1111-activity.csv'),
-          artifact('workplace-one', '2222', 'fidelity-netbenefits-retirement-2222-statement.pdf', {
-            artifactType: 'statement-pdf',
+          artifact('retail-one', '1111', 'fidelity-retail-brokerage-1111-activity.json'),
+          artifact('retail-two', null, 'fidelity-retail-retirement-example-activity.json', {
             account: {
-              surface: 'netbenefits',
+              surface: 'retail',
               kind: 'retirement',
-              accountKey: 'workplace-one',
-              last4: '2222',
-              label: 'Example 401(k) 2222',
+              accountKey: 'retail-two',
+              remoteAccountId: 'fidelity:retail-token:12345',
+              last4: null,
+              label: 'Example retirement plan',
             },
-            parserId: 'fidelity-netbenefits-statement-pdf',
-            balanceCount: 1,
+            sourceAccounts: [{
+              remoteAccountId: 'fidelity:retail-token:12345',
+              sourceAccountName: 'Fidelity retirement plan 12345',
+            }],
           }),
         ]),
         skipped: ['Fidelity NetBenefits omitted one unsupported document'],
@@ -170,12 +173,12 @@ describe('Fidelity connector execution', () => {
 
     await expect(connector.run(runContext(accounts, event => events.push(event)))).resolves.toEqual([
       {
-        fileName: 'fidelity-retail-brokerage-1111-activity.csv',
+        fileName: 'fidelity-retail-brokerage-1111-activity.json',
         accountRoutes: [{ remoteAccountId: 'fidelity:Z00001111' }],
       },
       {
-        fileName: 'fidelity-netbenefits-retirement-2222-statement.pdf',
-        accountRoutes: [{ remoteAccountId: 'fidelity:Z00002222' }],
+        fileName: 'fidelity-retail-retirement-example-activity.json',
+        accountRoutes: [{ remoteAccountId: 'fidelity:retail-token:12345' }],
       },
     ]);
     expect(capturedConfig).toEqual({
@@ -228,16 +231,16 @@ describe('Fidelity connector execution', () => {
 
   test('routes only exact parser-backed identities and rejects missing or repeated claims', () => {
     expect(routeFidelityArtifacts([
-      artifact('remote-one', '1111', 'activity.csv'),
+      artifact('remote-one', '1111', 'activity.json'),
     ])).toEqual([{
-      fileName: 'activity.csv',
+      fileName: 'activity.json',
       accountRoutes: [{ remoteAccountId: 'fidelity:Z00001111' }],
     }]);
     expect(() => routeFidelityArtifacts([
-      artifact('remote-one', '1111', 'missing.csv', { sourceAccounts: [] }),
+      artifact('remote-one', '1111', 'missing.json', { sourceAccounts: [] }),
     ])).toThrow('no parser-backed account claims');
     expect(() => routeFidelityArtifacts([
-      artifact('remote-one', '1111', 'ambiguous.csv', { sourceAccounts: [
+      artifact('remote-one', '1111', 'ambiguous.json', { sourceAccounts: [
         { remoteAccountId: 'fidelity:Z00001111', sourceAccountName: 'First' },
         { remoteAccountId: 'fidelity:Z00001111', sourceAccountName: 'Second' },
       ] }),
