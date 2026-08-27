@@ -3,12 +3,15 @@ import { EventEmitter } from 'node:events';
 import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { BrowserContext, Page } from 'playwright';
+import type { Browser, BrowserContext, Page } from 'playwright';
 
 import {
   checkAuthenticationForCheckpoint,
   closeBrowserContext,
+  createCachedNormalChromeUserAgent,
   decodeInstitutionBrowserProgramResult,
+  deriveNormalChromeUserAgent,
+  institutionBrowserContextOptions,
   institutionBrowserLaunchStrategy,
   institutionStartPage,
   launchPersistentContextWithDeadline,
@@ -20,9 +23,7 @@ import {
   playwrightProfilePath,
   playwrightSessionStoragePath,
   restoreBrowserAuthentication,
-  requiresFreshInstitutionPage,
   runInstitutionBrowserProgram,
-  runWithNormalizedHeadlessUserAgent,
   runWhileBrowserOpen,
   showAuthenticationChapter,
   showSyncCompletionChapter,
@@ -145,7 +146,7 @@ describe('Playwright session helper', () => {
     expect(performance.now() - startedAt).toBeLessThan(250);
   });
 
-  test('normalizes only the HeadlessChrome user-agent token', () => {
+  test('normalizes only the headless Chrome product token', () => {
     expect(normalizeHeadlessUserAgent(
       'Mozilla/5.0 AppleWebKit/537.36 HeadlessChrome/151.0.0.0 Safari/537.36',
     )).toBe('Mozilla/5.0 AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36');
@@ -154,93 +155,107 @@ describe('Playwright session helper', () => {
     )).toBe('Mozilla/5.0 AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36');
   });
 
-  test('keeps the normalized user agent attached before navigation and through the operation', async () => {
-    const events: string[] = [];
-    const session = {
-      send: async (method: string, params: { userAgent: string }) => {
-        events.push(`${method}:${params.userAgent.includes('HeadlessChrome/') ? 'headless' : 'normal'}`);
-      },
-      detach: async () => {
-        events.push('detach');
-      },
-    };
-    const page = {
-      evaluate: async () => {
-        events.push('evaluate-user-agent');
-        return 'Mozilla/5.0 HeadlessChrome/151.0.0.0 Safari/537.36';
-      },
-    } as unknown as Page;
-    const context = {
-      newCDPSession: async () => {
-        events.push('open-session');
-        return session;
-      },
-    } as unknown as BrowserContext;
+  test('caches one successful normal Chrome user-agent derivation', async () => {
+    let calls = 0;
+    const normalChromeUserAgent = createCachedNormalChromeUserAgent(async () => {
+      calls += 1;
+      await Bun.sleep(5);
+      return 'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36';
+    });
 
-    await expect(runWithNormalizedHeadlessUserAgent(page, context, true, async () => {
-      events.push('navigate-start-url');
-      events.push('run-institution');
-      return 'complete';
-    })).resolves.toBe('complete');
-    expect(events).toEqual([
-      'evaluate-user-agent',
-      'open-session',
-      'Network.setUserAgentOverride:normal',
-      'navigate-start-url',
-      'run-institution',
-      'detach',
+    expect(await Promise.all([
+      normalChromeUserAgent(),
+      normalChromeUserAgent(),
+      normalChromeUserAgent(),
+    ])).toEqual([
+      'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36',
+      'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36',
+      'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36',
     ]);
+    expect(await normalChromeUserAgent()).toBe('Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36');
+    expect(calls).toBe(1);
   });
 
-  test('releases the normalized user-agent session when the institution operation fails', async () => {
-    const events: string[] = [];
-    const page = {
-      evaluate: async () => 'Mozilla/5.0 HeadlessChrome/151.0.0.0 Safari/537.36',
-    } as unknown as Page;
-    const context = {
-      newCDPSession: async () => ({
-        send: async () => events.push('override'),
-        detach: async () => events.push('detach'),
+  test('bounds the installed Chrome user-agent probe and closes a started browser', async () => {
+    let closeCalls = 0;
+    const browser = {
+      newPage: () => new Promise<Page>(() => {}),
+      close: async () => {
+        closeCalls += 1;
+      },
+    } as unknown as Pick<Browser, 'newPage' | 'close'>;
+
+    const startedAt = performance.now();
+    await expect(deriveNormalChromeUserAgent({
+      timeoutMs: 10,
+      launch: async () => browser,
+    })).rejects.toThrow('Timed out reading the installed Chrome user agent');
+    expect(performance.now() - startedAt).toBeLessThan(250);
+    expect(closeCalls).toBe(1);
+  });
+
+  test('leaves headed context options and browser identity untouched', async () => {
+    let probes = 0;
+    const headedOptions = {
+      headless: false,
+      userAgent: 'Institution-supplied headed browser identity',
+      locale: 'en-US',
+    };
+
+    expect(await institutionBrowserContextOptions(headedOptions, async () => {
+      probes += 1;
+      return 'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36';
+    })).toBe(headedOptions);
+    expect(probes).toBe(0);
+  });
+
+  test('overrides every headless context with the shared normal Chrome identity', async () => {
+    expect(await institutionBrowserContextOptions({
+      headless: true,
+      userAgent: 'Institution-specific identity',
+      locale: 'en-US',
+    }, async () => 'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36')).toEqual({
+      headless: true,
+      userAgent: 'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36',
+      locale: 'en-US',
+    });
+  });
+
+  test('sends the shared normal Chrome identity for page and context requests', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-user-agent-'));
+    temporaryDirectories.push(root);
+    const server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch: request => Response.json({
+        userAgent: request.headers.get('user-agent'),
       }),
-    } as unknown as BrowserContext;
-
-    await expect(runWithNormalizedHeadlessUserAgent(page, context, true, async () => {
-      events.push('operation');
-      throw new Error('observed failure');
-    })).rejects.toThrow('observed failure');
-    expect(events).toEqual(['override', 'operation', 'detach']);
-  });
-
-  test('leaves headed and already-normal browser identities alone', async () => {
-    const events: string[] = [];
-    const headedPage = {
-      evaluate: async () => {
-        throw new Error('headed sessions must not read browser identity');
-      },
-    } as unknown as Page;
-    const normalPage = {
-      evaluate: async () => 'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36',
-    } as unknown as Page;
-    const context = {
-      newCDPSession: async () => {
-        throw new Error('a normal browser identity must not open a CDP session');
-      },
-    } as unknown as BrowserContext;
-
-    await runWithNormalizedHeadlessUserAgent(headedPage, context, false, async () => {
-      events.push('headed-operation');
     });
-    await runWithNormalizedHeadlessUserAgent(normalPage, context, true, async () => {
-      events.push('normal-operation');
-    });
-    expect(events).toEqual(['headed-operation', 'normal-operation']);
-  });
+    const origin = `http://127.0.0.1:${server.port}`;
 
-  test('uses a fresh page for every headless session or explicit headed start', () => {
-    expect(requiresFreshInstitutionPage({ headless: true })).toBe(true);
-    expect(requiresFreshInstitutionPage({ headless: false })).toBe(false);
-    expect(requiresFreshInstitutionPage({ headless: false, forceStartUrl: true })).toBe(true);
-  });
+    try {
+      await withPlaywrightPage({
+        name: 'user-agent-fixture',
+        startUrl: `${origin}/page-navigation`,
+        profilePath: join(root, 'profile'),
+        persistAuthentication: false,
+        browserLaunchTimeoutMs: 30_000,
+        contextOptions: { headless: true },
+      }, async (page, context) => {
+        const navigatorUserAgent = await page.evaluate(() => navigator.userAgent);
+        const pageRequest = JSON.parse(await page.locator('body').innerText()) as { userAgent: string };
+        const contextRequest = await context.request.fetch(`${origin}/context-request`);
+        const contextRequestBody = await contextRequest.json() as { userAgent: string };
+
+        expect(navigatorUserAgent).toContain(' Chrome/');
+        expect(navigatorUserAgent).not.toContain('HeadlessChrome/');
+        expect(pageRequest.userAgent).toBe(navigatorUserAgent);
+        expect(contextRequestBody.userAgent).toBe(navigatorUserAgent);
+      });
+    } finally {
+      await server.stop(true);
+    }
+  }, 90_000);
 
   test('does not hang when opening the first page after browser launch never settles', async () => {
     const context = {

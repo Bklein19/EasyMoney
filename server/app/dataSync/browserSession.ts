@@ -13,6 +13,8 @@ export type InstitutionBrowserLaunchStrategy = {
   allowHeadedAuthenticationFallback: boolean;
 };
 
+type PersistentContextOptions = NonNullable<Parameters<typeof chromium.launchPersistentContext>[1]>;
+
 type SessionOptions = {
   name: string;
   startUrl: string;
@@ -23,7 +25,7 @@ type SessionOptions = {
   persistAuthentication?: boolean;
   browserLaunchTimeoutMs?: number;
   onInteractiveBrowserWait?: (message: string) => void;
-  contextOptions?: NonNullable<Parameters<typeof chromium.launchPersistentContext>[1]>;
+  contextOptions?: PersistentContextOptions;
   launchArgs?: string[];
 };
 
@@ -285,6 +287,109 @@ const defaultBrowserLaunchTimeoutMs = 30_000;
 const browserLaunchWatchdogGraceMs = 1_000;
 const restoredPageCloseTimeoutMs = 1_000;
 
+export function normalizeHeadlessUserAgent(userAgent: string): string {
+  return userAgent.replace(/\bHeadlessChrome\//, 'Chrome/');
+}
+
+type NormalChromeUserAgentProbeOptions = {
+  timeoutMs?: number;
+  launch?: () => Promise<Pick<Browser, 'newPage' | 'close'>>;
+};
+
+export async function deriveNormalChromeUserAgent(
+  options: NormalChromeUserAgentProbeOptions = {},
+): Promise<string> {
+  const timeoutMs = options.timeoutMs ?? defaultBrowserLaunchTimeoutMs;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error('Chrome user-agent probe timeout must be a positive number');
+  }
+
+  const timeoutError = () => new Error('Timed out reading the installed Chrome user agent');
+  let browser: Pick<Browser, 'newPage' | 'close'> | undefined;
+  let browserClose: Promise<unknown> | undefined;
+  let deadlineExpired = false;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const launch = options.launch ?? (() => chromium.launch({
+    channel: 'chrome',
+    headless: true,
+    chromiumSandbox: true,
+    timeout: timeoutMs,
+  }));
+  const closeBrowser = () => {
+    if (!browser) return Promise.resolve();
+    browserClose ??= browser.close().catch(() => {});
+    return browserClose;
+  };
+
+  const probe = (async () => {
+    try {
+      browser = await launch();
+      if (deadlineExpired) throw timeoutError();
+      const page = await browser.newPage();
+      if (deadlineExpired) throw timeoutError();
+      const userAgent = await page.evaluate(() => navigator.userAgent);
+      const normalizedUserAgent = normalizeHeadlessUserAgent(userAgent);
+      if (/\bHeadlessChrome\//.test(normalizedUserAgent) || !/\bChrome\/\d/.test(normalizedUserAgent)) {
+        throw new Error('Installed Chrome did not expose a recognizable user agent');
+      }
+      return normalizedUserAgent;
+    } finally {
+      await closeBrowser();
+    }
+  })();
+
+  try {
+    return await Promise.race([
+      probe,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          deadlineExpired = true;
+          void closeBrowser();
+          reject(timeoutError());
+        }, timeoutMs);
+      }),
+    ]);
+  } catch (error) {
+    if (deadlineExpired) throw timeoutError();
+    throw error;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+export function createCachedNormalChromeUserAgent(
+  derive: () => Promise<string>,
+): () => Promise<string> {
+  let cachedUserAgent: string | undefined;
+  let inFlight: Promise<string> | undefined;
+  return () => {
+    if (cachedUserAgent !== undefined) return Promise.resolve(cachedUserAgent);
+    inFlight ??= (async () => {
+      try {
+        const userAgent = await derive();
+        cachedUserAgent = userAgent;
+        return userAgent;
+      } finally {
+        inFlight = undefined;
+      }
+    })();
+    return inFlight;
+  };
+}
+
+const normalChromeUserAgent = createCachedNormalChromeUserAgent(deriveNormalChromeUserAgent);
+
+export async function institutionBrowserContextOptions(
+  contextOptions: PersistentContextOptions,
+  resolveNormalChromeUserAgent: () => Promise<string> = normalChromeUserAgent,
+): Promise<PersistentContextOptions> {
+  if (contextOptions.headless !== true) return contextOptions;
+  return {
+    ...contextOptions,
+    userAgent: await resolveNormalChromeUserAgent(),
+  };
+}
+
 async function settleBeforeBrowserDeadline<T>(
   operation: Promise<T>,
   timeoutMs: number,
@@ -333,38 +438,6 @@ export async function institutionStartPage(
     console.warn('Timed out closing a restored institution browser page; continuing in the fresh page.');
   }
   return freshPage;
-}
-
-export function normalizeHeadlessUserAgent(userAgent: string): string {
-  return userAgent.replace('HeadlessChrome/', 'Chrome/');
-}
-
-export function requiresFreshInstitutionPage(options: {
-  forceStartUrl?: boolean;
-  headless: boolean;
-}): boolean {
-  return options.forceStartUrl === true || options.headless;
-}
-
-export async function runWithNormalizedHeadlessUserAgent<T>(
-  page: Page,
-  context: Pick<BrowserContext, 'newCDPSession'>,
-  headless: boolean,
-  operation: () => Promise<T>,
-): Promise<T> {
-  if (!headless) return operation();
-
-  const userAgent = await page.evaluate(() => navigator.userAgent);
-  const normalizedUserAgent = normalizeHeadlessUserAgent(userAgent);
-  if (normalizedUserAgent === userAgent) return operation();
-
-  const session = await context.newCDPSession(page);
-  try {
-    await session.send('Network.setUserAgentOverride', { userAgent: normalizedUserAgent });
-    return await operation();
-  } finally {
-    await session.detach().catch(() => {});
-  }
 }
 
 export function institutionBrowserLaunchStrategy(options: {
@@ -463,7 +536,7 @@ async function launchPlaywrightPage<T>(
   const authenticationProfilePath = options.authenticationProfilePath;
   const persistAuthentication = options.persistAuthentication ?? true;
   const browserLaunchTimeoutMs = options.browserLaunchTimeoutMs ?? defaultBrowserLaunchTimeoutMs;
-  const headless = options.contextOptions?.headless ?? false;
+  const contextOptions = await institutionBrowserContextOptions(options.contextOptions ?? {});
 
   const hasSavedAuthentication = persistAuthentication &&
     await fileExists(playwrightAuthStatePath(authenticationProfilePath));
@@ -473,12 +546,12 @@ async function launchPlaywrightPage<T>(
     context = await launchPersistentContextWithDeadline(
       () => chromium.launchPersistentContext(profilePath, {
         channel: 'chrome',
-        headless,
+        headless: contextOptions.headless ?? false,
         acceptDownloads: true,
         chromiumSandbox: true,
-        ...options.contextOptions,
+        ...contextOptions,
         timeout: browserLaunchTimeoutMs,
-        args: [...(options.contextOptions?.args ?? []), ...(options.launchArgs ?? [])],
+        args: [...(contextOptions.args ?? []), ...(options.launchArgs ?? [])],
       }),
       {
         sessionName: options.name,
@@ -494,19 +567,9 @@ async function launchPlaywrightPage<T>(
 
   try {
     if (hasSavedAuthentication) await restoreBrowserAuthentication(context, authenticationProfilePath);
-    const page = await institutionStartPage(context, requiresFreshInstitutionPage({
-      forceStartUrl: options.forceStartUrl,
-      headless,
-    }), browserLaunchTimeoutMs);
-    return await runWithNormalizedHeadlessUserAgent(
-      page,
-      context,
-      headless,
-      async () => {
-        await openInstitutionStartPage(page, options.startUrl, hasSavedAuthentication, options.forceStartUrl);
-        return await runWhileBrowserOpen(context, () => operation(page, context));
-      },
-    );
+    const page = await institutionStartPage(context, options.forceStartUrl, browserLaunchTimeoutMs);
+    await openInstitutionStartPage(page, options.startUrl, hasSavedAuthentication, options.forceStartUrl);
+    return await runWhileBrowserOpen(context, () => operation(page, context));
   } finally {
     const closed = await closeBrowserContext(context);
     if (!closed) console.warn(`Timed out closing the ${options.name} browser context after Chrome exited.`);
