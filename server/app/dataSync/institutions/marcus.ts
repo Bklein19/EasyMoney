@@ -13,6 +13,7 @@ import type { SyncReporter } from '../types.ts';
 import type { APIResponse, Page, Request } from 'playwright';
 
 const LOGIN_URL = 'https://www.marcus.com/us/en/login';
+const ACCOUNTS_URL = 'https://www.marcus.com/us/en/accounts';
 const DOCUMENTS_URL = 'https://www.marcus.com/us/en/documents';
 const MARCUS_ORIGIN = 'https://www.marcus.com';
 const MARCUS_COS_PATH = '/api/cos';
@@ -523,11 +524,15 @@ export async function waitUntilMarcusAuthenticated(page: Page, timeoutMs: number
   }, LOGIN_PATH_PATTERN.source, { timeout: timeoutMs });
 }
 
-async function openMarcusDocuments(page: Page): Promise<boolean> {
+async function openMarcusAuthenticatedRoute(
+  page: Page,
+  url: string,
+  destination: 'accounts' | 'documents',
+): Promise<boolean> {
   try {
-    await page.goto(DOCUMENTS_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
   } catch {
-    throw new Error('Marcus documents navigation failed');
+    throw new Error(`Marcus ${destination} navigation failed`);
   }
   return isMarcusAuthenticatedPage(page);
 }
@@ -598,7 +603,8 @@ async function waitForMarcusCatalogRequests(
   };
   page.on('request', onRequest);
   try {
-    if (!await openMarcusDocuments(page)) return null;
+    if (!await openMarcusAuthenticatedRoute(page, ACCOUNTS_URL, 'accounts')) return null;
+    if (!await openMarcusAuthenticatedRoute(page, DOCUMENTS_URL, 'documents')) return null;
     if (!accounts || !documents) {
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
