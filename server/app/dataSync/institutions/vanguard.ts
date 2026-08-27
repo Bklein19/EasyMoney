@@ -7,6 +7,11 @@ import { vanguardActivityCsvParser } from '../../importParsers/vanguardActivityC
 import { parseCsvRows } from '../../importParsers/csvRows.ts';
 import { vanguardStatementParser } from '../../importParsers/vanguardStatement.ts';
 import {
+  browserNativeResponseBody,
+  runBrowserNativeRequest,
+  type BrowserNativeResponse,
+} from '../browserRequest.ts';
+import {
   playwrightAuthStatePath,
   playwrightHasSavedAuthentication,
   playwrightProfilePath,
@@ -99,13 +104,7 @@ export interface VanguardApiRequest {
   headers?: Record<string, string>;
 }
 
-export interface VanguardBrowserApiResponse {
-  status: number;
-  url: string;
-  headers: Record<string, string>;
-  bodyBase64: string;
-  redirected: boolean;
-}
+export type VanguardBrowserApiResponse = BrowserNativeResponse;
 
 export type VanguardProgressPhase =
   | 'sync'
@@ -843,49 +842,6 @@ export function vanguardApiResponseRequiresAuthentication(
   return vanguardAuthenticationResponse(response.url);
 }
 
-export async function vanguardBrowserFetchInPage(
-  request: VanguardApiRequest,
-): Promise<VanguardBrowserApiResponse> {
-  const headers = new Headers(request.headers ?? {});
-  const requestedReferrer = headers.get('referer');
-  headers.delete('referer');
-  let referrer: string | undefined;
-  if (requestedReferrer) {
-    try {
-      const parsedReferrer = new URL(requestedReferrer, location.href);
-      if (parsedReferrer.origin === location.origin) referrer = parsedReferrer.toString();
-    } catch {
-      // Browser fetch will provide the current document as the safe referrer.
-    }
-  }
-
-  const response = await fetch(request.url, {
-    method: request.method,
-    headers,
-    ...(request.body ? { body: request.body } : {}),
-    ...(referrer ? { referrer } : {}),
-    credentials: 'include',
-    redirect: 'manual',
-  });
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  let binary = '';
-  const chunkSize = 32_768;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
-  }
-  const responseHeaders: Record<string, string> = {};
-  response.headers.forEach((value, name) => {
-    responseHeaders[name.toLowerCase()] = value;
-  });
-  return {
-    status: response.status,
-    url: response.url || request.url,
-    headers: responseHeaders,
-    bodyBase64: btoa(binary),
-    redirected: response.redirected || response.type === 'opaqueredirect' || response.status === 0,
-  };
-}
-
 function vanguardApiPageUrl(request: VanguardApiRequest): string {
   const referer = Object.entries(request.headers ?? {})
     .find(([name]) => name.toLowerCase() === 'referer')?.[1];
@@ -923,11 +879,18 @@ async function fetchVanguardApiResponse(
   }
 
   try {
-    const response = await page.evaluate(vanguardBrowserFetchInPage, request);
-    return {
-      ...response,
-      url: new URL(response.url, request.url).toString(),
-    };
+    return await runBrowserNativeRequest(page, {
+      url: request.url,
+      method: request.method,
+      headers: request.headers,
+      ...(request.body === undefined ? {} : {
+        bodyBase64: Buffer.from(request.body, 'utf8').toString('base64'),
+      }),
+    }, current.origin === target.origin ? undefined : {
+      applicationOrigin: current.origin,
+      destinationOrigin: target.origin,
+      institutionHostname: 'vanguard.com',
+    });
   } catch (error) {
     if (page.isClosed() || isVanguardLoginUrl(page.url())) {
       throw new Error(AUTHENTICATION_REQUIRED);
@@ -937,7 +900,7 @@ async function fetchVanguardApiResponse(
 }
 
 function vanguardApiResponseBody(response: VanguardBrowserApiResponse): Buffer {
-  return Buffer.from(response.bodyBase64, 'base64');
+  return browserNativeResponseBody(response);
 }
 
 function vanguardApiResponseJson(response: VanguardBrowserApiResponse): unknown {

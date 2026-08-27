@@ -12,6 +12,11 @@ import parseTiaaActivity, {
 import parseTiaaStatement, {
   meta as tiaaStatementMeta,
 } from '../../importParsers/moneyParsers/tiaa-statement-pdf.ts';
+import {
+  browserNativeResponseBody,
+  runBrowserNativeRequest,
+  type BrowserNativeResponse,
+} from '../browserRequest.ts';
 import { runInstitutionBrowserProgram } from '../browserSession.ts';
 
 const TIAA_SESSION = 'tiaa-catchup';
@@ -378,39 +383,16 @@ export async function browserFetch(
   };
   page.on('request', observeRequest);
   page.on('response', observeResponse);
-  let response: { status: number; contentType: string; finalUrl: string; body: string };
+  let response: BrowserNativeResponse;
   try {
-    response = await page.evaluate(async ({ destination, method, headers, body }) => {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30_000);
-      try {
-        const result = await fetch(destination, {
-          method,
-          headers,
-          body,
-          credentials: 'include',
-          redirect: 'follow',
-          signal: controller.signal,
-        });
-        const bytes = new Uint8Array(await result.arrayBuffer());
-        let binary = '';
-        for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-          binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
-        }
-        return {
-          status: result.status,
-          contentType: result.headers.get('content-type') ?? '',
-          finalUrl: result.url,
-          body: btoa(binary),
-        };
-      } finally {
-        clearTimeout(timeout);
-      }
-    }, {
-      destination,
+    response = await runBrowserNativeRequest(page, {
+      url: destination,
       method,
       headers: options.headers ?? {},
-      body: options.body,
+      ...(options.body === undefined ? {} : {
+        bodyBase64: Buffer.from(options.body, 'utf8').toString('base64'),
+      }),
+      timeoutMs: 30_000,
     });
   } catch (error) {
     if (authenticationEvidence) throw new TiaaAuthenticationRequiredError('TIAA authentication is required');
@@ -421,11 +403,12 @@ export async function browserFetch(
   }
   const decoded = {
     status: response.status,
-    contentType: response.contentType.toLowerCase(),
-    finalUrl: response.finalUrl,
-    body: Buffer.from(response.body, 'base64'),
+    contentType: response.headers['content-type']?.toLowerCase() ?? '',
+    finalUrl: response.url,
+    body: browserNativeResponseBody(response),
   };
-  if (tiaaResponseRequiresAuthentication(decoded.status, decoded.finalUrl) ||
+  if (response.redirected || response.status === 0 ||
+    tiaaResponseRequiresAuthentication(decoded.status, decoded.finalUrl) ||
     tiaaResponseBodyRequiresAuthentication(decoded.contentType, decoded.body)) {
     throw new TiaaAuthenticationRequiredError('TIAA authentication is required');
   }

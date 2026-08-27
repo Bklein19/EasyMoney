@@ -5,6 +5,12 @@ import { basename, join, resolve } from "node:path";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 
 import { runInstitutionBrowserProgram } from "../browserSession.ts";
+import {
+  browserNativeResponseBody,
+  browserNativeResponseOk,
+  runBrowserNativeRequest,
+  type BrowserNativeResponse,
+} from "../browserRequest.ts";
 import { parseCsvRows } from "../../importParsers/csvRows.ts";
 import type { Page } from "playwright";
 
@@ -436,20 +442,23 @@ export function bankOfAmericaCardActivityRequest(
 async function executeBankOfAmericaRequest(
   page: Page,
   request: BankOfAmericaApiRequest,
-) {
+): Promise<BrowserNativeResponse> {
   if (request.multipart) {
-    return page.context().request.fetch(request.url, {
+    return runBrowserNativeRequest(page, {
+      url: request.url,
       method: request.method,
       multipart: request.multipart,
     });
   }
   if (request.data) {
-    return page.context().request.fetch(request.url, {
+    return runBrowserNativeRequest(page, {
+      url: request.url,
       method: request.method,
-      data: request.data,
+      headers: { "content-type": "application/json" },
+      bodyBase64: Buffer.from(JSON.stringify(request.data), "utf8").toString("base64"),
     });
   }
-  return page.context().request.fetch(request.url, { method: request.method });
+  return runBrowserNativeRequest(page, { url: request.url, method: request.method });
 }
 
 async function saveBankOfAmericaArtifact(
@@ -463,17 +472,17 @@ async function saveBankOfAmericaArtifact(
     throw new Error("Bank of America artifact filename is invalid");
   }
   const response = await executeBankOfAmericaRequest(page, request);
-  if (!response.ok()) {
-    throw new Error(`Bank of America ${kind.toUpperCase()} request failed with status ${response.status()}`);
+  if (!browserNativeResponseOk(response)) {
+    throw new Error(`Bank of America ${kind.toUpperCase()} request failed with status ${response.status}`);
   }
-  const contentType = response.headers()["content-type"]?.toLowerCase() ?? "";
+  const contentType = response.headers["content-type"]?.toLowerCase() ?? "";
   if (kind === "csv" && !contentType.includes("csv") && !contentType.includes("octet-stream")) {
     throw new Error("Bank of America activity response was not CSV");
   }
   if (kind === "pdf" && !contentType.includes("pdf") && !contentType.includes("octet-stream")) {
     throw new Error("Bank of America statement response was not PDF");
   }
-  const body = await response.body();
+  const body = browserNativeResponseBody(response);
   if (body.length < 16) throw new Error(`Bank of America ${kind.toUpperCase()} response was empty`);
   await writeFile(join(outputDir, filename), body);
 }
@@ -487,12 +496,17 @@ async function fetchBankOfAmericaStatements(
   const documents = new Map<string, BankOfAmericaStatementDocument>();
   for (const request of bankOfAmericaStatementIndexRequests(accountDestination, from, through)) {
     const response = await executeBankOfAmericaRequest(page, request);
-    if (!response.ok()) {
-      throw new Error(`Bank of America statement index failed with status ${response.status()}`);
+    if (!browserNativeResponseOk(response)) {
+      throw new Error(`Bank of America statement index failed with status ${response.status}`);
     }
-    const contentType = response.headers()["content-type"]?.toLowerCase() ?? "";
+    const contentType = response.headers["content-type"]?.toLowerCase() ?? "";
     if (!contentType.includes("json")) throw new Error("Bank of America statement index was not JSON");
-    const body = await response.json() as { documentList?: unknown };
+    let body: { documentList?: unknown };
+    try {
+      body = JSON.parse(browserNativeResponseBody(response).toString("utf8")) as { documentList?: unknown };
+    } catch {
+      throw new Error("Bank of America statement index was not JSON");
+    }
     if (!Array.isArray(body.documentList)) {
       throw new Error("Bank of America statement index omitted its document list");
     }

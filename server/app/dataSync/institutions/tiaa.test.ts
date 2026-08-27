@@ -217,7 +217,7 @@ describe('TIAA parser claim identity', () => {
     expect(source).toContain('/secure/participantdata/api/quickendownload');
     expect(source).toContain('/secure/account-statements/api/type');
     expect(source).toContain('/private/ahstatementsui/getreport');
-    expect(source).toContain('fetch(destination');
+    expect(source).toContain('runBrowserNativeRequest(page');
     expect(source).not.toContain('normalizeHeadlessUserAgent');
     expect(source).not.toContain('--disable-blink-features=AutomationControlled');
     expect(source).not.toContain('normalChromeUserAgent');
@@ -255,6 +255,7 @@ describe('TIAA parser claim identity', () => {
       redirectedFrom: () => rootRequest,
     };
     const page = {
+      url: () => destination,
       on(event: string, listener: (request: unknown) => void) {
         if (event === 'request') requestListeners.push(listener);
       },
@@ -274,15 +275,17 @@ describe('TIAA parser claim identity', () => {
     });
 
     const loginHtmlPage = {
+      url: () => destination,
       on() {},
       off() {},
       async evaluate() {
         return {
           status: 200,
-          contentType: 'text/html',
-          finalUrl: destination,
-          body: Buffer.from('<html><input autocomplete="username"><input type="password"></html>')
+          url: destination,
+          headers: { 'content-type': 'text/html' },
+          bodyBase64: Buffer.from('<html><input autocomplete="username"><input type="password"></html>')
             .toString('base64'),
+          redirected: false,
         };
       },
     } as unknown as Page;

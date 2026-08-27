@@ -18,6 +18,13 @@ function sharedDataSyncFiles(): string[] {
   );
 }
 
+function institutionProductionFiles(): string[] {
+  return [...new Bun.Glob('institutions/*.ts').scanSync({
+    cwd: dataSyncDirectory,
+    absolute: true,
+  })].filter(file => !file.endsWith('.test.ts'));
+}
+
 function displayPath(file: string): string {
   return relative(repositoryRoot, file);
 }
@@ -44,14 +51,28 @@ function dependencyClosure(entrypoint: string): string[] {
 
 describe('data sync architecture', () => {
   test('keeps AutomationControlled suppression in the shared browser launcher', () => {
-    const violations = [...new Bun.Glob('institutions/*.ts').scanSync({
-      cwd: dataSyncDirectory,
-      absolute: true,
-    })]
-      .filter(file => !file.endsWith('.test.ts'))
+    const violations = institutionProductionFiles()
       .filter(file => readFileSync(file, 'utf8').includes('AutomationControlled'));
 
     expect(violations.map(displayPath)).toEqual([]);
+  });
+
+  test('keeps authenticated HTTP replay in the shared browser-native transport', () => {
+    const forbidden = [
+      /page\.context\(\)\.request/,
+      /context\(\)\.request/,
+      /\.request\.fetch\s*\(/,
+      /\bAPIRequestContext\b/,
+      /\bAPIResponse\b/,
+      /\bfetch\s*\(/,
+    ];
+    const violations = institutionProductionFiles().flatMap(file => {
+      const source = readFileSync(file, 'utf8');
+      const matches = forbidden.filter(pattern => pattern.test(source)).map(pattern => pattern.source);
+      return matches.length === 0 ? [] : [{ file: displayPath(file), matches }];
+    });
+
+    expect(violations).toEqual([]);
   });
 
   test('keeps concrete connector imports inside the registry composition root', () => {

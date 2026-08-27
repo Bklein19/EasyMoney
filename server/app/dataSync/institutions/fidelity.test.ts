@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { chromium, type Download } from 'playwright';
+import type { Download } from 'playwright';
 
 import {
   FIDELITY_AUTHENTICATION_TIMEOUT_MS,
@@ -14,7 +14,6 @@ import {
   fidelityAccountsFromCandidates,
   fidelityArtifactDedupeKey,
   fidelityArtifactFileName,
-  fidelityBrowserFetchInPage,
   fidelityDirectRequestUrl,
   fidelityStatementDocumentIdFromRequestBody,
   fidelityResponseRequiresAuthentication,
@@ -643,115 +642,6 @@ describe('Fidelity replay authentication', () => {
     })).toBe(true);
   });
 
-  test('replays JSON, binary POST bytes, and cookies in Chromium without Bun parsing the HTTP response', async () => {
-    const responseBytes = new Uint8Array([0, 1, 127, 128, 254, 255]);
-    const requestBytes = new Uint8Array([255, 0, 42, 128]);
-    const jsonResponseBytes = new TextEncoder().encode(JSON.stringify({ result: 'browser-owned' }));
-    let observedRequest: {
-      method: string;
-      contentType: string | null;
-      proofHeader: string | null;
-      referrer: string | null;
-      body: Uint8Array;
-    } | null = null;
-    const server = Bun.serve({
-      hostname: '127.0.0.1',
-      port: 0,
-      async fetch(request) {
-        const url = new URL(request.url);
-        if (url.pathname === '/replay') {
-          observedRequest = {
-            method: request.method,
-            contentType: request.headers.get('content-type'),
-            proofHeader: request.headers.get('x-replay-proof'),
-            referrer: request.headers.get('referer'),
-            body: new Uint8Array(await request.arrayBuffer()),
-          };
-          return new Response(responseBytes, {
-            headers: {
-              'content-type': 'application/octet-stream',
-              'set-cookie': 'fidelity-browser-cookie=accepted; Path=/; SameSite=Lax',
-            },
-          });
-        }
-        if (url.pathname === '/json') {
-          return new Response(jsonResponseBytes, {
-            headers: { 'content-type': 'application/json' },
-          });
-        }
-        if (url.pathname === '/redirect') {
-          return new Response(null, {
-            status: 302,
-            headers: {
-              location: '/login',
-              'set-cookie': 'fidelity-redirect-cookie=accepted; Path=/; SameSite=Lax',
-            },
-          });
-        }
-        return new Response('<!doctype html><title>Fidelity browser replay test</title>', {
-          headers: { 'content-type': 'text/html' },
-        });
-      },
-    });
-    const origin = server.url.origin;
-    const browser = await chromium.launch({ channel: 'chrome', headless: true });
-    try {
-      const context = await browser.newContext();
-      const page = await context.newPage();
-      await page.goto(origin, { waitUntil: 'domcontentloaded' });
-      const response = await page.evaluate(fidelityBrowserFetchInPage, {
-        url: `${origin}/replay`,
-        method: 'POST',
-        headers: {
-          'content-type': 'application/octet-stream',
-          referer: `${origin}/activity`,
-          'x-replay-proof': 'preserved',
-        },
-        bodyBase64: Buffer.from(requestBytes).toString('base64'),
-      });
-
-      expect(observedRequest as unknown).toEqual({
-        method: 'POST',
-        contentType: 'application/octet-stream',
-        proofHeader: 'preserved',
-        referrer: `${origin}/activity`,
-        body: requestBytes,
-      });
-      expect(response).toMatchObject({
-        status: 200,
-        url: `${origin}/replay`,
-        redirected: false,
-      });
-      expect(response.headers['content-type']).toContain('application/octet-stream');
-      expect(new Uint8Array(Buffer.from(response.bodyBase64, 'base64'))).toEqual(responseBytes);
-      expect((await context.cookies(origin)).some(cookie => (
-        cookie.name === 'fidelity-browser-cookie' && cookie.value === 'accepted'
-      ))).toBe(true);
-
-      const jsonResponse = await page.evaluate(fidelityBrowserFetchInPage, {
-        url: `${origin}/json`,
-        method: 'GET',
-      });
-      const receivedJsonBytes = new Uint8Array(Buffer.from(jsonResponse.bodyBase64, 'base64'));
-      expect(jsonResponse.headers['content-type']).toContain('application/json');
-      expect(receivedJsonBytes).toEqual(jsonResponseBytes);
-      expect(JSON.parse(new TextDecoder().decode(receivedJsonBytes))).toEqual({ result: 'browser-owned' });
-
-      const redirect = await page.evaluate(fidelityBrowserFetchInPage, {
-        url: `${origin}/redirect`,
-        method: 'GET',
-      });
-      expect(redirect.status).toBe(0);
-      expect(redirect.redirected).toBe(true);
-      expect(fidelityResponseRequiresAuthentication(redirect)).toBe(true);
-      expect((await context.cookies(origin)).some(cookie => (
-        cookie.name === 'fidelity-redirect-cookie' && cookie.value === 'accepted'
-      ))).toBe(true);
-    } finally {
-      await browser.close();
-      await server.stop(true);
-    }
-  }, 30_000);
 });
 
 describe('Fidelity artifact validation', () => {
@@ -964,9 +854,7 @@ test('Fidelity authentication waits classify login before maintenance copy', asy
 
 test('Fidelity institution code uses direct requests and no fixed browser sleeps', async () => {
   const source = await readFile(new URL('./fidelity.ts', import.meta.url), 'utf8');
-  expect(source).toContain('page.evaluate(fidelityBrowserFetchInPage');
-  expect(source).toContain("credentials: 'include'");
-  expect(source).toContain("redirect: 'manual'");
+  expect(source).toContain('runBrowserNativeRequest(page');
   expect(source).not.toContain('page.context().request');
   expect(source).toContain('#account-selector:visible section[aria-label] a');
   expect(source).not.toContain('normalizeHeadlessUserAgent');

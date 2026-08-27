@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 
-import type { APIResponse, Page } from 'playwright';
+import type { Page } from 'playwright';
 
 import { parseCsvRows } from '../../importParsers/csvRows.ts';
 import { sequoiaFundActivityParser } from '../../importParsers/sequoiaFundActivity.ts';
@@ -10,6 +10,12 @@ import {
   sequoiaFundSourceAccountName,
 } from '../../importParsers/sequoiaFundIdentity.ts';
 import { sequoiaFundStatementParser } from '../../importParsers/sequoiaFundStatement.ts';
+import {
+  browserNativeResponseBody,
+  browserNativeResponseOk,
+  runBrowserNativeRequest,
+  type BrowserNativeResponse,
+} from '../browserRequest.ts';
 import { runInstitutionBrowserProgram } from '../browserSession.ts';
 
 const sequoiaFundHost = 'secureaccountview.com';
@@ -479,29 +485,30 @@ export function sequoiaFundStatementJobs(
   return jobs.sort((left, right) => left.fileName.localeCompare(right.fileName));
 }
 
-function responseContentType(response: APIResponse): string {
-  return response.headers()['content-type']?.toLowerCase() ?? '';
+function responseContentType(response: BrowserNativeResponse): string {
+  return response.headers['content-type']?.toLowerCase() ?? '';
 }
 
-function assertCsvResponse(response: APIResponse, body: Buffer): void {
+function assertCsvResponse(response: BrowserNativeResponse, body: Buffer): void {
   const sample = body.subarray(0, Math.min(body.length, 1024));
   const text = sample.toString('utf8').trimStart().toLowerCase();
-  if (!response.ok() || body.length < 32 || sample.includes(0) || !sample.includes(44) || !/[\r\n]/.test(text) ||
+  if (!browserNativeResponseOk(response) || body.length < 32 || sample.includes(0) || !sample.includes(44) || !/[\r\n]/.test(text) ||
     text.startsWith('<') || text.startsWith('%pdf-') ||
     !/(?:csv|text|excel|octet-stream)/.test(responseContentType(response))) {
     throw new Error('Sequoia Fund activity response failed CSV validation');
   }
 }
 
-function assertPdfResponse(response: APIResponse, body: Buffer): void {
-  if (!response.ok() || body.length < 1_000 || body.subarray(0, 5).toString('ascii') !== '%PDF-' ||
+function assertPdfResponse(response: BrowserNativeResponse, body: Buffer): void {
+  if (!browserNativeResponseOk(response) || body.length < 1_000 || body.subarray(0, 5).toString('ascii') !== '%PDF-' ||
     !/(?:pdf|octet-stream)/.test(responseContentType(response))) {
     throw new Error('Sequoia Fund statement response failed PDF validation');
   }
 }
 
-async function executeRequest(page: Page, request: SequoiaFundApiRequest): Promise<APIResponse> {
-  return page.context().request.fetch(request.url, {
+async function executeRequest(page: Page, request: SequoiaFundApiRequest): Promise<BrowserNativeResponse> {
+  return runBrowserNativeRequest(page, {
+    url: request.url,
     method: request.method,
     headers: request.headers,
     ...(request.form ? { form: request.form } : {}),
@@ -703,10 +710,16 @@ async function discoverActivityRequest(
 async function fetchStatementList(page: Page): Promise<SequoiaFundStatementList> {
   const request = sequoiaFundStatementListRequest(page.url());
   const response = await executeRequest(page, request);
-  if (!response.ok() || !responseContentType(response).includes('json')) {
+  if (!browserNativeResponseOk(response) || !responseContentType(response).includes('json')) {
     throw new Error('Sequoia Fund statement list request failed');
   }
-  return parseSequoiaFundStatementList(await response.json());
+  let body: unknown;
+  try {
+    body = JSON.parse(browserNativeResponseBody(response).toString('utf8')) as unknown;
+  } catch {
+    throw new Error('Sequoia Fund statement list request failed');
+  }
+  return parseSequoiaFundStatementList(body);
 }
 
 async function discoverStatementAccess(
@@ -768,7 +781,7 @@ async function downloadArtifact(options: {
 
   options.progress(options.key, options.phase, 'start', `Downloading Sequoia Fund ${options.kind}`, options.data);
   const response = await executeRequest(options.page, options.request);
-  const body = await response.body();
+  const body = browserNativeResponseBody(response);
   if (options.kind === 'activity') assertCsvResponse(response, body);
   else assertPdfResponse(response, body);
   await writeFile(path, body);
