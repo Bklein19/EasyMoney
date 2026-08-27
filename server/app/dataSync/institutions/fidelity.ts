@@ -1020,6 +1020,27 @@ function safeErrorMessage(error: unknown): string {
     .slice(0, 500);
 }
 
+export function normalizeFidelityHeadlessUserAgent(userAgent: string): string {
+  return userAgent.replace('HeadlessChrome/', 'Chrome/');
+}
+
+export async function runWithFidelityUserAgent<T>(
+  page: Page,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const userAgent = await page.evaluate(() => navigator.userAgent);
+  const normalizedUserAgent = normalizeFidelityHeadlessUserAgent(userAgent);
+  if (normalizedUserAgent === userAgent) return operation();
+
+  const session = await page.context().newCDPSession(page);
+  await session.send('Network.setUserAgentOverride', { userAgent: normalizedUserAgent });
+  try {
+    return await operation();
+  } finally {
+    await session.detach().catch(() => {});
+  }
+}
+
 async function runAuthenticatedFidelity(
   page: Page,
   config: Required<FidelitySyncConfig>,
@@ -1110,7 +1131,10 @@ export async function runFidelitySync(
           timestamp: new Date().toISOString(),
         }),
         programBindings: {
-          run: (page: Page) => runAuthenticatedFidelity(page, config, report),
+          run: (page: Page) => runWithFidelityUserAgent(
+            page,
+            () => runAuthenticatedFidelity(page, config, report),
+          ),
           classify: (error: unknown) => {
             if (error instanceof FidelityAuthenticationRequiredError) {
               return {

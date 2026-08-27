@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Page } from 'playwright';
 
 import {
   fidelityAccountsFromCandidates,
@@ -9,7 +10,9 @@ import {
   fidelityDirectRequestUrl,
   fidelityStatementPlans,
   isFidelityInstitutionUnavailableText,
+  normalizeFidelityHeadlessUserAgent,
   resolveFidelitySurfaceDiscoveries,
+  runWithFidelityUserAgent,
   validateFidelityArtifact,
   type FidelityAccountIdentity,
   type FidelityRemoteAccount,
@@ -21,6 +24,68 @@ const retailAccount: FidelityAccountIdentity = {
   accountKey: 'retail-account',
   last4: '1234',
 };
+
+describe('Fidelity headless browser identity', () => {
+  test('normalizes only the HeadlessChrome user-agent token', () => {
+    expect(normalizeFidelityHeadlessUserAgent(
+      'Mozilla/5.0 AppleWebKit/537.36 HeadlessChrome/151.0.0.0 Safari/537.36',
+    )).toBe('Mozilla/5.0 AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36');
+    expect(normalizeFidelityHeadlessUserAgent(
+      'Mozilla/5.0 AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36',
+    )).toBe('Mozilla/5.0 AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36');
+  });
+
+  test('keeps the Fidelity override attached before navigation and releases it afterward', async () => {
+    const events: string[] = [];
+    const session = {
+      send: async (method: string, params: { userAgent: string }) => {
+        events.push(`${method}:${params.userAgent.includes('HeadlessChrome/') ? 'headless' : 'normal'}`);
+      },
+      detach: async () => {
+        events.push('detach');
+      },
+    };
+    const page = {
+      evaluate: async () => {
+        events.push('evaluate-user-agent');
+        return 'Mozilla/5.0 HeadlessChrome/151.0.0.0 Safari/537.36';
+      },
+      context: () => ({
+        newCDPSession: async () => {
+          events.push('open-session');
+          return session;
+        },
+      }),
+    } as unknown as Page;
+
+    await expect(runWithFidelityUserAgent(page, async () => {
+      events.push('navigate');
+      return 'complete';
+    })).resolves.toBe('complete');
+    expect(events).toEqual([
+      'evaluate-user-agent',
+      'open-session',
+      'Network.setUserAgentOverride:normal',
+      'navigate',
+      'detach',
+    ]);
+  });
+
+  test('does not alter headed Fidelity pages', async () => {
+    const events: string[] = [];
+    const page = {
+      evaluate: async () => 'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36',
+      context: () => {
+        throw new Error('headed pages must not open a CDP override session');
+      },
+    } as unknown as Page;
+
+    await runWithFidelityUserAgent(page, async () => {
+      events.push('navigate');
+    });
+    expect(events).toEqual(['navigate']);
+  });
+});
 
 function remoteAccount(
   surface: FidelityRemoteAccount['surface'],
