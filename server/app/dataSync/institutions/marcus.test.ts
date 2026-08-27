@@ -102,25 +102,25 @@ test('Marcus discovers every savings and deposit account while selecting every s
     { text: 'Online Savings Account **** 1111', remoteKey: 'remote-a' },
   ], [
     {
-      href: '/us/en/accounts/document/document-a',
+      href: '/api/savings/api/v1/accounts/document/document-a',
       accountText: 'Online Savings Account **** 1111',
       documentText: 'June 1, 2026 Statement',
       remoteKey: 'remote-a',
     },
     {
-      href: '/us/en/accounts/document/document-a',
+      href: '/api/savings/api/v1/accounts/document/document-a',
       accountText: 'Online Savings Account **** 1111',
       documentText: 'June 1, 2026 Statement',
       remoteKey: 'remote-a',
     },
     {
-      href: '/us/en/accounts/document/document-b',
+      href: '/api/savings/api/v1/accounts/document/document-b',
       accountText: 'High-Yield CD - 2222',
       documentText: 'June 1, 2026 Statement',
       remoteKey: 'remote-b',
     },
     {
-      href: '/us/en/accounts/document/tax-document',
+      href: '/api/savings/api/v1/accounts/document/tax-document',
       accountText: 'Online Savings Account **** 1111',
       documentText: '2026 1099 tax document',
       remoteKey: 'remote-a',
@@ -147,7 +147,7 @@ test('Marcus discovers every savings and deposit account while selecting every s
     account: savingsAccount(),
     artifactType: 'statement-pdf',
     statementDate: '2026-06-01',
-    request: { method: 'GET', url: 'https://www.marcus.com/us/en/accounts/document/document-a' },
+    request: { method: 'GET', url: 'https://www.marcus.com/api/savings/api/v1/accounts/document/document-a' },
   });
   expect(catalog.unsupportedArtifactCount).toBe(2);
 });
@@ -160,12 +160,12 @@ test('Marcus rejects routing ambiguity rather than mixing remote accounts or sta
 
   expect(() => buildMarcusRemoteCatalog([], [
     {
-      href: '/us/en/accounts/document/document-a',
+      href: '/api/savings/api/v1/accounts/document/document-a',
       accountText: 'Online Savings Account **** 1111',
       documentText: 'June 1, 2026 Statement',
     },
     {
-      href: '/us/en/accounts/document/document-b',
+      href: '/api/savings/api/v1/accounts/document/document-b',
       accountText: 'Online Savings Account **** 1111',
       documentText: 'June 1, 2026 Statement',
     },
@@ -192,17 +192,17 @@ test('Marcus maps discovered accounts to exact local identities without account-
 test('Marcus selects only mapped documents inside each account-specific catch-up window', () => {
   const catalog = buildMarcusRemoteCatalog([], [
     {
-      href: '/us/en/accounts/document/savings-a-june',
+      href: '/api/savings/api/v1/accounts/document/savings-a-june',
       accountText: 'Online Savings Account **** 1111',
       documentText: 'June 30, 2026 Statement',
     },
     {
-      href: '/us/en/accounts/document/savings-b-may',
+      href: '/api/savings/api/v1/accounts/document/savings-b-may',
       accountText: 'Online Savings Account **** 2222',
       documentText: 'May 31, 2026 Statement',
     },
     {
-      href: '/us/en/accounts/document/unmapped-june',
+      href: '/api/savings/api/v1/accounts/document/unmapped-june',
       accountText: 'Online Savings Account **** 3333',
       documentText: 'June 30, 2026 Statement',
     },
@@ -223,11 +223,11 @@ test('Marcus selects only mapped documents inside each account-specific catch-up
 });
 
 test('Marcus permits only the verified authenticated document route', () => {
-  expect(marcusDocumentRequest('/us/en/accounts/document/opaque-document')).toEqual({
+  expect(marcusDocumentRequest('/api/savings/api/v1/accounts/document/opaque-document')).toEqual({
     method: 'GET',
-    url: 'https://www.marcus.com/us/en/accounts/document/opaque-document',
+    url: 'https://www.marcus.com/api/savings/api/v1/accounts/document/opaque-document',
   });
-  expect(() => marcusDocumentRequest('https://example.com/us/en/accounts/document/opaque-document')).toThrow(
+  expect(() => marcusDocumentRequest('https://example.com/api/savings/api/v1/accounts/document/opaque-document')).toThrow(
     'destination is invalid',
   );
   expect(() => marcusDocumentRequest('/us/en/login')).toThrow('destination is invalid');
@@ -280,12 +280,12 @@ test('Marcus downloads verified document URLs through the authenticated request 
 
   const bytes = await fetchMarcusDocumentBytes(
     page,
-    marcusDocumentRequest('/us/en/accounts/document/opaque-document'),
+    marcusDocumentRequest('/api/savings/api/v1/accounts/document/opaque-document'),
   );
 
   expect(bytes).toEqual(validPdf);
   expect(calls).toEqual([{
-    url: 'https://www.marcus.com/us/en/accounts/document/opaque-document',
+    url: 'https://www.marcus.com/api/savings/api/v1/accounts/document/opaque-document',
     options: { method: 'GET', maxRedirects: 5, timeout: 30_000 },
   }]);
   expect(disposed).toBe(true);

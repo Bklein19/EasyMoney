@@ -15,14 +15,14 @@ import type { APIResponse, Page } from 'playwright';
 const LOGIN_URL = 'https://www.marcus.com/us/en/login';
 const DOCUMENTS_URL = 'https://www.marcus.com/us/en/documents';
 const MARCUS_ORIGIN = 'https://www.marcus.com';
-const DOCUMENT_LINK_SELECTOR = 'a[href*="/us/en/accounts/document/"]';
+const DOCUMENT_LINK_SELECTOR = 'a[href*="/accounts/document/"]';
 const AUTHENTICATION_FIELD_SELECTOR = [
   'input[type="password"]:visible',
   'input[autocomplete="username"]:visible',
   'input[autocomplete="current-password"]:visible',
 ].join(',');
 const LOGIN_PATH_PATTERN = /(?:login|logon|sign[-_]?in|authenticate|challenge|verify|mfa|otp)/i;
-const DOCUMENT_PATH_PATTERN = /^\/us\/en\/accounts\/document\/[^/]+\/?$/;
+const DOCUMENT_PATH_PATTERN = /^\/api\/savings\/api\/[^/]+\/accounts\/document\/[^/]+\/?$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export const MARCUS_PROFILE_NAME = 'marcus-catchup';
