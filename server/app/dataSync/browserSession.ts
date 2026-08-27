@@ -1221,6 +1221,8 @@ function isClosedContextError(error: unknown): boolean {
   return /Target page, context or browser has been closed/i.test(String(error instanceof Error ? error.message : error));
 }
 
+class ResumeHeadlesslyAfterAuthentication extends Error {}
+
 export async function showSyncCompletionChapter(
   page: Page,
   options: Pick<RunOptions, 'completionDescription' | 'completionDurationMs'>,
@@ -1271,6 +1273,7 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     persistAuthentication: session.persistAuthentication,
     requestedHeadless: session.contextOptions?.headless,
   });
+  const resumeHeadlesslyAfterAuthentication = session.contextOptions?.headless === undefined;
 
   const runAttempt = async (
     headless: boolean,
@@ -1292,19 +1295,20 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     let activePage = page;
     const deadline = Date.now() + (options.authenticationTimeoutMs ?? 10 * 60_000);
     const isAuthenticated = options.isAuthenticated ?? hasDefaultAuthentication;
-    const checkpointAuthentication = async () => {
-      if (!(session.persistAuthentication ?? true)) return;
+    const checkpointAuthentication = async (): Promise<boolean> => {
+      if (!(session.persistAuthentication ?? true)) return false;
       const authenticated = await checkAuthenticationForCheckpoint(
         activePage,
         isAuthenticated,
         options.authenticationCheckpointTimeoutMs,
       );
-      if (!authenticated) return;
+      if (!authenticated) return false;
       const persisted = await persistBrowserAuthentication(
         context,
         playwrightAuthStatePath(canonicalProfilePath),
       );
       if (!persisted) console.warn(`Could not checkpoint authentication for ${session.name}.`);
+      return persisted;
     };
     let result = decodeInstitutionBrowserProgramResult<T>(await program(
       activePage,
@@ -1323,8 +1327,11 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
         ...options,
         authenticationRecoveryUrl: options.authenticationRecoveryUrl ?? session.startUrl,
       }, context);
-      await checkpointAuthentication();
+      const checkpointed = await checkpointAuthentication();
       reportProgress('Authentication complete. Continuing downloads.');
+      if (checkpointed && resumeHeadlesslyAfterAuthentication) {
+        throw new ResumeHeadlesslyAfterAuthentication();
+      }
       result = decodeInstitutionBrowserProgramResult<T>(await program(
         activePage,
         reportProgress,
@@ -1347,13 +1354,35 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     ));
   }
 
+  const runInteractiveAttemptWithResume = async (
+    operation: () => Promise<InstitutionBrowserProgramResult<T>>,
+  ): Promise<InstitutionBrowserProgramResult<T>> => {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!(error instanceof ResumeHeadlesslyAfterAuthentication)) throw error;
+      console.log(`Authentication for ${session.name} was saved. Resuming headlessly.`);
+      const resumed = await runWithTransientBrowserProfile(profilePath => runAttempt(
+        true,
+        false,
+        profilePath,
+      ));
+      if (resumed.status === 'login-required') {
+        throw new Error(`Saved authentication for ${session.name} could not be restored headlessly`);
+      }
+      return resumed;
+    }
+  };
+
   const initialResult = launchStrategy.allowHeadedAuthenticationFallback
     ? await runWithTransientBrowserProfile(profilePath => runAttempt(true, false, profilePath))
-    : await runAttempt(launchStrategy.initialHeadless, !launchStrategy.initialHeadless);
+    : launchStrategy.initialHeadless
+      ? await runAttempt(true, false)
+      : await runInteractiveAttemptWithResume(() => runAttempt(false, true));
   if (initialResult.status !== 'login-required' || !launchStrategy.allowHeadedAuthenticationFallback) {
     return initialResult;
   }
 
   console.log(`Saved authentication for ${session.name} needs attention. Opening the browser for login or MFA.`);
-  return runAttempt(false, true, canonicalProfilePath, true);
+  return runInteractiveAttemptWithResume(() => runAttempt(false, true, canonicalProfilePath, true));
 }

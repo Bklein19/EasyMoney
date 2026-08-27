@@ -383,6 +383,235 @@ describe('Playwright session helper', () => {
     expect(await stat(transientProfilePath).then(() => true, () => false)).toBe(false);
   });
 
+  test('hands off to a fresh headless attempt immediately after interactive authentication is saved', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-auth-resume-'));
+    temporaryDirectories.push(root);
+    const canonicalProfilePath = join(root, 'profiles', 'fidelity-catchup');
+    const transientRoot = join(root, 'transient');
+    await mkdir(canonicalProfilePath, { recursive: true });
+    await writeFile(playwrightAuthStatePath(canonicalProfilePath), JSON.stringify({
+      cookies: [{ name: 'stale-session', value: 'old', domain: '.example.test', path: '/' }],
+      origins: [],
+    }));
+
+    const attempts: Array<{
+      headless: boolean;
+      profilePath: string;
+      authenticationProfilePath: string;
+      forceStartUrl: boolean;
+      restoredFreshAuthentication: boolean;
+    }> = [];
+    const programCalls: number[] = [];
+    let attemptNumber = 0;
+    const fakeWithPlaywrightPage: typeof withPlaywrightPage = async (sessionOptions, operation) => {
+      const headless = sessionOptions.contextOptions?.headless ?? false;
+      attemptNumber += 1;
+      const authenticationProfilePath = sessionOptions.authenticationProfilePath ?? '';
+      const savedState = JSON.parse(await readFile(
+        playwrightAuthStatePath(authenticationProfilePath),
+        'utf8',
+      )) as { cookies?: Array<{ name?: string }> };
+      const restoredFreshAuthentication = savedState.cookies?.some(cookie => cookie.name === 'fresh-session') ?? false;
+      attempts.push({
+        headless,
+        profilePath: sessionOptions.profilePath ?? '',
+        authenticationProfilePath,
+        forceStartUrl: sessionOptions.forceStartUrl ?? false,
+        restoredFreshAuthentication,
+      });
+      programCalls.push(0);
+      const context = new EventEmitter();
+      const page = Object.assign(new EventEmitter(), {
+        attemptNumber,
+        authenticated: headless && restoredFreshAuthentication,
+        isClosed: () => false,
+        context: () => context,
+        url: () => 'https://digital.fidelity.com/ftgw/digital/portfolio/summary',
+        bringToFront: async () => {},
+        waitForTimeout: async () => {},
+        evaluate: async () => ({
+          origin: 'https://digital.fidelity.com',
+          entries: { authenticated: 'true' },
+        }),
+        screencast: {
+          showChapter: async () => {},
+          hideOverlays: async () => {},
+        },
+      }) as unknown as Page;
+      Object.assign(context, {
+        pages: () => [page],
+        storageState: async () => ({
+          cookies: [{ name: 'fresh-session', value: 'new', domain: '.example.test', path: '/' }],
+          origins: [],
+        }),
+      });
+      return operation(page, context as unknown as BrowserContext);
+    };
+    const fakeWithTransientBrowserProfile: typeof withTransientBrowserProfile = async operation =>
+      withTransientBrowserProfile(operation, { temporaryRoot: transientRoot });
+
+    const result = await runInstitutionBrowserProgram(
+      {
+        name: 'fidelity-catchup',
+        startUrl: 'https://digital.fidelity.com/ftgw/digital/portfolio/activity',
+        profilePath: canonicalProfilePath,
+      },
+      `async (page, _reportProgress, bindings) => {
+        bindings.programCalls[page.attemptNumber - 1] += 1;
+        return JSON.stringify({ status: page.authenticated ? 'complete' : 'login-required' });
+      }`,
+      {
+        completionDescription: 'Downloads complete.',
+        programBindings: { programCalls },
+        isAuthenticated: async page => Boolean((page as unknown as { authenticated: boolean }).authenticated),
+        waitUntilAuthenticated: async page => {
+          (page as unknown as { authenticated: boolean }).authenticated = true;
+        },
+      },
+      {
+        withPlaywrightPage: fakeWithPlaywrightPage,
+        withTransientBrowserProfile: fakeWithTransientBrowserProfile,
+      },
+    );
+
+    expect(result.status).toBe('complete');
+    expect(attempts).toHaveLength(3);
+    expect(attempts.map(attempt => attempt.headless)).toEqual([true, false, true]);
+    expect(attempts.map(attempt => attempt.authenticationProfilePath)).toEqual([
+      canonicalProfilePath,
+      canonicalProfilePath,
+      canonicalProfilePath,
+    ]);
+    expect(attempts[0]?.profilePath).not.toBe(canonicalProfilePath);
+    expect(attempts[1]?.profilePath).toBe(canonicalProfilePath);
+    expect(attempts[2]?.profilePath).not.toBe(canonicalProfilePath);
+    expect(attempts[0]?.profilePath).not.toBe(attempts[2]?.profilePath);
+    expect(attempts.map(attempt => attempt.forceStartUrl)).toEqual([false, true, false]);
+    expect(attempts.map(attempt => attempt.restoredFreshAuthentication)).toEqual([false, false, true]);
+    expect(programCalls).toEqual([1, 1, 1]);
+  });
+
+  test('keeps an explicitly headed session in the authenticated browser', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-explicit-headed-'));
+    temporaryDirectories.push(root);
+    const canonicalProfilePath = join(root, 'profiles', 'headed-catchup');
+    await mkdir(canonicalProfilePath, { recursive: true });
+
+    const programCalls = { value: 0 };
+    let transientAttempts = 0;
+    const fakeWithPlaywrightPage: typeof withPlaywrightPage = async (sessionOptions, operation) => {
+      expect(sessionOptions.contextOptions?.headless).toBe(false);
+      const context = new EventEmitter();
+      const page = Object.assign(new EventEmitter(), {
+        authenticated: false,
+        isClosed: () => false,
+        context: () => context,
+        url: () => 'https://example.test/account',
+        bringToFront: async () => {},
+        waitForTimeout: async () => {},
+        evaluate: async () => ({ origin: 'https://example.test', entries: {} }),
+        screencast: { showChapter: async () => {}, hideOverlays: async () => {} },
+      }) as unknown as Page;
+      Object.assign(context, {
+        pages: () => [page],
+        storageState: async () => ({ cookies: [], origins: [] }),
+      });
+      return operation(page, context as unknown as BrowserContext);
+    };
+
+    const result = await runInstitutionBrowserProgram(
+      {
+        name: 'headed-catchup',
+        startUrl: 'https://example.test/account',
+        profilePath: canonicalProfilePath,
+        contextOptions: { headless: false },
+      },
+      `async (page, _reportProgress, bindings) => {
+        bindings.programCalls.value += 1;
+        return JSON.stringify({ status: page.authenticated ? 'complete' : 'login-required' });
+      }`,
+      {
+        completionDescription: 'Downloads complete.',
+        programBindings: { programCalls },
+        isAuthenticated: async page => Boolean((page as unknown as { authenticated: boolean }).authenticated),
+        waitUntilAuthenticated: async page => {
+          (page as unknown as { authenticated: boolean }).authenticated = true;
+        },
+      },
+      {
+        withPlaywrightPage: fakeWithPlaywrightPage,
+        withTransientBrowserProfile: async operation => {
+          transientAttempts += 1;
+          return operation(join(root, 'unexpected-transient'));
+        },
+      },
+    );
+
+    expect(result.status).toBe('complete');
+    expect(programCalls.value).toBe(2);
+    expect(transientAttempts).toBe(0);
+  });
+
+  test('does not retry after a failed checkpoint or connector error', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-failed-checkpoint-'));
+    temporaryDirectories.push(root);
+    const canonicalProfilePath = join(root, 'profiles', 'failed-checkpoint');
+    await mkdir(canonicalProfilePath, { recursive: true });
+
+    const programCalls = { value: 0 };
+    let transientAttempts = 0;
+    const fakeWithPlaywrightPage: typeof withPlaywrightPage = async (_sessionOptions, operation) => {
+      const context = new EventEmitter();
+      const page = Object.assign(new EventEmitter(), {
+        authenticated: false,
+        isClosed: () => false,
+        context: () => context,
+        url: () => 'https://example.test/account',
+        bringToFront: async () => {},
+        waitForTimeout: async () => {},
+        evaluate: async () => ({ origin: 'https://example.test', entries: {} }),
+        screencast: { showChapter: async () => {}, hideOverlays: async () => {} },
+      }) as unknown as Page;
+      Object.assign(context, {
+        pages: () => [page],
+        storageState: async () => {
+          throw new Error('checkpoint unavailable');
+        },
+      });
+      return operation(page, context as unknown as BrowserContext);
+    };
+
+    await expect(runInstitutionBrowserProgram(
+      {
+        name: 'failed-checkpoint',
+        startUrl: 'https://example.test/account',
+        profilePath: canonicalProfilePath,
+      },
+      `async (page, _reportProgress, bindings) => {
+        bindings.programCalls.value += 1;
+        if (page.authenticated) throw new Error('connector failed');
+        return JSON.stringify({ status: 'login-required' });
+      }`,
+      {
+        completionDescription: 'Downloads complete.',
+        programBindings: { programCalls },
+        isAuthenticated: async page => Boolean((page as unknown as { authenticated: boolean }).authenticated),
+        waitUntilAuthenticated: async page => {
+          (page as unknown as { authenticated: boolean }).authenticated = true;
+        },
+      },
+      {
+        withPlaywrightPage: fakeWithPlaywrightPage,
+        withTransientBrowserProfile: async operation => {
+          transientAttempts += 1;
+          return operation(join(root, 'unexpected-transient'));
+        },
+      },
+    )).rejects.toThrow('connector failed');
+    expect(programCalls.value).toBe(2);
+    expect(transientAttempts).toBe(0);
+  });
+
   test('checkpoints a successful transient probe to canonical authentication state only', async () => {
     const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-canonical-auth-'));
     temporaryDirectories.push(root);
