@@ -612,7 +612,8 @@ async function waitForMarcusCatalogRequests(
     if (!documents && isMarcusApiCatalogRequest(request, 'documents')) documents = request;
     if (accounts && documents) resolveCaptured?.();
   };
-  page.on('request', onRequest);
+  const context = page.context();
+  context.on('request', onRequest);
   try {
     if (!await openMarcusAuthenticatedRoute(page, ACCOUNTS_URL, 'accounts')) return null;
     if (!await openMarcusAuthenticatedRoute(page, DOCUMENTS_URL, 'documents')) return null;
@@ -635,7 +636,7 @@ async function waitForMarcusCatalogRequests(
     if (!accounts || !documents) throw missingMarcusCatalogRequestError(accounts, documents);
     return { accounts, documents };
   } finally {
-    page.off('request', onRequest);
+    context.off('request', onRequest);
   }
 }
 

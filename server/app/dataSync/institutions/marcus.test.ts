@@ -435,6 +435,18 @@ test('Marcus spans observed account and document routes when capturing catalog r
       links: [{ link: '/api/savings/api/v1/accounts/document/document-a' }],
     }] } } } }],
   ]);
+  const context = {
+    on: (_event: 'request', listener: RequestListener) => listeners.add(listener),
+    off: (_event: 'request', listener: RequestListener) => listeners.delete(listener),
+    request: {
+      fetch: async (request: unknown) => ({
+        ok: () => true,
+        headers: () => ({ 'content-type': 'application/json' }),
+        json: async () => payloads.get(request),
+        dispose: async () => {},
+      }),
+    },
+  };
   const page = {
     url: () => currentUrl,
     goto: async (url: string) => {
@@ -444,18 +456,7 @@ test('Marcus spans observed account and document routes when capturing catalog r
       for (const listener of listeners) listener(request);
     },
     locator: () => ({ count: async () => 0 }),
-    on: (_event: 'request', listener: RequestListener) => listeners.add(listener),
-    off: (_event: 'request', listener: RequestListener) => listeners.delete(listener),
-    context: () => ({
-      request: {
-        fetch: async (request: unknown) => ({
-          ok: () => true,
-          headers: () => ({ 'content-type': 'application/json' }),
-          json: async () => payloads.get(request),
-          dispose: async () => {},
-        }),
-      },
-    }),
+    context: () => context,
   } as unknown as Page;
 
   const catalog = await discoverMarcusRemoteCatalog(page);
