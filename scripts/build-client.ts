@@ -6,12 +6,13 @@ const rootDir = path.resolve(import.meta.dir, '..');
 const distDir = path.join(rootDir, 'dist');
 const args = process.argv.slice(2);
 const isProduction = process.env.NODE_ENV === 'production' || args.includes('--production');
+const entrypoint = args.includes('--desktop') ? './desktop/index.html' : './index.html';
 
 await fs.rm(distDir, { recursive: true, force: true });
 
 const buildArgs = [
   'build',
-  './index.html',
+  entrypoint,
   '--outdir',
   './dist',
   '--target',

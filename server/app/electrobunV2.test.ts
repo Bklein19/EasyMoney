@@ -24,6 +24,20 @@ describe('Electrobun 2 packaging contract', () => {
       'utf8',
     );
     expect(clientBuild).toContain("'--react-compiler'");
+
+    const webHtml = fs.readFileSync(path.join(projectRoot, 'index.html'), 'utf8');
+    const desktopHtml = fs.readFileSync(
+      path.join(projectRoot, 'desktop', 'index.html'),
+      'utf8',
+    );
+    expect(webHtml).not.toContain('easymoney-desktop');
+    expect(desktopHtml).toContain('<body class="easymoney-desktop">');
+
+    const desktopBuild = fs.readFileSync(
+      path.join(projectRoot, 'scripts', 'build-desktop-assets.ts'),
+      'utf8',
+    );
+    expect(desktopBuild).toContain("'--desktop'");
   });
 
   test('uses the native v2 icon pipeline and audits every standard build', () => {

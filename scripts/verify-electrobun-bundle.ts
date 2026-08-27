@@ -132,6 +132,14 @@ try {
   ]) {
     assert(fs.existsSync(requiredPath), `Missing packaged application file: ${requiredPath}`);
   }
+  const packagedHtml = fs.readFileSync(
+    path.join(resources, 'app', 'views', 'mainview', 'index.html'),
+    'utf8',
+  );
+  assert(
+    /<body\b[^>]*\bclass=["'][^"']*\beasymoney-desktop\b[^"']*["']/i.test(packagedHtml),
+    'Packaged desktop HTML is missing the easymoney-desktop body class',
+  );
 
   console.log(
     `Verified Electrobun ${expectedElectrobunVersion}: Bun ${actualBunVersion} main process; no Hutch or Cottontail runtime files`,

@@ -27,5 +27,8 @@ async function runBunScript(script: string, args: string[] = []) {
   });
 }
 
-await runBunScript('scripts/build-client.ts', isProduction ? ['--production'] : []);
+await runBunScript('scripts/build-client.ts', [
+  '--desktop',
+  ...(isProduction ? ['--production'] : []),
+]);
 await runBunScript('scripts/build-desktop-sync.ts');
