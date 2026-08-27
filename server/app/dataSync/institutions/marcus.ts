@@ -621,7 +621,13 @@ async function waitForMarcusCatalogRequests(
         if (timeout) clearTimeout(timeout);
       }
     }
-    if (!accounts || !documents) throw new Error('Marcus metadata API requests did not load');
+    if (!accounts || !documents) {
+      const missing = [
+        ...(!accounts ? ['account'] : []),
+        ...(!documents ? ['document'] : []),
+      ].join(' and ');
+      throw new Error(`Marcus ${missing} metadata API request did not load`);
+    }
     return { accounts, documents };
   } finally {
     page.off('request', onRequest);
