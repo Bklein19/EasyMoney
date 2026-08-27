@@ -10,9 +10,10 @@ import {
 } from '../browserSession.ts';
 import { reportSyncStep } from '../observability.ts';
 import type { SyncReporter } from '../types.ts';
-import type { APIResponse, Page, Request } from 'playwright';
+import type { APIResponse, BrowserContext, Page, Request } from 'playwright';
 
 const LOGIN_URL = 'https://www.marcus.com/us/en/login';
+const CAPTURE_START_URL = 'about:blank';
 const ACCOUNTS_URL = 'https://www.marcus.com/us/en/accounts';
 const DOCUMENTS_URL = 'https://www.marcus.com/us/en/documents';
 const MARCUS_ORIGIN = 'https://www.marcus.com';
@@ -550,6 +551,49 @@ function missingMarcusCatalogRequestError(
   return new Error(`Marcus ${missing} metadata API request did not load`);
 }
 
+type MarcusCatalogRequestCapture = {
+  context: BrowserContext;
+  accounts?: Request;
+  documents?: Request;
+  captured: Promise<void>;
+  dispose: () => void;
+};
+
+const marcusCatalogRequestCaptures = new WeakMap<BrowserContext, MarcusCatalogRequestCapture>();
+
+function getMarcusCatalogRequestCapture(page: Page): MarcusCatalogRequestCapture {
+  const context = page.context();
+  const existing = marcusCatalogRequestCaptures.get(context);
+  if (existing) return existing;
+
+  let resolveCaptured: (() => void) | undefined;
+  const captured = new Promise<void>(resolve => { resolveCaptured = resolve; });
+  let capture: MarcusCatalogRequestCapture;
+  const onRequest = (request: Request) => {
+    if (!capture.accounts && isMarcusApiCatalogRequest(request, 'accounts')) {
+      capture.accounts = request;
+    }
+    if (!capture.documents && isMarcusApiCatalogRequest(request, 'documents')) {
+      capture.documents = request;
+    }
+    if (capture.accounts && capture.documents) resolveCaptured?.();
+  };
+  capture = {
+    context,
+    captured,
+    dispose: () => {
+      resolveCaptured = undefined;
+      context.off('request', onRequest);
+      if (marcusCatalogRequestCaptures.get(context) === capture) {
+        marcusCatalogRequestCaptures.delete(context);
+      }
+    },
+  };
+  context.on('request', onRequest);
+  marcusCatalogRequestCaptures.set(context, capture);
+  return capture;
+}
+
 export function isMarcusApiCatalogRequest(
   request: MarcusCatalogRequestLike,
   operation: MarcusApiCatalogOperation,
@@ -603,28 +647,18 @@ export async function fetchMarcusApiPayload(page: Page, request: Request): Promi
 async function waitForMarcusCatalogRequests(
   page: Page,
 ): Promise<{ accounts: Request; documents: Request } | null> {
-  let accounts: Request | undefined;
-  let documents: Request | undefined;
-  let resolveCaptured: (() => void) | undefined;
-  const captured = new Promise<void>(resolve => { resolveCaptured = resolve; });
-  const onRequest = (request: Request) => {
-    if (!accounts && isMarcusApiCatalogRequest(request, 'accounts')) accounts = request;
-    if (!documents && isMarcusApiCatalogRequest(request, 'documents')) documents = request;
-    if (accounts && documents) resolveCaptured?.();
-  };
-  const context = page.context();
-  context.on('request', onRequest);
+  const capture = getMarcusCatalogRequestCapture(page);
   try {
     if (!await openMarcusAuthenticatedRoute(page, ACCOUNTS_URL, 'accounts')) return null;
     if (!await openMarcusAuthenticatedRoute(page, DOCUMENTS_URL, 'documents')) return null;
-    if (!accounts || !documents) {
+    if (!capture.accounts || !capture.documents) {
       let timeout: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
-          captured,
+          capture.captured,
           new Promise<never>((_resolve, reject) => {
             timeout = setTimeout(
-              () => reject(missingMarcusCatalogRequestError(accounts, documents)),
+              () => reject(missingMarcusCatalogRequestError(capture.accounts, capture.documents)),
               30_000,
             );
           }),
@@ -633,10 +667,15 @@ async function waitForMarcusCatalogRequests(
         if (timeout) clearTimeout(timeout);
       }
     }
-    if (!accounts || !documents) throw missingMarcusCatalogRequestError(accounts, documents);
-    return { accounts, documents };
-  } finally {
-    context.off('request', onRequest);
+    if (!capture.accounts || !capture.documents) {
+      throw missingMarcusCatalogRequestError(capture.accounts, capture.documents);
+    }
+    const requests = { accounts: capture.accounts, documents: capture.documents };
+    capture.dispose();
+    return requests;
+  } catch (error) {
+    capture.dispose();
+    throw error;
   }
 }
 
@@ -907,12 +946,6 @@ export async function executeMarcusBrowser(
   parser: MarcusParserLike,
 ): Promise<InstitutionBrowserProgramResult<MarcusBrowserResult>> {
   try {
-    if (!await isMarcusAuthenticatedPage(page)) {
-      return {
-        status: 'login-required',
-        action: 'Sign in to Marcus and complete MFA. EasyMoney will continue automatically.',
-      };
-    }
     const catalog = await reportSyncStep(report, {
       step: 'discover-metadata',
       message: 'Discovering Marcus accounts and documents',
@@ -974,13 +1007,14 @@ export async function runMarcusSync(
   }, () => dependencies.runBrowserProgram<MarcusBrowserResult>(
     {
       name: session,
-      startUrl: LOGIN_URL,
+      startUrl: CAPTURE_START_URL,
       ...(config.profilePath ? { profilePath: config.profilePath } : {}),
       ...(!allowInteractiveAuthentication ? { contextOptions: { headless: true } } : {}),
     },
     browserProgram(),
     {
       completionDescription: 'Marcus downloads are complete.',
+      authenticationRecoveryUrl: LOGIN_URL,
       isAuthenticated: isMarcusAuthenticatedPage,
       waitUntilAuthenticated: waitUntilMarcusAuthenticated,
       onProgress: message => report({

@@ -479,11 +479,21 @@ test('Marcus authenticated routes exclude login and challenge paths', () => {
   expect(isMarcusAuthenticatedPath('/us/en/accounts/verify-identity')).toBe(false);
 });
 
-test('Marcus waits for authentication before navigating to the documents route', async () => {
-  let navigations = 0;
+test('Marcus begins catalog capture before waiting for authentication', async () => {
+  const listeners = new Set<(request: never) => void>();
+  const navigations: string[] = [];
+  let currentUrl = 'about:blank';
+  const context = {
+    on: (_event: 'request', listener: (request: never) => void) => listeners.add(listener),
+    off: (_event: 'request', listener: (request: never) => void) => listeners.delete(listener),
+  };
   const page = {
-    url: () => 'https://www.marcus.com/us/en/login',
-    goto: async () => { navigations += 1; },
+    url: () => currentUrl,
+    goto: async (url: string) => {
+      navigations.push(url);
+      currentUrl = 'https://www.marcus.com/us/en/login';
+    },
+    context: () => context,
   } as unknown as Page;
 
   expect(await executeMarcusBrowser(page, {
@@ -494,7 +504,8 @@ test('Marcus waits for authentication before navigating to the documents route',
     status: 'login-required',
     action: 'Sign in to Marcus and complete MFA. EasyMoney will continue automatically.',
   });
-  expect(navigations).toBe(0);
+  expect(navigations).toEqual(['https://www.marcus.com/us/en/accounts']);
+  expect(listeners.size).toBe(1);
 });
 
 test('Marcus downloads verified document URLs through the authenticated request context', async () => {
@@ -636,11 +647,17 @@ test('Marcus reports missing auth without launching Chrome', async () => {
 
 test('Marcus cached-auth probes stay headless when interactive auth is not granted', async () => {
   const outputDir = await mkdtemp(join(tmpdir(), 'marcus-headless-test-'));
-  let browserSession: { contextOptions?: { headless?: boolean } } | undefined;
+  let browserSession: { startUrl: string; contextOptions?: { headless?: boolean } } | undefined;
+  let authenticationRecoveryUrl: string | undefined;
   const dependencies: MarcusSyncDependencies = {
     hasSavedAuthentication: async () => true,
-    runBrowserProgram: (async (session: { contextOptions?: { headless?: boolean } }) => {
+    runBrowserProgram: (async (
+      session: { startUrl: string; contextOptions?: { headless?: boolean } },
+      _code: string,
+      options: { authenticationRecoveryUrl?: string },
+    ) => {
       browserSession = session;
+      authenticationRecoveryUrl = options.authenticationRecoveryUrl;
       return { status: 'login-required' };
     }) as MarcusSyncDependencies['runBrowserProgram'],
     parser: fakeParser(),
@@ -656,6 +673,8 @@ test('Marcus cached-auth probes stay headless when interactive auth is not grant
       reason: 'expired',
     });
     expect(browserSession?.contextOptions?.headless).toBe(true);
+    expect(browserSession?.startUrl).toBe('about:blank');
+    expect(authenticationRecoveryUrl).toBe('https://www.marcus.com/us/en/login');
   } finally {
     await rm(outputDir, { recursive: true, force: true });
   }
