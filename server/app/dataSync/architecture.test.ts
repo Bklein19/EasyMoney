@@ -19,7 +19,7 @@ function sharedDataSyncFiles(): string[] {
 }
 
 function institutionProductionFiles(): string[] {
-  return [...new Bun.Glob('institutions/*.ts').scanSync({
+  return [...new Bun.Glob('institutions/**/*.ts').scanSync({
     cwd: dataSyncDirectory,
     absolute: true,
   })].filter(file => !file.endsWith('.test.ts'));
