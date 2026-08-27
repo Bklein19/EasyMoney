@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { extname, join, resolve } from 'node:path';
 
-import type { APIResponse, Download, Locator, Page, Request } from 'playwright';
+import type { Download, Locator, Page, Request } from 'playwright';
 import { extractText, getDocumentProxy } from 'unpdf';
 
 import { fidelity401kParser } from '../../importParsers/fidelity401k.ts';
@@ -172,6 +172,21 @@ type FidelityReplayRequest = {
   method: string;
   headers?: Record<string, string>;
   postData?: Buffer;
+};
+
+export type FidelityBrowserFetchRequest = {
+  url: string;
+  method: string;
+  headers?: Record<string, string>;
+  bodyBase64?: string;
+};
+
+export type FidelityBrowserFetchResponse = {
+  status: number;
+  url: string;
+  headers: Record<string, string>;
+  bodyBase64: string;
+  redirected: boolean;
 };
 
 type FidelityBrowserResult = {
@@ -1208,8 +1223,9 @@ export function fidelityResponseRequiresAuthentication(response: {
   url: string;
   headers?: Record<string, string>;
   bodyText?: string | null;
+  redirected?: boolean;
 }): boolean {
-  if (response.status === 401 || response.status === 403) return true;
+  if (response.redirected || response.status === 0 || response.status === 401 || response.status === 403) return true;
   try {
     if (fidelityAuthenticationRoute(new URL(response.url))) return true;
   } catch {
@@ -1239,36 +1255,119 @@ function replayRequestFromBrowserRequest(request: Request): FidelityReplayReques
   };
 }
 
-async function executeFidelityRequest(page: Page, request: FidelityReplayRequest): Promise<APIResponse> {
+export async function fidelityBrowserFetchInPage(
+  request: FidelityBrowserFetchRequest,
+): Promise<FidelityBrowserFetchResponse> {
+  const headers = new Headers(request.headers ?? {});
+  const requestedReferrer = headers.get('referer');
+  headers.delete('referer');
+  headers.delete('origin');
+  let referrer: string | undefined;
+  if (requestedReferrer) {
+    try {
+      const parsedReferrer = new URL(requestedReferrer, location.href);
+      if (parsedReferrer.origin === location.origin) referrer = parsedReferrer.toString();
+    } catch {
+      // Browser fetch supplies the current document as the safe referrer.
+    }
+  }
+
+  let body: ArrayBuffer | undefined;
+  if (request.bodyBase64 !== undefined) {
+    const binary = atob(request.bodyBase64);
+    body = new ArrayBuffer(binary.length);
+    const bytes = new Uint8Array(body);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  }
+  const response = await fetch(request.url, {
+    method: request.method,
+    headers,
+    ...(body ? { body } : {}),
+    ...(referrer ? { referrer } : {}),
+    credentials: 'include',
+    redirect: 'manual',
+    signal: AbortSignal.timeout(60_000),
+  });
+  const responseBytes = new Uint8Array(await response.arrayBuffer());
+  let binary = '';
+  const chunkSize = 32_768;
+  for (let offset = 0; offset < responseBytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...responseBytes.subarray(offset, offset + chunkSize));
+  }
+  const responseHeaders: Record<string, string> = {};
+  response.headers.forEach((value, name) => {
+    responseHeaders[name.toLowerCase()] = value;
+  });
+  return {
+    status: response.status,
+    url: response.url || request.url,
+    headers: responseHeaders,
+    bodyBase64: btoa(binary),
+    redirected: response.redirected || response.type === 'opaqueredirect' || response.status === 0,
+  };
+}
+
+function fidelityBrowserResponseBytes(response: FidelityBrowserFetchResponse): Uint8Array {
+  return new Uint8Array(Buffer.from(response.bodyBase64, 'base64'));
+}
+
+function fidelityBrowserResponseJson(response: FidelityBrowserFetchResponse): unknown {
   try {
-    const response = await page.context().request.fetch(request.url, {
+    return JSON.parse(Buffer.from(response.bodyBase64, 'base64').toString('utf8')) as unknown;
+  } catch {
+    throw new Error('Fidelity direct response is not valid JSON');
+  }
+}
+
+function fidelityBrowserResponseOk(response: FidelityBrowserFetchResponse): boolean {
+  return response.status >= 200 && response.status < 300;
+}
+
+async function executeFidelityRequest(
+  page: Page,
+  request: FidelityReplayRequest,
+): Promise<FidelityBrowserFetchResponse> {
+  try {
+    const target = new URL(request.url);
+    const current = new URL(page.url());
+    if (target.origin !== current.origin) {
+      throw new Error('Fidelity direct request does not match the open application origin');
+    }
+    const response = await page.evaluate(fidelityBrowserFetchInPage, {
+      url: request.url,
       method: request.method,
       headers: request.headers,
-      data: request.postData,
-      failOnStatusCode: false,
-      timeout: 60_000,
+      ...(request.postData ? { bodyBase64: request.postData.toString('base64') } : {}),
     });
-    const headers = response.headers();
+    const normalizedResponse = {
+      ...response,
+      url: new URL(response.url, request.url).toString(),
+    };
+    const headers = normalizedResponse.headers;
     const bodyText = headers['content-type']?.toLowerCase().includes('html')
-      ? await response.text().catch(() => '')
+      ? Buffer.from(normalizedResponse.bodyBase64, 'base64').toString('utf8')
       : null;
     if (fidelityResponseRequiresAuthentication({
-      status: response.status(),
-      url: response.url(),
+      status: normalizedResponse.status,
+      url: normalizedResponse.url,
       headers,
       bodyText,
+      redirected: normalizedResponse.redirected,
     })) {
       throw new FidelityAuthenticationRequiredError('authentication-required');
     }
-    return response;
+    return normalizedResponse;
   } catch (error) {
     if (error instanceof FidelityAuthenticationRequiredError) throw error;
     throw new Error('Fidelity direct request failed before receiving a response');
   }
 }
 
-function responseMatchesArtifact(response: APIResponse, artifactType: FidelityArtifactType): boolean {
-  const contentType = response.headers()['content-type']?.toLowerCase() ?? '';
+function responseMatchesArtifact(
+  response: FidelityBrowserFetchResponse,
+  artifactType: FidelityArtifactType,
+): boolean {
+  const contentType = response.headers['content-type']?.toLowerCase() ?? '';
   if (artifactType === 'activity-csv') {
     return contentType.includes('csv') || contentType.includes('excel') || contentType.includes('octet-stream');
   }
@@ -1313,17 +1412,17 @@ export function assertFidelityActivityResponseAccount(
 }
 
 async function artifactBytesFromResponse(
-  response: APIResponse,
+  response: FidelityBrowserFetchResponse,
   artifactType: FidelityArtifactType,
 ): Promise<Uint8Array> {
-  const contentType = response.headers()['content-type']?.toLowerCase() ?? '';
+  const contentType = response.headers['content-type']?.toLowerCase() ?? '';
   if (artifactType === 'statement-pdf' && contentType.includes('json')) {
-    return decodeFidelityStatementDocument(await response.json());
+    return decodeFidelityStatementDocument(fidelityBrowserResponseJson(response));
   }
   if (!responseMatchesArtifact(response, artifactType)) {
     throw new Error('Fidelity direct response has the wrong content type');
   }
-  return new Uint8Array(await response.body());
+  return fidelityBrowserResponseBytes(response);
 }
 
 async function downloadAndValidatePlan(
@@ -1351,7 +1450,9 @@ async function downloadAndValidatePlan(
   } catch {}
 
   const response = await executeFidelityRequest(page, request);
-  if (!response.ok()) throw new Error(`Fidelity direct request returned status ${response.status()}`);
+  if (!fidelityBrowserResponseOk(response)) {
+    throw new Error(`Fidelity direct request returned status ${response.status}`);
+  }
   const bytes = await artifactBytesFromResponse(response, plan.artifactType);
   if (plan.artifactType === 'activity-json') {
     const siteAccountId = 'siteAccountId' in plan.account && typeof plan.account.siteAccountId === 'string'
@@ -1510,10 +1611,12 @@ type FidelityStatementView = {
 
 async function statementListFromRequest(page: Page, request: Request): Promise<FidelityStatementDocument[]> {
   const response = await executeFidelityRequest(page, replayRequestFromBrowserRequest(request));
-  if (!response.ok()) throw new Error(`Fidelity statement list returned status ${response.status()}`);
-  const contentType = response.headers()['content-type']?.toLowerCase() ?? '';
+  if (!fidelityBrowserResponseOk(response)) {
+    throw new Error(`Fidelity statement list returned status ${response.status}`);
+  }
+  const contentType = response.headers['content-type']?.toLowerCase() ?? '';
   if (!contentType.includes('json')) throw new Error('Fidelity statement list response is not JSON');
-  return parseFidelityStatementList(await response.json());
+  return parseFidelityStatementList(fidelityBrowserResponseJson(response));
 }
 
 async function openRetailStatementCenter(page: Page): Promise<FidelityStatementView> {
