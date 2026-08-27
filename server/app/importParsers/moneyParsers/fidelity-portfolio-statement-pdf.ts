@@ -1,19 +1,17 @@
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { getDocumentProxy, extractText } from "unpdf";
 import { cents, makeTx } from "./_helpers";
+import { fidelityInvestmentReportStructure } from "./fidelity-report-structure.ts";
 
 export const meta: ParserMeta = {
   id: "fidelity-portfolio-statement-pdf",
   institution: "Fidelity",
   kind: "statement",
   priority: 50,
-  matches: ({ filename, sample }) =>
-    /^\d{4}-\d{2}-.+-Fidelity-Statement\.pdf$/i.test(filename) ||
-    /^[A-Za-z]+(?:-[A-Za-z]+)? \d{4}-.+-Fidelity-Statement\.pdf$/i.test(filename) ||
-    (/\.pdf$/i.test(filename) &&
-      /INVESTMENT REPORT/i.test(sample) &&
-      /Account (?:Number|#):\s*\d{3}-\d{6}/i.test(sample) &&
-      /(?:Your Account Value|Ending Account Value)/i.test(sample)),
+  matches: ({ filename, sample }) => sample.trim()
+    ? /\.pdf$/i.test(filename) && fidelityInvestmentReportStructure(sample) === "portfolio-statement"
+    : /^\d{4}-\d{2}-.+-Fidelity-Statement\.pdf$/i.test(filename) ||
+      /^[A-Za-z]+(?:-[A-Za-z]+)? \d{4}-.+-Fidelity-Statement\.pdf$/i.test(filename),
 };
 
 const titleCase = (value: string) =>

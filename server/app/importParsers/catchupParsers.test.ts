@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { bofaCreditCardActivityParser, parseBofaCreditCardActivity } from './bofaCreditCardActivity.ts';
 import { fidelityActivityParser, parseFidelityActivity } from './fidelityActivity.ts';
-import { resolveImportParser } from './index.ts';
+import { IMPORT_PARSERS, resolveImportParser } from './index.ts';
 import { parseBofaDepositStatementText } from './moneyParsers/bofa-statement-pdf.ts';
 import { parseWellsFargoStatementText } from './moneyParsers/wells-fargo-statement-pdf.ts';
 import { parseVanguardActivityCsv, vanguardActivityCsvParser } from './vanguardActivityCsv.ts';
@@ -118,6 +118,44 @@ test('PII-free Fidelity report filename resolves from document structure', () =>
     sample: 'INVESTMENT REPORT\nJuly 1, 2026 - July 31, 2026\nAccount Number: Z00-000000\nYour Account Value: $1.00',
   });
   expect(parser?.id).toBe('fidelity-investment-report-pdf');
+});
+
+test.each([
+  {
+    name: 'numeric portfolio account under the connector report filename',
+    fileName: 'fidelity-investment-report-2026-07.pdf',
+    sample: 'INVESTMENT REPORT\nAccount Number: 123-456789\nYour Account Value: $1.00',
+    expectedId: 'fidelity-portfolio-statement-pdf',
+  },
+  {
+    name: 'alphanumeric investment-report account',
+    fileName: 'fidelity-investment-report-2026-07.pdf',
+    sample: 'INVESTMENT REPORT\nAccount Number: Z00-000000\nYour Account Value: $1.00',
+    expectedId: 'fidelity-investment-report-pdf',
+  },
+  {
+    name: 'portfolio account summary sample',
+    fileName: 'statement.pdf',
+    sample: [
+      'INVESTMENT REPORT',
+      'Account Number: 111-222333',
+      'Your Account Value: $3,500.81',
+      'Account Summary',
+      'EXAMPLE OWNER - HEALTH SAVINGS ACCOUNT',
+      'Contributions',
+    ].join('\n'),
+    expectedId: 'fidelity-portfolio-statement-pdf',
+  },
+] as const)('Fidelity registry has exactly one structural matcher for $name', ({
+  fileName,
+  sample,
+  expectedId,
+}) => {
+  const file = { fileName, headers: [], sample };
+  const matchingIds = IMPORT_PARSERS.filter(parser => parser.matches(file)).map(parser => parser.id);
+
+  expect(matchingIds).toEqual([expectedId]);
+  expect(resolveImportParser(file)?.id).toBe(expectedId);
 });
 
 test('Sequoia Fund catch-up activity resolves through the public parser registry', () => {

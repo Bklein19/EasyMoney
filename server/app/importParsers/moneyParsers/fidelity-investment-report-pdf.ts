@@ -1,18 +1,16 @@
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { makeTx, pdfToText } from "./_helpers";
 import { getDocumentProxy, extractText } from "unpdf";
+import { fidelityInvestmentReportStructure } from "./fidelity-report-structure.ts";
 
 export const meta: ParserMeta = {
   id: "fidelity-investment-report-pdf",
   institution: "Fidelity",
   kind: "statement",
   priority: 50,
-  matches: ({ filename, sample }) =>
-    /^fidelity-Z\d+-\d{4}-\d{2}-\d{2}\.pdf$/.test(filename) ||
-    (/\.pdf$/i.test(filename) &&
-      /INVESTMENT REPORT/i.test(sample) &&
-      /Account (?:Number|#):/i.test(sample) &&
-      /(?:Your Account Value|Ending Account Value)/i.test(sample)),
+  matches: ({ filename, sample }) => sample.trim()
+    ? /\.pdf$/i.test(filename) && fidelityInvestmentReportStructure(sample) === "investment-report"
+    : /^fidelity-Z\d+-\d{4}-\d{2}-\d{2}\.pdf$/.test(filename),
 };
 
 function parseMoneyToCents(s: string): number {
