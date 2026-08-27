@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { Download } from 'playwright';
 
 import {
+  FIDELITY_AUTHENTICATION_TIMEOUT_MS,
   assertFidelityActivityHistoryRequest,
   assertFidelityActivityResponseAccount,
   assertFidelityStatementControlBijection,
@@ -35,6 +36,17 @@ import {
   type FidelityDownloadedArtifact,
   type FidelityRemoteAccount,
 } from './fidelity.ts';
+
+test('Fidelity interactive authentication allows a full user login and MFA window', async () => {
+  expect(FIDELITY_AUTHENTICATION_TIMEOUT_MS).toBe(30 * 60_000);
+
+  const source = await readFile(new URL('./fidelity.ts', import.meta.url), 'utf8');
+  const runStart = source.indexOf('export async function runFidelitySync');
+  const runSource = source.slice(runStart);
+  expect(runSource).toContain(
+    'authenticationTimeoutMs: FIDELITY_AUTHENTICATION_TIMEOUT_MS',
+  );
+});
 
 const retailAccount: FidelityAccountIdentity = {
   surface: 'retail',

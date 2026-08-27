@@ -22,6 +22,7 @@ const FIDELITY_ACTIVITY_URL = 'https://digital.fidelity.com/ftgw/digital/portfol
 const FIDELITY_NETBENEFITS_URL = 'https://nb.fidelity.com/public/nb/default/home';
 const FIDELITY_START_URL = 'data:text/html,<title>EasyMoney Fidelity connector</title>';
 const DEFAULT_SESSION = 'fidelity-catchup';
+export const FIDELITY_AUTHENTICATION_TIMEOUT_MS = 30 * 60_000;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const FIDELITY_TIME_ZONE = 'America/New_York';
 const DOM_AUTHENTICATION_FIELDS = [
@@ -1912,6 +1913,7 @@ export async function runFidelitySync(
         completionDescription: 'Fidelity downloads are ready for review.',
         isAuthenticated: isFidelityAuthenticatedPage,
         waitUntilAuthenticated: waitUntilFidelityAuthenticated,
+        authenticationTimeoutMs: FIDELITY_AUTHENTICATION_TIMEOUT_MS,
         onProgress: message => report({
           phase: 'authentication',
           step: 'session',
