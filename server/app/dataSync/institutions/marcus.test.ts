@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -16,6 +16,7 @@ import {
   marcusAccountIdentityFromText,
   marcusDocumentRequest,
   marcusStatementDateFromText,
+  marcusStatementPeriodDateFromDownloadDate,
   planMarcusCatalog,
   readMarcusApiPayload,
   runMarcusSync,
@@ -98,6 +99,10 @@ test('Marcus account and date metadata parsing is account-count agnostic', () =>
   expect(marcusStatementDateFromText('Statement date 6/30/2026')).toBe('2026-06-30');
   expect(marcusStatementDateFromText('Created 2026-06-30T12:00:00Z')).toBe('2026-06-30');
   expect(marcusStatementDateFromText('June 2026 Statement')).toBe('2026-06-01');
+  expect(marcusStatementPeriodDateFromDownloadDate('2026-01-01')).toBe('2025-12-31');
+  expect(marcusStatementPeriodDateFromDownloadDate('2024-03-01')).toBe('2024-02-29');
+  expect(marcusStatementPeriodDateFromDownloadDate('2026-06-30')).toBe('2026-06-30');
+  expect(marcusStatementPeriodDateFromDownloadDate('not-a-date')).toBeNull();
 });
 
 test('Marcus discovers every savings and deposit account while selecting every supported document', () => {
@@ -152,6 +157,7 @@ test('Marcus discovers every savings and deposit account while selecting every s
     account: savingsAccount(),
     artifactType: 'statement-pdf',
     statementDate: '2026-06-01',
+    downloadDate: '2026-06-01',
     request: { method: 'GET', url: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-a' },
   });
   expect(catalog.unsupportedArtifactCount).toBe(2);
@@ -183,13 +189,13 @@ test('Marcus builds a dynamic account and document catalog from the observed API
           response: [
             {
               accountId: 'remote-a',
-              createdDate: '2026-06-30T12:00:00Z',
+              createdDate: '2026-07-01T12:00:00Z',
               fileName: 'June 2026 Statement.pdf',
               links: [{ link: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-a' }],
             },
             {
               accountId: 'remote-b',
-              createdDate: '2026-06-30T12:00:00Z',
+              createdDate: '2026-07-01T12:00:00Z',
               fileName: 'June 2026 Statement.pdf',
               links: [{ link: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-b' }],
             },
@@ -224,6 +230,7 @@ test('Marcus builds a dynamic account and document catalog from the observed API
     account: savingsAccount(),
     artifactType: 'statement-pdf',
     statementDate: '2026-06-30',
+    downloadDate: '2026-07-01',
     request: {
       method: 'GET',
       url: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-a',
@@ -502,37 +509,86 @@ test('Marcus begins catalog capture without leaving the authentication page', as
   expect(listeners.size).toBe(1);
 });
 
-test('Marcus downloads verified document URLs through the authenticated request context', async () => {
-  const calls: Array<{ url: string; options: unknown }> = [];
-  let disposed = false;
-  const page = {
-    context: () => ({
-      request: {
-        fetch: async (url: string, options: unknown) => {
-          calls.push({ url, options });
-          return {
-            ok: () => true,
-            status: () => 200,
-            headers: () => ({ 'content-type': 'application/pdf' }),
-            body: async () => validPdf,
-            dispose: async () => { disposed = true; },
-          };
-        },
-      },
+test('Marcus downloads the account-routed statement control exposed by the authenticated UI', async () => {
+  const outputDir = await mkdtemp(join(tmpdir(), 'marcus-ui-download-test-'));
+  const downloadPath = join(outputDir, 'statement.pdf');
+  await writeFile(downloadPath, validPdf);
+  const calls: Array<{ operation: string; value?: unknown }> = [];
+  const link = {
+    click: async (options: unknown) => { calls.push({ operation: 'click', value: options }); },
+  };
+  const candidates = {
+    first: () => ({
+      waitFor: async (options: unknown) => { calls.push({ operation: 'waitFor', value: options }); },
     }),
+    evaluateAll: async (_callback: unknown, target: unknown) => {
+      calls.push({ operation: 'route', value: target });
+      return [0];
+    },
+    nth: (index: number) => {
+      calls.push({ operation: 'nth', value: index });
+      return link;
+    },
+  };
+  const page = {
+    getByText: (value: string, options: unknown) => {
+      calls.push({ operation: 'getByText', value: { value, options } });
+      return candidates;
+    },
+    waitForEvent: async (event: string, options: unknown) => {
+      calls.push({ operation: 'waitForEvent', value: { event, options } });
+      return {
+        failure: async () => null,
+        path: async () => downloadPath,
+      };
+    },
   } as unknown as Page;
 
-  const bytes = await fetchMarcusDocumentBytes(
-    page,
-    marcusDocumentRequest('https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/opaque-document'),
-  );
+  try {
+    expect(await fetchMarcusDocumentBytes(page, {
+      account: savingsAccount(),
+      downloadDate: '2026-07-01',
+    })).toEqual(validPdf);
+    expect(calls).toEqual([
+      {
+        operation: 'getByText',
+        value: { value: '07/01/2026', options: { exact: true } },
+      },
+      {
+        operation: 'waitFor',
+        value: { state: 'visible', timeout: 30_000 },
+      },
+      {
+        operation: 'route',
+        value: { last4: '1111', renderedDate: '07/01/2026' },
+      },
+      { operation: 'nth', value: 0 },
+      {
+        operation: 'waitForEvent',
+        value: { event: 'download', options: { timeout: 30_000 } },
+      },
+      { operation: 'click', value: { timeout: 30_000 } },
+    ]);
+  } finally {
+    await rm(outputDir, { recursive: true, force: true });
+  }
+});
 
-  expect(bytes).toEqual(validPdf);
-  expect(calls).toEqual([{
-    url: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/opaque-document',
-    options: { method: 'GET', maxRedirects: 5, timeout: 30_000 },
-  }]);
-  expect(disposed).toBe(true);
+test('Marcus refuses ambiguous statement controls instead of mixing account downloads', async () => {
+  const candidates = {
+    first: () => ({ waitFor: async () => {} }),
+    evaluateAll: async () => [0, 1],
+    nth: () => { throw new Error('must not select an ambiguous statement'); },
+  };
+  const page = {
+    getByText: () => candidates,
+    waitForEvent: () => { throw new Error('must not wait for an ambiguous download'); },
+  } as unknown as Page;
+
+  await expect(fetchMarcusDocumentBytes(page, {
+    account: savingsAccount(),
+    downloadDate: '2026-07-01',
+  })).rejects.toThrow('missing or ambiguous for its account');
 });
 
 test('Marcus validates PDF magic and EOF before parser validation', () => {
@@ -639,8 +695,8 @@ test('Marcus reports missing auth without launching Chrome', async () => {
   }
 });
 
-test('Marcus cached-auth probes stay headless when interactive auth is not granted', async () => {
-  const outputDir = await mkdtemp(join(tmpdir(), 'marcus-headless-test-'));
+test('Marcus cached-auth probes stay headed because the saved profile is rejected headlessly', async () => {
+  const outputDir = await mkdtemp(join(tmpdir(), 'marcus-headed-test-'));
   let browserSession: {
     startUrl: string;
     beforeStartNavigation?: (page: Page) => void | Promise<void>;
@@ -674,7 +730,7 @@ test('Marcus cached-auth probes stay headless when interactive auth is not grant
       status: 'authentication-required',
       reason: 'expired',
     });
-    expect(browserSession?.contextOptions?.headless).toBe(true);
+    expect(browserSession?.contextOptions?.headless).toBe(false);
     expect(browserSession?.startUrl).toBe('https://www.marcus.com/us/en/documents');
     expect(browserSession?.beforeStartNavigation).toBeFunction();
     expect(authenticationRecoveryUrl).toBe('https://www.marcus.com/us/en/login');

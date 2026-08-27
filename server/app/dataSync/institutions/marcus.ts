@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 import { marcusStatementParser } from '../../importParsers/marcusStatement.ts';
@@ -10,7 +10,7 @@ import {
 } from '../browserSession.ts';
 import { reportSyncStep } from '../observability.ts';
 import type { SyncReporter } from '../types.ts';
-import type { APIResponse, BrowserContext, Page, Request, Response } from 'playwright';
+import type { BrowserContext, Download, Locator, Page, Request, Response } from 'playwright';
 
 const LOGIN_URL = 'https://www.marcus.com/us/en/login';
 const ACCOUNTS_URL = 'https://www.marcus.com/us/en/accounts';
@@ -103,6 +103,7 @@ export interface MarcusDocumentMetadata {
   href: string;
   accountText: string;
   documentText: string;
+  downloadDate?: string;
   remoteKey?: string | null;
 }
 
@@ -117,6 +118,7 @@ export interface MarcusCatalogDocument {
   account: MarcusAccountIdentity;
   artifactType: MarcusArtifactType;
   statementDate: string;
+  downloadDate: string;
   request: MarcusApiRequest;
 }
 
@@ -258,6 +260,18 @@ export function marcusStatementDateFromText(value: string): string | null {
   return `${namedDate[3]}-${monthNumbers[namedDate[1]!.toLowerCase()]}-${(namedDate[2] ?? '1').padStart(2, '0')}`;
 }
 
+export function marcusStatementPeriodDateFromDownloadDate(value: string): string | null {
+  const downloadDate = value.slice(0, 10);
+  if (!DATE_PATTERN.test(downloadDate)) return null;
+  const parsed = new Date(`${downloadDate}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== downloadDate) {
+    return null;
+  }
+  if (!downloadDate.endsWith('-01')) return downloadDate;
+  parsed.setUTCDate(parsed.getUTCDate() - 1);
+  return parsed.toISOString().slice(0, 10);
+}
+
 function isSupportedStatementMetadata(value: string): boolean {
   if (/\b(?:tax|1099|interest\s+income)\b/i.test(value)) return false;
   return /\bstatement\b/i.test(value) || marcusStatementDateFromText(value) !== null;
@@ -386,7 +400,10 @@ export function marcusMetadataFromApiPayloads(
     if (!remoteKey || !account || !createdDate || !fileName) {
       throw new Error('Marcus document API identity is unavailable');
     }
-    const documentText = `${fileName} ${createdDate}`;
+    const downloadDate = createdDate.slice(0, 10);
+    const statementDate = marcusStatementPeriodDateFromDownloadDate(downloadDate);
+    if (!statementDate) throw new Error('Marcus document API date is invalid');
+    const documentText = `${fileName} ${statementDate}`;
     let href = '';
     if (account.identity.kind === 'savings' && isSupportedStatementMetadata(documentText)) {
       const requests = validApiDocumentLinks(record?.links);
@@ -402,6 +419,7 @@ export function marcusMetadataFromApiPayloads(
       href,
       accountText: account.text,
       documentText,
+      downloadDate,
       remoteKey,
     });
   }
@@ -465,6 +483,8 @@ export function buildMarcusRemoteCatalog(
     }
     const statementDate = marcusStatementDateFromText(candidate.documentText);
     if (!statementDate) throw new Error('Marcus statement date is unavailable');
+    const downloadDate = candidate.downloadDate ?? statementDate;
+    if (!DATE_PATTERN.test(downloadDate)) throw new Error('Marcus statement download date is unavailable');
     const request = marcusDocumentRequest(candidate.href);
     const logicalKey = `${identity.sourceAccountKey}:${statementDate}:statement-pdf`;
     const existing = documents.get(logicalKey);
@@ -475,6 +495,7 @@ export function buildMarcusRemoteCatalog(
       account: identity,
       artifactType: 'statement-pdf',
       statementDate,
+      downloadDate,
       request,
     });
   }
@@ -786,34 +807,65 @@ export function validateMarcusPdfSignature(bytes: Uint8Array): void {
   }
 }
 
-async function disposeResponse(response: APIResponse): Promise<void> {
-  await response.dispose().catch(() => {});
+function renderedMarcusDocumentDate(value: string): string {
+  if (!DATE_PATTERN.test(value)) throw new Error('Marcus statement download date is invalid');
+  return `${value.slice(5, 7)}/${value.slice(8, 10)}/${value.slice(0, 4)}`;
 }
 
-export async function fetchMarcusDocumentBytes(page: Page, request: MarcusApiRequest): Promise<Uint8Array> {
-  let response: APIResponse;
+async function marcusStatementDownloadLink(
+  page: Page,
+  document: Pick<MarcusCatalogDocument, 'account' | 'downloadDate'>,
+): Promise<Locator> {
+  const renderedDate = renderedMarcusDocumentDate(document.downloadDate);
+  const candidates = page.getByText(renderedDate, { exact: true });
   try {
-    response = await page.context().request.fetch(request.url, {
-      method: request.method,
-      maxRedirects: 5,
-      timeout: 30_000,
-    });
+    await candidates.first().waitFor({ state: 'visible', timeout: 30_000 });
   } catch {
-    throw new Error('Marcus statement request failed');
+    throw new Error('Marcus statement download control did not appear');
   }
 
-  try {
-    if (!response.ok()) throw new Error(`Marcus statement request failed with status ${response.status()}`);
-    const contentType = response.headers()['content-type']?.toLowerCase() ?? '';
-    if (!contentType.includes('pdf') && !contentType.includes('octet-stream')) {
-      throw new Error('Marcus statement response was not a PDF');
-    }
-    const bytes = new Uint8Array(await response.body());
-    validateMarcusPdfSignature(bytes);
-    return bytes;
-  } finally {
-    await disposeResponse(response);
+  const matches = await candidates.evaluateAll((elements, target) => {
+    const normalized = (value: string | null | undefined) => value?.replace(/\s+/g, ' ').trim() ?? '';
+    return elements.flatMap((element, index) => {
+      let ancestor: Element | null = element;
+      while (ancestor && ancestor !== globalThis.document.body) {
+        const text = normalized(ancestor.textContent);
+        if (text.includes(target.last4)) {
+          const matchingControls = [...ancestor.querySelectorAll('a[href], button, [role="button"]')]
+            .filter(control => normalized(control.textContent) === target.renderedDate);
+          return matchingControls.length === 1 ? [index] : [];
+        }
+        ancestor = ancestor.parentElement;
+      }
+      return [];
+    });
+  }, { last4: document.account.last4, renderedDate });
+  if (matches.length !== 1) {
+    throw new Error('Marcus statement download control is missing or ambiguous for its account');
   }
+  return candidates.nth(matches[0]!);
+}
+
+export async function fetchMarcusDocumentBytes(
+  page: Page,
+  document: Pick<MarcusCatalogDocument, 'account' | 'downloadDate'>,
+): Promise<Uint8Array> {
+  const link = await marcusStatementDownloadLink(page, document);
+  let download: Download;
+  try {
+    [download] = await Promise.all([
+      page.waitForEvent('download', { timeout: 30_000 }),
+      link.click({ timeout: 30_000 }),
+    ]);
+  } catch {
+    throw new Error('Marcus statement download did not start');
+  }
+  if (await download.failure()) throw new Error('Marcus statement download failed');
+  const path = await download.path();
+  if (!path) throw new Error('Marcus statement download failed');
+  const bytes = new Uint8Array(await readFile(path));
+  validateMarcusPdfSignature(bytes);
+  return bytes;
 }
 
 function parsedAccountNames(parsed: AppImportParseResult): string[] {
@@ -926,7 +978,7 @@ async function syncAuthenticatedMarcus(
         step: 'download-artifact',
         message: 'Downloading Marcus statement',
         details,
-      }, () => fetchMarcusDocumentBytes(page, document.request));
+      }, () => fetchMarcusDocumentBytes(page, document));
       const artifact = await reportSyncStep(report, {
         step: 'validate-artifact',
         message: 'Validating Marcus statement',
@@ -1030,8 +1082,8 @@ export async function runMarcusSync(
       name: session,
       startUrl: DOCUMENTS_URL,
       beforeStartNavigation: prepareMarcusCatalogCapture,
+      contextOptions: { headless: false },
       ...(config.profilePath ? { profilePath: config.profilePath } : {}),
-      ...(!allowInteractiveAuthentication ? { contextOptions: { headless: true } } : {}),
     },
     browserProgram(),
     {
