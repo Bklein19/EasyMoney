@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright';
 
 import {
   checkAuthenticationForCheckpoint,
+  chromeBrowserProfileOwner,
   closeBrowserContext,
   createCachedNormalChromeUserAgent,
   decodeInstitutionBrowserProgramResult,
@@ -27,6 +28,7 @@ import {
   restoreBrowserAuthentication,
   runInstitutionBrowserProgram,
   runWhileBrowserOpen,
+  runWhilePersistentBrowserOpen,
   showAuthenticationChapter,
   showSyncCompletionChapter,
   waitForInteractiveAuthentication,
@@ -1126,5 +1128,101 @@ describe('Playwright session helper', () => {
     await expect(running).rejects.toThrow('Browser closed before the institution sync completed');
     expect(browser.listenerCount('disconnected')).toBe(0);
     expect(context.listenerCount('close')).toBe(0);
+  });
+
+  test('reads the Chrome process identity from its persistent profile lock', async () => {
+    if (process.platform === 'win32') return;
+    const profilePath = await mkdtemp(join(tmpdir(), 'easymoney-playwright-profile-owner-'));
+    temporaryDirectories.push(profilePath);
+    await symlink('example-host-43210', join(profilePath, 'SingletonLock'));
+
+    expect(await chromeBrowserProfileOwner(profilePath)).toEqual({
+      kind: 'process',
+      lockTarget: 'example-host-43210',
+      pid: 43210,
+    });
+  });
+
+  test('recognizes the locked Chrome profile marker used on Windows', async () => {
+    let inspectedPath = '';
+    expect(await chromeBrowserProfileOwner('C:\\profiles\\fidelity-catchup', {
+      platform: 'win32',
+      windowsLockIsHeld: lockPath => {
+        inspectedPath = lockPath;
+        return true;
+      },
+    })).toEqual({ kind: 'windows-lock' });
+    expect(inspectedPath.endsWith('lockfile')).toBe(true);
+  });
+
+  test('rejects when Chrome exits without emitting Playwright close events', async () => {
+    const browser = Object.assign(new EventEmitter(), {
+      isConnected: () => true,
+    });
+    const context = Object.assign(new EventEmitter(), {
+      browser: () => browser,
+    });
+    let alive = true;
+    const firstProcessCheck = Promise.withResolvers<void>();
+    let processChecks = 0;
+    const running = runWhileBrowserOpen(
+      context as never,
+      () => new Promise<never>(() => {}),
+      {
+        isBrowserProcessAlive: () => {
+          processChecks += 1;
+          firstProcessCheck.resolve();
+          return alive;
+        },
+        processPollIntervalMs: 1,
+      },
+    );
+    await firstProcessCheck.promise;
+    alive = false;
+
+    await expect(running).rejects.toThrow('Browser closed before the institution sync completed');
+    expect(processChecks).toBeGreaterThanOrEqual(2);
+    expect(browser.listenerCount('disconnected')).toBe(0);
+    expect(context.listenerCount('close')).toBe(0);
+  });
+
+  test('rejects stuck post-launch setup when the real profile owner exits silently', async () => {
+    if (process.platform === 'win32') return;
+    const profilePath = await mkdtemp(join(tmpdir(), 'easymoney-playwright-profile-process-'));
+    temporaryDirectories.push(profilePath);
+    const child = Bun.spawn({
+      cmd: [process.execPath, '-e', 'setInterval(() => {}, 1000)'],
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+    await symlink(`example-host-${child.pid}`, join(profilePath, 'SingletonLock'));
+    const browser = Object.assign(new EventEmitter(), {
+      isConnected: () => true,
+    });
+    const context = Object.assign(new EventEmitter(), {
+      browser: () => browser,
+    });
+    const enteredSetup = Promise.withResolvers<void>();
+
+    try {
+      const running = runWhilePersistentBrowserOpen(
+        context as never,
+        profilePath,
+        () => {
+          enteredSetup.resolve();
+          return new Promise<never>(() => {});
+        },
+        { processPollIntervalMs: 1 },
+      );
+      await enteredSetup.promise;
+      child.kill();
+      await child.exited;
+
+      await expect(running).rejects.toThrow('Browser closed before the institution sync completed');
+      expect(browser.listenerCount('disconnected')).toBe(0);
+      expect(context.listenerCount('close')).toBe(0);
+    } finally {
+      child.kill();
+    }
   });
 });

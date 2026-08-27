@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, open, readFile, readlink, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, posix, resolve, win32 } from 'node:path';
 
@@ -606,10 +606,16 @@ async function launchPlaywrightPage<T>(
   }
 
   try {
-    if (hasSavedAuthentication) await restoreBrowserAuthentication(context, authenticationProfilePath);
-    const page = await institutionStartPage(context, options.forceStartUrl, browserLaunchTimeoutMs);
-    await openInstitutionStartPage(page, options.startUrl, hasSavedAuthentication, options.forceStartUrl);
-    return await runWhileBrowserOpen(context, () => operation(page, context));
+    return await runWhilePersistentBrowserOpen(
+      context,
+      profilePath,
+      async () => {
+        if (hasSavedAuthentication) await restoreBrowserAuthentication(context, authenticationProfilePath);
+        const page = await institutionStartPage(context, options.forceStartUrl, browserLaunchTimeoutMs);
+        await openInstitutionStartPage(page, options.startUrl, hasSavedAuthentication, options.forceStartUrl);
+        return operation(page, context);
+      },
+    );
   } finally {
     const closed = await closeBrowserContext(context);
     if (!closed) console.warn(`Timed out closing the ${options.name} browser context after Chrome exited.`);
@@ -802,6 +808,10 @@ export async function closeBrowserContext(
 export async function runWhileBrowserOpen<T>(
   context: Pick<BrowserContext, 'browser' | 'once' | 'off'>,
   operation: () => Promise<T>,
+  options: {
+    isBrowserProcessAlive?: () => boolean | Promise<boolean>;
+    processPollIntervalMs?: number;
+  } = {},
 ): Promise<T> {
   const browser: Pick<Browser, 'isConnected' | 'once' | 'off'> | null =
     typeof (context as Partial<BrowserContext>).browser === 'function'
@@ -816,18 +826,124 @@ export async function runWhileBrowserOpen<T>(
     context.once('close', handleClose);
     browser?.once('disconnected', handleClose);
   });
+  let processPoll: ReturnType<typeof setTimeout> | undefined;
+  let stopProcessPolling = false;
+  const isBrowserProcessAlive = options.isBrowserProcessAlive;
+  const browserProcessClosed = isBrowserProcessAlive
+    ? new Promise<never>((_resolve, reject) => {
+        const poll = async () => {
+          if (stopProcessPolling) return;
+          let alive = false;
+          try {
+            alive = await isBrowserProcessAlive();
+          } catch {
+            alive = false;
+          }
+          if (stopProcessPolling) return;
+          if (!alive) {
+            reject(new Error('Browser closed before the institution sync completed'));
+            return;
+          }
+          processPoll = setTimeout(poll, options.processPollIntervalMs ?? 250);
+        };
+        void poll();
+      })
+    : null;
 
   try {
     if (browser && !browser.isConnected()) handleClose();
     return await Promise.race([
       Promise.resolve().then(operation),
       browserClosed,
+      ...(browserProcessClosed ? [browserProcessClosed] : []),
     ]);
   } finally {
+    stopProcessPolling = true;
+    if (processPoll) clearTimeout(processPoll);
     rejectClosed = undefined;
     context.off('close', handleClose);
     browser?.off('disconnected', handleClose);
   }
+}
+
+export type ChromeBrowserProfileOwner =
+  | { kind: 'process'; lockTarget: string; pid: number }
+  | { kind: 'windows-lock' };
+
+type ChromeBrowserProfileOwnerOptions = {
+  platform?: NodeJS.Platform;
+  windowsLockIsHeld?: (lockPath: string) => boolean | Promise<boolean>;
+};
+
+async function windowsChromeProfileLockIsHeld(lockPath: string): Promise<boolean> {
+  try {
+    const handle = await open(lockPath, 'r+');
+    await handle.close();
+    return false;
+  } catch (error) {
+    return fileSystemErrorCode(error) !== 'ENOENT';
+  }
+}
+
+export async function chromeBrowserProfileOwner(
+  profilePath: string,
+  options: ChromeBrowserProfileOwnerOptions = {},
+): Promise<ChromeBrowserProfileOwner | null> {
+  const platform = options.platform ?? process.platform;
+  if (platform === 'win32') {
+    const lockPath = join(resolve(profilePath), 'lockfile');
+    const lockIsHeld = options.windowsLockIsHeld ?? windowsChromeProfileLockIsHeld;
+    return await lockIsHeld(lockPath) ? { kind: 'windows-lock' } : null;
+  }
+  try {
+    const lockTarget = await readlink(join(resolve(profilePath), 'SingletonLock'));
+    const pidText = /-(\d+)$/.exec(lockTarget)?.[1];
+    if (!pidText) return null;
+    const pid = Number(pidText);
+    return Number.isSafeInteger(pid) && pid > 0
+      ? { kind: 'process', lockTarget, pid }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function chromeBrowserProfileOwnerIsAlive(
+  profilePath: string,
+  owner: ChromeBrowserProfileOwner,
+): Promise<boolean> {
+  if (owner.kind === 'windows-lock') {
+    return windowsChromeProfileLockIsHeld(join(resolve(profilePath), 'lockfile'));
+  }
+  try {
+    const lockTarget = await readlink(join(resolve(profilePath), 'SingletonLock'));
+    return lockTarget === owner.lockTarget && systemProcessIsAlive(owner.pid);
+  } catch {
+    return false;
+  }
+}
+
+export async function runWhilePersistentBrowserOpen<T>(
+  context: Pick<BrowserContext, 'browser' | 'once' | 'off'>,
+  profilePath: string,
+  operation: () => Promise<T>,
+  options: {
+    processPollIntervalMs?: number;
+    readBrowserProfileOwner?: (profilePath: string) => Promise<ChromeBrowserProfileOwner | null>;
+    browserProfileOwnerIsAlive?: (
+      profilePath: string,
+      owner: ChromeBrowserProfileOwner,
+    ) => boolean | Promise<boolean>;
+  } = {},
+): Promise<T> {
+  const readBrowserProfileOwner = options.readBrowserProfileOwner ?? chromeBrowserProfileOwner;
+  const owner = await readBrowserProfileOwner(profilePath);
+  if (!owner) throw new Error('Browser closed before the institution sync completed');
+  const browserProfileOwnerIsAlive = options.browserProfileOwnerIsAlive ?? chromeBrowserProfileOwnerIsAlive;
+  return runWhileBrowserOpen(context, operation, {
+    isBrowserProcessAlive: () => browserProfileOwnerIsAlive(profilePath, owner),
+    processPollIntervalMs: options.processPollIntervalMs,
+  });
 }
 
 export function decodeInstitutionBrowserProgramResult<T extends Record<string, unknown>>(
