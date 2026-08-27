@@ -52,6 +52,49 @@ test('Fidelity activity parser supports brokerage and retirement exports', () =>
   });
 });
 
+test('Fidelity activity parser supports account-qualified brokerage exports after leading blank lines', () => {
+  const brokerage = [
+    '\uFEFF',
+    '',
+    'Run Date,Account,Account Number,Action,Symbol,Description,Type,Price ($),Quantity,Commission ($),Fees ($),Accrued Interest ($),Amount ($),Settlement Date',
+    '08/20/2026,Example Brokerage,Z00-000000,DIVIDEND RECEIVED,EX,EXAMPLE FUND,Cash,0,0,0,0,0,12.34,08/20/2026',
+  ].join('\n');
+
+  expect(fidelityActivityParser.matches({
+    fileName: 'fidelity-investment-activity.csv',
+    headers: [],
+    sample: brokerage,
+  })).toBe(true);
+  expect(parseFidelityActivity({
+    fileName: 'fidelity-investment-activity.csv',
+    headers: [],
+    rows: [],
+    text: brokerage,
+  }).transactions.filter(Boolean)).toEqual([
+    expect.objectContaining({
+      amountCents: 1234,
+      description: 'DIVIDEND RECEIVED',
+      institution: 'Fidelity',
+      account: 'Example Brokerage',
+      remoteAccountId: 'fidelity:Z00000000',
+    }),
+  ]);
+});
+
+test('Fidelity activity parser rejects partial identity in an account-qualified export', () => {
+  const brokerage = [
+    'Run Date,Account,Account Number,Action,Symbol,Description,Type,Price ($),Quantity,Commission ($),Fees ($),Accrued Interest ($),Amount ($),Settlement Date',
+    '08/20/2026,Example Brokerage,Z00-000000,DIVIDEND RECEIVED,EX,EXAMPLE FUND,Cash,0,0,0,0,0,12.34,08/20/2026',
+    '08/21/2026,,,DIVIDEND RECEIVED,EX,EXAMPLE FUND,Cash,0,0,0,0,0,5.00,08/21/2026',
+  ].join('\n');
+  expect(() => parseFidelityActivity({
+    fileName: 'fidelity-investment-activity.csv',
+    headers: [],
+    rows: [],
+    text: brokerage,
+  })).toThrow('missing a stable account identity');
+});
+
 test('Vanguard activity CSV parser skips holdings and parses the transaction section', () => {
   const text = [
     'Account Number,Investment Name,Symbol,Shares,Share Price,Total Value,',

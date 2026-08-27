@@ -14,7 +14,6 @@ import type {
 import {
   createFidelityConnector,
   fidelityConnector,
-  inferFidelityAccountLast4,
   matchesFidelityAccount,
   routeFidelityArtifacts,
 } from './fidelityConnector.ts';
@@ -64,7 +63,11 @@ function artifact(
     parserId: 'fidelity-activity-csv',
     transactionCount: 1,
     balanceCount: 0,
-    parsedAccountLast4s: [],
+    contentHash: 'a'.repeat(64),
+    sourceAccounts: [{
+      remoteAccountId: `fidelity:Z0000${last4 ?? '0000'}`,
+      sourceAccountName: last4 ? `Brokerage ${last4}` : 'Brokerage account',
+    }],
     ...overrides,
   };
 }
@@ -108,20 +111,6 @@ describe('Fidelity connector targeting', () => {
     expect(matchesFidelityAccount(accounts[0]!)).toBe(true);
   });
 
-  test('extracts one unambiguous account suffix without treating years as account numbers', () => {
-    expect(inferFidelityAccountLast4(account(1, {
-      name: 'Roth IRA',
-      sourceAccountName: 'Account ending in 1234',
-      artifactFileNames: ['fidelity-report-2026.pdf'],
-    }))).toBe('1234');
-    expect(inferFidelityAccountLast4(account(2, {
-      name: 'Brokerage 2026',
-    }))).toBeNull();
-    expect(inferFidelityAccountLast4(account(3, {
-      name: 'Brokerage 1234',
-      accountAliases: ['Investment 5678'],
-    }))).toBeNull();
-  });
 });
 
 describe('Fidelity connector execution', () => {
@@ -180,8 +169,14 @@ describe('Fidelity connector execution', () => {
     ];
 
     await expect(connector.run(runContext(accounts, event => events.push(event)))).resolves.toEqual([
-      { fileName: 'fidelity-retail-brokerage-1111-activity.csv', accountId: 10 },
-      { fileName: 'fidelity-netbenefits-retirement-2222-statement.pdf', accountId: 20 },
+      {
+        fileName: 'fidelity-retail-brokerage-1111-activity.csv',
+        accountRoutes: [{ remoteAccountId: 'fidelity:Z00001111' }],
+      },
+      {
+        fileName: 'fidelity-netbenefits-retirement-2222-statement.pdf',
+        accountRoutes: [{ remoteAccountId: 'fidelity:Z00002222' }],
+      },
     ]);
     expect(capturedConfig).toEqual({
       outputDir: '/tmp/easymoney-fidelity-connector-test',
@@ -231,24 +226,22 @@ describe('Fidelity connector execution', () => {
     await expect(maintenance.run(runContext(accounts))).rejects.toThrow('temporarily unavailable');
   });
 
-  test('rejects ambiguous or collapsing local routes', () => {
-    expect(() => routeFidelityArtifacts([
+  test('routes only exact parser-backed identities and rejects missing or repeated claims', () => {
+    expect(routeFidelityArtifacts([
       artifact('remote-one', '1111', 'activity.csv'),
-    ], [
-      account(10, { name: 'Brokerage 1111' }),
-      account(20, { name: 'Second brokerage 1111' }),
-    ])).toThrow('no unambiguous local account route');
-
+    ])).toEqual([{
+      fileName: 'activity.csv',
+      accountRoutes: [{ remoteAccountId: 'fidelity:Z00001111' }],
+    }]);
     expect(() => routeFidelityArtifacts([
-      artifact('remote-one', null, 'first.csv', { account: {
-        surface: 'retail', kind: 'brokerage', accountKey: 'remote-one', last4: null, label: 'Shared account',
-      } }),
-      artifact('remote-two', null, 'second.csv', { account: {
-        surface: 'retail', kind: 'brokerage', accountKey: 'remote-two', last4: null, label: 'Shared account',
-      } }),
-    ], [
-      account(10, { sourceAccountName: 'Shared account' }),
-    ])).toThrow('Multiple Fidelity remote accounts map to the same local account');
+      artifact('remote-one', '1111', 'missing.csv', { sourceAccounts: [] }),
+    ])).toThrow('no parser-backed account claims');
+    expect(() => routeFidelityArtifacts([
+      artifact('remote-one', '1111', 'ambiguous.csv', { sourceAccounts: [
+        { remoteAccountId: 'fidelity:Z00001111', sourceAccountName: 'First' },
+        { remoteAccountId: 'fidelity:Z00001111', sourceAccountName: 'Second' },
+      ] }),
+    ])).toThrow('ambiguous parser-backed account claims');
   });
 
   test('does not invoke Fidelity when no matching local account exists', async () => {

@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, extname, join, resolve } from 'node:path';
+import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { extname, join, resolve } from 'node:path';
 
 import type { APIResponse, Download, Locator, Page, Request } from 'playwright';
 import { extractText, getDocumentProxy } from 'unpdf';
 
 import { fidelity401kParser } from '../../importParsers/fidelity401k.ts';
+import { fidelityRemoteAccountId } from '../../importParsers/fidelityAccountIdentity.ts';
 import { fidelityActivityParser } from '../../importParsers/fidelityActivity.ts';
 import { fidelityInvestmentReportParser } from '../../importParsers/fidelityInvestmentReport.ts';
 import { fidelityNetBenefitsStatementParser } from '../../importParsers/fidelityNetBenefitsStatement.ts';
@@ -78,21 +79,17 @@ export interface FidelityRemoteAccount extends FidelityAccountIdentity {
   };
 }
 
-export interface FidelityDocumentCandidate {
-  surface: FidelitySurface;
-  label: string;
-  href: string;
-  accountKey?: string | null;
-}
-
 export interface FidelityArtifactPlan {
   artifactType: FidelityArtifactType;
   fileName: string;
   account: FidelityAccountIdentity;
   coveredFrom: string | null;
   coveredThrough: string;
-  requestUrl?: string;
-  controlIndex?: number;
+}
+
+export interface FidelitySourceAccountClaim {
+  remoteAccountId: string;
+  sourceAccountName: string;
 }
 
 export interface FidelityDownloadedArtifact extends FidelityArtifactPlan {
@@ -100,7 +97,8 @@ export interface FidelityDownloadedArtifact extends FidelityArtifactPlan {
   parserId: string;
   transactionCount: number;
   balanceCount: number;
-  parsedAccountLast4s: string[];
+  contentHash: string;
+  sourceAccounts: FidelitySourceAccountClaim[];
 }
 
 export interface FidelityProgressEvent {
@@ -137,8 +135,28 @@ export type FidelitySyncResult =
 
 type FidelityValidationResult = Pick<
   FidelityDownloadedArtifact,
-  'parserId' | 'transactionCount' | 'balanceCount' | 'parsedAccountLast4s'
+  | 'parserId'
+  | 'transactionCount'
+  | 'balanceCount'
+  | 'contentHash'
+  | 'sourceAccounts'
+  | 'coveredFrom'
+  | 'coveredThrough'
 >;
+
+export interface FidelityVerifiedActivityAccount {
+  account: FidelityRemoteAccount;
+  sourceAccount: FidelitySourceAccountClaim;
+}
+
+export interface FidelityStatementDocument {
+  id: string;
+  remoteAccountId: string;
+  periodStart: string | null;
+  periodEnd: string | null;
+  pdfAvailable: boolean;
+  householded: boolean;
+}
 
 type FidelityReplayRequest = {
   url: string;
@@ -146,6 +164,10 @@ type FidelityReplayRequest = {
   headers?: Record<string, string>;
   postData?: Buffer;
 };
+
+type FidelityDownloadSource =
+  | { kind: 'direct-request'; request: FidelityReplayRequest }
+  | { kind: 'browser-download'; download: Download };
 
 type FidelityBrowserResult = {
   status: 'complete';
@@ -174,6 +196,14 @@ export interface FidelityResolvedSurfaces {
 
 class FidelityAuthenticationRequiredError extends Error {}
 class FidelityInstitutionUnavailableError extends Error {}
+
+function fidelityRuntimeDiagnostic(
+  step: string,
+  details: Record<string, string | number | boolean | null>,
+): void {
+  if (process.env.EASYMONEY_FIDELITY_DIAGNOSTICS !== '1') return;
+  console.log(JSON.stringify({ connector: 'fidelity', step, ...details }));
+}
 
 function normalizedAccountLabel(value: string): string {
   return value
@@ -227,8 +257,7 @@ export function fidelityAccountsFromCandidates(candidates: FidelityAccountCandid
     if (!label || /^(?:all accounts?|select an? account)$/i.test(label)) continue;
     const identity = remoteIdentity(candidate, label);
     const accountKey = opaqueAccountKey(candidate.surface, identity);
-    if (accounts.has(accountKey)) continue;
-    accounts.set(accountKey, {
+    const account: FidelityRemoteAccount = {
       surface: candidate.surface,
       kind: accountKind(`${label} ${candidate.href ?? ''}`),
       accountKey,
@@ -239,11 +268,26 @@ export function fidelityAccountsFromCandidates(candidates: FidelityAccountCandid
         href: candidate.href ?? null,
         label,
       },
-    });
+    };
+    const existing = accounts.get(accountKey);
+    if (existing) {
+      if (existing.surface !== account.surface || existing.kind !== account.kind
+          || existing.last4 !== account.last4 || existing.label !== account.label) {
+        throw new Error('Fidelity controls expose conflicting account identity');
+      }
+      continue;
+    }
+    accounts.set(accountKey, account);
   }
 
+  return [...accounts.values()];
+}
+
+export function assertUniqueFidelityRoutingSuffixes(
+  accounts: readonly FidelityRemoteAccount[],
+): void {
   const routableIdentities = new Set<string>();
-  for (const account of accounts.values()) {
+  for (const account of accounts) {
     if (!account.last4) continue;
     const identity = `${account.surface}:${account.last4}`;
     if (routableIdentities.has(identity)) {
@@ -251,7 +295,6 @@ export function fidelityAccountsFromCandidates(candidates: FidelityAccountCandid
     }
     routableIdentities.add(identity);
   }
-  return [...accounts.values()];
 }
 
 function accountSlug(account: FidelityAccountIdentity): string {
@@ -270,22 +313,6 @@ export function fidelityArtifactFileName(
   return `fidelity-${slug}-${through}-statement.pdf`;
 }
 
-function isoDateFromDocumentLabel(value: string): string | null {
-  const iso = value.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
-  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
-  const numeric = value.match(/\b(\d{1,2})\/(\d{1,2})\/(20\d{2})\b/);
-  if (numeric) return `${numeric[3]}-${numeric[1].padStart(2, '0')}-${numeric[2].padStart(2, '0')}`;
-  const named = value.match(
-    /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(20\d{2})\b/i,
-  );
-  if (!named) return null;
-  const month = String([
-    'january', 'february', 'march', 'april', 'may', 'june',
-    'july', 'august', 'september', 'october', 'november', 'december',
-  ].indexOf(named[1].toLowerCase()) + 1).padStart(2, '0');
-  return `${named[3]}-${month}-${named[2].padStart(2, '0')}`;
-}
-
 export function fidelityDirectRequestUrl(value: string, baseUrl = 'https://www.fidelity.com/'): string {
   const url = new URL(value, baseUrl);
   if (url.protocol !== 'https:' || !/(?:^|\.)fidelity\.com$/i.test(url.hostname)) {
@@ -295,49 +322,174 @@ export function fidelityDirectRequestUrl(value: string, baseUrl = 'https://www.f
   return url.toString();
 }
 
-function accountForDocument(
-  candidate: FidelityDocumentCandidate,
-  accounts: FidelityRemoteAccount[],
-): FidelityRemoteAccount {
-  if (candidate.accountKey) {
-    const exact = accounts.filter(account => account.accountKey === candidate.accountKey);
-    if (exact.length === 1) return exact[0];
+export function isFidelityStatementDownloadRequestUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:'
+      && /(?:^|\.)fidelity\.com$/i.test(url.hostname)
+      && /\/accounts\/communications\/financial-documents\/download\/?$/i.test(url.pathname);
+  } catch {
+    return false;
   }
-  const suffixes = [...new Set(candidate.label.match(/\b\d{4}\b/g) ?? [])];
-  const bySuffix = accounts.filter(account => account.last4 && suffixes.includes(account.last4));
-  if (bySuffix.length === 1) return bySuffix[0];
-  const sameSurface = accounts.filter(account => account.surface === candidate.surface);
-  if (sameSurface.length === 1) return sameSurface[0];
-  throw new Error('Fidelity document account identity is ambiguous');
 }
 
-export function fidelityStatementPlans(
-  candidates: FidelityDocumentCandidate[],
-  accounts: FidelityRemoteAccount[],
-  from: string,
-  through: string,
-): FidelityArtifactPlan[] {
-  const plans = new Map<string, FidelityArtifactPlan>();
-  for (const candidate of candidates) {
-    if (!/statement|investment report|retirement savings/i.test(candidate.label)) continue;
-    const statementDate = isoDateFromDocumentLabel(candidate.label);
-    if (!statementDate || statementDate < from || statementDate > through) continue;
-    const requestUrl = fidelityDirectRequestUrl(candidate.href);
-    if (plans.has(requestUrl)) continue;
-    const account = accountForDocument(candidate, accounts);
-    const artifactType: FidelityArtifactType = /\.html?(?:$|\?)/i.test(requestUrl)
-      ? 'statement-html'
-      : 'statement-pdf';
-    plans.set(requestUrl, {
-      artifactType,
-      fileName: fidelityArtifactFileName(account, artifactType, statementDate, statementDate),
-      account,
-      coveredFrom: null,
-      coveredThrough: statementDate,
-      requestUrl,
+export function isFidelityStatementListRequestUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:'
+      && /(?:^|\.)fidelity\.com$/i.test(url.hostname)
+      && /\/accounts\/communications\/financial-documents\/statements\/?$/i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+export function fidelityStatementDocumentIdFromRequestBody(value: string | Buffer): string {
+  let body: unknown;
+  try {
+    body = JSON.parse(typeof value === 'string' ? value : value.toString('utf8')) as unknown;
+  } catch {
+    throw new Error('Fidelity statement download request body is invalid');
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new Error('Fidelity statement download request body is invalid');
+  }
+  const record = body as Record<string, unknown>;
+  const id = typeof record.id === 'string' ? record.id.trim() : '';
+  if (!id || typeof record.acctType !== 'string' || typeof record.docType !== 'string'
+      || typeof record.formatType !== 'string') {
+    throw new Error('Fidelity statement download request metadata is missing');
+  }
+  return id;
+}
+
+export function decodeFidelityStatementDocument(value: unknown): Uint8Array {
+  const detail = value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as { document?: unknown }).document
+    : null;
+  const documentDetail = detail && typeof detail === 'object' && !Array.isArray(detail)
+    ? (detail as { docDetail?: unknown }).docDetail
+    : null;
+  if (!documentDetail || typeof documentDetail !== 'object' || Array.isArray(documentDetail)) {
+    throw new Error('Fidelity statement response metadata is missing');
+  }
+  const { content, contentType, encoding } = documentDetail as Record<string, unknown>;
+  if (typeof content !== 'string' ||
+      typeof contentType !== 'string' || !/^application\/pdf$/i.test(contentType.trim()) ||
+      typeof encoding !== 'string' || !/^base64$/i.test(encoding.trim())) {
+    throw new Error('Fidelity statement response does not contain a base64 PDF');
+  }
+  const normalized = content.replace(/\s+/g, '');
+  if (normalized.length < 8 || normalized.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(normalized)) {
+    throw new Error('Fidelity statement response contains invalid base64');
+  }
+  const bytes = new Uint8Array(Buffer.from(normalized, 'base64'));
+  if (new TextDecoder('ascii').decode(bytes.subarray(0, 5)) !== '%PDF-') {
+    throw new Error('Fidelity statement response PDF magic is missing');
+  }
+  return bytes;
+}
+
+function isoDateFromEpoch(value: unknown): string | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
+  const date = new Date(value < 1_000_000_000_000 ? value * 1_000 : value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+}
+
+export function parseFidelityStatementList(value: unknown): FidelityStatementDocument[] {
+  const root = value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+  const statement = root?.statement && typeof root.statement === 'object' && !Array.isArray(root.statement)
+    ? root.statement as Record<string, unknown>
+    : null;
+  const docDetails = statement?.docDetails && typeof statement.docDetails === 'object'
+    && !Array.isArray(statement.docDetails)
+    ? statement.docDetails as Record<string, unknown>
+    : null;
+  const documents = docDetails?.docDetail;
+  if (!Array.isArray(documents)) throw new Error('Fidelity statement list metadata is missing');
+
+  const result: FidelityStatementDocument[] = [];
+  const ids = new Set<string>();
+  for (const raw of documents) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new Error('Fidelity statement list contains invalid document metadata');
+    }
+    const document = raw as Record<string, unknown>;
+    const id = typeof document.id === 'string' ? document.id.trim() : '';
+    const remoteAccountId = typeof document.acctNum === 'string'
+      ? fidelityRemoteAccountId(document.acctNum)
+      : null;
+    const formatTypes = document.formatTypes && typeof document.formatTypes === 'object'
+      && !Array.isArray(document.formatTypes)
+      ? (document.formatTypes as Record<string, unknown>).formatType
+      : null;
+    const formats = formatTypes && typeof formatTypes === 'object' && !Array.isArray(formatTypes)
+      ? formatTypes as Record<string, unknown>
+      : null;
+    if (!id || !remoteAccountId || ids.has(id)) {
+      throw new Error('Fidelity statement list account or document identity is ambiguous');
+    }
+    ids.add(id);
+    result.push({
+      id,
+      remoteAccountId,
+      periodStart: isoDateFromEpoch(document.periodStartDate),
+      periodEnd: isoDateFromEpoch(document.periodEndDate),
+      pdfAvailable: formats?.isPDF === true,
+      householded: document.isHouseholded === true,
     });
   }
-  return [...plans.values()].sort((left, right) => left.fileName.localeCompare(right.fileName));
+  return result;
+}
+
+export function verifyFidelityActivityAccounts(
+  artifacts: readonly FidelityDownloadedArtifact[],
+  accounts: readonly FidelityRemoteAccount[],
+): FidelityVerifiedActivityAccount[] {
+  const accountByKey = new Map(accounts.map(account => [account.accountKey, account]));
+  if (accountByKey.size !== accounts.length) {
+    throw new Error('Fidelity discovered account identity is ambiguous');
+  }
+  const verified: FidelityVerifiedActivityAccount[] = [];
+  const seenAccountKeys = new Set<string>();
+  const seenRemoteAccountIds = new Set<string>();
+  for (const artifact of artifacts.filter(item => item.artifactType === 'activity-csv')) {
+    const account = accountByKey.get(artifact.account.accountKey);
+    if (!account || seenAccountKeys.has(account.accountKey) || artifact.sourceAccounts.length > 1) {
+      throw new Error('Fidelity activity artifact account identity is ambiguous');
+    }
+    seenAccountKeys.add(account.accountKey);
+    if (artifact.transactionCount === 0 && artifact.balanceCount === 0
+        && artifact.sourceAccounts.length === 0) continue;
+    if (artifact.sourceAccounts.length !== 1) {
+      throw new Error('Fidelity activity artifact account identity is ambiguous');
+    }
+    const sourceAccount = artifact.sourceAccounts[0]!;
+    const parserLast4 = sourceAccount.remoteAccountId.replace(/^fidelity:/, '').replace(/\D/g, '').slice(-4);
+    if (account.last4 && parserLast4 !== account.last4) {
+      throw new Error('Fidelity activity parser identity does not match the selected account');
+    }
+    if (seenRemoteAccountIds.has(sourceAccount.remoteAccountId)) {
+      throw new Error('Multiple Fidelity activity accounts expose the same parser identity');
+    }
+    seenRemoteAccountIds.add(sourceAccount.remoteAccountId);
+    verified.push({ account, sourceAccount });
+  }
+  if (seenAccountKeys.size !== accounts.length) {
+    throw new Error('Fidelity activity did not verify every discovered account identity');
+  }
+  return verified;
+}
+
+function statementDocumentMayIntersect(
+  document: FidelityStatementDocument,
+  from: string,
+  through: string,
+): boolean {
+  if (!document.periodStart || !document.periodEnd) return true;
+  return document.periodEnd >= from && document.periodStart <= through;
 }
 
 export function isFidelityInstitutionUnavailableText(value: string): boolean {
@@ -353,18 +505,46 @@ async function pageShowsInstitutionUnavailable(page: Page): Promise<boolean> {
   ).count() > 0;
 }
 
-function parserAccounts(parsed: AppImportParseResult): string[] {
-  return [...new Set([
-    ...parsed.transactions.flatMap(transaction => transaction?.account ? [transaction.account] : []),
-    ...parsed.balances.flatMap(balance => balance.account ? [balance.account] : []),
-  ])];
+function parserSourceAccountClaims(parsed: AppImportParseResult): FidelitySourceAccountClaim[] {
+  const claims = new Map<string, FidelitySourceAccountClaim>();
+  const facts = [
+    ...parsed.transactions.filter((item): item is NonNullable<typeof item> => Boolean(item)),
+    ...parsed.balances,
+  ];
+  for (const fact of facts) {
+    const remoteAccountId = fact.remoteAccountId?.trim();
+    const sourceAccountName = fact.account?.replace(/\s+/g, ' ').trim();
+    if (!remoteAccountId || !sourceAccountName) {
+      throw new Error('Fidelity parser fact is missing a stable account identity');
+    }
+    const existing = claims.get(remoteAccountId);
+    if (existing && existing.sourceAccountName !== sourceAccountName) {
+      throw new Error('Fidelity parser account identity is ambiguous');
+    }
+    claims.set(remoteAccountId, { remoteAccountId, sourceAccountName });
+  }
+  return [...claims.values()].sort((left, right) => (
+    left.remoteAccountId.localeCompare(right.remoteAccountId)
+  ));
 }
 
-function parserAccountLast4s(parsed: AppImportParseResult): string[] {
-  return [...new Set(parserAccounts(parsed).flatMap(account => {
-    const digits = account.replace(/\D/g, '');
-    return digits.length >= 4 ? [digits.slice(-4)] : [];
-  }))];
+function parsedCoverage(
+  parsed: AppImportParseResult,
+  plan: Pick<FidelityArtifactPlan, 'artifactType' | 'coveredFrom' | 'coveredThrough'>,
+): Pick<FidelityArtifactPlan, 'coveredFrom' | 'coveredThrough'> {
+  if (plan.artifactType === 'activity-csv') {
+    return { coveredFrom: plan.coveredFrom, coveredThrough: plan.coveredThrough };
+  }
+  const dates = [
+    ...parsed.transactions.flatMap(transaction => transaction?.date ? [transaction.date.slice(0, 10)] : []),
+    ...parsed.balances.flatMap(balance => balance.date ? [balance.date.slice(0, 10)] : []),
+  ].sort();
+  const coveredFrom = parsed.coveredFrom?.slice(0, 10) ?? dates[0] ?? null;
+  const coveredThrough = parsed.coveredTo?.slice(0, 10) ?? dates.at(-1) ?? null;
+  if (!coveredFrom || !coveredThrough || coveredFrom > coveredThrough) {
+    throw new Error('Fidelity statement parser produced no valid coverage');
+  }
+  return { coveredFrom, coveredThrough };
 }
 
 async function pdfSample(bytes: Uint8Array): Promise<string> {
@@ -403,7 +583,10 @@ function parserForArtifact(
 
 export async function validateFidelityArtifact(
   path: string,
-  plan: Pick<FidelityArtifactPlan, 'artifactType' | 'fileName' | 'account'>,
+  plan: Pick<
+    FidelityArtifactPlan,
+    'artifactType' | 'fileName' | 'account' | 'coveredFrom' | 'coveredThrough'
+  >,
 ): Promise<FidelityValidationResult> {
   const metadata = await stat(path);
   if (!metadata.isFile() || metadata.size < 16) throw new Error('Fidelity artifact is empty or too small');
@@ -435,17 +618,20 @@ export async function validateFidelityArtifact(
   if (plan.artifactType !== 'activity-csv' && parsed.balances.length === 0) {
     throw new Error('Fidelity statement parser produced no balance');
   }
-  const parsedAccountLast4s = parserAccountLast4s(parsed);
-  if (plan.account.last4 && parsedAccountLast4s.length > 0 && (
-    parsedAccountLast4s.length !== 1 || parsedAccountLast4s[0] !== plan.account.last4
-  )) {
-    throw new Error('Fidelity parser account does not match the discovered remote account');
+  const sourceAccounts = parserSourceAccountClaims(parsed);
+  const transactionCount = parsed.transactions.filter(Boolean).length;
+  if (sourceAccounts.length === 0
+      && !(plan.artifactType === 'activity-csv' && transactionCount === 0 && parsed.balances.length === 0)) {
+    throw new Error('Fidelity parser produced no stable account identity');
   }
+  const coverage = parsedCoverage(parsed, plan);
   return {
     parserId: parser.id,
-    transactionCount: parsed.transactions.filter(Boolean).length,
+    transactionCount,
     balanceCount: parsed.balances.length,
-    parsedAccountLast4s,
+    contentHash: createHash('sha256').update(bytes).digest('hex'),
+    sourceAccounts,
+    ...coverage,
   };
 }
 
@@ -509,7 +695,17 @@ function fidelityAuthenticatedRoute(url: URL): boolean {
   if (!/(?:^|\.)fidelity\.com$/i.test(url.hostname)) return false;
   return /\/ftgw\/digital\/portfolio(?:\/|$)/i.test(url.pathname)
     || /\/mybenefits(?:\/|$)/i.test(url.pathname)
-    || /\/public\/nb\//i.test(url.pathname);
+    || /\/navigate\/ent-documentcenter\//i.test(url.pathname);
+}
+
+export function isFidelityRetailActivityUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return /(?:^|\.)fidelity\.com$/i.test(url.hostname)
+      && /\/ftgw\/digital\/portfolio\/activity(?:\/|$)/i.test(url.pathname);
+  } catch {
+    return false;
+  }
 }
 
 export async function isFidelityAuthenticatedPage(page: Page): Promise<boolean> {
@@ -532,7 +728,7 @@ export async function waitUntilFidelityAuthenticated(page: Page, timeoutMs: numb
     };
     const hasAuthenticationField = Array.from(document.querySelectorAll(selector)).some(visible);
     const fidelityHost = /(?:^|\.)fidelity\.com$/i.test(location.hostname);
-    const authenticatedPath = /\/ftgw\/digital\/portfolio(?:\/|$)|\/mybenefits(?:\/|$)|\/public\/nb\//i.test(location.pathname);
+    const authenticatedPath = /\/ftgw\/digital\/portfolio(?:\/|$)|\/mybenefits(?:\/|$)/i.test(location.pathname);
     const authenticationPath = /(?:login|logon|sign[-_]?in|authenticate|authorization|oauth|sso|auth)/i.test(
       location.hostname + location.pathname,
     );
@@ -551,7 +747,7 @@ export async function waitUntilFidelityAuthenticated(page: Page, timeoutMs: numb
 
 type PageGate = 'ready' | 'no-accounts' | 'authentication-required' | 'institution-unavailable';
 
-async function navigateToFidelityPage(
+export async function navigateToFidelityPage(
   page: Page,
   url: string,
   readySelector: string,
@@ -571,7 +767,20 @@ async function navigateToFidelityPage(
   }
   if (await pageShowsInstitutionUnavailable(page)) return 'institution-unavailable';
   try {
-    await page.locator(readySelector).first().waitFor({ state: 'attached', timeout: 30_000 });
+    const ready = page.locator(readySelector).first()
+      .waitFor({ state: 'attached', timeout: 30_000 })
+      .then(() => 'ready' as const);
+    const outcome = options.missingControlsMeanNoAccounts
+      ? await Promise.race([
+        ready,
+        page.waitForURL(url => (
+          /(?:^|\.)fidelity\.com$/i.test(url.hostname)
+          && !fidelityAuthenticationRoute(url)
+          && !fidelityAuthenticatedRoute(url)
+        ), { waitUntil: 'commit', timeout: 30_000 }).then(() => 'no-accounts' as const),
+      ])
+      : await ready;
+    if (outcome === 'no-accounts') return outcome;
   } catch {
     try {
       currentUrl = new URL(page.url());
@@ -582,8 +791,8 @@ async function navigateToFidelityPage(
       return 'authentication-required';
     }
     if (await pageShowsInstitutionUnavailable(page)) return 'institution-unavailable';
-    if (!fidelityAuthenticatedRoute(currentUrl)) return 'authentication-required';
     if (options.missingControlsMeanNoAccounts) return 'no-accounts';
+    if (!fidelityAuthenticatedRoute(currentUrl)) return 'authentication-required';
     throw new Error('Fidelity page controls did not become available');
   }
   return 'ready';
@@ -617,8 +826,7 @@ async function accountCandidatesFromLocator(
 }
 
 const retailAccountControlSelector = [
-  '#account-selector:visible a',
-  '#account-selector:visible button',
+  '#account-selector:visible section[aria-label] a',
   '[role="listbox"]:visible [role="option"]',
 ].join(',');
 
@@ -634,6 +842,85 @@ async function openRetailAccountSelector(page: Page): Promise<Locator> {
   return controls;
 }
 
+async function retailAccountSupportsActivity(
+  page: Page,
+  account: FidelityRemoteAccount,
+): Promise<boolean> {
+  const startedAt = performance.now();
+  fidelityRuntimeDiagnostic('retail-capability-start', {
+    controlIndex: account.selection.controlIndex,
+    accountKind: account.kind,
+  });
+  const gate = await navigateToFidelityPage(page, FIDELITY_ACTIVITY_URL, [
+    '#account-selector',
+    'button[aria-label="account selector"]',
+  ].join(','), { missingControlsMeanNoAccounts: true });
+  fidelityRuntimeDiagnostic('retail-capability-gate', {
+    controlIndex: account.selection.controlIndex,
+    gate,
+    elapsedMs: Math.round(performance.now() - startedAt),
+  });
+  if (gate === 'no-accounts') return false;
+  assertGate(gate);
+
+  const controls = await openRetailAccountSelector(page);
+  const control = controls.nth(account.selection.controlIndex);
+  await control.waitFor({ state: 'attached', timeout: 30_000 });
+  await control.click();
+  if (fidelityAuthenticationRoute(new URL(page.url())) ||
+      await page.locator(VISIBLE_AUTHENTICATION_FIELDS).count() > 0) {
+    fidelityRuntimeDiagnostic('retail-capability-authentication', {
+      controlIndex: account.selection.controlIndex,
+      phase: 'after-control',
+      elapsedMs: Math.round(performance.now() - startedAt),
+    });
+    throw new FidelityAuthenticationRequiredError('authentication-required');
+  }
+  if (await pageShowsInstitutionUnavailable(page)) {
+    throw new FidelityInstitutionUnavailableError('institution-unavailable');
+  }
+  if (!isFidelityRetailActivityUrl(page.url())) {
+    fidelityRuntimeDiagnostic('retail-capability-unsupported', {
+      controlIndex: account.selection.controlIndex,
+      phase: 'after-control',
+      elapsedMs: Math.round(performance.now() - startedAt),
+    });
+    return false;
+  }
+
+  try {
+    await page.getByRole('button', { name: /Open time filter/i })
+      .waitFor({ state: 'visible', timeout: 30_000 });
+  } catch {
+    if (fidelityAuthenticationRoute(new URL(page.url())) ||
+        await page.locator(VISIBLE_AUTHENTICATION_FIELDS).count() > 0) {
+      fidelityRuntimeDiagnostic('retail-capability-authentication', {
+        controlIndex: account.selection.controlIndex,
+        phase: 'activity-controls-timeout',
+        elapsedMs: Math.round(performance.now() - startedAt),
+      });
+      throw new FidelityAuthenticationRequiredError('authentication-required');
+    }
+    if (await pageShowsInstitutionUnavailable(page)) {
+      throw new FidelityInstitutionUnavailableError('institution-unavailable');
+    }
+    if (!isFidelityRetailActivityUrl(page.url())) {
+      fidelityRuntimeDiagnostic('retail-capability-unsupported', {
+        controlIndex: account.selection.controlIndex,
+        phase: 'activity-controls-timeout',
+        elapsedMs: Math.round(performance.now() - startedAt),
+      });
+      return false;
+    }
+    throw new Error('Fidelity activity controls did not become available');
+  }
+  fidelityRuntimeDiagnostic('retail-capability-ready', {
+    controlIndex: account.selection.controlIndex,
+    elapsedMs: Math.round(performance.now() - startedAt),
+  });
+  return true;
+}
+
 export async function discoverFidelityRetailAccounts(page: Page): Promise<FidelityRemoteAccount[]> {
   const gate = await navigateToFidelityPage(page, FIDELITY_ACTIVITY_URL, [
     '#account-selector',
@@ -644,7 +931,25 @@ export async function discoverFidelityRetailAccounts(page: Page): Promise<Fideli
   const accounts = fidelityAccountsFromCandidates(
     await accountCandidatesFromLocator(await openRetailAccountSelector(page), 'retail'),
   );
-  return accounts;
+  fidelityRuntimeDiagnostic('retail-candidates', {
+    candidateCount: accounts.length,
+  });
+  return filterFidelityRetailActivityAccounts(
+    accounts,
+    account => retailAccountSupportsActivity(page, account),
+  );
+}
+
+export async function filterFidelityRetailActivityAccounts(
+  accounts: readonly FidelityRemoteAccount[],
+  supportsActivity: (account: FidelityRemoteAccount) => Promise<boolean>,
+): Promise<FidelityRemoteAccount[]> {
+  const supported: FidelityRemoteAccount[] = [];
+  for (const account of accounts) {
+    if (await supportsActivity(account)) supported.push(account);
+  }
+  assertUniqueFidelityRoutingSuffixes(supported);
+  return supported;
 }
 
 const netBenefitsAccountControlSelector = [
@@ -667,7 +972,9 @@ export async function discoverFidelityNetBenefitsAccounts(page: Page): Promise<F
     /401\s*\(k\)|403\s*\(b\)|retirement|pension|savings plan|workplace/i.test(candidate.label)
     || Boolean(candidate.remoteId)
   ));
-  return fidelityAccountsFromCandidates(candidates);
+  const accounts = fidelityAccountsFromCandidates(candidates);
+  assertUniqueFidelityRoutingSuffixes(accounts);
+  return accounts;
 }
 
 async function discoverFidelitySurface(
@@ -701,9 +1008,6 @@ export function resolveFidelitySurfaceDiscoveries(
   const netBenefits = bySurface.get('netbenefits')!;
   const results = [retail, netBenefits];
 
-  if (results.every(result => result.status === 'authentication-required')) {
-    throw new FidelityAuthenticationRequiredError('authentication-required');
-  }
   if (results.every(result => result.status === 'institution-unavailable')) {
     throw new FidelityInstitutionUnavailableError('institution-unavailable');
   }
@@ -711,11 +1015,18 @@ export function resolveFidelitySurfaceDiscoveries(
   const retailAccounts = retail.status === 'accounts' ? retail.accounts : [];
   const netBenefitsAccounts = netBenefits.status === 'accounts' ? netBenefits.accounts : [];
   if (retailAccounts.length + netBenefitsAccounts.length === 0) {
+    if (results.some(result => result.status === 'authentication-required')) {
+      throw new FidelityAuthenticationRequiredError('authentication-required');
+    }
     throw new Error('Fidelity did not expose accounts on an available surface');
   }
 
   const skipped = results.flatMap(result => {
-    if (result.status === 'accounts') return [];
+    if (result.status === 'accounts') {
+      return result.surface === 'netbenefits'
+        ? ['Fidelity NetBenefits accounts were discovered, but their downloads are not yet parser-verified']
+        : [];
+    }
     const name = result.surface === 'retail' ? 'retail' : 'NetBenefits';
     if (result.status === 'no-accounts') return [`Fidelity ${name} has no accounts`];
     if (result.status === 'authentication-required') {
@@ -733,6 +1044,33 @@ function safeReplayHeaders(headers: Record<string, string>): Record<string, stri
     'sec-fetch-mode', 'sec-fetch-site', 'user-agent',
   ]);
   return Object.fromEntries(Object.entries(headers).filter(([name]) => !excluded.has(name.toLowerCase())));
+}
+
+export function fidelityResponseRequiresAuthentication(response: {
+  status: number;
+  url: string;
+  headers?: Record<string, string>;
+  bodyText?: string | null;
+}): boolean {
+  if (response.status === 401 || response.status === 403) return true;
+  try {
+    if (fidelityAuthenticationRoute(new URL(response.url))) return true;
+  } catch {
+    return true;
+  }
+  const location = Object.entries(response.headers ?? {})
+    .find(([name]) => name.toLowerCase() === 'location')?.[1];
+  if (location) {
+    try {
+      if (fidelityAuthenticationRoute(new URL(location, response.url))) return true;
+    } catch {
+      return true;
+    }
+  }
+  if (response.status >= 300 && response.status < 400) return true;
+  const bodyText = response.bodyText ?? '';
+  return /<input[^>]+type=["']?password\b|(?:sign|log)\s*in\s+to\s+fidelity|<title>[^<]*(?:sign|log)\s*in/i
+    .test(bodyText);
 }
 
 function replayRequestFromBrowserRequest(request: Request): FidelityReplayRequest {
@@ -783,10 +1121,11 @@ async function replayRequestFromControl(control: Locator, pageUrl: string): Prom
   return request;
 }
 
-async function captureCanceledDownloadRequest(
+async function captureDownloadSource(
   page: Page,
   trigger: () => Promise<void>,
-): Promise<FidelityReplayRequest> {
+  requestMatches?: (request: Request) => boolean,
+): Promise<FidelityDownloadSource> {
   const observed: Request[] = [];
   const observe = (request: Request) => observed.push(request);
   page.on('request', observe);
@@ -795,12 +1134,28 @@ async function captureCanceledDownloadRequest(
     const downloadEvent = page.waitForEvent('download', { timeout: 30_000 });
     await trigger();
     download = await downloadEvent;
-    const request = [...observed].reverse().find(candidate => candidate.url() === download?.url());
-    await download.cancel();
-    return request ? replayRequestFromBrowserRequest(request) : {
-      url: fidelityDirectRequestUrl(download.url()),
+    const request = [...observed].reverse().find(candidate => requestMatches
+      ? requestMatches(candidate)
+      : candidate.url() === download?.url());
+    if (request) {
+      await download.cancel();
+      return { kind: 'direct-request', request: replayRequestFromBrowserRequest(request) };
+    }
+    let downloadUrl: URL;
+    try {
+      downloadUrl = new URL(download.url());
+    } catch {
+      throw new Error('Fidelity download destination is invalid');
+    }
+    if (downloadUrl.protocol === 'blob:') {
+      return { kind: 'browser-download', download };
+    }
+    const replayRequest = {
+      url: fidelityDirectRequestUrl(downloadUrl.toString()),
       method: 'GET',
     };
+    await download.cancel();
+    return { kind: 'direct-request', request: replayRequest };
   } catch {
     if (download) await download.cancel().catch(() => {});
     throw new Error('Fidelity download request metadata was unavailable');
@@ -811,14 +1166,28 @@ async function captureCanceledDownloadRequest(
 
 async function executeFidelityRequest(page: Page, request: FidelityReplayRequest): Promise<APIResponse> {
   try {
-    return await page.context().request.fetch(request.url, {
+    const response = await page.context().request.fetch(request.url, {
       method: request.method,
       headers: request.headers,
       data: request.postData,
       failOnStatusCode: false,
       timeout: 60_000,
     });
-  } catch {
+    const headers = response.headers();
+    const bodyText = headers['content-type']?.toLowerCase().includes('html')
+      ? await response.text().catch(() => '')
+      : null;
+    if (fidelityResponseRequiresAuthentication({
+      status: response.status(),
+      url: response.url(),
+      headers,
+      bodyText,
+    })) {
+      throw new FidelityAuthenticationRequiredError('authentication-required');
+    }
+    return response;
+  } catch (error) {
+    if (error instanceof FidelityAuthenticationRequiredError) throw error;
     throw new Error('Fidelity direct request failed before receiving a response');
   }
 }
@@ -832,6 +1201,20 @@ function responseMatchesArtifact(response: APIResponse, artifactType: FidelityAr
     return contentType.includes('pdf') || contentType.includes('octet-stream');
   }
   return contentType.includes('html') || contentType.includes('text/plain');
+}
+
+async function artifactBytesFromResponse(
+  response: APIResponse,
+  artifactType: FidelityArtifactType,
+): Promise<Uint8Array> {
+  const contentType = response.headers()['content-type']?.toLowerCase() ?? '';
+  if (artifactType === 'statement-pdf' && contentType.includes('json')) {
+    return decodeFidelityStatementDocument(await response.json());
+  }
+  if (!responseMatchesArtifact(response, artifactType)) {
+    throw new Error('Fidelity direct response has the wrong content type');
+  }
+  return new Uint8Array(await response.body());
 }
 
 async function downloadAndValidatePlan(
@@ -848,12 +1231,10 @@ async function downloadAndValidatePlan(
 
   const response = await executeFidelityRequest(page, request);
   if (!response.ok()) throw new Error(`Fidelity direct request returned status ${response.status()}`);
-  if (!responseMatchesArtifact(response, plan.artifactType)) {
-    throw new Error('Fidelity direct response has the wrong content type');
-  }
+  const bytes = await artifactBytesFromResponse(response, plan.artifactType);
   const temporaryPath = join(outputDir, `.${plan.fileName}.${randomUUID()}.partial`);
   try {
-    await writeFile(temporaryPath, await response.body(), { mode: 0o600 });
+    await writeFile(temporaryPath, bytes, { mode: 0o600 });
     const validated = await validateFidelityArtifact(temporaryPath, plan);
     await rename(temporaryPath, targetPath);
     return { ...plan, path: targetPath, ...validated };
@@ -880,14 +1261,41 @@ async function setRetailActivityRange(page: Page, from: string, through: string)
   await page.locator('#input-from-date:visible').waitFor({ state: 'hidden', timeout: 30_000 });
 }
 
-async function activityRequest(page: Page): Promise<FidelityReplayRequest> {
+async function activityRequest(page: Page): Promise<FidelityDownloadSource> {
   await page.getByRole('button', { name: 'Download', exact: true }).click();
   const csv = page.getByRole('button', { name: 'Download as CSV', exact: true })
     .or(page.getByRole('link', { name: 'Download as CSV', exact: true }))
     .first();
   await csv.waitFor({ state: 'visible', timeout: 30_000 });
   const direct = await replayRequestFromControl(csv, page.url());
-  return direct ?? captureCanceledDownloadRequest(page, () => csv.click());
+  return direct
+    ? { kind: 'direct-request', request: direct }
+    : captureDownloadSource(page, () => csv.click());
+}
+
+export async function saveAndValidateFidelityBrowserDownload(
+  download: Pick<Download, 'cancel' | 'saveAs'>,
+  outputDir: string,
+  plan: FidelityArtifactPlan,
+): Promise<FidelityDownloadedArtifact> {
+  const targetPath = join(outputDir, plan.fileName);
+  try {
+    const existing = await validateFidelityArtifact(targetPath, plan);
+    await download.cancel().catch(() => {});
+    return { ...plan, path: targetPath, ...existing };
+  } catch {}
+
+  const temporaryPath = join(outputDir, `.${plan.fileName}.${randomUUID()}.partial`);
+  try {
+    await download.saveAs(temporaryPath);
+    if (process.platform !== 'win32') await chmod(temporaryPath, 0o600);
+    const validated = await validateFidelityArtifact(temporaryPath, plan);
+    await rename(temporaryPath, targetPath);
+    return { ...plan, path: targetPath, ...validated };
+  } finally {
+    await download.cancel().catch(() => {});
+    await rm(temporaryPath, { force: true });
+  }
 }
 
 async function downloadRetailActivity(
@@ -918,7 +1326,10 @@ async function downloadRetailActivity(
       async () => {
         await selectRetailAccount(page, account);
         await setRetailActivityRange(page, config.from, config.through);
-        return downloadAndValidatePlan(page, config.outputDir, plan, await activityRequest(page));
+        const source = await activityRequest(page);
+        return source.kind === 'direct-request'
+          ? downloadAndValidatePlan(page, config.outputDir, plan, source.request)
+          : saveAndValidateFidelityBrowserDownload(source.download, config.outputDir, plan);
       },
       { surface: account.surface, artifactType: plan.artifactType, index: index + 1, total: accounts.length },
     );
@@ -927,86 +1338,311 @@ async function downloadRetailActivity(
   return artifacts;
 }
 
-async function collectDocumentCandidates(
-  page: Page,
-  surface: FidelitySurface,
-  accountKey?: string,
-): Promise<FidelityDocumentCandidate[]> {
-  const links = page.locator([
-    'a[aria-label*="Download Document"]',
-    'a[download]',
-    'a[href*=".pdf"]',
-    'a[href*="statement"]',
-  ].join(','));
-  return links.evaluateAll((elements, metadata) => elements.map(element => {
-    const anchor = element as HTMLAnchorElement;
-    const row = element.closest('tr,li,article,[role="row"]');
-    return {
-      surface: metadata.surface,
-      label: `${row?.textContent ?? ''} ${element.textContent ?? ''}`.replace(/\s+/g, ' ').trim(),
-      href: anchor.href,
-      accountKey: metadata.accountKey,
-    };
-  }), { surface, accountKey });
+const fidelityStatementControlSelector = 'a[aria-label*="Download Document"]';
+
+type FidelityStatementView = {
+  documents: FidelityStatementDocument[];
+};
+
+async function statementListFromRequest(page: Page, request: Request): Promise<FidelityStatementDocument[]> {
+  const response = await executeFidelityRequest(page, replayRequestFromBrowserRequest(request));
+  if (!response.ok()) throw new Error(`Fidelity statement list returned status ${response.status()}`);
+  const contentType = response.headers()['content-type']?.toLowerCase() ?? '';
+  if (!contentType.includes('json')) throw new Error('Fidelity statement list response is not JSON');
+  return parseFidelityStatementList(await response.json());
 }
 
-async function discoverRetailDocumentPlans(
-  page: Page,
-  accounts: FidelityRemoteAccount[],
-  from: string,
-  through: string,
-): Promise<FidelityArtifactPlan[]> {
-  const gate = await navigateToFidelityPage(page, FIDELITY_ACTIVITY_URL, 'a,button');
+async function openRetailStatementCenter(page: Page): Promise<FidelityStatementView> {
+  const gate = await navigateToFidelityPage(page, FIDELITY_ACTIVITY_URL, 'a[data-utility="Documents"]');
   assertGate(gate);
-  const documents = page.locator('a,button').filter({ hasText: /^Documents$/i }).first();
-  await documents.waitFor({ state: 'visible', timeout: 30_000 });
-  await documents.click();
-  if (await pageShowsInstitutionUnavailable(page)) throw new FidelityInstitutionUnavailableError('institution-unavailable');
-  await page.locator('a[aria-label*="Download Document"], a[href*=".pdf"]').first()
-    .waitFor({ state: 'attached', timeout: 30_000 });
-  return fidelityStatementPlans(await collectDocumentCandidates(page, 'retail'), accounts, from, through);
+  const documents = page.locator('a[data-utility="Documents"]').first();
+  await documents.waitFor({ state: 'attached', timeout: 30_000 });
+  const href = await documents.getAttribute('href');
+  if (!href) throw new Error('Fidelity Documents destination is missing');
+  const requestPromise = page.waitForRequest(request => (
+    request.method() === 'POST' && isFidelityStatementListRequestUrl(request.url())
+  ), { timeout: 60_000 });
+  const documentsGatePromise = navigateToFidelityPage(
+    page,
+    fidelityDirectRequestUrl(href, page.url()),
+    'body',
+  );
+  const [request, documentsGate] = await Promise.all([requestPromise, documentsGatePromise]);
+  assertGate(documentsGate);
+  return { documents: await statementListFromRequest(page, request) };
 }
 
-async function discoverNetBenefitsDocumentPlans(
-  page: Page,
-  accounts: FidelityRemoteAccount[],
-  from: string,
-  through: string,
-): Promise<FidelityArtifactPlan[]> {
-  const plans: FidelityArtifactPlan[] = [];
-  for (const account of accounts) {
-    if (!account.selection.href) continue;
-    const gate = await navigateToFidelityPage(page, fidelityDirectRequestUrl(account.selection.href), 'a,button');
-    assertGate(gate);
-    const statements = page.locator('a,button').filter({ hasText: /statements?|documents?/i }).first();
-    if (await statements.count() === 0) continue;
-    await statements.click();
-    if (await pageShowsInstitutionUnavailable(page)) throw new FidelityInstitutionUnavailableError('institution-unavailable');
-    const candidates = await collectDocumentCandidates(page, 'netbenefits', account.accountKey);
-    plans.push(...fidelityStatementPlans(candidates, accounts, from, through));
+async function statementYearOptions(page: Page): Promise<{
+  selectIndex: number;
+  options: Array<{ year: string; value: string; selected: boolean }>;
+} | null> {
+  const candidates = await page.locator('select:visible').evaluateAll(elements => elements.map((element, selectIndex) => {
+    const select = element as HTMLSelectElement;
+    return {
+      selectIndex,
+      options: [...select.options].flatMap(option => {
+        const year = (option.textContent ?? '').trim();
+        return /^20\d{2}$/.test(year) ? [{ year, value: option.value, selected: option.selected }] : [];
+      }),
+    };
+  }).filter(candidate => candidate.options.length > 0));
+  if (candidates.length > 1) throw new Error('Fidelity statement year selector is ambiguous');
+  return candidates[0] ?? null;
+}
+
+export function fidelityStatementYearTraversal(
+  requestedYears: readonly string[],
+  options: readonly { year: string; selected: boolean }[],
+): {
+  orderedYears: string[];
+  missingYears: string[];
+  useInitialView: boolean;
+} {
+  const available = new Map(options.map(option => [option.year, option]));
+  const availableRequested = requestedYears.filter(year => available.has(year));
+  const selectedYear = availableRequested.find(year => available.get(year)?.selected);
+  return {
+    orderedYears: selectedYear
+      ? [selectedYear, ...availableRequested.filter(year => year !== selectedYear)]
+      : availableRequested,
+    missingYears: requestedYears.filter(year => !available.has(year)),
+    useInitialView: availableRequested.length === 0,
+  };
+}
+
+export async function traverseFidelityStatementYears<T>(options: {
+  initialView: T;
+  requestedYears: readonly string[];
+  initialOptions: readonly { year: string; selected: boolean }[];
+  selectYear: (year: string) => Promise<T>;
+  processView: (view: T) => Promise<void>;
+}): Promise<ReturnType<typeof fidelityStatementYearTraversal>> {
+  const traversal = fidelityStatementYearTraversal(options.requestedYears, options.initialOptions);
+  if (traversal.useInitialView) {
+    await options.processView(options.initialView);
+    return traversal;
   }
-  return plans;
+  const initiallySelectedYear = options.initialOptions.find(option => option.selected)?.year;
+  for (const year of traversal.orderedYears) {
+    await options.processView(year === initiallySelectedYear
+      ? options.initialView
+      : await options.selectYear(year));
+  }
+  return traversal;
 }
 
-async function downloadStatementPlans(
+async function selectStatementYear(
   page: Page,
-  outputDir: string,
-  plans: FidelityArtifactPlan[],
+  selectIndex: number,
+  option: { year: string; value: string; selected: boolean },
+): Promise<FidelityStatementView> {
+  if (option.selected) {
+    throw new Error('Fidelity statement year option did not require a new request');
+  }
+  const responsePromise = page.waitForResponse(response => (
+    response.request().method() === 'POST'
+    && isFidelityStatementListRequestUrl(response.url())
+  ), { timeout: 60_000 });
+  await page.locator('select:visible').nth(selectIndex).selectOption(option.value, { timeout: 60_000 });
+  const response = await responsePromise;
+  if (!response.ok()) throw new Error(`Fidelity statement year request returned status ${response.status()}`);
+  await response.finished();
+  return { documents: await statementListFromRequest(page, response.request()) };
+}
+
+async function waitForStatementControls(page: Page, expected: number): Promise<void> {
+  await page.waitForFunction(({ selector, expectedCount }) => (
+    document.querySelectorAll(selector).length === expectedCount
+  ), { selector: fidelityStatementControlSelector, expectedCount: expected }, { timeout: 60_000 });
+}
+
+async function captureStatementRequest(page: Page, controlIndex: number): Promise<{
+  documentId: string;
+  request: FidelityReplayRequest;
+}> {
+  const control = page.locator(fidelityStatementControlSelector).nth(controlIndex);
+  await control.waitFor({ state: 'attached', timeout: 30_000 });
+  const requestPromise = page.waitForRequest(request => (
+    request.method() === 'POST'
+    && isFidelityStatementDownloadRequestUrl(request.url())
+    && Boolean(request.postDataBuffer()?.byteLength)
+  ), { timeout: 30_000 });
+  const downloadPromise = page.waitForEvent('download', { timeout: 30_000 });
+  await control.click();
+  const [request, download] = await Promise.all([requestPromise, downloadPromise]);
+  await download.cancel().catch(() => {});
+  const postData = request.postDataBuffer();
+  if (!postData) throw new Error('Fidelity statement download request body is missing');
+  return {
+    documentId: fidelityStatementDocumentIdFromRequestBody(postData),
+    request: replayRequestFromBrowserRequest(request),
+  };
+}
+
+function statementPlan(
+  document: FidelityStatementDocument,
+  through: string,
+): FidelityArtifactPlan {
+  const documentKey = createHash('sha256').update(document.id).digest('hex').slice(0, 10);
+  const date = document.periodEnd ?? through;
+  return {
+    artifactType: 'statement-pdf',
+    fileName: `fidelity-statement-${date.slice(0, 7)}-${documentKey}.pdf`,
+    account: {
+      surface: 'retail',
+      kind: 'other',
+      accountKey: opaqueAccountKey('retail', document.remoteAccountId),
+      last4: null,
+      label: 'Fidelity statement account',
+    },
+    coveredFrom: document.periodStart,
+    coveredThrough: date,
+  };
+}
+
+export function fidelityArtifactDedupeKey(artifact: FidelityDownloadedArtifact): string {
+  return JSON.stringify({
+    contentHash: artifact.contentHash,
+    parserId: artifact.parserId,
+    sourceAccounts: artifact.sourceAccounts.map(account => account.remoteAccountId).sort(),
+    coveredFrom: artifact.coveredFrom,
+    coveredThrough: artifact.coveredThrough,
+  });
+}
+
+export function assertFidelityStatementControlBijection(
+  documents: readonly Pick<FidelityStatementDocument, 'id'>[],
+  capturedDocumentIds: readonly string[],
+): void {
+  const listed = new Set(documents.map(document => document.id));
+  const captured = new Set(capturedDocumentIds);
+  if (listed.size !== documents.length || captured.size !== capturedDocumentIds.length
+      || listed.size !== captured.size
+      || [...listed].some(id => !captured.has(id))) {
+    throw new Error('Fidelity statement controls do not match list metadata exactly');
+  }
+}
+
+async function downloadStatementView(
+  page: Page,
+  config: Required<FidelitySyncConfig>,
+  view: FidelityStatementView,
+  seenDocumentIds: Set<string>,
+  seenArtifactKeys: Set<string>,
   report: FidelityProgressReporter,
 ): Promise<FidelityDownloadedArtifact[]> {
+  await waitForStatementControls(page, view.documents.length);
+  const documentsById = new Map(view.documents.map(document => [document.id, document]));
+  if (documentsById.size !== view.documents.length) {
+    throw new Error('Fidelity statement view repeats document identity');
+  }
   const artifacts: FidelityDownloadedArtifact[] = [];
-  for (const [index, plan] of plans.entries()) {
-    if (!plan.requestUrl) throw new Error('Fidelity statement request metadata is missing');
+  const controlCount = await page.locator(fidelityStatementControlSelector).count();
+  const capturedRequests: Array<{
+    documentId: string;
+    request: FidelityReplayRequest;
+  }> = [];
+  for (let controlIndex = 0; controlIndex < controlCount; controlIndex += 1) {
+    capturedRequests.push(await captureStatementRequest(page, controlIndex));
+  }
+  assertFidelityStatementControlBijection(
+    view.documents,
+    capturedRequests.map(captured => captured.documentId),
+  );
+  for (const captured of capturedRequests) {
+    const document = documentsById.get(captured.documentId);
+    if (!document) throw new Error('Fidelity statement control was not present in list metadata');
+    if (seenDocumentIds.has(document.id)) continue;
+    seenDocumentIds.add(document.id);
+    if (!document.pdfAvailable || !statementDocumentMayIntersect(document, config.from, config.through)) continue;
+    if (document.householded) {
+      throw new Error('Fidelity householded statement identity is not supported');
+    }
+    const plan = statementPlan(document, config.through);
     const artifact = await reportStep(
       report,
       'download',
-      `statement-${index + 1}`,
+      `statement-${seenDocumentIds.size}`,
       'Downloading Fidelity statement',
-      () => downloadAndValidatePlan(page, outputDir, plan, { url: plan.requestUrl!, method: 'GET' }),
-      { surface: plan.account.surface, artifactType: plan.artifactType, index: index + 1, total: plans.length },
+      () => downloadAndValidatePlan(page, config.outputDir, plan, captured.request),
+      { surface: 'retail', artifactType: plan.artifactType },
     );
+    if (artifact.sourceAccounts.length !== 1
+        || artifact.sourceAccounts[0]!.remoteAccountId !== document.remoteAccountId) {
+      await rm(artifact.path, { force: true });
+      throw new Error('Fidelity statement parser identity does not match list metadata');
+    }
+    if (!artifact.coveredFrom || artifact.coveredThrough < config.from
+        || artifact.coveredFrom > config.through) {
+      await rm(artifact.path, { force: true });
+      continue;
+    }
+    const dedupeKey = fidelityArtifactDedupeKey(artifact);
+    if (seenArtifactKeys.has(dedupeKey)) {
+      await rm(artifact.path, { force: true });
+      continue;
+    }
+    seenArtifactKeys.add(dedupeKey);
     artifacts.push(artifact);
   }
+  return artifacts;
+}
+
+async function downloadRetailStatements(
+  page: Page,
+  config: Required<FidelitySyncConfig>,
+  report: FidelityProgressReporter,
+): Promise<FidelityDownloadedArtifact[]> {
+  const initialView = await openRetailStatementCenter(page);
+  const yearSelector = await statementYearOptions(page);
+  const requestedYears = Array.from(
+    { length: Number(config.through.slice(0, 4)) - Number(config.from.slice(0, 4)) + 1 },
+    (_, index) => String(Number(config.from.slice(0, 4)) + index),
+  );
+  const artifacts: FidelityDownloadedArtifact[] = [];
+  const seenDocumentIds = new Set<string>();
+  const seenArtifactKeys = new Set<string>();
+  const processView = async (view: FidelityStatementView) => {
+    artifacts.push(...await downloadStatementView(
+      page,
+      config,
+      view,
+      seenDocumentIds,
+      seenArtifactKeys,
+      report,
+    ));
+  };
+  const traversal = fidelityStatementYearTraversal(requestedYears, yearSelector?.options ?? []);
+  if (traversal.missingYears.length > 0) {
+    report({
+      phase: 'artifact-discovery',
+      step: 'statement-years',
+      status: 'completed',
+      message: 'Some requested Fidelity statement years are unavailable',
+      timestamp: new Date().toISOString(),
+      details: {
+        requestedYears: requestedYears.length,
+        availableYears: traversal.orderedYears.length,
+        unavailableYears: traversal.missingYears.length,
+      },
+    });
+  }
+  await traverseFidelityStatementYears({
+    initialView,
+    requestedYears,
+    initialOptions: yearSelector?.options ?? [],
+    processView,
+    selectYear: async year => {
+      const currentSelector = await statementYearOptions(page);
+      if (!currentSelector) throw new Error('Fidelity statement year selector disappeared');
+      const option = currentSelector.options.find(candidate => candidate.year === year);
+      if (!option) throw new Error('Fidelity statement year became unavailable');
+      if (option.selected) {
+        throw new Error('Fidelity statement year selection did not advance');
+      }
+      return selectStatementYear(page, currentSelector.selectIndex, option);
+    },
+  });
   return artifacts;
 }
 
@@ -1044,25 +1680,35 @@ async function runAuthenticatedFidelity(
     netBenefitsDiscovery,
   ]);
   const accounts = [...retailAccounts, ...netBenefitsAccounts];
-  const artifacts = retailAccounts.length > 0
+  const activityArtifacts = retailAccounts.length > 0
     ? await downloadRetailActivity(page, config, retailAccounts, report)
     : [];
-  const statementPlans = await reportStep(
-    report,
-    'artifact-discovery',
-    'statements',
-    'Discovering Fidelity statements',
-    async () => [
-      ...(retailAccounts.length > 0
-        ? await discoverRetailDocumentPlans(page, retailAccounts, config.from, config.through)
-        : []),
-      ...(netBenefitsAccounts.length > 0
-        ? await discoverNetBenefitsDocumentPlans(page, netBenefitsAccounts, config.from, config.through)
-        : []),
-    ],
-  );
-  artifacts.push(...await downloadStatementPlans(page, config.outputDir, statementPlans, report));
-  return { status: 'complete', accountsDiscovered: accounts.length, artifacts, skipped };
+  if (retailAccounts.length > 0) {
+    verifyFidelityActivityAccounts(activityArtifacts, retailAccounts);
+  }
+  const quietActivity = activityArtifacts.filter(artifact => (
+    artifact.transactionCount === 0 && artifact.balanceCount === 0
+  ));
+  await Promise.all(quietActivity.map(artifact => rm(artifact.path, { force: true })));
+  if (quietActivity.length > 0) {
+    skipped.push(
+      `Fidelity omitted ${quietActivity.length} empty activity export${quietActivity.length === 1 ? '' : 's'}`,
+    );
+  }
+  const artifacts = activityArtifacts.filter(artifact => !quietActivity.includes(artifact));
+  if (retailAccounts.length > 0) {
+    artifacts.push(...await reportStep(
+      report,
+      'artifact-discovery',
+      'statements',
+      'Discovering Fidelity statements',
+      () => downloadRetailStatements(page, config, report),
+    ));
+  }
+  const sourceAccounts = new Set(artifacts.flatMap(artifact => (
+    artifact.sourceAccounts.map(account => account.remoteAccountId)
+  )));
+  return { status: 'complete', accountsDiscovered: sourceAccounts.size || accounts.length, artifacts, skipped };
 }
 
 const fidelityBrowserProgram = `async (page, _reportProgress, bindings) => {

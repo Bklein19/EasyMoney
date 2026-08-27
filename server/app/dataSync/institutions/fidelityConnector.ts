@@ -1,4 +1,5 @@
 import type {
+  MultiAccountSyncArtifact,
   RoutedSyncArtifact,
   SyncAccountCoverage,
   SyncConnector,
@@ -8,132 +9,32 @@ import type {
 import { goalWindowForCoverage } from '../planning.ts';
 import {
   runFidelitySync,
-  type FidelityAccountKind,
   type FidelityDownloadedArtifact,
   type FidelityProgressEvent,
 } from './fidelity.ts';
 
 type FidelitySyncRunner = typeof runFidelitySync;
 
-function identityTexts(account: SyncAccountCoverage): string[] {
-  return [
-    account.name,
-    account.sourceAccountName,
-    ...account.sourceAccountNames,
-    ...account.accountAliases,
-  ].filter((value): value is string => Boolean(value?.trim()));
-}
-
-function normalizedIdentity(value: string): string {
-  return value.replace(/\s+/g, ' ').trim().toLowerCase();
-}
-
 export function matchesFidelityAccount(account: SyncAccountCoverage): boolean {
   return /\bfidelity\b/i.test(account.institution?.trim() ?? '');
 }
 
-export function inferFidelityAccountLast4(account: SyncAccountCoverage): string | null {
-  const preferred = new Set<string>();
-  const fallback = new Set<string>();
-  for (const text of identityTexts(account)) {
-    const explicit = text.match(
-      /(?:ending\s+in|account(?:\s+(?:number|ending))?|[x*\u2022]{2,}|-{2,})\D{0,12}(\d{4})(?!\d)/i,
-    )?.[1];
-    if (explicit) preferred.add(explicit);
-    for (const match of text.matchAll(/\b(?!19\d{2}\b|20\d{2}\b)(\d{4})\b/g)) {
-      fallback.add(match[1]!);
-    }
-  }
-  const candidates = preferred.size > 0 ? preferred : fallback;
-  return candidates.size === 1 ? [...candidates][0]! : null;
-}
-
-function localAccountSupportsKind(account: SyncAccountCoverage, kind: FidelityAccountKind): boolean {
-  const text = `${account.type} ${identityTexts(account).join(' ')}`.toLowerCase();
-  if (kind === 'retirement') return /401\s*\(k\)|403\s*\(b\)|retirement|pension|workplace|savings plan/.test(text);
-  if (kind === 'stock-plan') return /stock plan|equity compensation|rsu|espp/.test(text);
-  if (kind === 'cash-management') return /cash management/.test(text);
-  if (kind === 'hsa') return /health savings|\bhsa\b/.test(text);
-  if (kind === 'ira') return /\bira\b|roth|traditional/.test(text);
-  if (kind === 'brokerage') return /brokerage|individual|joint|trust|custodial|investment/.test(text);
-  return true;
-}
-
-function accountForRemoteIdentity(
-  remote: FidelityDownloadedArtifact['account'],
-  accounts: SyncAccountCoverage[],
-  remoteIdentityCount: number,
-): SyncAccountCoverage {
-  let candidates = remote.last4
-    ? accounts.filter(account => inferFidelityAccountLast4(account) === remote.last4)
-    : [];
-
-  if (candidates.length > 1) {
-    const byKind = candidates.filter(account => localAccountSupportsKind(account, remote.kind));
-    if (byKind.length > 0) candidates = byKind;
-  }
-
-  if (candidates.length === 0 && remote.label) {
-    const remoteName = normalizedIdentity(remote.label);
-    candidates = accounts.filter(account => identityTexts(account).some(
-      name => normalizedIdentity(name) === remoteName,
-    ));
-  }
-
-  if (candidates.length === 0 && remoteIdentityCount === 1 && accounts.length === 1) {
-    candidates = [accounts[0]!];
-  }
-
-  if (candidates.length !== 1) {
-    const identity = remote.last4 ? ` ending in ${remote.last4}` : '';
-    throw new Error(`A Fidelity ${remote.kind} account${identity} has no unambiguous local account route`);
-  }
-  return candidates[0]!;
-}
-
 export function routeFidelityArtifacts(
   artifacts: readonly FidelityDownloadedArtifact[],
-  accounts: readonly SyncAccountCoverage[],
-): RoutedSyncArtifact[] {
-  const localAccounts = accounts.filter(matchesFidelityAccount);
-  if (artifacts.length === 0) return [];
-  if (localAccounts.length === 0) {
-    throw new Error('No active Fidelity account is available for downloaded data');
-  }
-
-  const byRemoteIdentity = new Map<string, FidelityDownloadedArtifact[]>();
-  for (const artifact of artifacts) {
-    const identity = `${artifact.account.surface}:${artifact.account.accountKey}`;
-    const group = byRemoteIdentity.get(identity) ?? [];
-    group.push(artifact);
-    byRemoteIdentity.set(identity, group);
-  }
-
-  const accountIdByIdentity = new Map<string, number>();
-  const usedAccountIds = new Set<number>();
-  for (const [identity, group] of byRemoteIdentity) {
-    const signatures = new Set(group.map(artifact => JSON.stringify({
-      surface: artifact.account.surface,
-      kind: artifact.account.kind,
-      last4: artifact.account.last4,
-      label: artifact.account.label ?? null,
-    })));
-    if (signatures.size !== 1) {
-      throw new Error('Fidelity artifacts disagree about their remote account identity');
+): MultiAccountSyncArtifact[] {
+  return artifacts.map(artifact => {
+    if (artifact.sourceAccounts.length === 0) {
+      throw new Error('A Fidelity artifact exposes no parser-backed account claims');
     }
-
-    const account = accountForRemoteIdentity(group[0]!.account, localAccounts, byRemoteIdentity.size);
-    if (usedAccountIds.has(account.id)) {
-      throw new Error('Multiple Fidelity remote accounts map to the same local account');
+    const remoteAccountIds = artifact.sourceAccounts.map(account => account.remoteAccountId.trim());
+    if (remoteAccountIds.some(value => !value) || new Set(remoteAccountIds).size !== remoteAccountIds.length) {
+      throw new Error('A Fidelity artifact exposes ambiguous parser-backed account claims');
     }
-    usedAccountIds.add(account.id);
-    accountIdByIdentity.set(identity, account.id);
-  }
-
-  return artifacts.map(artifact => ({
-    fileName: artifact.fileName,
-    accountId: accountIdByIdentity.get(`${artifact.account.surface}:${artifact.account.accountKey}`)!,
-  }));
+    return {
+      fileName: artifact.fileName,
+      accountRoutes: remoteAccountIds.map(remoteAccountId => ({ remoteAccountId })),
+    };
+  });
 }
 
 function fidelityAccounts(context: SyncConnectorContext): SyncAccountCoverage[] {
@@ -204,7 +105,7 @@ export function createFidelityConnector(
         context.report({ type: 'warning', message });
       }
 
-      const routed = routeFidelityArtifacts(result.artifacts, accounts);
+      const routed: RoutedSyncArtifact[] = routeFidelityArtifacts(result.artifacts);
       context.report({
         type: 'phase',
         message: `Validated ${routed.length} Fidelity artifact${routed.length === 1 ? '' : 's'}`,

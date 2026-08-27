@@ -1,17 +1,35 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Download } from 'playwright';
 
 import {
+  assertFidelityStatementControlBijection,
+  assertUniqueFidelityRoutingSuffixes,
+  decodeFidelityStatementDocument,
   fidelityAccountsFromCandidates,
+  fidelityArtifactDedupeKey,
   fidelityArtifactFileName,
   fidelityDirectRequestUrl,
-  fidelityStatementPlans,
+  fidelityStatementDocumentIdFromRequestBody,
+  fidelityResponseRequiresAuthentication,
+  fidelityStatementYearTraversal,
+  filterFidelityRetailActivityAccounts,
+  isFidelityAuthenticatedPage,
   isFidelityInstitutionUnavailableText,
+  isFidelityRetailActivityUrl,
+  isFidelityStatementDownloadRequestUrl,
+  isFidelityStatementListRequestUrl,
+  navigateToFidelityPage,
+  parseFidelityStatementList,
   resolveFidelitySurfaceDiscoveries,
+  saveAndValidateFidelityBrowserDownload,
+  traverseFidelityStatementYears,
   validateFidelityArtifact,
+  verifyFidelityActivityAccounts,
   type FidelityAccountIdentity,
+  type FidelityDownloadedArtifact,
   type FidelityRemoteAccount,
 } from './fidelity.ts';
 
@@ -92,11 +110,83 @@ describe('Fidelity account discovery', () => {
     ]);
   });
 
-  test('rejects ambiguous routing suffixes on the same Fidelity surface', () => {
-    expect(() => fidelityAccountsFromCandidates([
+  test('rejects ambiguous routing suffixes only after activity capability filtering', async () => {
+    const accounts = fidelityAccountsFromCandidates([
       { surface: 'retail', label: 'Brokerage 1234', remoteId: 'one' },
       { surface: 'retail', label: 'Roth IRA 1234', remoteId: 'two' },
-    ])).toThrow('Multiple Fidelity retail accounts share one routing suffix');
+    ]);
+    await expect(filterFidelityRetailActivityAccounts(accounts, async () => true))
+      .rejects.toThrow('Multiple Fidelity retail accounts share one routing suffix');
+    await expect(filterFidelityRetailActivityAccounts(accounts, async account => account.kind !== 'ira'))
+      .resolves.toHaveLength(1);
+  });
+
+  test('deduplicates only semantically identical responsive account controls', () => {
+    expect(fidelityAccountsFromCandidates([
+      { surface: 'retail', label: 'Brokerage 1234', remoteId: 'same', controlIndex: 0 },
+      { surface: 'retail', label: ' Brokerage 1234 ', remoteId: 'same', controlIndex: 1 },
+    ])).toHaveLength(1);
+    expect(() => fidelityAccountsFromCandidates([
+      { surface: 'retail', label: 'Brokerage 1234', remoteId: 'same' },
+      { surface: 'retail', label: 'Brokerage 5678', remoteId: 'same' },
+    ])).toThrow('conflicting account identity');
+    expect(() => assertUniqueFidelityRoutingSuffixes(fidelityAccountsFromCandidates([
+      { surface: 'retail', label: 'Brokerage 1234', remoteId: 'first' },
+      { surface: 'retail', label: 'Roth IRA 1234', remoteId: 'second' },
+    ]))).toThrow('Multiple Fidelity retail accounts share one routing suffix');
+  });
+
+  test('keeps only dynamically proven retail activity accounts', async () => {
+    const accounts = fidelityAccountsFromCandidates([
+      { surface: 'retail', label: 'Brokerage 1234', remoteId: 'retail-one' },
+      { surface: 'retail', label: 'Roth IRA 5678', remoteId: 'retail-two' },
+      { surface: 'retail', label: 'Stock Plan 9012', remoteId: 'workplace-one' },
+    ]);
+    const checked: string[] = [];
+
+    const supported = await filterFidelityRetailActivityAccounts(accounts, async account => {
+      checked.push(account.accountKey);
+      return account.kind !== 'stock-plan';
+    });
+
+    expect(checked).toEqual(accounts.map(account => account.accountKey));
+    expect(supported.map(account => account.kind)).toEqual(['brokerage', 'ira']);
+  });
+
+  test('recognizes only the Fidelity retail activity route as activity-capable', () => {
+    expect(isFidelityRetailActivityUrl(
+      'https://digital.fidelity.com/ftgw/digital/portfolio/activity',
+    )).toBe(true);
+    expect(isFidelityRetailActivityUrl(
+      'https://digital.fidelity.com/ftgw/digital/portfolio/summary',
+    )).toBe(false);
+    expect(isFidelityRetailActivityUrl(
+      'https://nb.fidelity.com/public/nb/default/home',
+    )).toBe(false);
+  });
+
+  test('classifies an event-driven redirect away from activity as unsupported instead of expired auth', async () => {
+    let currentUrl = 'https://digital.fidelity.com/ftgw/digital/portfolio/activity';
+    const page = {
+      url: () => currentUrl,
+      goto: async () => null,
+      locator: (selector: string) => selector.includes('password')
+        ? { count: async () => 0 }
+        : { first: () => ({ waitFor: () => new Promise<void>(() => {}) }) },
+      getByText: () => ({ count: async () => 0 }),
+      waitForURL: async (predicate: (url: URL) => boolean) => {
+        const unsupported = new URL('https://digital.fidelity.com/ftgw/digital/stock-plan/overview');
+        expect(predicate(unsupported)).toBe(true);
+        currentUrl = unsupported.toString();
+      },
+    } as never;
+
+    await expect(navigateToFidelityPage(
+      page,
+      'https://digital.fidelity.com/ftgw/digital/portfolio/activity',
+      '#account-selector',
+      { missingControlsMeanNoAccounts: true },
+    )).resolves.toBe('no-accounts');
   });
 
   test('continues with retail accounts when NetBenefits has no accounts', () => {
@@ -119,7 +209,23 @@ describe('Fidelity account discovery', () => {
     ])).toEqual({
       retailAccounts: [],
       netBenefitsAccounts: [workplace],
-      skipped: ['Fidelity retail is not available to this login'],
+      skipped: [
+        'Fidelity retail is not available to this login',
+        'Fidelity NetBenefits accounts were discovered, but their downloads are not yet parser-verified',
+      ],
+    });
+  });
+
+  test('keeps parser-verified retail work when unsupported NetBenefits accounts are also discovered', () => {
+    const retail = remoteAccount('retail', 'retail-one');
+    const workplace = remoteAccount('netbenefits', 'workplace-one');
+    expect(resolveFidelitySurfaceDiscoveries([
+      { surface: 'retail', status: 'accounts', accounts: [retail] },
+      { surface: 'netbenefits', status: 'accounts', accounts: [workplace] },
+    ])).toEqual({
+      retailAccounts: [retail],
+      netBenefitsAccounts: [workplace],
+      skipped: ['Fidelity NetBenefits accounts were discovered, but their downloads are not yet parser-verified'],
     });
   });
 
@@ -127,6 +233,19 @@ describe('Fidelity account discovery', () => {
     expect(() => resolveFidelitySurfaceDiscoveries([
       { surface: 'retail', status: 'authentication-required', accounts: [] },
       { surface: 'netbenefits', status: 'authentication-required', accounts: [] },
+    ])).toThrow('authentication-required');
+  });
+
+  test('requires login when an expired retail surface is paired with a public NetBenefits landing page', async () => {
+    const publicLanding = {
+      url: () => 'https://nb.fidelity.com/public/nb/default/home',
+      getByText: () => ({ count: async () => 0 }),
+      locator: () => ({ count: async () => 0 }),
+    } as never;
+    expect(await isFidelityAuthenticatedPage(publicLanding)).toBe(false);
+    expect(() => resolveFidelitySurfaceDiscoveries([
+      { surface: 'retail', status: 'authentication-required', accounts: [] },
+      { surface: 'netbenefits', status: 'no-accounts', accounts: [] },
     ])).toThrow('authentication-required');
   });
 
@@ -158,49 +277,228 @@ describe('Fidelity direct requests', () => {
   });
 });
 
-describe('Fidelity statement planning', () => {
-  test('routes statements by account suffix and filters the requested date range', () => {
-    const accounts = fidelityAccountsFromCandidates([
-      { surface: 'retail', label: 'Brokerage 1234', remoteId: 'one' },
-      { surface: 'retail', label: 'Roth IRA 5678', remoteId: 'two' },
-    ]);
-    const plans = fidelityStatementPlans([
-      {
-        surface: 'retail',
-        label: 'Brokerage 1234 statement July 31, 2026',
-        href: 'https://digital.fidelity.com/documents/one.pdf',
+describe('Fidelity statement contracts', () => {
+  test('parses exact account and document identities from statement list metadata', () => {
+    expect(parseFidelityStatementList({
+      statement: {
+        docDetails: {
+          docDetail: [{
+            id: 'document-one',
+            acctNum: 'Z00-000000',
+            periodStartDate: Date.UTC(2026, 6, 1),
+            periodEndDate: Date.UTC(2026, 6, 31),
+            generatedDate: Date.UTC(2026, 7, 1),
+            isHouseholded: false,
+            formatTypes: { formatType: { isPDF: true, isHTML: false, isCSV: false } },
+          }],
+        },
       },
-      {
-        surface: 'retail',
-        label: 'Roth IRA 5678 statement 06/30/2026',
-        href: 'https://digital.fidelity.com/documents/two.pdf',
-      },
-      {
-        surface: 'retail',
-        label: 'Brokerage 1234 statement March 31, 2026',
-        href: 'https://digital.fidelity.com/documents/old.pdf',
-      },
-    ], accounts, '2026-04-01', '2026-08-24');
-
-    expect(plans).toHaveLength(2);
-    expect(plans.map(plan => [plan.account.last4, plan.coveredThrough])).toEqual([
-      ['1234', '2026-07-31'],
-      ['5678', '2026-06-30'],
-    ]);
+    })).toEqual([{
+      id: 'document-one',
+      remoteAccountId: 'fidelity:Z00000000',
+      periodStart: '2026-07-01',
+      periodEnd: '2026-07-31',
+      pdfAvailable: true,
+      householded: false,
+    }]);
+    expect(() => parseFidelityStatementList({ statement: { docDetails: { docDetail: [
+      { id: 'same', acctNum: 'Z00-000000', formatTypes: { formatType: { isPDF: true } } },
+      { id: 'same', acctNum: 'Z00-000001', formatTypes: { formatType: { isPDF: true } } },
+    ] } } })).toThrow('ambiguous');
   });
 
-  test('rejects a statement that cannot be assigned to exactly one account', () => {
-    const accounts = fidelityAccountsFromCandidates([
-      { surface: 'retail', label: 'Brokerage 1234', remoteId: 'one' },
-      { surface: 'retail', label: 'Roth IRA 5678', remoteId: 'two' },
-    ]);
-    expect(() => fidelityStatementPlans([{
-      surface: 'retail',
-      label: 'Monthly statement July 31, 2026',
-      href: 'https://digital.fidelity.com/documents/unknown.pdf',
-    }], accounts, '2026-04-01', '2026-08-24')).toThrow(
-      'Fidelity document account identity is ambiguous',
+  test('binds each discovered account to one unique activity parser claim', () => {
+    const account = remoteAccount('retail', 'retail-one');
+    const artifact: FidelityDownloadedArtifact = {
+      artifactType: 'activity-csv',
+      fileName: 'activity.csv',
+      account,
+      coveredFrom: '2026-07-01',
+      coveredThrough: '2026-07-31',
+      path: '/tmp/activity.csv',
+      parserId: 'fidelity-activity-csv',
+      transactionCount: 1,
+      balanceCount: 0,
+      contentHash: 'a'.repeat(64),
+      sourceAccounts: [{
+        remoteAccountId: 'fidelity:Z00001234',
+        sourceAccountName: 'Example Brokerage',
+      }],
+    };
+    expect(verifyFidelityActivityAccounts([artifact], [account])).toEqual([{
+      account,
+      sourceAccount: artifact.sourceAccounts[0],
+    }]);
+    expect(() => verifyFidelityActivityAccounts([
+      artifact,
+      { ...artifact, account: { ...account, accountKey: 'retail-two' }, fileName: 'second.csv' },
+    ], [account, { ...account, accountKey: 'retail-two' }])).toThrow('same parser identity');
+    expect(() => verifyFidelityActivityAccounts([
+      { ...artifact, sourceAccounts: [{
+        remoteAccountId: 'fidelity:Z00005678',
+        sourceAccountName: 'Example Brokerage',
+      }] },
+    ], [account])).toThrow('does not match the selected account');
+  });
+
+  test('retains account traversal proof for an official empty activity export', () => {
+    const account = remoteAccount('retail', 'retail-one');
+    const emptyArtifact: FidelityDownloadedArtifact = {
+      artifactType: 'activity-csv',
+      fileName: 'empty.csv',
+      account,
+      coveredFrom: '2026-07-01',
+      coveredThrough: '2026-07-31',
+      path: '/tmp/empty.csv',
+      parserId: 'fidelity-activity-csv',
+      transactionCount: 0,
+      balanceCount: 0,
+      contentHash: 'e'.repeat(64),
+      sourceAccounts: [],
+    };
+    expect(verifyFidelityActivityAccounts([emptyArtifact], [account])).toEqual([]);
+  });
+
+  test('recognizes list/download endpoints and validates exact download POST metadata', () => {
+    expect(isFidelityStatementListRequestUrl(
+      'https://digital.fidelity.com/ftgw/dp/retail-am-financialdoc/v1/accounts/communications/financial-documents/statements',
+    )).toBe(true);
+    expect(isFidelityStatementDownloadRequestUrl(
+      'https://digital.fidelity.com/ftgw/dp/retail-am-financialdoc/v1/accounts/communications/financial-documents/download',
+    )).toBe(true);
+    expect(isFidelityStatementDownloadRequestUrl(
+      'https://example.com/accounts/communications/financial-documents/download',
+    )).toBe(false);
+    expect(fidelityStatementDocumentIdFromRequestBody(JSON.stringify({
+      acctType: 'account',
+      docType: 'statement',
+      formatType: 'PDF',
+      id: 'document-one',
+    }))).toBe('document-one');
+    expect(() => fidelityStatementDocumentIdFromRequestBody('{}')).toThrow('metadata is missing');
+
+    const pdf = Buffer.from('%PDF-1.4\nexample');
+    expect(decodeFidelityStatementDocument({
+      document: {
+        docDetail: {
+          content: pdf.toString('base64'),
+          contentType: 'application/pdf',
+          encoding: 'base64',
+        },
+      },
+    })).toEqual(new Uint8Array(pdf));
+    expect(() => decodeFidelityStatementDocument({ document: {} })).toThrow(
+      'Fidelity statement response metadata is missing',
     );
+  });
+
+  test('deduplicates only exact content, parser identity, source identities, and coverage', () => {
+    const account = remoteAccount('retail', 'retail-one');
+    const artifact: FidelityDownloadedArtifact = {
+      artifactType: 'statement-pdf',
+      fileName: 'first.pdf',
+      account,
+      coveredFrom: '2026-07-01',
+      coveredThrough: '2026-07-31',
+      path: '/tmp/first.pdf',
+      parserId: 'fidelity-investment-report-pdf',
+      transactionCount: 1,
+      balanceCount: 1,
+      contentHash: 'b'.repeat(64),
+      sourceAccounts: [{
+        remoteAccountId: 'fidelity:Z00000000',
+        sourceAccountName: 'Z00-000000',
+      }],
+    };
+    expect(fidelityArtifactDedupeKey({ ...artifact, fileName: 'responsive-copy.pdf' }))
+      .toBe(fidelityArtifactDedupeKey(artifact));
+    expect(fidelityArtifactDedupeKey({ ...artifact, contentHash: 'c'.repeat(64) }))
+      .not.toBe(fidelityArtifactDedupeKey(artifact));
+  });
+
+  test('requires an exact bijection between statement list identities and download controls', () => {
+    const documents = [{ id: 'one' }, { id: 'two' }, { id: 'three' }];
+    expect(() => assertFidelityStatementControlBijection(documents, ['three', 'one', 'two']))
+      .not.toThrow();
+    expect(() => assertFidelityStatementControlBijection(documents, ['one', 'one', 'two']))
+      .toThrow('do not match list metadata exactly');
+    expect(() => assertFidelityStatementControlBijection(documents, ['one', 'two']))
+      .toThrow('do not match list metadata exactly');
+    expect(() => assertFidelityStatementControlBijection(documents, ['one', 'two', 'three', 'four']))
+      .toThrow('do not match list metadata exactly');
+  });
+
+  test('processes the initially rendered year first, then reselects every other available requested year', async () => {
+    expect(fidelityStatementYearTraversal(
+      ['2024', '2025', '2026'],
+      [{ year: '2025', selected: false }, { year: '2026', selected: true }],
+    )).toEqual({
+      orderedYears: ['2026', '2025'],
+      missingYears: ['2024'],
+      useInitialView: false,
+    });
+
+    const events: string[] = [];
+    const traversal = await traverseFidelityStatementYears({
+      initialView: 'view-2026',
+      requestedYears: ['2024', '2025', '2026'],
+      initialOptions: [{ year: '2025', selected: false }, { year: '2026', selected: true }],
+      selectYear: async year => {
+        events.push(`select-${year}`);
+        return `view-${year}`;
+      },
+      processView: async view => {
+        events.push(`process-${view}`);
+      },
+    });
+    expect(events).toEqual(['process-view-2026', 'select-2025', 'process-view-2025']);
+    expect(traversal.missingYears).toEqual(['2024']);
+  });
+
+  test('falls back to the current statement view only when no requested year is available', async () => {
+    const views: string[] = [];
+    await traverseFidelityStatementYears({
+      initialView: 'current-view',
+      requestedYears: ['2024'],
+      initialOptions: [{ year: '2025', selected: true }, { year: '2026', selected: false }],
+      selectYear: async () => { throw new Error('must not select an unavailable year'); },
+      processView: async view => { views.push(view); },
+    });
+    expect(views).toEqual(['current-view']);
+  });
+});
+
+describe('Fidelity replay authentication', () => {
+  test('classifies status, redirect, final login URL, and login HTML as expired authentication', () => {
+    expect(fidelityResponseRequiresAuthentication({
+      status: 401,
+      url: 'https://digital.fidelity.com/api/activity',
+    })).toBe(true);
+    expect(fidelityResponseRequiresAuthentication({
+      status: 403,
+      url: 'https://digital.fidelity.com/api/activity',
+    })).toBe(true);
+    expect(fidelityResponseRequiresAuthentication({
+      status: 302,
+      url: 'https://digital.fidelity.com/api/activity',
+      headers: { location: 'https://digital.fidelity.com/prgw/digital/login/full-page' },
+    })).toBe(true);
+    expect(fidelityResponseRequiresAuthentication({
+      status: 200,
+      url: 'https://digital.fidelity.com/prgw/digital/login/full-page',
+    })).toBe(true);
+    expect(fidelityResponseRequiresAuthentication({
+      status: 200,
+      url: 'https://digital.fidelity.com/api/activity',
+      headers: { 'content-type': 'text/html' },
+      bodyText: '<form><input type="password" name="password"></form>',
+    })).toBe(true);
+    expect(fidelityResponseRequiresAuthentication({
+      status: 200,
+      url: 'https://digital.fidelity.com/api/activity',
+      headers: { 'content-type': 'text/csv' },
+      bodyText: 'Run Date,Account,Amount',
+    })).toBe(false);
   });
 });
 
@@ -211,8 +509,8 @@ describe('Fidelity artifact validation', () => {
     const fileName = fidelityArtifactFileName(retailAccount, 'activity-csv', '2026-07-01', '2026-07-31');
     const path = join(directory, fileName);
     await writeFile(path, [
-      'Run Date,Action,Symbol,Description,Type,Price ($),Quantity,Commission ($),Fees ($),Accrued Interest ($),Amount ($),Cash Balance ($),Settlement Date',
-      '07/15/2026,DIVIDEND RECEIVED,EXAMPLE,EXAMPLE FUND,Cash,0,0,0,0,0,12.34,1000.00,07/15/2026',
+      'Run Date,Account,Account Number,Action,Symbol,Description,Type,Price ($),Quantity,Commission ($),Fees ($),Accrued Interest ($),Amount ($),Settlement Date',
+      '07/15/2026,Example Brokerage,Z00-000000,DIVIDEND RECEIVED,EXAMPLE,EXAMPLE FUND,Cash,0,0,0,0,0,12.34,07/15/2026',
     ].join('\n'));
 
     try {
@@ -220,10 +518,127 @@ describe('Fidelity artifact validation', () => {
         artifactType: 'activity-csv',
         fileName,
         account: retailAccount,
+        coveredFrom: '2026-07-01',
+        coveredThrough: '2026-07-31',
       });
       expect(validation.parserId).toBe('fidelity-activity-csv');
       expect(validation.transactionCount).toBe(1);
-      expect(validation.parsedAccountLast4s).toEqual([]);
+      expect(validation.sourceAccounts).toEqual([{
+        remoteAccountId: 'fidelity:Z00000000',
+        sourceAccountName: 'Example Brokerage',
+      }]);
+      expect(validation.contentHash).toHaveLength(64);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('parser-validates an official zero-activity schema without inventing a financial fact', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'easymoney-fidelity-empty-test-'));
+    const fileName = fidelityArtifactFileName(retailAccount, 'activity-csv', '2026-07-01', '2026-07-31');
+    const path = join(directory, fileName);
+    await writeFile(path, [
+      '\uFEFF',
+      '',
+      'Run Date,Account,Account Number,Action,Symbol,Description,Type,Price ($),Quantity,Commission ($),Fees ($),Accrued Interest ($),Amount ($),Settlement Date',
+    ].join('\n'));
+
+    try {
+      await expect(validateFidelityArtifact(path, {
+        artifactType: 'activity-csv',
+        fileName,
+        account: retailAccount,
+        coveredFrom: '2026-07-01',
+        coveredThrough: '2026-07-31',
+      })).resolves.toMatchObject({
+        parserId: 'fidelity-activity-csv',
+        transactionCount: 0,
+        balanceCount: 0,
+        sourceAccounts: [],
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects an artifact when any parsed fact lacks the stable Fidelity account identity', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'easymoney-fidelity-incomplete-identity-test-'));
+    const fileName = fidelityArtifactFileName(retailAccount, 'activity-csv', '2026-07-01', '2026-07-31');
+    const path = join(directory, fileName);
+    await writeFile(path, [
+      'Run Date,Account,Account Number,Action,Symbol,Description,Type,Price ($),Quantity,Commission ($),Fees ($),Accrued Interest ($),Amount ($),Settlement Date',
+      '07/15/2026,Example Brokerage,Z00-000000,DIVIDEND RECEIVED,EXAMPLE,EXAMPLE FUND,Cash,0,0,0,0,0,12.34,07/15/2026',
+      '07/16/2026,,,DIVIDEND RECEIVED,EXAMPLE,EXAMPLE FUND,Cash,0,0,0,0,0,5.00,07/16/2026',
+    ].join('\n'));
+
+    try {
+      await expect(validateFidelityArtifact(path, {
+        artifactType: 'activity-csv',
+        fileName,
+        account: retailAccount,
+        coveredFrom: '2026-07-01',
+        coveredThrough: '2026-07-31',
+      })).rejects.toThrow('missing a stable account identity');
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('saves and parser-validates an official browser-generated activity CSV', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'easymoney-fidelity-browser-download-test-'));
+    const fileName = fidelityArtifactFileName(retailAccount, 'activity-csv', '2026-07-01', '2026-07-31');
+    const csv = [
+      'Run Date,Account,Account Number,Action,Symbol,Description,Type,Price ($),Quantity,Commission ($),Fees ($),Accrued Interest ($),Amount ($),Settlement Date',
+      '07/15/2026,Example Brokerage,Z00-000000,DIVIDEND RECEIVED,EXAMPLE,EXAMPLE FUND,Cash,0,0,0,0,0,12.34,07/15/2026',
+    ].join('\n');
+    let cancelCalls = 0;
+    const download = {
+      saveAs: async (path: string) => writeFile(path, csv),
+      cancel: async () => {
+        cancelCalls += 1;
+      },
+    } as unknown as Pick<Download, 'cancel' | 'saveAs'>;
+
+    try {
+      const artifact = await saveAndValidateFidelityBrowserDownload(download, directory, {
+        artifactType: 'activity-csv',
+        fileName,
+        account: retailAccount,
+        coveredFrom: '2026-07-01',
+        coveredThrough: '2026-07-31',
+      });
+
+      expect(artifact.parserId).toBe('fidelity-activity-csv');
+      expect(artifact.transactionCount).toBe(1);
+      expect(await readFile(artifact.path, 'utf8')).toBe(csv);
+      expect(cancelCalls).toBe(1);
+      expect((await readdir(directory)).filter(name => name.endsWith('.partial'))).toEqual([]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('removes a browser-generated download that fails parser validation', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'easymoney-fidelity-invalid-download-test-'));
+    const fileName = fidelityArtifactFileName(retailAccount, 'activity-csv', '2026-07-01', '2026-07-31');
+    let cancelCalls = 0;
+    const download = {
+      saveAs: async (path: string) => writeFile(path, '<html>Sign in</html>'),
+      cancel: async () => {
+        cancelCalls += 1;
+      },
+    } as unknown as Pick<Download, 'cancel' | 'saveAs'>;
+
+    try {
+      await expect(saveAndValidateFidelityBrowserDownload(download, directory, {
+        artifactType: 'activity-csv',
+        fileName,
+        account: retailAccount,
+        coveredFrom: '2026-07-01',
+        coveredThrough: '2026-07-31',
+      })).rejects.toBeDefined();
+      expect(cancelCalls).toBe(1);
+      expect(await readdir(directory)).toEqual([]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -259,6 +674,7 @@ test('Fidelity authentication waits classify login before maintenance copy', asy
 test('Fidelity institution code uses direct requests and no fixed browser sleeps', async () => {
   const source = await readFile(new URL('./fidelity.ts', import.meta.url), 'utf8');
   expect(source).toContain('page.context().request.fetch');
+  expect(source).toContain('#account-selector:visible section[aria-label] a');
   expect(source).not.toContain('normalizeHeadlessUserAgent');
   expect(source).not.toContain('HeadlessChrome/');
   expect(source).not.toContain('newCDPSession');
