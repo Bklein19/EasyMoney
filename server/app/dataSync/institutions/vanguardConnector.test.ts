@@ -286,6 +286,7 @@ test('Vanguard identity helpers do not depend on generic shared routing', () => 
   );
   expect(inferVanguardAccountLast4(brokerage)).toBe('1111');
   expect(inferVanguardAccountLast4(ambiguous)).toBeNull();
+  expect(inferVanguardAccountLast4({ ...ambiguous, last4: '4444' })).toBe('4444');
   expect(vanguardProfileIdFromArtifactFileNames([
     'vanguard-login-2-traditional-ira-2026-01-01-to-2026-08-16-activity-4444.csv',
   ])).toBe('login-2');

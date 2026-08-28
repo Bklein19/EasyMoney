@@ -167,14 +167,16 @@
 
 .account-row.is-closed .account-status-chip,
 .account-closed-badge,
-.account-owner-badge {
+.account-owner-badge,
+.account-last4-badge {
   color: var(--text-secondary);
   background: var(--bg-subtle);
   border-color: var(--glass-border);
 }
 
 .account-closed-badge,
-.account-owner-badge {
+.account-owner-badge,
+.account-last4-badge {
   display: inline-flex;
   flex: 0 0 auto;
   align-items: center;
@@ -193,6 +195,13 @@
   color: var(--accent-blue);
   background: var(--color-info-bg);
   border-color: color-mix(in srgb, var(--accent-blue) 24%, var(--glass-border));
+}
+
+.account-last4-badge {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  text-transform: none;
 }
 
 .account-row__balance {

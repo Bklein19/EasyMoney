@@ -1,4 +1,5 @@
 import { getDb } from '../database.ts';
+import { normalizeAccountLast4 } from './accountLast4.ts';
 import type { AccountAliasSummary, AccountListResponse, AccountSummary } from './types';
 
 interface AccountRow {
@@ -10,6 +11,7 @@ interface AccountRow {
   latestBalanceMonth: string | null;
   currency: string | null;
   accountHolder: string | null;
+  last4: string | null;
   status: string | null;
   archivedAt: string | null;
   updatedAt: string | null;
@@ -38,6 +40,7 @@ function toAccountSummary(row: AccountRow, aliases: AccountAliasSummary[]): Acco
     isClosed: status === 'closed' || (status !== 'archived' && row.balanceCents === 0 && row.latestBalanceMonth !== null),
     currency: row.currency ?? 'USD',
     accountHolder: row.accountHolder,
+    last4: row.last4,
     status,
     archivedAt: row.archivedAt,
     updatedAt: row.updatedAt,
@@ -46,7 +49,7 @@ function toAccountSummary(row: AccountRow, aliases: AccountAliasSummary[]): Acco
 }
 
 function normalizeAccountMetadata(changes: Record<string, unknown>) {
-  const allowed = new Set(['name', 'institution', 'type', 'currency', 'accountHolder']);
+  const allowed = new Set(['name', 'institution', 'type', 'currency', 'accountHolder', 'last4']);
   const unsupported = Object.keys(changes).filter(field => !allowed.has(field));
   if (unsupported.length) {
     throw new Error(`Accounts only support metadata updates: ${unsupported.join(', ')}`);
@@ -80,6 +83,9 @@ function normalizeAccountMetadata(changes: Record<string, unknown>) {
       : String(changes.accountHolder).trim() || null;
     normalized.accountHolder = accountHolder;
   }
+  if ('last4' in changes) {
+    normalized.last4 = normalizeAccountLast4(changes.last4);
+  }
 
   return normalized;
 }
@@ -99,6 +105,7 @@ export function listAccounts(options: ListAccountsOptions = {}): AccountListResp
          a.institution,
          a.type,
          a.accountHolder,
+         a.last4,
          (
            SELECT lb.balanceCents
            FROM ledgerBalances lb

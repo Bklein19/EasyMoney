@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { basename } from 'node:path';
 
 import { getDb } from '../../database.ts';
+import { normalizeAccountLast4, sourceAccountLast4 } from '../accountLast4.ts';
 import {
   commitImport,
   getImportAccountMappings,
@@ -99,8 +100,11 @@ interface StoredSyncAccountClaim {
   institution: string | null;
   accountName: string | null;
   accountHolder: string | null;
+  last4: string | null;
   transactionCount: number;
   balanceCount: number;
+  latestBalanceDate: string | null;
+  latestBalanceCents: number | null;
 }
 
 function storedAccountClaims(importFileId: number): StoredSyncAccountClaim[] {
@@ -112,7 +116,21 @@ function storedAccountClaims(importFileId: number): StoredSyncAccountClaim[] {
       sa.sourceAccountName AS accountName,
       sa.accountHolder,
       COUNT(DISTINCT st.id) AS transactionCount,
-      COUNT(DISTINCT sb.id) AS balanceCount
+      COUNT(DISTINCT sb.id) AS balanceCount,
+      (
+        SELECT latest.date
+        FROM sourceBalances latest
+        WHERE latest.sourceAccountId = sa.id
+        ORDER BY latest.date DESC, latest.id DESC
+        LIMIT 1
+      ) AS latestBalanceDate,
+      (
+        SELECT latest.balanceCents
+        FROM sourceBalances latest
+        WHERE latest.sourceAccountId = sa.id
+        ORDER BY latest.date DESC, latest.id DESC
+        LIMIT 1
+      ) AS latestBalanceCents
     FROM sourceAccounts sa
     JOIN sourceFiles sf ON sf.id = sa.sourceFileId
     LEFT JOIN sourceTransactions st ON st.sourceAccountId = sa.id
@@ -120,11 +138,80 @@ function storedAccountClaims(importFileId: number): StoredSyncAccountClaim[] {
     WHERE sf.importFileId = ?
     GROUP BY sa.id
     ORDER BY sa.id
-  `).all(importFileId) as StoredSyncAccountClaim[]).map(claim => ({
+  `).all(importFileId) as Array<Omit<StoredSyncAccountClaim, 'last4'>>).map(claim => ({
     ...claim,
+    last4: sourceAccountLast4({
+      sourceAccountKey: claim.remoteAccountId,
+      sourceAccountName: claim.accountName,
+    }),
     transactionCount: Number(claim.transactionCount || 0),
     balanceCount: Number(claim.balanceCount || 0),
+    latestBalanceDate: claim.latestBalanceDate ?? null,
+    latestBalanceCents: claim.latestBalanceCents === null
+      ? null
+      : Number(claim.latestBalanceCents),
   }));
+}
+
+const syncAccountEvidenceFields = [
+  'last4',
+  'latestBalanceDate',
+  'latestBalanceCents',
+] as const;
+
+function hasOwnSyncAccountEvidence(
+  claim: SyncAccountClaim,
+  key: typeof syncAccountEvidenceFields[number],
+): boolean {
+  return Object.prototype.hasOwnProperty.call(claim, key);
+}
+
+function syncAccountClaimIdentity(
+  claim: Pick<SyncAccountClaim, 'sourceAccountId' | 'remoteAccountId'>,
+): string {
+  return JSON.stringify([claim.sourceAccountId, claim.remoteAccountId]);
+}
+
+/**
+ * Reviews saved by older builds do not contain the display-only evidence fields.
+ * Fill only those absent fields from the same staged source identity; all saved
+ * routing and resolution choices remain authoritative until confirmation.
+ */
+export function hydrateSyncReviewEvidence(review: SyncRunReview): SyncRunReview {
+  let reviewChanged = false;
+  const artifacts = review.artifacts.map(artifact => {
+    if (!artifact.accountClaims.some(claim =>
+      syncAccountEvidenceFields.some(key => !hasOwnSyncAccountEvidence(claim, key))
+    )) {
+      return artifact;
+    }
+
+    const storedByIdentity = new Map(storedAccountClaims(artifact.importFileId)
+      .map(claim => [syncAccountClaimIdentity(claim), claim]));
+    let artifactChanged = false;
+    const accountClaims = artifact.accountClaims.map(claim => {
+      const storedClaim = storedByIdentity.get(syncAccountClaimIdentity(claim));
+      if (!storedClaim) return claim;
+      const hydrated = { ...claim };
+      if (!hasOwnSyncAccountEvidence(claim, 'last4')) {
+        hydrated.last4 = storedClaim.last4;
+        artifactChanged = true;
+      }
+      if (!hasOwnSyncAccountEvidence(claim, 'latestBalanceDate')) {
+        hydrated.latestBalanceDate = storedClaim.latestBalanceDate;
+        artifactChanged = true;
+      }
+      if (!hasOwnSyncAccountEvidence(claim, 'latestBalanceCents')) {
+        hydrated.latestBalanceCents = storedClaim.latestBalanceCents;
+        artifactChanged = true;
+      }
+      return hydrated;
+    });
+    if (!artifactChanged) return artifact;
+    reviewChanged = true;
+    return { ...artifact, accountClaims };
+  });
+  return reviewChanged ? { ...review, artifacts } : review;
 }
 
 function transactionClaims(importFileId: number): SyncTransactionClaim[] {
@@ -365,6 +452,7 @@ export async function stageSyncArtifact(input: StageSyncArtifactInput): Promise<
 function explicitMappingForClaim(
   claim: SyncAccountClaim,
   mapping: SyncAccountMappingDecision,
+  last4: string | null,
 ): SyncAccountMappingDecision {
   if (mapping.mode === 'auto') {
     if (syncClaimRequiresExplicitMapping(claim)) {
@@ -376,6 +464,7 @@ function explicitMappingForClaim(
     destinationAccount(claim.resolvedAccountId);
     return {
       sourceAccountId: claim.sourceAccountId,
+      last4,
       mode: 'existing',
       accountId: claim.resolvedAccountId,
     };
@@ -387,7 +476,7 @@ function explicitMappingForClaim(
     )) {
       throw new Error(`Account name is required for source account ${claim.sourceAccountId}.`);
     }
-    return { ...mapping, sourceAccountId: claim.sourceAccountId };
+    return { ...mapping, sourceAccountId: claim.sourceAccountId, last4 };
   }
   if (mapping.mode === 'unarchive') {
     const accountId = Number(mapping.accountId);
@@ -395,7 +484,7 @@ function explicitMappingForClaim(
       throw new Error(`Account id is required for source account ${claim.sourceAccountId}.`);
     }
     destinationAccount(accountId, { allowArchived: true });
-    return { ...mapping, sourceAccountId: claim.sourceAccountId, accountId };
+    return { ...mapping, sourceAccountId: claim.sourceAccountId, accountId, last4 };
   }
   const accountId = mapping.accountId === null ? null : Number(mapping.accountId);
   if (accountId === null || !Number.isFinite(accountId)) {
@@ -404,6 +493,7 @@ function explicitMappingForClaim(
   destinationAccount(accountId);
   return {
     sourceAccountId: claim.sourceAccountId,
+    last4,
     mode: 'existing',
     accountId,
   };
@@ -418,6 +508,7 @@ function mappingDecisionSignature(mapping: SyncAccountMappingDecision): string {
   if (mapping.mode === 'create') {
     return JSON.stringify({
       mode: mapping.mode,
+      last4: normalizeAccountLast4(mapping.last4),
       account: {
         name: mapping.account.name?.trim() || '',
         institution: mapping.account.institution?.trim() || '',
@@ -427,8 +518,14 @@ function mappingDecisionSignature(mapping: SyncAccountMappingDecision): string {
       },
     });
   }
-  if (mapping.mode === 'auto') return JSON.stringify({ mode: mapping.mode });
-  return JSON.stringify({ mode: mapping.mode, accountId: mapping.accountId });
+  if (mapping.mode === 'auto') {
+    return JSON.stringify({ mode: mapping.mode, last4: normalizeAccountLast4(mapping.last4) });
+  }
+  return JSON.stringify({
+    mode: mapping.mode,
+    accountId: mapping.accountId,
+    last4: normalizeAccountLast4(mapping.last4),
+  });
 }
 
 function mappingForSourceAccount(
@@ -438,19 +535,26 @@ function mappingForSourceAccount(
   return { ...mapping, sourceAccountId };
 }
 
+function commonMappingLast4(
+  values: Array<string | null | undefined>,
+  conflictMessage: string,
+): string | null {
+  const known = new Set(values
+    .map(value => normalizeAccountLast4(value))
+    .filter((value): value is string => value !== null));
+  if (known.size > 1) throw new Error(conflictMessage);
+  return known.values().next().value ?? null;
+}
+
 function validatedSyncAccountMappings(
   review: SyncRunReview,
   requested?: SyncAccountMappingDecision[] | null,
 ): Map<number, PlannedSyncAccountMapping[]> {
   const readyArtifacts = review.artifacts.filter(artifact => artifact.status === 'ready');
-  const claims = readyArtifacts.flatMap(artifact => artifact.accountClaims);
-  const claimById = new Map(claims.map(claim => [claim.sourceAccountId, claim]));
-  if (claimById.size !== claims.length) {
-    throw new Error('Sync review contains duplicate source account claims.');
-  }
-
-  for (const artifact of readyArtifacts) {
-    const storedIdentities = storedAccountClaims(artifact.importFileId)
+  const claims = readyArtifacts.flatMap(artifact => {
+    const storedClaims = storedAccountClaims(artifact.importFileId);
+    const storedById = new Map(storedClaims.map(claim => [claim.sourceAccountId, claim]));
+    const storedIdentities = storedClaims
       .map(claim => `${claim.sourceAccountId}:${claim.remoteAccountId}`)
       .sort();
     const reviewIdentities = artifact.accountClaims
@@ -459,6 +563,29 @@ function validatedSyncAccountMappings(
     if (storedIdentities.join('\n') !== reviewIdentities.join('\n')) {
       throw new Error(`${artifact.fileName} account claims changed after review.`);
     }
+
+    return artifact.accountClaims.map(reviewClaim => {
+      const storedClaim = storedById.get(reviewClaim.sourceAccountId)!;
+      const last4Changed = hasOwnSyncAccountEvidence(reviewClaim, 'last4') &&
+        normalizeAccountLast4(reviewClaim.last4) !== storedClaim.last4;
+      const balanceDateChanged = hasOwnSyncAccountEvidence(reviewClaim, 'latestBalanceDate') &&
+        (reviewClaim.latestBalanceDate ?? null) !== storedClaim.latestBalanceDate;
+      const balanceChanged = hasOwnSyncAccountEvidence(reviewClaim, 'latestBalanceCents') &&
+        (reviewClaim.latestBalanceCents ?? null) !== storedClaim.latestBalanceCents;
+      if (last4Changed || balanceDateChanged || balanceChanged) {
+        throw new Error(`${artifact.fileName} account claims changed after review.`);
+      }
+      return {
+        ...reviewClaim,
+        last4: storedClaim.last4,
+        latestBalanceDate: storedClaim.latestBalanceDate,
+        latestBalanceCents: storedClaim.latestBalanceCents,
+      };
+    });
+  });
+  const claimById = new Map(claims.map(claim => [claim.sourceAccountId, claim]));
+  if (claimById.size !== claims.length) {
+    throw new Error('Sync review contains duplicate source account claims.');
   }
 
   const claimsByRemoteId = new Map<string, SyncAccountClaim[]>();
@@ -488,6 +615,18 @@ function validatedSyncAccountMappings(
   const validatedBySourceId = new Map<number, PlannedSyncAccountMapping>();
   for (const [remoteAccountId, groupedClaims] of claimsByRemoteId) {
     const requestedMappings = requestedByRemoteId.get(remoteAccountId) ?? [];
+    const claimedLast4 = commonMappingLast4(
+      groupedClaims.map(claim => claim.last4),
+      'Downloaded files disagree about the account last four.',
+    );
+    const submittedLast4 = commonMappingLast4(
+      requestedMappings.map(mapping => mapping.last4),
+      'Submitted mappings disagree about the account last four.',
+    );
+    if (claimedLast4 !== null && submittedLast4 !== null && claimedLast4 !== submittedLast4) {
+      throw new Error('Downloaded account last four conflicts with the submitted account last four.');
+    }
+    const last4 = claimedLast4 ?? submittedLast4;
     const commonAutoDestination = commonSafeSyncAccountDestination(groupedClaims);
     if (requestedMappings.some(mapping => mapping.mode === 'auto') && commonAutoDestination === null) {
       throw new Error(`Remote account ${remoteAccountId} has no single safe automatic destination; choose an existing account or create one.`);
@@ -497,7 +636,7 @@ function validatedSyncAccountMappings(
     if (requestedMappings.length > 0) {
       const validated = requestedMappings.map(mapping => {
         const claim = claimById.get(mapping.sourceAccountId)!;
-        return explicitMappingForClaim(claim, mapping);
+        return explicitMappingForClaim(claim, mapping, last4);
       });
       const signatures = new Set(validated.map(mappingDecisionSignature));
       if (signatures.size !== 1) {
@@ -510,6 +649,7 @@ function validatedSyncAccountMappings(
       }
       canonical = {
         sourceAccountId: groupedClaims[0]!.sourceAccountId,
+        last4,
         mode: 'existing',
         accountId: commonAutoDestination,
       };
@@ -598,6 +738,7 @@ export async function commitSyncReview(
           ? mapping
           : {
               sourceAccountId: mapping.sourceAccountId,
+              last4: mapping.last4,
               mode: 'existing' as const,
               accountId: existingAccountId,
             };

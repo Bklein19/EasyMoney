@@ -14,6 +14,7 @@ function routedClaim(sourceAccountId: number, resolvedAccountId: number | null):
     institution: 'Example Institution',
     accountName: `Remote account ${sourceAccountId}`,
     accountHolder: null,
+    last4: null,
     resolvedAccountId,
     resolvedAccountName: resolvedAccountId === null ? null : `Local account ${resolvedAccountId}`,
     resolvedAccountStatus: resolvedAccountId === null ? null : 'active',
@@ -21,6 +22,8 @@ function routedClaim(sourceAccountId: number, resolvedAccountId: number | null):
     requiresExplicitMapping: false,
     transactionCount: 1,
     balanceCount: 0,
+    latestBalanceDate: null,
+    latestBalanceCents: null,
   };
 }
 

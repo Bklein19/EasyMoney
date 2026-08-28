@@ -80,6 +80,7 @@ export function inferVanguardAccountKind(
 }
 
 export function inferVanguardAccountLast4(account: SyncAccountCoverage): string | null {
+  if (/^\d{4}$/.test(account.last4 ?? '')) return account.last4!;
   const preferred = new Set<string>();
   const fallback = new Set<string>();
   for (const text of identityTexts(account)) {

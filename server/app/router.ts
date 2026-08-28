@@ -62,27 +62,33 @@ const accountMetadataInput = z.object({
     type: z.unknown().optional(),
     currency: z.unknown().optional(),
     accountHolder: z.unknown().optional(),
+    last4: z.unknown().optional(),
   }),
 });
 const accountMappingIdInput = z.coerce.number().int().positive();
+const accountMappingLast4Input = z.string().trim().regex(/^\d{4}$/).nullable().optional();
 const accountMappingDecisionSchema = z.discriminatedUnion('mode', [
   z.object({
     sourceAccountId: accountMappingIdInput,
+    last4: accountMappingLast4Input,
     mode: z.literal('existing'),
     accountId: accountMappingIdInput.nullable(),
   }).strict(),
   z.object({
     sourceAccountId: accountMappingIdInput,
+    last4: accountMappingLast4Input,
     mode: z.literal('auto'),
     accountId: accountMappingIdInput.nullable().optional(),
   }).strict(),
   z.object({
     sourceAccountId: accountMappingIdInput,
+    last4: accountMappingLast4Input,
     mode: z.literal('unarchive'),
     accountId: accountMappingIdInput,
   }).strict(),
   z.object({
     sourceAccountId: accountMappingIdInput,
+    last4: accountMappingLast4Input,
     mode: z.literal('create'),
     account: z.object({
       name: z.string().nullable().optional(),

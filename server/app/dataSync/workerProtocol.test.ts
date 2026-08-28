@@ -27,6 +27,7 @@ function executionPlan(outputDir = '/runtime/sync/artifacts'): SyncExecutionPlan
       name: 'Synthetic Brokerage 1234',
       institution: 'Vanguard',
       type: 'investment',
+      last4: '1234',
       latestFactDate: '2026-08-01',
       earliestFactDate: '2025-01-01',
       latestBalanceDate: '2026-07-31',

@@ -14,6 +14,7 @@ export interface AccountSummary {
   isClosed: boolean;
   currency: string;
   accountHolder: string | null;
+  last4: string | null;
   status: 'active' | 'archived' | 'closed' | string;
   archivedAt: string | null;
   updatedAt: string | null;

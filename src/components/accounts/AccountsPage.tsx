@@ -15,6 +15,7 @@ type AccountDraft = {
   type: string;
   currency: string;
   accountHolder: string;
+  last4: string;
 };
 
 type AccountDraftField = keyof AccountDraft;
@@ -45,6 +46,7 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }: A
     type: account.type || 'other',
     currency: account.currency || 'USD',
     accountHolder: account.accountHolder || '',
+    last4: account.last4 || '',
   });
 
   const isArchived = account.status === 'archived';
@@ -53,7 +55,8 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }: A
     draft.institution.trim() !== (account.institution || '') ||
     draft.type !== (account.type || 'other') ||
     draft.currency !== (account.currency || 'USD') ||
-    draft.accountHolder.trim() !== (account.accountHolder || '');
+    draft.accountHolder.trim() !== (account.accountHolder || '') ||
+    draft.last4.trim() !== (account.last4 || '');
 
   const updateDraft = (field: AccountDraftField, value: string) => {
     setDraft(current => ({ ...current, [field]: value }));
@@ -67,6 +70,7 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }: A
       type: draft.type,
       currency: draft.currency,
       accountHolder: draft.accountHolder.trim() || null,
+      last4: draft.last4.trim() || null,
     });
   };
 
@@ -101,6 +105,21 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }: A
             value={draft.institution}
             placeholder="No institution"
             onChange={(event) => updateDraft('institution', event.target.value)}
+            disabled={isSaving}
+          />
+        </div>
+
+        <div className="account-field">
+          <label htmlFor={`account-last4-${account.id}`}>Last four</label>
+          <input
+            id={`account-last4-${account.id}`}
+            value={draft.last4}
+            placeholder="1234"
+            maxLength={4}
+            pattern="[0-9]{4}"
+            inputMode="numeric"
+            autoComplete="off"
+            onChange={(event) => updateDraft('last4', event.target.value.replace(/\D/g, '').slice(0, 4))}
             disabled={isSaving}
           />
         </div>
@@ -291,6 +310,7 @@ export default function AccountsPage() {
                       <td>
                         <div className="account-row__name" title={account.name}>
                           <span>{account.name}</span>
+                          {account.last4 && <span className="account-last4-badge">•••• {account.last4}</span>}
                           {account.accountHolder && <span className="account-owner-badge">{account.accountHolder}</span>}
                           {account.isClosed && <span className="account-closed-badge">Closed</span>}
                         </div>

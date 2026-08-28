@@ -289,6 +289,109 @@ test('init database records account owner schema migration', () => {
   expect(accountColumns.map(column => column.name)).toContain('accountHolder');
 });
 
+test('init database records and conservatively backfills account last four migrations', () => {
+  const db = getDb();
+  const inferredAccountId = Number(insertRow('accounts', {
+    name: 'Inferred Checking',
+    institution: 'Example Bank',
+    type: 'checking',
+    last4: null,
+  }));
+  const preservedAccountId = Number(insertRow('accounts', {
+    name: 'Preserved Checking',
+    institution: 'Example Bank',
+    type: 'checking',
+    last4: '9999',
+  }));
+  const ambiguousAccountId = Number(insertRow('accounts', {
+    name: 'Ambiguous Checking',
+    institution: 'Example Bank',
+    type: 'checking',
+    last4: null,
+  }));
+  for (const [institution, alias, accountId] of [
+    ['Example Bank', 'Inferred Checking ending in 0123', inferredAccountId],
+    ['Example Bank', 'Preserved Checking ending in 0123', preservedAccountId],
+    ['First Example Bank', 'Ambiguous Checking ending in 1111', ambiguousAccountId],
+    ['Second Example Bank', 'Ambiguous Checking ending in 2222', ambiguousAccountId],
+  ] as const) {
+    insertRow('accountAliases', { institution, alias, accountId });
+  }
+
+  db.prepare("DELETE FROM schemaMigrations WHERE name = '2026-08-27-account-last4-backfill'").run();
+  initDatabase();
+
+  expect(db.prepare(`
+    SELECT id, last4
+    FROM accounts
+    ORDER BY id
+  `).all()).toEqual([
+    { id: inferredAccountId, last4: '0123' },
+    { id: preservedAccountId, last4: '9999' },
+    { id: ambiguousAccountId, last4: null },
+  ]);
+  expect(db.prepare(
+    "SELECT name FROM schemaMigrations WHERE name = '2026-08-27-account-last4'"
+  ).get()).toEqual({ name: '2026-08-27-account-last4' });
+  expect((db.prepare('PRAGMA table_info(accounts)').all() as Array<{ name: string }>)
+    .map(column => column.name)).toContain('last4');
+  expect(db.prepare(
+    "SELECT name FROM schemaMigrations WHERE name = '2026-08-27-account-last4-backfill'"
+  ).get()).toEqual({ name: '2026-08-27-account-last4-backfill' });
+});
+
+test('init database repairs only unsupported year-like last four backfills', () => {
+  const db = getDb();
+  const suspectAccountId = Number(insertRow('accounts', {
+    name: 'Example Investment',
+    institution: 'Example Bank',
+    type: 'investment',
+    last4: '2026',
+  }));
+  const supportedAccountId = Number(insertRow('accounts', {
+    name: 'Supported Investment',
+    institution: 'Example Bank',
+    type: 'investment',
+    last4: '2026',
+  }));
+  const manualAccountId = Number(insertRow('accounts', {
+    name: 'Investment account 2026',
+    institution: 'Example Bank',
+    type: 'investment',
+    last4: '2026',
+    updatedAt: '2999-01-01T00:00:00.000Z',
+  }));
+  const sourceFileId = Number(insertRow('sourceFiles', {
+    fileName: 'synthetic-year-label.csv',
+    contentHash: 'synthetic-year-label-hash',
+    status: 'committed',
+  }));
+  insertRow('sourceAccounts', {
+    sourceFileId,
+    accountId: suspectAccountId,
+    institution: 'Example Bank',
+    sourceAccountKey: 'synthetic-year-label',
+    sourceAccountName: 'Investment account 2026',
+  });
+  insertRow('accountAliases', {
+    institution: 'Example Bank',
+    alias: 'Supported Investment ending in 2026',
+    accountId: supportedAccountId,
+  });
+
+  db.prepare("DELETE FROM schemaMigrations WHERE name = '2026-08-27-account-last4-year-repair'").run();
+  initDatabase();
+
+  expect(db.prepare('SELECT id, last4 FROM accounts ORDER BY id').all()).toEqual([
+    { id: suspectAccountId, last4: null },
+    { id: supportedAccountId, last4: '2026' },
+    { id: manualAccountId, last4: '2026' },
+  ]);
+  expect(db.prepare(
+    "SELECT name FROM schemaMigrations WHERE name = '2026-08-27-account-last4-year-repair'"
+  ).get()).toEqual({ name: '2026-08-27-account-last4-year-repair' });
+});
+
 test('init database records source account owner schema migration', () => {
   const migration = getDb().prepare(
     "SELECT name FROM schemaMigrations WHERE name = '2026-07-06-source-account-owner'"
@@ -491,6 +594,7 @@ test('app accounts endpoint returns domain-shaped accounts', async () => {
     currentBalance: 1234.56,
     currency: 'USD',
     accountHolder: 'Example Owner',
+    last4: '0123',
     updatedAt: '2026-06-14T12:00:00.000Z',
   }));
   insertRow('ledgerBalances', {
@@ -521,6 +625,7 @@ test('app accounts endpoint returns domain-shaped accounts', async () => {
         isClosed: false,
         currency: 'USD',
         accountHolder: 'Example Owner',
+        last4: '0123',
         status: 'active',
         archivedAt: null,
         updatedAt: '2026-06-14T12:00:00.000Z',
@@ -590,6 +695,31 @@ test('app accounts endpoint updates account owner metadata', async () => {
       accountHolder: null,
     })],
   });
+});
+
+test('app accounts endpoint normalizes, preserves, and clears a numeric last four', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Numbered Brokerage',
+    institution: 'Example Brokerage',
+    type: 'investment',
+    currentBalance: 0,
+  }));
+
+  await caller.accounts.updateMetadata({ id: accountId, changes: { last4: ' 0123 ' } });
+  expect(await listAccountsForTest()).toMatchObject({
+    accounts: [expect.objectContaining({ id: accountId, last4: '0123' })],
+  });
+
+  for (const invalid of ['123', '12345', '12A4']) {
+    await expect(caller.accounts.updateMetadata({ id: accountId, changes: { last4: invalid } }))
+      .rejects.toThrow('Account last four must contain exactly four digits.');
+  }
+  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId))
+    .toEqual({ last4: '0123' });
+
+  await caller.accounts.updateMetadata({ id: accountId, changes: { last4: '' } });
+  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId))
+    .toEqual({ last4: null });
 });
 
 test('trpc accounts mutations update metadata and archive state', async () => {
@@ -4251,12 +4381,214 @@ test('catch-up confirmation rejects unvalidated mapping decision variants at the
   expect((await caller.dataSync.status({ runId: review.runId }))?.status).toBe('awaiting-confirmation');
 });
 
+test('catch-up review exposes conservative last-four and latest downloaded balance evidence', () => {
+  const staged = stageConsolidatedSyncFacts([
+    {
+      remoteAccountId: 'remote:masked-balance-evidence',
+      accountName: 'Example Savings ending in 1234',
+      balanceCents: 12_345,
+    },
+    {
+      remoteAccountId: 'remote:unlabeled-balance-evidence',
+      accountName: 'Example Savings projection 2026',
+    },
+  ], 'account-evidence-review.csv');
+  const sourceFile = getDb().prepare(`
+    SELECT sourceFileId
+    FROM sourceAccounts
+    WHERE id = ?
+  `).get(staged.sourceAccountIds[0]!) as { sourceFileId: number };
+  insertRow('sourceBalances', {
+    sourceFileId: sourceFile.sourceFileId,
+    sourceAccountId: staged.sourceAccountIds[0]!,
+    date: '2026-08-15',
+    balanceCents: 0,
+    rawJson: '{}',
+    createdAt: '2026-08-20T00:00:00.000Z',
+  });
+
+  const artifact = buildSyncArtifactReview({
+    importFileId: staged.importFileId,
+    fileName: staged.fileName,
+    status: 'ready',
+    accountRoutes: [
+      { remoteAccountId: 'remote:masked-balance-evidence' },
+      { remoteAccountId: 'remote:unlabeled-balance-evidence' },
+    ],
+  });
+
+  expect(artifact.accountClaims[0]).toEqual(expect.objectContaining({
+    last4: '1234',
+    balanceCount: 2,
+    latestBalanceDate: '2026-08-15',
+    latestBalanceCents: 0,
+  }));
+  expect(artifact.accountClaims[1]).toEqual(expect.objectContaining({
+    last4: null,
+    balanceCount: 0,
+    latestBalanceDate: null,
+    latestBalanceCents: null,
+  }));
+});
+
+test('catch-up enriches legacy review claims with current staged last-four evidence', async () => {
+  const staged = stageConsolidatedSyncFacts([{
+    remoteAccountId: 'remote:legacy-review-evidence',
+    accountName: 'Legacy Review Savings ending in 4321',
+    balanceCents: 50_000,
+  }], 'legacy-account-evidence-review.csv');
+  const artifact = buildSyncArtifactReview({
+    importFileId: staged.importFileId,
+    fileName: staged.fileName,
+    status: 'ready',
+    accountRoutes: [{ remoteAccountId: 'remote:legacy-review-evidence' }],
+  });
+  const legacyAccountClaims = artifact.accountClaims.map(claim => {
+    const legacyClaim: Partial<typeof claim> = { ...claim };
+    legacyClaim.resolution = 'ambiguous';
+    delete legacyClaim.last4;
+    delete legacyClaim.latestBalanceDate;
+    delete legacyClaim.latestBalanceCents;
+    return legacyClaim;
+  });
+  const review = {
+    runId: 'sync-legacy-account-evidence-review',
+    institutionId: 'bank-of-america' as const,
+    downloaded: 1,
+    readyToImport: 1,
+    alreadyImported: 0,
+    artifacts: [{ ...artifact, accountClaims: legacyAccountClaims }],
+  };
+  await saveAwaitingSyncReview(review);
+
+  const loaded = await caller.dataSync.status({ runId: review.runId });
+  expect(loaded?.review?.artifacts[0]?.accountClaims[0]).toEqual(expect.objectContaining({
+    sourceAccountId: staged.sourceAccountIds[0]!,
+    remoteAccountId: 'remote:legacy-review-evidence',
+    resolution: 'ambiguous',
+    last4: '4321',
+    latestBalanceDate: '2026-08-01',
+    latestBalanceCents: 50_000,
+  }));
+
+  const confirmed = await caller.dataSync.confirm({
+    runId: review.runId,
+    accountMappings: [{
+      sourceAccountId: staged.sourceAccountIds[0]!,
+      mode: 'create',
+      account: {
+        name: 'Legacy Evidence Destination',
+        institution: 'Example Institution',
+        type: 'savings',
+        currency: 'USD',
+      },
+    }],
+  });
+
+  expect(confirmed.status).toBe('complete');
+  expect(getDb().prepare(`
+    SELECT last4
+    FROM accounts
+    WHERE name = 'Legacy Evidence Destination'
+  `).get()).toEqual({ last4: '4321' });
+});
+
+test('catch-up rejects conflicting last-four evidence for one remote identity', async () => {
+  const first = stageConsolidatedSyncFacts([{
+    remoteAccountId: 'remote:conflicting-last-four',
+    accountName: 'Example Account ending in 1111',
+  }], 'conflicting-last-four-activity.csv');
+  const second = stageConsolidatedSyncFacts([{
+    remoteAccountId: 'remote:conflicting-last-four',
+    accountName: 'Example Account ending in 2222',
+  }], 'conflicting-last-four-statement.pdf', 'statement');
+  const artifacts = [first, second].map(stagedArtifact => buildSyncArtifactReview({
+    importFileId: stagedArtifact.importFileId,
+    fileName: stagedArtifact.fileName,
+    status: 'ready',
+    accountRoutes: [{ remoteAccountId: 'remote:conflicting-last-four' }],
+  }));
+  const review = {
+    runId: 'sync-conflicting-last-four-evidence',
+    institutionId: 'bank-of-america' as const,
+    downloaded: 2,
+    readyToImport: 2,
+    alreadyImported: 0,
+    artifacts,
+  };
+  await saveAwaitingSyncReview(review);
+
+  await expect(caller.dataSync.confirm({
+    runId: review.runId,
+    accountMappings: [{
+      sourceAccountId: first.sourceAccountIds[0]!,
+      mode: 'create',
+      account: {
+        name: 'Conflicting Evidence Destination',
+        institution: 'Example Institution',
+        type: 'savings',
+        currency: 'USD',
+      },
+    }],
+  })).rejects.toThrow('Downloaded files disagree about the account last four.');
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM accounts').get()).toEqual({ count: 0 });
+  expect(getDb().prepare('SELECT status FROM importFiles ORDER BY id').all()).toEqual([
+    { status: 'previewed' },
+    { status: 'previewed' },
+  ]);
+});
+
+test('catch-up rejects a submitted last four that conflicts with downloaded evidence', async () => {
+  const staged = stageConsolidatedSyncFacts([{
+    remoteAccountId: 'remote:submitted-last-four-conflict',
+    accountName: 'Example Checking ending in 1234',
+  }], 'submitted-last-four-conflict.csv');
+  const artifact = buildSyncArtifactReview({
+    importFileId: staged.importFileId,
+    fileName: staged.fileName,
+    status: 'ready',
+    accountRoutes: [{ remoteAccountId: 'remote:submitted-last-four-conflict' }],
+  });
+  const review = {
+    runId: 'sync-submitted-last-four-conflict',
+    institutionId: 'bank-of-america' as const,
+    downloaded: 1,
+    readyToImport: 1,
+    alreadyImported: 0,
+    artifacts: [artifact],
+  };
+  await saveAwaitingSyncReview(review);
+
+  await expect(caller.dataSync.confirm({
+    runId: review.runId,
+    accountMappings: [{
+      sourceAccountId: staged.sourceAccountIds[0]!,
+      last4: '5678',
+      mode: 'create',
+      account: {
+        name: 'Submitted Conflict Destination',
+        institution: 'Example Institution',
+        type: 'checking',
+        currency: 'USD',
+      },
+    }],
+  })).rejects.toThrow(
+    'Downloaded account last four conflicts with the submitted account last four.',
+  );
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM accounts').get()).toEqual({ count: 0 });
+  expect(getDb().prepare('SELECT status FROM importFiles').all()).toEqual([{ status: 'previewed' }]);
+});
+
 test('catch-up creates one local account for the same remote identity across activity and statements', async () => {
   const activity = stageConsolidatedSyncFacts([
-    { remoteAccountId: 'remote:shared-retirement', accountName: 'Retirement Activity' },
+    { remoteAccountId: 'remote:shared-retirement', accountName: 'Retirement Activity ending in 8765' },
   ], 'shared-retirement-activity.csv', 'activity-export');
   const statement = stageConsolidatedSyncFacts([
-    { remoteAccountId: 'remote:shared-retirement', accountName: 'Retirement Quarterly Statement', balanceCents: 7250000 },
+    {
+      remoteAccountId: 'remote:shared-retirement',
+      accountName: 'Retirement Quarterly Statement ending in 8765',
+      balanceCents: 7250000,
+    },
   ], 'shared-retirement-statement.pdf', 'statement');
   const artifacts = [activity, statement].map(staged => buildSyncArtifactReview({
     importFileId: staged.importFileId,
@@ -4290,11 +4622,12 @@ test('catch-up creates one local account for the same remote identity across act
 
   expect(confirmed.status).toBe('complete');
   const createdAccounts = getDb().prepare(`
-    SELECT id
+    SELECT id, last4
     FROM accounts
     WHERE name = 'Shared Retirement Account'
-  `).all() as Array<{ id: number }>;
+  `).all() as Array<{ id: number; last4: string | null }>;
   expect(createdAccounts).toHaveLength(1);
+  expect(createdAccounts[0]!.last4).toBe('8765');
   expect(getDb().prepare(`
     SELECT DISTINCT accountId
     FROM sourceAccounts
@@ -4952,6 +5285,7 @@ test('app import preview allows native parsers to handle malformed institution C
     institution: 'Bank of America',
     sourceAccountName: 'Adv Plus Banking - 1234',
     sourceAccountHolder: null,
+    last4: '1234',
     resolvedAccountId: null,
     resolvedAccountStatus: null,
     resolution: 'auto-create',
@@ -4986,6 +5320,7 @@ test('app imports commit uses source account mapping overrides', async () => {
     balanceRowIds: preview.balanceRowIds,
     accountMappings: [{
       sourceAccountId,
+      last4: '1234',
       accountId: existingAccountId,
     }],
   });
@@ -5018,9 +5353,199 @@ test('app imports commit uses source account mapping overrides', async () => {
     accountId: number;
   };
   expect(sourceAccount.accountId).toBe(existingAccountId);
-  expect(getDb().prepare('SELECT accountHolder FROM accounts WHERE id = ?').get(existingAccountId)).toEqual({
+  expect(getDb().prepare('SELECT accountHolder, last4 FROM accounts WHERE id = ?').get(existingAccountId)).toEqual({
     accountHolder: 'Manual Owner',
+    last4: '1234',
   });
+});
+
+test('app imports auto mappings preserve a leading-zero last four', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Adv Plus Banking - 0123',
+    institution: 'Bank of America',
+    type: 'checking',
+    currentBalance: 0,
+    currency: 'USD',
+    last4: null,
+  }));
+  const preview = await postImportPreview('bofa-checking-0123-2026-01-01-to-2026-01-31.csv', [
+    'Description,,Summary Amt.',
+    'Opening Balance,,"1,000.00"',
+    'Date,Description,Amount,Running Bal.',
+    '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+  ].join('\n'));
+
+  expect(preview.accountMappings[0]).toMatchObject({
+    last4: '0123',
+    resolvedAccountId: accountId,
+    resolution: 'exact',
+  });
+
+  await commitImportForTest({
+    accountId: null,
+    importFileId: preview.importFileId,
+    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    balanceRowIds: preview.balanceRowIds,
+    accountMappings: [{
+      sourceAccountId: preview.accountMappings[0].sourceAccountId,
+      mode: 'auto',
+      last4: '0123',
+    }],
+  });
+
+  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId))
+    .toEqual({ last4: '0123' });
+  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?')
+    .get(preview.accountMappings[0].sourceAccountId)).toEqual({ accountId });
+});
+
+test('app imports reject a staged last four conflicting with an existing destination when payload omits it', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Existing Destination',
+    institution: 'Bank of America',
+    type: 'checking',
+    currentBalance: 0,
+    currency: 'USD',
+    last4: '9999',
+  }));
+  const preview = await postImportPreview('bofa-checking-1234-2026-01-01-to-2026-01-31.csv', [
+    'Description,,Summary Amt.',
+    'Opening Balance,,"1,000.00"',
+    'Date,Description,Amount,Running Bal.',
+    '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+  ].join('\n'));
+  const sourceAccountId = preview.accountMappings[0].sourceAccountId;
+
+  await expect(commitImportForTest({
+    accountId: null,
+    importFileId: preview.importFileId,
+    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    balanceRowIds: preview.balanceRowIds,
+    accountMappings: [{
+      sourceAccountId,
+      mode: 'existing',
+      accountId,
+    }],
+  })).rejects.toThrow('Selected account has a conflicting last four.');
+
+  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId))
+    .toEqual({ last4: '9999' });
+  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(sourceAccountId))
+    .toEqual({ accountId: null });
+  expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(preview.importFileId))
+    .toEqual({ status: 'previewed' });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM accountAliases').get()).toEqual({ count: 0 });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
+});
+
+test('app imports reject a submitted last four conflicting with authoritative staged evidence', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Existing Destination',
+    institution: 'Bank of America',
+    type: 'checking',
+    currentBalance: 0,
+    currency: 'USD',
+    last4: null,
+  }));
+  const preview = await postImportPreview('bofa-checking-1234-2026-01-01-to-2026-01-31.csv', [
+    'Description,,Summary Amt.',
+    'Opening Balance,,"1,000.00"',
+    'Date,Description,Amount,Running Bal.',
+    '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+  ].join('\n'));
+  const sourceAccountId = preview.accountMappings[0].sourceAccountId;
+
+  await expect(commitImportForTest({
+    accountId: null,
+    importFileId: preview.importFileId,
+    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    balanceRowIds: preview.balanceRowIds,
+    accountMappings: [{
+      sourceAccountId,
+      mode: 'existing',
+      accountId,
+      last4: '9999',
+    }],
+  })).rejects.toThrow('Downloaded account last four conflicts with the submitted account last four.');
+
+  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId))
+    .toEqual({ last4: null });
+  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(sourceAccountId))
+    .toEqual({ accountId: null });
+  expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(preview.importFileId))
+    .toEqual({ status: 'previewed' });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
+});
+
+test('app imports enforce staged last four during automatic resolution without a mapping payload', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Adv Plus Banking - 1234',
+    institution: 'Bank of America',
+    type: 'checking',
+    currentBalance: 0,
+    currency: 'USD',
+    last4: '9999',
+  }));
+  const preview = await postImportPreview('bofa-checking-1234-2026-01-01-to-2026-01-31.csv', [
+    'Description,,Summary Amt.',
+    'Opening Balance,,"1,000.00"',
+    'Date,Description,Amount,Running Bal.',
+    '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+  ].join('\n'));
+
+  expect(preview.accountMappings[0]).toMatchObject({
+    resolvedAccountId: accountId,
+    resolution: 'exact',
+    last4: '1234',
+  });
+  await expect(commitImportForTest({
+    accountId: null,
+    importFileId: preview.importFileId,
+    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    balanceRowIds: preview.balanceRowIds,
+  })).rejects.toThrow('Selected account has a conflicting last four.');
+
+  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId))
+    .toEqual({ last4: '9999' });
+  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?')
+    .get(preview.accountMappings[0].sourceAccountId)).toEqual({ accountId: null });
+  expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(preview.importFileId))
+    .toEqual({ status: 'previewed' });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
+});
+
+test('app imports reject malformed mapping last four at the API boundary', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Existing Destination',
+    institution: 'Bank of America',
+    type: 'checking',
+    currentBalance: 0,
+    currency: 'USD',
+  }));
+  const preview = await postImportPreview('bofa-checking-1234-2026-01-01-to-2026-01-31.csv', [
+    'Description,,Summary Amt.',
+    'Opening Balance,,"1,000.00"',
+    'Date,Description,Amount,Running Bal.',
+    '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+  ].join('\n'));
+
+  await expect(caller.imports.commit({
+    accountId: null,
+    importFileId: preview.importFileId,
+    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    balanceRowIds: preview.balanceRowIds,
+    accountMappings: [{
+      sourceAccountId: preview.accountMappings[0].sourceAccountId,
+      mode: 'existing',
+      accountId,
+      last4: '123',
+    }],
+  } as never)).rejects.toThrow();
+
+  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId))
+    .toEqual({ last4: null });
+  expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(preview.importFileId))
+    .toEqual({ status: 'previewed' });
 });
 
 test('app import preview reports archived matches and commit requires explicit unarchive decision', async () => {
@@ -5069,13 +5594,15 @@ test('app import preview reports archived matches and commit requires explicit u
       sourceAccountId: preview.accountMappings[0].sourceAccountId,
       mode: 'unarchive',
       accountId: archivedAccountId,
+      last4: '1234',
     }],
   });
 
   expect(commit.importedCount).toBe(1);
-  expect(getDb().prepare('SELECT status, archivedAt FROM accounts WHERE id = ?').get(archivedAccountId)).toMatchObject({
+  expect(getDb().prepare('SELECT status, archivedAt, last4 FROM accounts WHERE id = ?').get(archivedAccountId)).toMatchObject({
     status: 'active',
     archivedAt: null,
+    last4: '1234',
   });
   expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(preview.accountMappings[0].sourceAccountId)).toMatchObject({
     accountId: archivedAccountId,
@@ -5098,6 +5625,7 @@ test('app imports commit creates accounts from explicit source account mapping d
     accountMappings: [{
       sourceAccountId: preview.accountMappings[0].sourceAccountId,
       mode: 'create',
+      last4: '4321',
       account: {
         name: 'Imported Savings',
         institution: 'Bank of America',
@@ -5115,11 +5643,13 @@ test('app imports commit creates accounts from explicit source account mapping d
     type: string;
     status: string;
     accountHolder: string | null;
+    last4: string | null;
   };
   expect(account).toMatchObject({
     institution: 'Bank of America',
     type: 'savings',
     accountHolder: 'Example Owner',
+    last4: '4321',
     status: 'active',
   });
   expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(preview.accountMappings[0].sourceAccountId)).toMatchObject({

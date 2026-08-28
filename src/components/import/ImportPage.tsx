@@ -213,6 +213,7 @@ export default function ImportPage() {
   const buildAutoAccountMappings = (result: ImportPreviewResult) => (result.accountMappings || []).map(mapping => ({
     sourceAccountId: mapping.sourceAccountId,
     mode: 'auto' as const,
+    last4: mapping.last4 || null,
   }));
 
   const commitPreviewResult = async (result: ImportPreviewResult): Promise<CommitImportResult> => {

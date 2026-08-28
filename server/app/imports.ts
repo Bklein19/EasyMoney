@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { getDb, insertRow, updateRow } from '../database.ts';
 import { hashContent } from '../hash.ts';
+import { normalizeAccountLast4, sourceAccountLast4 } from './accountLast4.ts';
 import { hashImportContent } from './importContentHash.ts';
 import type { CommitImportTransaction, ImportAccountMapping, ImportAccountMappingDecision, ImportPreviewTransaction, ImportProfile, ParsedImportBalance, ParsedImportTransaction } from './importTypes.ts';
 import { CUSTOM_CSV_PARSER_ID, parseCustomCsv } from './importParsers/customCsv.ts';
@@ -501,8 +502,21 @@ function normalizeAccountStatus(status: string | null | undefined) {
   return status || 'active';
 }
 
+function authoritativeSourceAccountLast4(
+  sourceAccount: { sourceAccountKey?: string | null; sourceAccountName?: string | null },
+  submittedValue?: unknown,
+) {
+  const sourceLast4 = sourceAccountLast4(sourceAccount);
+  const submittedLast4 = normalizeAccountLast4(submittedValue);
+  if (sourceLast4 && submittedLast4 && sourceLast4 !== submittedLast4) {
+    throw new Error('Downloaded account last four conflicts with the submitted account last four.');
+  }
+  return sourceLast4 ?? submittedLast4;
+}
+
 function normalizeAccountCreateInput(mapping: Extract<ImportAccountMappingDecision, { mode: 'create' }>, sourceAccount: {
   institution: string | null;
+  sourceAccountKey?: string | null;
   sourceAccountName: string | null;
   accountHolder?: string | null;
 }) {
@@ -520,13 +534,15 @@ function normalizeAccountCreateInput(mapping: Extract<ImportAccountMappingDecisi
   const accountHolder = input.accountHolder === null || input.accountHolder === undefined
     ? sourceAccount.accountHolder || null
     : String(input.accountHolder).trim() || null;
+  const last4 = authoritativeSourceAccountLast4(sourceAccount, mapping.last4);
   if (!type) throw new Error('Account type is required for import-created accounts.');
   if (!currency) throw new Error('Account currency is required for import-created accounts.');
-  return { name, institution, type, currency, accountHolder };
+  return { name, institution, type, currency, accountHolder, last4 };
 }
 
 function createAccountForSourceMapping(mapping: Extract<ImportAccountMappingDecision, { mode: 'create' }>, sourceAccount: {
   institution: string | null;
+  sourceAccountKey?: string | null;
   sourceAccountName: string | null;
   accountHolder?: string | null;
 }) {
@@ -577,7 +593,64 @@ function applySourceAccountHolder(sourceAccount: { accountHolder?: string | null
   });
 }
 
-function linkSourceAccount(sourceAccountId: number, accountId: number | null, options: { allowArchived?: boolean } = {}) {
+function blankFillAccountLast4(
+  sourceAccount: { sourceAccountKey?: string | null; sourceAccountName?: string | null },
+  accountId: number | null,
+) {
+  const last4 = sourceAccountLast4(sourceAccount);
+  if (!last4 || !accountId) return;
+  getDb().prepare(`
+    UPDATE accounts
+    SET last4 = @last4,
+        updatedAt = @updatedAt
+    WHERE id = @accountId
+      AND (last4 IS NULL OR TRIM(last4) = '')
+  `).run({
+    accountId,
+    last4,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+function persistConfirmedAccountLast4(accountId: number, value: unknown) {
+  const last4 = normalizeAccountLast4(value);
+  if (!last4) return;
+  const account = getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId) as
+    | { last4: string | null }
+    | undefined;
+  if (!account) throw new Error('Selected account was not found.');
+  const existing = account.last4?.trim() || null;
+  if (existing && existing !== last4) {
+    throw new Error('Selected account has a conflicting last four.');
+  }
+  if (existing) return;
+  getDb().prepare(`
+    UPDATE accounts
+    SET last4 = @last4,
+        updatedAt = @updatedAt
+    WHERE id = @accountId
+      AND (last4 IS NULL OR TRIM(last4) = '')
+  `).run({
+    accountId,
+    last4,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+function applySourceAccountMetadata(sourceAccount: {
+  accountHolder?: string | null;
+  sourceAccountKey?: string | null;
+  sourceAccountName?: string | null;
+}, accountId: number | null) {
+  applySourceAccountHolder(sourceAccount, accountId);
+  blankFillAccountLast4(sourceAccount, accountId);
+}
+
+function linkSourceAccount(
+  sourceAccountId: number,
+  accountId: number | null,
+  options: { allowArchived?: boolean; last4?: unknown } = {},
+) {
   const db = getDb();
   if (accountId !== null) {
     const account = db.prepare('SELECT id, status FROM accounts WHERE id = ?').get(accountId) as
@@ -590,28 +663,43 @@ function linkSourceAccount(sourceAccountId: number, accountId: number | null, op
   }
 
   const sourceAccount = db.prepare(`
-    SELECT id, institution, sourceAccountName, accountHolder
+    SELECT id, institution, sourceAccountKey, sourceAccountName, accountHolder
     FROM sourceAccounts
     WHERE id = ?
   `).get(sourceAccountId) as
-    | { id: number; institution: string | null; sourceAccountName: string | null; accountHolder: string | null }
+    | {
+        id: number;
+        institution: string | null;
+        sourceAccountKey: string;
+        sourceAccountName: string | null;
+        accountHolder: string | null;
+      }
     | undefined;
   if (!sourceAccount) throw new Error(`Source account not found: ${sourceAccountId}`);
 
+  const last4 = authoritativeSourceAccountLast4(sourceAccount, options.last4);
+  if (accountId !== null) persistConfirmedAccountLast4(accountId, last4);
   db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(accountId, sourceAccountId);
   if (accountId !== null) {
     upsertAccountAlias(sourceAccount, accountId);
-    applySourceAccountHolder(sourceAccount, accountId);
+    applySourceAccountMetadata(sourceAccount, accountId);
   }
 }
 
 function getSourceAccount(sourceAccountId: number) {
   const sourceAccount = getDb().prepare(`
-    SELECT id, accountId, institution, sourceAccountName, accountHolder
+    SELECT id, accountId, institution, sourceAccountKey, sourceAccountName, accountHolder
     FROM sourceAccounts
     WHERE id = ?
   `).get(sourceAccountId) as
-    | { id: number; accountId: number | null; institution: string | null; sourceAccountName: string | null; accountHolder: string | null }
+    | {
+        id: number;
+        accountId: number | null;
+        institution: string | null;
+        sourceAccountKey: string;
+        sourceAccountName: string | null;
+        accountHolder: string | null;
+      }
     | undefined;
   if (!sourceAccount) throw new Error(`Source account not found: ${sourceAccountId}`);
   return sourceAccount;
@@ -642,14 +730,14 @@ function applyAccountMappingOverrides(accountMappings: ImportAccountMappingDecis
       if (!resolution.resolvedAccountId || resolution.resolvedAccountStatus === 'archived') {
         throw new Error('Import account mapping requires an explicit account choice.');
       }
-      linkSourceAccount(sourceAccountId, resolution.resolvedAccountId);
+      linkSourceAccount(sourceAccountId, resolution.resolvedAccountId, { last4: mapping.last4 });
       continue;
     }
 
     if (mapping.mode === 'create') {
       const sourceAccount = getSourceAccount(sourceAccountId);
       const accountId = createAccountForSourceMapping(mapping, sourceAccount);
-      linkSourceAccount(sourceAccountId, accountId);
+      linkSourceAccount(sourceAccountId, accountId, { last4: mapping.last4 });
       continue;
     }
 
@@ -657,7 +745,7 @@ function applyAccountMappingOverrides(accountMappings: ImportAccountMappingDecis
       const accountId = Number(mapping.accountId);
       if (!Number.isFinite(accountId)) throw new Error('Account id is required to unarchive an import mapping.');
       unarchiveAccountForImport(accountId);
-      linkSourceAccount(sourceAccountId, accountId);
+      linkSourceAccount(sourceAccountId, accountId, { last4: mapping.last4 });
       continue;
     }
 
@@ -666,7 +754,7 @@ function applyAccountMappingOverrides(accountMappings: ImportAccountMappingDecis
     }
     const accountId = mapping.accountId === null || mapping.accountId === undefined ? null : Number(mapping.accountId);
     if (accountId !== null && !Number.isFinite(accountId)) continue;
-    linkSourceAccount(sourceAccountId, accountId);
+    linkSourceAccount(sourceAccountId, accountId, { last4: mapping.last4 });
   }
 }
 
@@ -742,6 +830,7 @@ export function getImportAccountMappings(importFileId: number): ImportAccountMap
       sa.id AS sourceAccountId,
       sa.accountId,
       sa.institution,
+      sa.sourceAccountKey,
       sa.sourceAccountName,
       sa.accountHolder AS sourceAccountHolder,
       COUNT(DISTINCT st.id) AS transactionCount,
@@ -757,6 +846,7 @@ export function getImportAccountMappings(importFileId: number): ImportAccountMap
     sourceAccountId: number;
     accountId: number | null;
     institution: string | null;
+    sourceAccountKey: string;
     sourceAccountName: string | null;
     sourceAccountHolder: string | null;
     transactionCount: number;
@@ -768,6 +858,7 @@ export function getImportAccountMappings(importFileId: number): ImportAccountMap
     institution: row.institution,
     sourceAccountName: row.sourceAccountName,
     sourceAccountHolder: row.sourceAccountHolder,
+    last4: sourceAccountLast4(row),
     ...getImportAccountResolution({
       id: row.sourceAccountId,
       accountId: row.accountId,
@@ -788,11 +879,18 @@ function resolveImportedAccount(sourceAccountId: number | null | undefined, fall
   }
 
   const sourceAccount = db.prepare(`
-    SELECT id, accountId, institution, sourceAccountName, accountHolder
+    SELECT id, accountId, institution, sourceAccountKey, sourceAccountName, accountHolder
     FROM sourceAccounts
     WHERE id = ?
   `).get(sourceAccountId) as
-    | { id: number; accountId: number | null; institution: string | null; sourceAccountName: string | null; accountHolder: string | null }
+    | {
+        id: number;
+        accountId: number | null;
+        institution: string | null;
+        sourceAccountKey: string;
+        sourceAccountName: string | null;
+        accountHolder: string | null;
+      }
     | undefined;
 
   if (!sourceAccount) {
@@ -807,6 +905,11 @@ function resolveImportedAccount(sourceAccountId: number | null | undefined, fall
     if (normalizeAccountStatus(account?.status) === 'archived') {
       throw new Error('Import account mapping matched an archived account. Choose unarchive, another account, or create a new account.');
     }
+    persistConfirmedAccountLast4(
+      sourceAccount.accountId,
+      authoritativeSourceAccountLast4(sourceAccount),
+    );
+    applySourceAccountMetadata(sourceAccount, sourceAccount.accountId);
     return sourceAccount.accountId;
   }
 
@@ -814,8 +917,7 @@ function resolveImportedAccount(sourceAccountId: number | null | undefined, fall
   const institution = (sourceAccount.institution || 'Unknown Institution').trim();
   if (!alias || alias === 'Selected account') {
     if (!fallbackAccountId) throw new Error('accountId is required when parser does not identify an account');
-    db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(fallbackAccountId, sourceAccount.id);
-    applySourceAccountHolder(sourceAccount, fallbackAccountId);
+    linkSourceAccount(sourceAccount.id, fallbackAccountId);
     return fallbackAccountId;
   }
 
@@ -830,8 +932,7 @@ function resolveImportedAccount(sourceAccountId: number | null | undefined, fall
     if (normalizeAccountStatus(aliased[0].status) === 'archived') {
       throw new Error('Import account mapping matched an archived account. Choose unarchive, another account, or create a new account.');
     }
-    db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(aliased[0].accountId, sourceAccount.id);
-    applySourceAccountHolder(sourceAccount, aliased[0].accountId);
+    linkSourceAccount(sourceAccount.id, aliased[0].accountId);
     return aliased[0].accountId;
   }
 
@@ -852,15 +953,14 @@ function resolveImportedAccount(sourceAccountId: number | null | undefined, fall
     currentBalance: 0,
     currency: 'USD',
     accountHolder: sourceAccount.accountHolder || null,
+    last4: sourceAccountLast4(sourceAccount),
     status: 'active',
     archivedAt: null,
     createdAt: now,
     updatedAt: now,
   }));
 
-  upsertAccountAlias(sourceAccount, accountId);
-  db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(accountId, sourceAccount.id);
-  applySourceAccountHolder(sourceAccount, accountId);
+  linkSourceAccount(sourceAccount.id, accountId);
 
   return accountId;
 }

@@ -8,6 +8,7 @@ export type AccountMetadataChanges = {
   type?: unknown;
   currency?: unknown;
   accountHolder?: unknown;
+  last4?: unknown;
 };
 
 export type AccountRow = ReturnType<typeof fromAppAccount>;
@@ -19,7 +20,7 @@ export function useAccounts(options: { includeArchived?: boolean } = {}) {
   }));
 
   async function updateAccount(id: number | string, changes: AccountMetadataChanges) {
-    const allowed = new Set(['name', 'institution', 'type', 'currency', 'accountHolder']);
+    const allowed = new Set(['name', 'institution', 'type', 'currency', 'accountHolder', 'last4']);
     const unsupported = Object.keys(changes).filter(field => !allowed.has(field));
     if (unsupported.length) {
       throw new Error(`Accounts only support metadata updates: ${unsupported.join(', ')}`);
@@ -64,6 +65,7 @@ function fromAppAccount(account: AccountSummary) {
     isClosed: account.isClosed,
     currency: account.currency,
     accountHolder: account.accountHolder,
+    last4: account.last4,
     status: account.status,
     archivedAt: account.archivedAt,
     updatedAt: account.updatedAt,

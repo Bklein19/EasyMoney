@@ -82,6 +82,7 @@ export interface SyncAccountClaim {
   institution: string | null;
   accountName: string | null;
   accountHolder: string | null;
+  last4: string | null;
   resolvedAccountId: number | null;
   resolvedAccountName: string | null;
   resolvedAccountStatus: string | null;
@@ -90,14 +91,17 @@ export interface SyncAccountClaim {
   requiresExplicitMapping: boolean;
   transactionCount: number;
   balanceCount: number;
+  latestBalanceDate: string | null;
+  latestBalanceCents: number | null;
 }
 
 export type SyncAccountMappingDecision =
-  | { sourceAccountId: number; mode: 'existing'; accountId: number | null }
-  | { sourceAccountId: number; mode: 'auto'; accountId?: number | null }
-  | { sourceAccountId: number; mode: 'unarchive'; accountId: number }
+  | { sourceAccountId: number; last4?: string | null; mode: 'existing'; accountId: number | null }
+  | { sourceAccountId: number; last4?: string | null; mode: 'auto'; accountId?: number | null }
+  | { sourceAccountId: number; last4?: string | null; mode: 'unarchive'; accountId: number }
   | {
       sourceAccountId: number;
+      last4?: string | null;
       mode: 'create';
       account: {
         name?: string | null;

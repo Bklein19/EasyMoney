@@ -8,6 +8,7 @@ import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import { isCreditAccount } from '../../utils/accounts';
 import { getAccountTypeLabel } from '../../utils/formatters';
 import { splitDuplicateTransactions } from '../../utils/importIdentity';
+import { formatAccountMappingCandidate } from './syncAccountMapping.ts';
 import './ImportPreview.css';
 
 const DEFAULT_ACCOUNT_TYPE = 'checking';
@@ -142,6 +143,7 @@ function previewStateKey(importMeta?: ImportMeta | null) {
       mapping.sourceAccountId,
       mapping.resolution,
       mapping.resolvedAccountId || '',
+      mapping.last4 || '',
     ].join(':')).join('|'),
   ].join(':');
 }
@@ -261,14 +263,16 @@ function ImportPreviewContent({
     if (!decision) {
       throw new Error('Resolve every source account before importing.');
     }
+    const last4 = mapping.last4;
     if (decision.mode === 'auto') {
-      return { sourceAccountId: mapping.sourceAccountId, mode: 'auto' };
+      return { sourceAccountId: mapping.sourceAccountId, mode: 'auto', last4 };
     }
     if (decision.mode === 'existing') {
       return {
         sourceAccountId: mapping.sourceAccountId,
         mode: 'existing',
         accountId: Number(decision.accountId),
+        last4,
       };
     }
     if (decision.mode === 'unarchive') {
@@ -276,11 +280,13 @@ function ImportPreviewContent({
         sourceAccountId: mapping.sourceAccountId,
         mode: 'unarchive',
         accountId: Number(decision.accountId),
+        last4,
       };
     }
     return {
       sourceAccountId: mapping.sourceAccountId,
       mode: 'create',
+      last4,
       account: {
         name: decision.account.name.trim(),
         institution: decision.account.institution?.trim() || null,
@@ -441,15 +447,19 @@ function ImportPreviewContent({
                   >
                     <option value="">Choose account action</option>
                     {mapping.resolvedAccountId && mapping.resolution !== 'archived-match' && (
-                      <option value="__auto__">Use matched account</option>
+                      <option value="__auto__">
+                        Use matched account{matchedAccount ? `: ${formatAccountMappingCandidate(matchedAccount)}` : ''}
+                      </option>
                     )}
                     {mapping.resolution === 'archived-match' && mapping.resolvedAccountId && (
-                      <option value="__unarchive__">Unarchive and use matched account</option>
+                      <option value="__unarchive__">
+                        Unarchive and use {matchedAccount ? formatAccountMappingCandidate(matchedAccount) : 'matched account'}
+                      </option>
                     )}
                     <option value="__create__">Create account from this import</option>
                     {activeAccounts.map(account => (
                       <option key={account.id} value={account.id}>
-                        {account.name} ({getAccountTypeLabel(account.type)})
+                        {formatAccountMappingCandidate(account)}
                       </option>
                     ))}
                   </select>

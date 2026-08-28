@@ -55,6 +55,7 @@ const syncAccountCoverageSchema = z.object({
   name: z.string(),
   institution: nullableString,
   type: z.string(),
+  last4: nullableString.optional(),
   latestFactDate: nullableString,
   earliestFactDate: nullableString,
   latestBalanceDate: nullableString,

@@ -113,6 +113,11 @@ describe('Marcus connector', () => {
       name: 'Savings 2222',
       sourceAccountName: 'Online Savings Account ending in 1111',
     }))).toBeNull();
+    expect(inferMarcusAccountLast4(account({
+      name: 'Savings 2222',
+      sourceAccountName: 'Online Savings Account ending in 1111',
+      last4: '3333',
+    }))).toBe('3333');
     expect(inferMarcusAccountKind(account({
       accountAliases: ['High-Yield CD - 1111'],
     }))).toBeNull();

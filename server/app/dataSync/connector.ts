@@ -5,6 +5,8 @@ export interface SyncAccountCoverage {
   name: string;
   institution: string | null;
   type: string;
+  /** User-confirmed account-number suffix used for institution routing. */
+  last4?: string | null;
   latestFactDate: string | null;
   earliestFactDate: string | null;
   latestBalanceDate: string | null;

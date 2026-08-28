@@ -2,6 +2,7 @@ import { Database } from 'bun:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { commonAccountLast4 } from './app/accountLast4.ts';
 import { hashContent } from './hash.ts';
 
 type DatabaseValue = string | number | bigint | boolean | null | Uint8Array | Date;
@@ -89,6 +90,22 @@ interface IndexListRow extends DatabaseRow {
   name: string;
   unique: number;
   origin: string;
+}
+
+interface AccountLast4BackfillRow extends DatabaseRow {
+  id: number;
+  name: string;
+}
+
+interface AccountLast4IdentityRow extends DatabaseRow {
+  value: string | null;
+}
+
+interface AccountLast4RepairRow extends DatabaseRow {
+  id: number;
+  name: string;
+  last4: string;
+  updatedAt: string | null;
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -228,6 +245,100 @@ function runSchemaMigration(name: string, migrate: () => void) {
     migrate();
     db.prepare('INSERT INTO schemaMigrations (name, appliedAt) VALUES (?, ?)').run(name, new Date().toISOString());
   })();
+}
+
+function backfillBlankAccountLast4s() {
+  const accounts = db.prepare(`
+    SELECT id, name
+    FROM accounts
+    WHERE last4 IS NULL OR TRIM(last4) = ''
+    ORDER BY id
+  `).all() as AccountLast4BackfillRow[];
+  const identityRows = db.prepare(`
+    SELECT sourceAccountName AS value
+    FROM sourceAccounts
+    WHERE accountId = ?
+    UNION ALL
+    SELECT sourceAccountKey AS value
+    FROM sourceAccounts
+    WHERE accountId = ?
+    UNION ALL
+    SELECT alias AS value
+    FROM accountAliases
+    WHERE accountId = ?
+  `);
+  const update = db.prepare(`
+    UPDATE accounts
+    SET last4 = ?
+    WHERE id = ?
+      AND (last4 IS NULL OR TRIM(last4) = '')
+  `);
+
+  for (const account of accounts) {
+    const identities = identityRows.all(account.id, account.id, account.id) as AccountLast4IdentityRow[];
+    const last4 = commonAccountLast4([
+      account.name,
+      ...identities.map(identity => identity.value),
+    ]);
+    if (last4) update.run(last4, account.id);
+  }
+}
+
+function legacyYearLikeAccountLast4(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  const candidate = normalized.match(/\b(?:account|acct|plan)\b.*?(\d{4})(?!\d)$/i)?.[1];
+  if (!candidate) return null;
+  const number = Number(candidate);
+  return number >= 1900 && number <= 2099 ? candidate : null;
+}
+
+function repairYearLikeBackfilledAccountLast4s() {
+  const backfillMigration = db.prepare(`
+    SELECT appliedAt
+    FROM schemaMigrations
+    WHERE name = '2026-08-27-account-last4-backfill'
+  `).get() as { appliedAt: string } | undefined;
+  if (!backfillMigration) return;
+
+  const accounts = db.prepare(`
+    SELECT id, name, last4, updatedAt
+    FROM accounts
+    WHERE LENGTH(TRIM(last4)) = 4
+      AND CAST(last4 AS INTEGER) BETWEEN 1900 AND 2099
+    ORDER BY id
+  `).all() as AccountLast4RepairRow[];
+  const identityRows = db.prepare(`
+    SELECT sourceAccountName AS value
+    FROM sourceAccounts
+    WHERE accountId = ?
+    UNION ALL
+    SELECT sourceAccountKey AS value
+    FROM sourceAccounts
+    WHERE accountId = ?
+    UNION ALL
+    SELECT alias AS value
+    FROM accountAliases
+    WHERE accountId = ?
+  `);
+  const clear = db.prepare('UPDATE accounts SET last4 = NULL WHERE id = ? AND last4 = ?');
+
+  for (const account of accounts) {
+    // The buggy backfill deliberately left updatedAt unchanged. Any metadata
+    // edit at or after that migration is therefore user-authored provenance.
+    if (account.updatedAt && account.updatedAt >= backfillMigration.appliedAt) continue;
+
+    const identities = identityRows.all(account.id, account.id, account.id) as AccountLast4IdentityRow[];
+    const values = [account.name, ...identities.map(identity => identity.value)];
+    if (commonAccountLast4(values) === account.last4) continue;
+
+    const legacyCandidates = new Set(values
+      .map(legacyYearLikeAccountLast4)
+      .filter((value): value is string => value !== null));
+    if (legacyCandidates.size === 1 && legacyCandidates.has(account.last4)) {
+      clear.run(account.id, account.last4);
+    }
+  }
 }
 
 function repairCreditCardCashflowSigns() {
@@ -396,7 +507,7 @@ function repairCreditCardCashflowSigns() {
 }
 
 const TABLES = {
-  accounts: ['id', 'name', 'institution', 'type', 'currentBalance', 'currency', 'accountHolder', 'status', 'archivedAt', 'createdAt', 'updatedAt'],
+  accounts: ['id', 'name', 'institution', 'type', 'currentBalance', 'currency', 'accountHolder', 'last4', 'status', 'archivedAt', 'createdAt', 'updatedAt'],
   accountAliases: ['id', 'institution', 'alias', 'accountId', 'createdAt', 'updatedAt'],
   transactions: [
     'id', 'accountId', 'categoryId', 'date', 'amount', 'importBatchId', 'description', 'merchant',
@@ -476,6 +587,7 @@ export function initDatabase() {
       currentBalance REAL DEFAULT 0,
       currency TEXT DEFAULT 'USD',
       accountHolder TEXT,
+      last4 TEXT,
       status TEXT DEFAULT 'active',
       archivedAt TEXT,
       createdAt TEXT,
@@ -735,6 +847,22 @@ export function initDatabase() {
       db.prepare('ALTER TABLE accounts ADD COLUMN accountHolder TEXT').run();
     }
   });
+
+  runSchemaMigration('2026-08-27-account-last4', () => {
+    if (!tableColumnNames('accounts').includes('last4')) {
+      db.prepare('ALTER TABLE accounts ADD COLUMN last4 TEXT').run();
+    }
+  });
+
+  // The column migration shipped before historical source identities were
+  // backfilled. Keep this separate so databases that already recorded the
+  // first migration still receive the conservative blank-only repair.
+  runSchemaMigration('2026-08-27-account-last4-backfill', backfillBlankAccountLast4s);
+
+  // An early local build treated a trailing statement year after "account" or
+  // "plan" as a suffix. Repair only values uniquely attributable to that old
+  // inference while retaining explicit, structured, and manually entered data.
+  runSchemaMigration('2026-08-27-account-last4-year-repair', repairYearLikeBackfilledAccountLast4s);
 
   runSchemaMigration('2026-07-06-source-account-owner', () => {
     if (!tableColumnNames('sourceAccounts').includes('accountHolder')) {

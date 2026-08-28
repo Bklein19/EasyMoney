@@ -9,6 +9,7 @@ import {
   commitSyncReview,
   discardSyncPreviewIds,
   discardSyncReview,
+  hydrateSyncReviewEvidence,
 } from './review.ts';
 import { stageSyncArtifactManifest } from './staging.ts';
 import {
@@ -97,7 +98,10 @@ function persistJob(job: ManagedSyncJob) {
 
 async function managedJob(runId: string): Promise<ManagedSyncJob | null> {
   const current = jobs.get(runId);
-  if (current) return current;
+  if (current) {
+    if (current.review) current.review = hydrateSyncReviewEvidence(current.review);
+    return current;
+  }
   try {
     const saved = JSON.parse(await readFile(runFilePath(runId), 'utf8')) as Partial<SyncJob>;
     const loadedWhileReading = jobs.get(runId);
@@ -123,6 +127,7 @@ async function managedJob(runId: string): Promise<ManagedSyncJob | null> {
       cancelRequested: false,
       reviewAction: null,
     };
+    if (job.review) job.review = hydrateSyncReviewEvidence(job.review);
     jobs.set(runId, job);
     if (markInterruptedSyncJob(job)) await persistJob(job);
     return job;

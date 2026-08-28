@@ -31,6 +31,7 @@ function accountKind(account: SyncAccountCoverage): BankOfAmericaAccountKind {
 }
 
 function accountLast4(account: SyncAccountCoverage): string | null {
+  if (/^\d{4}$/.test(account.last4 ?? '')) return account.last4!;
   const value = [
     account.name,
     account.sourceAccountName,

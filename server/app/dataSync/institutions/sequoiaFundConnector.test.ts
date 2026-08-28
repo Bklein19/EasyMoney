@@ -202,6 +202,17 @@ describe('Sequoia Fund connector execution', () => {
     );
   });
 
+  test('treats the confirmed account last four as authoritative over display labels', async () => {
+    const connector = createSequoiaFundConnector(async () => result([
+      artifact('last4-2222', 'Sequoia Fund - 2222', 'activity.csv'),
+    ]));
+
+    await expect(connector.run(runContext([
+      account(10, { name: 'First fund - 2222', last4: '1111' }),
+      account(20, { name: 'Second fund - 1111', last4: '2222' }),
+    ]))).resolves.toEqual([{ fileName: 'activity.csv', accountId: 20 }]);
+  });
+
   test('rejects ambiguous last-four matches and conflicting remote identities', async () => {
     const duplicateLast4 = createSequoiaFundConnector(async () => result([
       artifact('last4-1111', 'Sequoia Fund - 1111', 'activity.csv'),

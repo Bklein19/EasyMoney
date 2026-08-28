@@ -29,6 +29,7 @@ function normalizedRouteNames(account: SyncAccountCoverage): Set<string> {
 }
 
 function routeLast4s(account: SyncAccountCoverage): Set<string> {
+  if (/^\d{4}$/.test(account.last4 ?? '')) return new Set([account.last4!]);
   return new Set([...normalizedRouteNames(account)]
     .flatMap(value => [...value.matchAll(/\b(\d{4})\b/g)].map(match => match[1]!)));
 }

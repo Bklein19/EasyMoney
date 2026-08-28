@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, ChevronDown, CircleDashed, Clock3, History, LoaderCircle, Lock, RefreshCw, X } from 'lucide-react';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import { useAccounts, type AccountRow } from '../../hooks/useAccounts';
-import { formatCurrency, formatDate, getAccountTypeLabel } from '../../utils/formatters';
+import { formatCurrency, formatDate } from '../../utils/formatters';
 import type {
   SyncAccountClaim,
   SyncAccountMappingDecision,
@@ -17,6 +17,7 @@ import {
   syncClaimRequiresExplicitMapping,
 } from '../../../server/app/dataSync/accountMapping.ts';
 import {
+  formatAccountMappingCandidate,
   groupSyncAccountClaims,
   syncAccountGroupAutoDestination,
   syncAccountGroupClaim,
@@ -119,7 +120,11 @@ function syncMappingChoiceComplete(choice: SyncMappingChoice | undefined, claim:
   }
   if (choice.mode === 'existing' || choice.mode === 'unarchive') return Boolean(choice.accountId);
   if (choice.mode === 'create') {
-    return Boolean(choice.account.name.trim() && choice.account.type && choice.account.currency);
+    return Boolean(
+      choice.account.name.trim() &&
+      choice.account.type &&
+      choice.account.currency
+    );
   }
   return false;
 }
@@ -280,15 +285,19 @@ function SyncAccountMappingControl({
           claim.resolution !== 'archived-match' &&
           claim.resolution !== 'ambiguous' &&
           !syncClaimRequiresExplicitMapping(claim) && (
-          <option value="__auto__">Use matched account{matchedAccount ? `: ${matchedAccount.name}` : ''}</option>
+          <option value="__auto__">
+            Use matched account{matchedAccount ? `: ${formatAccountMappingCandidate(matchedAccount)}` : ''}
+          </option>
         )}
         {claim.resolution === 'archived-match' && claim.resolvedAccountId && (
-          <option value="__unarchive__">Unarchive and use {matchedAccount?.name || 'matched account'}</option>
+          <option value="__unarchive__">
+            Unarchive and use {matchedAccount ? formatAccountMappingCandidate(matchedAccount) : 'matched account'}
+          </option>
         )}
         <option value="__create__">Create account from this download</option>
         {activeAccounts.map(account => (
           <option key={account.id} value={account.id}>
-            {account.name} ({getAccountTypeLabel(account.type)})
+            {formatAccountMappingCandidate(account)}
           </option>
         ))}
       </select>
@@ -510,14 +519,15 @@ function SyncReviewPanel({
     if (!choice || !syncMappingChoiceComplete(choice, claim)) {
       throw new Error('Resolve every source account before confirming the catch-up.');
     }
+    const last4 = claim.last4;
     if (choice.mode === 'auto') {
-      return { sourceAccountId: claim.sourceAccountId, mode: 'auto' };
+      return { sourceAccountId: claim.sourceAccountId, mode: 'auto', last4 };
     }
     if (choice.mode === 'existing') {
-      return { sourceAccountId: claim.sourceAccountId, mode: 'existing', accountId: Number(choice.accountId) };
+      return { sourceAccountId: claim.sourceAccountId, mode: 'existing', accountId: Number(choice.accountId), last4 };
     }
     if (choice.mode === 'unarchive') {
-      return { sourceAccountId: claim.sourceAccountId, mode: 'unarchive', accountId: Number(choice.accountId) };
+      return { sourceAccountId: claim.sourceAccountId, mode: 'unarchive', accountId: Number(choice.accountId), last4 };
     }
     if (choice.mode !== 'create') {
       throw new Error('Resolve every source account before confirming the catch-up.');
@@ -525,6 +535,7 @@ function SyncReviewPanel({
     return {
       sourceAccountId: claim.sourceAccountId,
       mode: 'create',
+      last4,
       account: {
         name: choice.account.name.trim(),
         institution: choice.account.institution.trim() || null,
@@ -589,6 +600,13 @@ function SyncReviewPanel({
                   <small>{[representative.accountHolder, representative.institution].filter(Boolean).join(' · ') || 'No holder or institution stated'}</small>
                   <small>
                     {group.claims.length} file{group.claims.length === 1 ? '' : 's'} · {group.transactionCount} tx · {group.balanceCount} bal
+                  </small>
+                  <small>
+                    {group.latestBalanceDate !== null && group.latestBalanceCents !== null
+                      ? `Latest downloaded balance ${formatCurrency(group.latestBalanceCents / 100)} on ${formatFreshnessDate(group.latestBalanceDate)}`
+                      : group.latestBalanceDate !== null
+                        ? `Downloaded balances conflict on ${formatFreshnessDate(group.latestBalanceDate)}`
+                        : 'No downloaded balance'}
                   </small>
                 </div>
                 <SyncAccountMappingControl

@@ -6,6 +6,7 @@ interface SyncAccountCoverageRow {
   name: string;
   institution: string | null;
   type: string;
+  last4: string | null;
   latestFactDate: string | null;
   earliestFactDate: string | null;
   latestBalanceDate: string | null;
@@ -39,6 +40,7 @@ export function loadSyncAccountCoverage(): SyncAccountCoverage[] {
       a.name,
       a.institution,
       a.type,
+      a.last4,
       a.accountHolder,
       MIN(f.date) AS earliestFactDate,
       MAX(f.date) AS latestFactDate,

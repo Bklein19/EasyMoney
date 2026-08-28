@@ -86,6 +86,24 @@ describe('Bank of America connector', () => {
     ]);
   });
 
+  test('prefers the confirmed account last four over ambiguous display labels', async () => {
+    let capturedConfig: BankOfAmericaSyncConfig | undefined;
+    const connector = createBankOfAmericaConnector(async config => {
+      capturedConfig = config;
+      return { saved: [], skipped: [], artifacts: [] };
+    });
+
+    await connector.run(runContext([account({
+      name: 'Checking 1111',
+      accountAliases: ['Checking 2222'],
+      last4: '3333',
+    })]));
+
+    expect(capturedConfig?.accounts).toEqual([
+      { kind: 'checking', last4: '3333', from: '2026-07-25', through: '2026-08-20' },
+    ]);
+  });
+
   test('rejects duplicate local kind and last-four identities before downloading', async () => {
     let called = false;
     const connector = createBankOfAmericaConnector(async () => {

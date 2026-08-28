@@ -99,11 +99,12 @@ export type ImportAccountMappingResolution =
   | 'unresolved';
 
 export type ImportAccountMappingDecision =
-  | { sourceAccountId: number; mode?: 'existing'; accountId: number | null }
-  | { sourceAccountId: number; mode: 'auto'; accountId?: number | null }
-  | { sourceAccountId: number; mode: 'unarchive'; accountId: number }
+  | { sourceAccountId: number; last4?: string | null; mode?: 'existing'; accountId: number | null }
+  | { sourceAccountId: number; last4?: string | null; mode: 'auto'; accountId?: number | null }
+  | { sourceAccountId: number; last4?: string | null; mode: 'unarchive'; accountId: number }
   | {
       sourceAccountId: number;
+      last4?: string | null;
       mode: 'create';
       account: {
         name?: string | null;
@@ -119,6 +120,7 @@ export interface ImportAccountMapping {
   institution: string | null;
   sourceAccountName: string | null;
   sourceAccountHolder: string | null;
+  last4: string | null;
   resolvedAccountId: number | null;
   resolvedAccountStatus?: string | null;
   resolution: ImportAccountMappingResolution;
