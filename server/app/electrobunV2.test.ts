@@ -50,4 +50,16 @@ describe('Electrobun 2 packaging contract', () => {
     expect(wrapper).toContain('EASYMONEY_BUN_EXECUTABLE ||= process.execPath');
     expect(wrapper).toContain('verify-electrobun-bundle.ts');
   });
+
+  test('keeps generated files and mutable development data out of the rebuild watcher', () => {
+    const ignoredPaths = new Set(electrobunConfig.build?.watchIgnore ?? []);
+    for (const pathPattern of [
+      'dist/**',
+      'desktop-dist/**',
+      'data/**',
+      '.env.local',
+    ]) {
+      expect(ignoredPaths.has(pathPattern)).toBeTrue();
+    }
+  });
 });

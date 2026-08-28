@@ -27,7 +27,7 @@ export default {
       'scripts/build-desktop-assets.ts',
       'scripts/build-desktop-sync.ts',
     ],
-    watchIgnore: ['dist/**', 'desktop-dist/**'],
+    watchIgnore: ['dist/**', 'desktop-dist/**', 'data/**', '.env.local'],
     mac: {
       bundleCEF: false,
       createDmg: false,

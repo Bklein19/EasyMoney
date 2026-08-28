@@ -9,6 +9,7 @@ lerna-debug.log*
 
 node_modules
 .hutch/
+.cottontail-tmp/
 dist
 dist-ssr
 desktop-dist/
