@@ -27,7 +27,7 @@ export function sequoiaFundSourceAccountName(fileName: string): string {
 }
 
 export function isSequoiaFundActivityFileName(fileName: string): boolean {
-  return /^sequoia-fund-account-(?:last4-\d{4}|key-[a-f0-9]{12})-activity-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv$/i
+  return /^sequoia-fund-account-(?:last4-\d{4}|key-[a-f0-9]{12})(?:-scope-key-[a-f0-9]{12})?-activity-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv$/i
     .test(sequoiaFundOriginalFileName(fileName));
 }
 

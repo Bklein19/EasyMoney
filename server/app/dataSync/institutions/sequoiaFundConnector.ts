@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import type {
   RoutedSyncArtifact,
   SyncAccountCoverage,
@@ -17,80 +19,64 @@ function matchesSequoiaFundAccount(account: SyncAccountCoverage): boolean {
   return /sequoia/i.test(account.institution ?? '');
 }
 
-function normalizedRouteNames(account: SyncAccountCoverage): Set<string> {
-  return new Set([
-    account.name,
-    account.sourceAccountName,
-    ...account.sourceAccountNames,
-    ...account.accountAliases,
-  ]
-    .map(value => value?.replace(/\s+/g, ' ').trim().toLowerCase())
-    .filter((value): value is string => Boolean(value)));
+function connectionIdForAccount(account: SyncAccountCoverage): string {
+  return `account-${account.id}`;
 }
 
-function routeLast4s(account: SyncAccountCoverage): Set<string> {
-  if (/^\d{4}$/.test(account.last4 ?? '')) return new Set([account.last4!]);
-  return new Set([...normalizedRouteNames(account)]
-    .flatMap(value => [...value.matchAll(/\b(\d{4})\b/g)].map(match => match[1]!)));
+export function sequoiaFundCanonicalAccountToken(account: Pick<SyncAccountCoverage, 'id' | 'last4'>): string {
+  if (/^\d{4}$/.test(account.last4 ?? '')) return `last4-${account.last4}`;
+  const key = createHash('sha256')
+    .update(`sequoia-fund-local-account:${account.id}`)
+    .digest('hex')
+    .slice(0, 12);
+  return `key-${key}`;
 }
 
-function normalizedArtifactAccountName(value: string): string {
-  return value.replace(/\s+/g, ' ').trim().toLowerCase();
+function accountNameForToken(accountToken: string): string {
+  const last4 = accountToken.match(/^last4-(\d{4})$/)?.[1];
+  if (last4) return `Sequoia Fund - ${last4}`;
+  const key = accountToken.match(/^key-([a-f0-9]{12})$/)?.[1];
+  if (key) return `Sequoia Fund account ${key}`;
+  throw new Error('Sequoia Fund canonical account token is invalid');
+}
+
+export function selectSequoiaFundAccount(
+  accounts: SyncAccountCoverage[],
+  connectionId?: string,
+): SyncAccountCoverage {
+  const matches = accounts.filter(matchesSequoiaFundAccount);
+  if (connectionId) {
+    if (!/^account-\d+$/.test(connectionId)) throw new Error('Sequoia Fund connection is unavailable');
+    const selected = matches.find(account => connectionIdForAccount(account) === connectionId);
+    if (!selected) throw new Error('Sequoia Fund connection is unavailable');
+    return selected;
+  }
+  if (matches.length !== 1) {
+    throw new Error('Select exactly one Sequoia Fund account connection');
+  }
+  return matches[0]!;
 }
 
 function routeArtifacts(
   artifacts: SequoiaFundDownloadedArtifact[],
-  accounts: SyncAccountCoverage[],
+  account: SyncAccountCoverage,
+  accountToken: string,
 ): RoutedSyncArtifact[] {
-  if (artifacts.length === 0) return [];
-  if (accounts.length === 0) {
-    throw new Error('No active Sequoia Fund account is available for downloaded data');
-  }
-
-  const tokens = [...new Set(artifacts.map(artifact => artifact.accountToken))];
-  const accountIdByToken = new Map<string, number>();
-  const usedAccountIds = new Set<number>();
-
-  for (const token of tokens) {
-    const tokenArtifacts = artifacts.filter(artifact => artifact.accountToken === token);
-    const claimedNames = [...new Set(tokenArtifacts.map(artifact =>
-      normalizedArtifactAccountName(artifact.accountName)
-    ))];
-    if (claimedNames.length !== 1) {
-      throw new Error('Sequoia Fund artifacts disagree about their remote account identity');
+  const accountName = accountNameForToken(accountToken);
+  const fileNames = new Set<string>();
+  return artifacts.map(artifact => {
+    if (artifact.accountToken !== accountToken || artifact.accountName !== accountName) {
+      throw new Error('Sequoia Fund returned an artifact for a different canonical account');
     }
-
-    const last4 = token.match(/^last4-(\d{4})$/)?.[1];
-    let matches = last4
-      ? accounts.filter(account => routeLast4s(account).has(last4))
-      : accounts.filter(account => normalizedRouteNames(account).has(claimedNames[0]!));
-
-    if (matches.length === 0 && tokens.length === 1 && accounts.length === 1) {
-      matches = [accounts[0]!];
-    }
-    if (matches.length !== 1) {
-      throw new Error('A Sequoia Fund remote account has no unambiguous local account route');
-    }
-
-    const accountId = matches[0]!.id;
-    if (usedAccountIds.has(accountId)) {
-      throw new Error('Multiple Sequoia Fund remote accounts map to the same local account');
-    }
-    usedAccountIds.add(accountId);
-    accountIdByToken.set(token, accountId);
-  }
-
-  return artifacts.map(artifact => ({
-    fileName: artifact.fileName,
-    accountId: accountIdByToken.get(artifact.accountToken)!,
-  }));
+    if (fileNames.has(artifact.fileName)) throw new Error('Sequoia Fund returned a duplicate artifact filename');
+    fileNames.add(artifact.fileName);
+    return { fileName: artifact.fileName, accountId: account.id };
+  });
 }
 
-function targetLabel(accounts: SyncAccountCoverage[]): string {
-  const holders = [...new Set(accounts
-    .map(account => account.accountHolder?.trim())
-    .filter((holder): holder is string => Boolean(holder)))];
-  return holders.length === 1 ? `Sequoia Fund (${holders[0]})` : 'Sequoia Fund';
+function targetLabel(account: SyncAccountCoverage): string {
+  const detail = account.accountHolder?.trim() || account.name.trim();
+  return detail ? `Sequoia Fund (${detail})` : 'Sequoia Fund';
 }
 
 function reportProgress(context: SyncConnectorRunContext, event: SequoiaFundProgressEvent): void {
@@ -117,35 +103,41 @@ export function createSequoiaFundConnector(
 
     listTargets(context) {
       const accounts = context.accounts.filter(matchesSequoiaFundAccount);
-      return accounts.length === 0 ? [] : [{ label: targetLabel(accounts) }];
+      return accounts.map(account => ({
+        connectionId: connectionIdForAccount(account),
+        label: targetLabel(account),
+      }));
     },
 
     async run(context) {
-      const accounts = context.accounts.filter(matchesSequoiaFundAccount);
-      if (accounts.length === 0) {
-        throw new Error('No active Sequoia Fund accounts are available');
-      }
-
-      const windows = accounts.map(account => goalWindowForCoverage(context.goal, account, context.today));
-      const from = windows.map(window => window.startDate).sort()[0]!;
-      const through = windows.map(window => window.endDate).sort().at(-1)!;
+      const account = selectSequoiaFundAccount(context.accounts, context.connectionId);
+      const window = goalWindowForCoverage(context.goal, account, context.today);
+      const accountToken = sequoiaFundCanonicalAccountToken(account);
+      const connectionId = connectionIdForAccount(account);
 
       context.report({
         type: 'phase',
         message: 'Opening Sequoia Fund',
         data: {
           goal: context.goal.kind,
-          accountCount: accounts.length,
-          from,
-          through,
+          accountCount: 1,
+          from: window.startDate,
+          through: window.endDate,
         },
       });
 
       const result = await runSync(
-        { outputDir: context.outputDir, from, through },
+        {
+          outputDir: context.outputDir,
+          from: window.startDate,
+          through: window.endDate,
+          accountToken,
+          session: `sequoia-fund-${connectionId}-catchup`,
+        },
         event => reportProgress(context, event),
       );
-      const routed = routeArtifacts(result.artifacts, accounts);
+      if (result.accountCount !== 1) throw new Error('Sequoia Fund returned an invalid account count');
+      const routed = routeArtifacts(result.artifacts, account, accountToken);
 
       context.report({
         type: 'phase',

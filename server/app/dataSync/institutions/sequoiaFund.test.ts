@@ -17,13 +17,14 @@ import {
   selectAllSequoiaFundTransactions,
   selectSequoiaFundActivityExportSubmitter,
   selectSequoiaFundDuration,
-  sequoiaFundAccountsFromOptions,
-  sequoiaFundLoginAccountFromOptions,
-  sequoiaFundActivityAccountCrosswalk,
+  sequoiaFundActivityScopeBindings,
+  sequoiaFundActivityScopesFromOptions,
+  sequoiaFundActivityScopeToken,
   sequoiaFundActivityFilterRequestMatches,
   sequoiaFundActivityResponseMetadataAccepted,
   sequoiaFundActivityRequest,
   sequoiaFundBrowserSession,
+  sequoiaFundCanonicalAccount,
   sequoiaFundHistoryAccountIdentity,
   selectSequoiaFundActivityExportForm,
   sequoiaFundStatementJobs,
@@ -94,52 +95,44 @@ function blankObservedExportForm(): SequoiaFundActivityFormCandidate {
 }
 
 describe('Sequoia Fund account and request discovery', () => {
-  test('discovers every account and deduplicates responsive copies without assuming a count', () => {
-    const accounts = sequoiaFundAccountsFromOptions([
+  test('discovers every nonempty activity scope, including all-funds, and deduplicates exact values', () => {
+    const scopes = sequoiaFundActivityScopesFromOptions([
       { label: 'All fund accounts', value: 'all-funds' },
       { label: 'Investment account ending 1111', value: 'remote-a' },
       { label: 'Investment account ending 2222', value: 'remote-b' },
-      { label: 'Investment account ending 3333', value: 'remote-c' },
       { label: 'Investment account ending 1111', value: 'remote-a' },
+      { label: 'Disabled scope', value: 'disabled-scope', disabled: true },
+      { label: 'Placeholder', value: '' },
     ]);
 
-    expect(accounts.map(account => account.accountToken)).toEqual([
-      'last4-1111',
-      'last4-2222',
-      'last4-3333',
-    ]);
-    expect(accounts.map(account => account.accountName)).toEqual([
-      'Sequoia Fund - 1111',
-      'Sequoia Fund - 2222',
-      'Sequoia Fund - 3333',
-    ]);
-  });
-
-  test('treats the all-accounts option as a placeholder and requires one real account per login', () => {
-    expect(sequoiaFundLoginAccountFromOptions([
+    expect(scopes).toEqual([
       { label: 'All fund accounts', value: 'all-funds' },
       { label: 'Investment account ending 1111', value: 'remote-a' },
-    ])).toMatchObject({ accountToken: 'last4-1111', value: 'remote-a' });
-
-    expect(() => sequoiaFundLoginAccountFromOptions([
-      { label: 'Investment account ending 1111', value: 'remote-a' },
       { label: 'Investment account ending 2222', value: 'remote-b' },
-    ])).toThrow('exactly one investment account');
+    ]);
   });
 
-  test('uses a stable opaque token when the site does not expose last four digits', () => {
-    const first = sequoiaFundAccountsFromOptions([{ label: 'Investment account', value: 'opaque-account-a' }]);
-    const second = sequoiaFundAccountsFromOptions([{ label: 'Investment account', value: 'opaque-account-a' }]);
-
-    expect(first[0]?.accountToken).toMatch(/^key-[a-f0-9]{12}$/);
-    expect(second[0]?.accountToken).toBe(first[0]?.accountToken);
+  test('requires at least one nonempty activity scope', () => {
+    expect(() => sequoiaFundActivityScopesFromOptions([
+      { label: 'Placeholder', value: '' },
+    ])).toThrow('no downloadable activity scopes');
   });
 
-  test('rejects duplicate account identities instead of mixing artifacts', () => {
-    expect(() => sequoiaFundAccountsFromOptions([
-      { label: 'Investment account ending 1111', value: 'remote-a' },
-      { label: 'Second investment account ending 1111', value: 'remote-b' },
-    ])).toThrow('ambiguous account identities');
+  test('keeps canonical account identity independent from stable scope filenames', () => {
+    expect(sequoiaFundCanonicalAccount('last4-1111')).toEqual({
+      accountToken: 'last4-1111',
+      accountName: 'Sequoia Fund - 1111',
+    });
+    expect(sequoiaFundCanonicalAccount('key-abc123abc123')).toEqual({
+      accountToken: 'key-abc123abc123',
+      accountName: 'Sequoia Fund account abc123abc123',
+    });
+    expect(() => sequoiaFundCanonicalAccount('remote-account')).toThrow('canonical account token is invalid');
+
+    const first = sequoiaFundActivityScopeToken('opaque-scope-a');
+    expect(first).toMatch(/^key-[a-f0-9]{12}$/);
+    expect(sequoiaFundActivityScopeToken('opaque-scope-a')).toBe(first);
+    expect(sequoiaFundActivityScopeToken('opaque-scope-b')).not.toBe(first);
   });
 
   test('chooses the smallest discovered duration that covers the requested range', () => {
@@ -307,26 +300,35 @@ describe('Sequoia Fund account and request discovery', () => {
     }, '2026-01-01', '2026-08-27')).toThrow('metadata is incomplete');
   });
 
-  test('binds two filter selections to distinct stable server account state, not request nonces', () => {
+  test('binds every scope to stable server state while allowing many scopes to share it', () => {
     const first = observedHistory('fixture-group-a');
     const second = observedHistory('fixture-group-b');
-    const crosswalk = sequoiaFundActivityAccountCrosswalk([
-      { accountValue: 'fixture-account-a', historyFields: first },
-      { accountValue: 'fixture-account-b', historyFields: second },
+    const bindings = sequoiaFundActivityScopeBindings([
+      { scopeValue: 'fixture-scope-a', historyFields: first },
+      { scopeValue: 'fixture-scope-b', historyFields: second },
     ]);
 
-    expect(crosswalk.changedFieldNames).toEqual(['groupKey']);
-    expect(crosswalk.bindingFieldNames).toEqual(['groupKey']);
-    expect(crosswalk.bindings.map(binding => binding.bindingIdentity)).toEqual([
+    expect(bindings.changedFieldNames).toEqual(['groupKey']);
+    expect(bindings.bindingFieldNames).toEqual(['groupKey']);
+    expect(bindings.bindings.map(binding => binding.bindingIdentity)).toEqual([
       sequoiaFundHistoryAccountIdentity(first),
       sequoiaFundHistoryAccountIdentity(second),
     ]);
-    expect(new Set(crosswalk.bindings.map(binding => binding.bindingIdentity)).size).toBe(2);
+    expect(new Set(bindings.bindings.map(binding => binding.bindingIdentity)).size).toBe(2);
 
-    expect(() => sequoiaFundActivityAccountCrosswalk([
-      { accountValue: 'fixture-account-a', historyFields: observedHistory('fixture-shared', 'request-a') },
-      { accountValue: 'fixture-account-b', historyFields: observedHistory('fixture-shared', 'request-b') },
-    ])).toThrow('not one-to-one');
+    const shared = sequoiaFundActivityScopeBindings([
+      { scopeValue: 'fixture-scope-a', historyFields: observedHistory('fixture-shared', 'request-a') },
+      { scopeValue: 'fixture-scope-b', historyFields: observedHistory('fixture-shared', 'request-b') },
+    ]);
+    expect(shared.bindings).toHaveLength(2);
+    expect(new Set(shared.bindings.map(binding => binding.bindingIdentity)).size).toBe(1);
+    expect(shared.changedFieldNames).toEqual(['requestCode']);
+    expect(shared.bindingFieldNames).toEqual([]);
+
+    expect(() => sequoiaFundActivityScopeBindings([
+      { scopeValue: 'fixture-scope-a', historyFields: first },
+      { scopeValue: 'fixture-scope-a', historyFields: second },
+    ])).toThrow('binding map is ambiguous');
   });
 
   test('classifies the exact filter, history, and CSV request sequence without ordinal replay', () => {
@@ -464,11 +466,8 @@ describe('Sequoia Fund account and request discovery', () => {
 });
 
 describe('Sequoia Fund statement discovery', () => {
-  test('expands every API document and maps each to one discovered account', () => {
-    const accounts = sequoiaFundAccountsFromOptions([
-      { label: 'Investment account ending 1111', value: 'remote-a' },
-      { label: 'Investment account ending 2222', value: 'remote-b' },
-    ]);
+  test('expands every API document under the canonical login-level account', () => {
+    const account = sequoiaFundCanonicalAccount('last4-1111');
     const list = parseSequoiaFundStatementList({
       success: true,
       data: {
@@ -496,7 +495,7 @@ describe('Sequoia Fund statement discovery', () => {
       },
     });
     const jobs = sequoiaFundStatementJobs(
-      accounts,
+      account,
       list,
       {
         csrfToken: null,
@@ -517,7 +516,7 @@ describe('Sequoia Fund statement discovery', () => {
     );
 
     expect(jobs).toHaveLength(2);
-    expect(jobs.map(job => job.account.accountToken).sort()).toEqual(['last4-1111', 'last4-2222']);
+    expect(jobs.every(job => job.account.accountToken === 'last4-1111')).toBe(true);
     expect(jobs.every(job => job.request.method === 'GET')).toBe(true);
     expect(jobs.every(job => job.request.url.startsWith(
       'https://secureaccountview.com/BFWeb/clients/sequoiafund/statements/',
@@ -527,37 +526,8 @@ describe('Sequoia Fund statement discovery', () => {
     ))).toBe(true);
   });
 
-  test('rejects statement metadata that cannot distinguish multiple accounts', () => {
-    const accounts = sequoiaFundAccountsFromOptions([
-      { label: 'Investment account ending 1111', value: 'remote-a' },
-      { label: 'Investment account ending 2222', value: 'remote-b' },
-    ]);
-    const list = parseSequoiaFundStatementList({
-      success: true,
-      data: {
-        sessionId: 'fixture-session',
-        statements: [{
-          documentId: 'document-a',
-          statementType: 'quarterly',
-          statementDate: '2026-03-31',
-        }],
-      },
-    });
-
-    expect(() => sequoiaFundStatementJobs(
-      accounts,
-      list,
-      { csrfToken: 'fixture-csrf', links: [] },
-      'https://secureaccountview.com/BFWeb/clients/sequoiafund/viewStatements',
-      '2026-01-01',
-      '2026-12-31',
-    )).toThrow('account mapping is ambiguous');
-  });
-
   test('rejects statement documents without an observed direct download target', () => {
-    const accounts = sequoiaFundAccountsFromOptions([
-      { label: 'Investment account ending 1111', value: 'remote-a' },
-    ]);
+    const account = sequoiaFundCanonicalAccount('last4-1111');
     const list = parseSequoiaFundStatementList({
       success: true,
       data: {
@@ -571,7 +541,7 @@ describe('Sequoia Fund statement discovery', () => {
     });
 
     expect(() => sequoiaFundStatementJobs(
-      accounts,
+      account,
       list,
       { csrfToken: 'fixture-csrf', links: [] },
       'https://secureaccountview.com/BFWeb/clients/sequoiafund/viewStatements',
@@ -615,10 +585,8 @@ describe('Sequoia Fund parser validation', () => {
   test('activity artifacts carry account identity through the matching parser', async () => {
     const directory = await mkdtemp('/private/tmp/easymoney-sequoia-test-');
     temporaryDirectories.push(directory);
-    const account = sequoiaFundAccountsFromOptions([
-      { label: 'Investment account ending 1111', value: 'remote-a' },
-    ])[0]!;
-    const fileName = 'sequoia-fund-account-last4-1111-activity-2026-01-01-to-2026-08-23.csv';
+    const account = sequoiaFundCanonicalAccount('last4-1111');
+    const fileName = 'sequoia-fund-account-last4-1111-scope-key-abc123abc123-activity-2026-01-01-to-2026-08-23.csv';
     const path = join(directory, fileName);
     await writeFile(path, [
       'Transaction Date,Transaction Type,Description,Dollar Amount',
@@ -649,9 +617,7 @@ describe('Sequoia Fund parser validation', () => {
   test('rejects HTML masquerading as an activity artifact before parser success', async () => {
     const directory = await mkdtemp('/private/tmp/easymoney-sequoia-test-');
     temporaryDirectories.push(directory);
-    const account = sequoiaFundAccountsFromOptions([
-      { label: 'Investment account ending 1111', value: 'remote-a' },
-    ])[0]!;
+    const account = sequoiaFundCanonicalAccount('last4-1111');
     const path = join(
       directory,
       'sequoia-fund-account-last4-1111-activity-2026-01-01-to-2026-08-23.csv',
@@ -679,6 +645,7 @@ test('Sequoia Fund uses observed browser exports and the shared browser-native r
   expect(source).not.toContain('page.context().request');
   expect(source).toContain('page.waitForRequest');
   expect(source).toContain('locator.selectOption(value)');
+  expect(source).toContain('option.parentElement instanceof HTMLOptGroupElement');
   expect(source).toContain('element.form.requestSubmit()');
   expect(source).toContain("page.waitForEvent('download'");
   expect(source).not.toContain('replay');

@@ -50,6 +50,7 @@ export type SequoiaFundSyncConfig = {
   outputDir: string;
   from: string;
   through: string;
+  accountToken: string;
   session?: string;
   profilePath?: string;
 };
@@ -90,12 +91,15 @@ export function sequoiaFundBrowserSession(name: string, profilePath?: string) {
 export type SequoiaFundSelectOption = {
   label: string;
   value: string;
+  disabled?: boolean;
 };
 
-export type SequoiaFundRemoteAccount = {
+export type SequoiaFundActivityScope = {
   label: string;
   value: string;
-  last4: string | null;
+};
+
+export type SequoiaFundCanonicalAccount = {
   accountToken: string;
   accountName: string;
 };
@@ -155,16 +159,16 @@ export type SequoiaFundArtifactByteClass =
   | 'utf16-or-binary'
   | 'text';
 
-export type SequoiaFundActivityAccountState = {
-  accountValue: string;
+export type SequoiaFundActivityScopeState = {
+  scopeValue: string;
   historyFields: Record<string, string>;
 };
 
-export type SequoiaFundActivityAccountCrosswalk = {
+export type SequoiaFundActivityScopeBindings = {
   changedFieldNames: string[];
   bindingFieldNames: string[];
   bindings: Array<{
-    accountValue: string;
+    scopeValue: string;
     bindingIdentity: string;
   }>;
 };
@@ -207,7 +211,7 @@ export type SequoiaFundStatementAccess = {
 };
 
 export type SequoiaFundStatementJob = {
-  account: SequoiaFundRemoteAccount;
+  account: SequoiaFundCanonicalAccount;
   document: SequoiaFundStatementDocument;
   request: SequoiaFundApiRequest;
   fileName: string;
@@ -257,61 +261,34 @@ function normalizeStatementDate(value: string): string | null {
   return `${year}-${us[1].padStart(2, '0')}-${us[2].padStart(2, '0')}`;
 }
 
-function accountLast4(label: string, value: string): string | null {
-  return label.match(/(\d{4})(?!.*\d)/)?.[1] ?? value.match(/(\d{4})(?!.*\d)/)?.[1] ?? null;
-}
-
-function opaqueAccountToken(value: string): string {
-  return createHash('sha256').update(value).digest('hex').slice(0, 12);
-}
-
-function accountNameForToken(accountToken: string): string {
-  return sequoiaFundSourceAccountName(
+export function sequoiaFundCanonicalAccount(accountToken: string): SequoiaFundCanonicalAccount {
+  if (!/^(?:last4-\d{4}|key-[a-f0-9]{12})$/.test(accountToken)) {
+    throw new Error('Sequoia Fund canonical account token is invalid');
+  }
+  const accountName = sequoiaFundSourceAccountName(
     `sequoia-fund-account-${accountToken}-activity-2000-01-01-to-2000-01-01.csv`,
   );
+  return { accountToken, accountName };
 }
 
-export function sequoiaFundAccountsFromOptions(
+export function sequoiaFundActivityScopeToken(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) throw new Error('Sequoia Fund activity scope is empty');
+  return `key-${createHash('sha256').update(normalized).digest('hex').slice(0, 12)}`;
+}
+
+export function sequoiaFundActivityScopesFromOptions(
   options: SequoiaFundSelectOption[],
-): SequoiaFundRemoteAccount[] {
-  const byValue = new Map<string, SequoiaFundRemoteAccount>();
+): SequoiaFundActivityScope[] {
+  const byValue = new Map<string, SequoiaFundActivityScope>();
   for (const option of options) {
     const value = option.value.trim();
     const label = option.label.replace(/\s+/g, ' ').trim();
-    const normalizedLabel = label.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-    if (!value || /^(?:all|all (?:fund|funds|account|accounts|fund accounts)|select|select an? account|choose an? account)$/.test(
-      normalizedLabel,
-    ) || byValue.has(value)) continue;
-    const last4 = accountLast4(label, value);
-    const accountToken = last4 ? `last4-${last4}` : `key-${opaqueAccountToken(value)}`;
-    byValue.set(value, {
-      label,
-      value,
-      last4,
-      accountToken,
-      accountName: accountNameForToken(accountToken),
-    });
+    if (!value || option.disabled || byValue.has(value)) continue;
+    byValue.set(value, { label, value });
   }
-  if (byValue.size === 0) throw new Error('Sequoia Fund exposed no downloadable accounts');
-
-  const tokens = new Set<string>();
-  for (const account of byValue.values()) {
-    if (tokens.has(account.accountToken)) {
-      throw new Error('Sequoia Fund exposed ambiguous account identities');
-    }
-    tokens.add(account.accountToken);
-  }
+  if (byValue.size === 0) throw new Error('Sequoia Fund exposed no downloadable activity scopes');
   return [...byValue.values()];
-}
-
-export function sequoiaFundLoginAccountFromOptions(
-  options: SequoiaFundSelectOption[],
-): SequoiaFundRemoteAccount {
-  const accounts = sequoiaFundAccountsFromOptions(options);
-  if (accounts.length !== 1) {
-    throw new Error('Sequoia Fund login must expose exactly one investment account');
-  }
-  return accounts[0]!;
 }
 
 function durationDays(label: string, today: Date): number | null {
@@ -348,7 +325,7 @@ export function selectSequoiaFundDuration(
     Math.ceil((today.getTime() - Date.parse(`${from}T00:00:00Z`)) / 86_400_000) + 1,
   );
   const candidates = options
-    .filter(option => option.value)
+    .filter(option => option.value && !option.disabled)
     .map(option => ({ option, days: durationDays(option.label, today) }))
     .filter((candidate): candidate is { option: SequoiaFundSelectOption; days: number } =>
       candidate.days !== null && candidate.days >= requestedDays)
@@ -360,7 +337,7 @@ export function selectSequoiaFundDuration(
 export function selectAllSequoiaFundTransactions(
   options: SequoiaFundSelectOption[],
 ): SequoiaFundSelectOption {
-  const option = options.find(candidate => candidate.value && /\ball\b/i.test(candidate.label));
+  const option = options.find(candidate => candidate.value && !candidate.disabled && /\ball\b/i.test(candidate.label));
   if (!option) throw new Error('Sequoia Fund offers no all-transactions activity filter');
   return option;
 }
@@ -496,16 +473,16 @@ export function sequoiaFundHistoryAccountIdentity(fields: Record<string, string>
   return JSON.stringify(sequoiaFundAccountBindingFields.map(name => fields[name] ?? ''));
 }
 
-export function sequoiaFundActivityAccountCrosswalk(
-  states: SequoiaFundActivityAccountState[],
-): SequoiaFundActivityAccountCrosswalk {
-  if (states.length === 0) throw new Error('Sequoia Fund activity account crosswalk is empty');
-  const accountValues = new Set<string>();
+export function sequoiaFundActivityScopeBindings(
+  states: SequoiaFundActivityScopeState[],
+): SequoiaFundActivityScopeBindings {
+  if (states.length === 0) throw new Error('Sequoia Fund activity scope binding map is empty');
+  const scopeValues = new Set<string>();
   for (const state of states) {
-    if (!state.accountValue || accountValues.has(state.accountValue)) {
-      throw new Error('Sequoia Fund activity account crosswalk is ambiguous');
+    if (!state.scopeValue || scopeValues.has(state.scopeValue)) {
+      throw new Error('Sequoia Fund activity scope binding map is ambiguous');
     }
-    accountValues.add(state.accountValue);
+    scopeValues.add(state.scopeValue);
     if (sequoiaFundObservedHistoryFields.some(name => !(name in state.historyFields)) ||
       sequoiaFundRequiredHistoryFields.some(name => !state.historyFields[name])) {
       throw new Error('Sequoia Fund activity account state is incomplete');
@@ -516,13 +493,9 @@ export function sequoiaFundActivityAccountCrosswalk(
     new Set(states.map(state => state.historyFields[name] ?? '')).size > 1);
   const bindingFieldNames = sequoiaFundAccountBindingFields.filter(name => changedFieldNames.includes(name));
   const bindings = states.map(state => ({
-    accountValue: state.accountValue,
+    scopeValue: state.scopeValue,
     bindingIdentity: sequoiaFundHistoryAccountIdentity(state.historyFields),
   }));
-  if (states.length > 1 && (bindingFieldNames.length === 0 ||
-    new Set(bindings.map(binding => binding.bindingIdentity)).size !== states.length)) {
-    throw new Error('Sequoia Fund activity account crosswalk is not one-to-one');
-  }
   return { changedFieldNames, bindingFieldNames, bindings };
 }
 
@@ -669,23 +642,8 @@ export function sequoiaFundStatementDownloadRequest(
   };
 }
 
-function statementAccount(
-  document: SequoiaFundStatementDocument,
-  context: string,
-  accounts: SequoiaFundRemoteAccount[],
-): SequoiaFundRemoteAccount {
-  if (accounts.length === 1) return accounts[0]!;
-  const hints = [...document.accountHints, context].map(value => value.toLowerCase());
-  const matches = accounts.filter(account => hints.some(hint =>
-    (account.last4 ? hint.includes(account.last4) : false) ||
-    (account.label.length >= 4 ? hint.includes(account.label.toLowerCase()) : false) ||
-    (account.value.length >= 4 ? hint.includes(account.value.toLowerCase()) : false)));
-  if (matches.length !== 1) throw new Error('Sequoia Fund statement account mapping is ambiguous');
-  return matches[0]!;
-}
-
 export function sequoiaFundStatementJobs(
-  accounts: SequoiaFundRemoteAccount[],
+  account: SequoiaFundCanonicalAccount,
   list: SequoiaFundStatementList,
   access: SequoiaFundStatementAccess,
   baseUrl: string,
@@ -695,8 +653,6 @@ export function sequoiaFundStatementJobs(
   const jobs: SequoiaFundStatementJob[] = [];
   for (const document of list.documents) {
     if (document.statementDate < from || document.statementDate > through) continue;
-    const link = access.links.find(candidate => candidate.rawTarget.includes(document.documentId));
-    const account = statementAccount(document, link?.context ?? '', accounts);
     const documentToken = createHash('sha256')
       .update(`${document.documentId}\0${document.statementType}`)
       .digest('hex')
@@ -775,7 +731,7 @@ function parserInput(path: string, fileName: string, bytes: Buffer) {
 export async function validateSequoiaFundArtifact(
   path: string,
   kind: SequoiaFundArtifactKind,
-  account: SequoiaFundRemoteAccount,
+  account: SequoiaFundCanonicalAccount,
 ): Promise<Omit<SequoiaFundDownloadedArtifact, 'status' | 'statementDate'>> {
   const fileName = basename(path);
   const expectedExtension = kind === 'activity' ? '.csv' : '.pdf';
@@ -873,6 +829,8 @@ async function discoverActivityFilters(page: Page): Promise<SequoiaFundActivityF
     const options = (input: HTMLSelectElement) => Array.from(input.options).map(option => ({
       label: (option.textContent ?? '').replace(/\s+/g, ' ').trim(),
       value: option.value,
+      disabled: input.disabled || option.disabled ||
+        (option.parentElement instanceof HTMLOptGroupElement && option.parentElement.disabled),
     })).filter(option => option.value);
     return {
       accountField: select.name,
@@ -895,14 +853,14 @@ type SequoiaFundActivityExportState = {
 async function discoverActivityExportState(
   page: Page,
   filters: SequoiaFundActivityFilters,
-  account: SequoiaFundRemoteAccount,
+  scope: SequoiaFundActivityScope,
   duration: SequoiaFundSelectOption,
   transactionType: SequoiaFundSelectOption,
   from: string,
   through: string,
   sensitiveValues: Set<string>,
 ): Promise<SequoiaFundActivityExportState> {
-  sensitiveValues.add(account.value);
+  sensitiveValues.add(scope.value);
   await page.waitForLoadState('networkidle', { timeout: 30_000 });
   let filterRequestObserved = false;
   const historyRequestPromise = page.waitForRequest(request => {
@@ -910,7 +868,7 @@ async function discoverActivityExportState(
       url: request.url(),
       method: request.method(),
       accountField: filters.accountField,
-      accountValue: account.value,
+      accountValue: scope.value,
       durationField: filters.durationField,
       durationValue: duration.value,
       transactionTypeField: filters.transactionTypeField,
@@ -922,7 +880,7 @@ async function discoverActivityExportState(
     return filterRequestObserved && historyFields(request) !== null;
   }, { timeout: 30_000 });
   for (const [name, value] of [
-    [filters.accountField, account.value],
+    [filters.accountField, scope.value],
     [filters.durationField, duration.value],
     [filters.transactionTypeField, transactionType.value],
   ] as const) {
@@ -950,8 +908,8 @@ async function discoverActivityExportState(
   const historyResponse = await historyRequest.response();
   await historyResponse?.finished();
   const selectedAccount = await page.locator(`select[name="${filters.accountField}"]`).first().inputValue();
-  if (selectedAccount !== account.value) {
-    throw new Error('Sequoia Fund activity account selection was not preserved');
+  if (selectedAccount !== scope.value) {
+    throw new Error('Sequoia Fund activity scope selection was not preserved');
   }
   await page.waitForFunction(expectedPath => Array.from(document.forms).some(form => {
     try {
@@ -1142,7 +1100,7 @@ async function discoverStatementAccess(
 async function existingArtifact(
   path: string,
   kind: SequoiaFundArtifactKind,
-  account: SequoiaFundRemoteAccount,
+  account: SequoiaFundCanonicalAccount,
 ): Promise<SequoiaFundDownloadedArtifact | null> {
   try {
     return { ...await validateSequoiaFundArtifact(path, kind, account), status: 'existing' };
@@ -1155,7 +1113,7 @@ async function downloadActivityArtifact(options: {
   page: Page;
   outputDir: string;
   fileName: string;
-  account: SequoiaFundRemoteAccount;
+  account: SequoiaFundCanonicalAccount;
   state: SequoiaFundActivityExportState;
   progress: Progress;
   key: string;
@@ -1210,7 +1168,7 @@ async function downloadArtifact(options: {
   outputDir: string;
   fileName: string;
   kind: SequoiaFundArtifactKind;
-  account: SequoiaFundRemoteAccount;
+  account: SequoiaFundCanonicalAccount;
   request: SequoiaFundApiRequest;
   progress: Progress;
   key: string;
@@ -1252,7 +1210,7 @@ async function downloadArtifact(options: {
 
 async function syncAuthenticated(
   page: Page,
-  config: Required<Pick<SequoiaFundSyncConfig, 'outputDir' | 'from' | 'through'>>,
+  config: Required<Pick<SequoiaFundSyncConfig, 'outputDir' | 'from' | 'through' | 'accountToken'>>,
   progress: Progress,
 ): Promise<SequoiaFundSyncResult> {
   const sensitiveValues = new Set<string>();
@@ -1265,68 +1223,69 @@ async function syncAuthenticated(
 
 async function syncAuthenticatedWithSensitiveValues(
   page: Page,
-  config: Required<Pick<SequoiaFundSyncConfig, 'outputDir' | 'from' | 'through'>>,
+  config: Required<Pick<SequoiaFundSyncConfig, 'outputDir' | 'from' | 'through' | 'accountToken'>>,
   progress: Progress,
   sensitiveValues: Set<string>,
 ): Promise<SequoiaFundSyncResult> {
   const discoveryKey = 'discovery';
-  progress(discoveryKey, 'discovery', 'start', 'Discovering Sequoia Fund accounts and artifacts');
+  progress(discoveryKey, 'discovery', 'start', 'Discovering Sequoia Fund activity scopes and artifacts');
   const activityFilters = await discoverActivityFilters(page);
   for (const option of activityFilters.accounts) {
     if (option.value) sensitiveValues.add(option.value);
     if (option.label) sensitiveValues.add(option.label);
   }
-  const accounts = [sequoiaFundLoginAccountFromOptions(activityFilters.accounts)];
+  const account = sequoiaFundCanonicalAccount(config.accountToken);
+  const scopes = sequoiaFundActivityScopesFromOptions(activityFilters.accounts);
   const duration = selectSequoiaFundDuration(activityFilters.durations, config.from);
   const transactionType = selectAllSequoiaFundTransactions(activityFilters.transactionTypes);
   const artifacts: SequoiaFundDownloadedArtifact[] = [];
   const discoveredStates: Array<{
-    account: SequoiaFundRemoteAccount;
+    scope: SequoiaFundActivityScope;
     state: SequoiaFundActivityExportState;
   }> = [];
-  for (let index = 0; index < accounts.length; index += 1) {
-    const account = accounts[index]!;
+  for (const scope of scopes) {
     const state = await discoverActivityExportState(
       page,
       activityFilters,
-      account,
+      scope,
       duration,
       transactionType,
       config.from,
       config.through,
       sensitiveValues,
     );
-    discoveredStates.push({ account, state });
+    discoveredStates.push({ scope, state });
   }
-  const crosswalk = sequoiaFundActivityAccountCrosswalk(discoveredStates.map(({ account, state }) => ({
-    accountValue: account.value,
+  const scopeBindings = sequoiaFundActivityScopeBindings(discoveredStates.map(({ scope, state }) => ({
+    scopeValue: scope.value,
     historyFields: state.historyFields,
   })));
-  progress('activity-crosswalk', 'discovery', 'complete', 'Validated Sequoia Fund activity account crosswalk', {
-    accountCount: accounts.length,
-    changedFieldNames: crosswalk.changedFieldNames.join(','),
-    bindingFieldNames: crosswalk.bindingFieldNames.join(','),
+  progress('activity-scope-bindings', 'discovery', 'complete', 'Validated Sequoia Fund activity scope bindings', {
+    activityScopeCount: scopes.length,
+    changedFieldNames: scopeBindings.changedFieldNames.join(','),
+    bindingFieldNames: scopeBindings.bindingFieldNames.join(','),
   });
-  const bindingByAccount = new Map(crosswalk.bindings.map(binding => [
-    binding.accountValue,
+  const bindingByScope = new Map(scopeBindings.bindings.map(binding => [
+    binding.scopeValue,
     binding.bindingIdentity,
   ]));
-  for (let index = 0; index < accounts.length; index += 1) {
-    const account = accounts[index]!;
+  for (let index = 0; index < scopes.length; index += 1) {
+    const scope = scopes[index]!;
     const state = await discoverActivityExportState(
       page,
       activityFilters,
-      account,
+      scope,
       duration,
       transactionType,
       config.from,
       config.through,
       sensitiveValues,
     );
-    if (bindingByAccount.get(account.value) !== state.accountIdentity) {
-      throw new Error('Sequoia Fund activity account crosswalk changed before download');
+    if (bindingByScope.get(scope.value) !== state.accountIdentity) {
+      throw new Error('Sequoia Fund activity scope binding changed before download');
     }
-    const fileName = `sequoia-fund-account-${account.accountToken}-activity-${config.from}-to-${config.through}.csv`;
+    const scopeToken = sequoiaFundActivityScopeToken(scope.value);
+    const fileName = `sequoia-fund-account-${account.accountToken}-scope-${scopeToken}-activity-${config.from}-to-${config.through}.csv`;
     artifacts.push(await downloadActivityArtifact({
       page,
       outputDir: config.outputDir,
@@ -1335,25 +1294,25 @@ async function syncAuthenticatedWithSensitiveValues(
       state,
       progress,
       key: `activity:${index}`,
-      data: { accountIndex: index + 1, accountCount: accounts.length },
+      data: { activityScopeIndex: index + 1, activityScopeCount: scopes.length },
     }));
   }
   const statementList = await fetchStatementList(page);
   const statementAccess = await discoverStatementAccess(page, statementList.documents.length);
   const statementJobs = sequoiaFundStatementJobs(
-    accounts,
+    account,
     statementList,
     statementAccess,
     page.url(),
     config.from,
     config.through,
   );
-  progress(discoveryKey, 'discovery', 'complete', 'Discovered Sequoia Fund accounts and artifacts', {
-    accountCount: accounts.length,
-    activityCount: accounts.length,
+  progress(discoveryKey, 'discovery', 'complete', 'Discovered Sequoia Fund activity scopes and artifacts', {
+    accountCount: 1,
+    activityCount: scopes.length,
     statementCount: statementJobs.length,
-    activityChangedFieldNames: crosswalk.changedFieldNames.join(','),
-    activityBindingFieldNames: crosswalk.bindingFieldNames.join(','),
+    activityChangedFieldNames: scopeBindings.changedFieldNames.join(','),
+    activityBindingFieldNames: scopeBindings.bindingFieldNames.join(','),
   });
 
   for (let index = 0; index < statementJobs.length; index += 1) {
@@ -1375,8 +1334,8 @@ async function syncAuthenticatedWithSensitiveValues(
 
   return {
     artifacts,
-    accountCount: accounts.length,
-    activityCount: accounts.length,
+    accountCount: 1,
+    activityCount: scopes.length,
     statementCount: statementJobs.length,
   };
 }
@@ -1456,6 +1415,7 @@ export async function runSequoiaFundSync(
 ): Promise<SequoiaFundSyncResult> {
   validateDate(config.from, 'Sequoia Fund start date');
   validateDate(config.through, 'Sequoia Fund through date');
+  sequoiaFundCanonicalAccount(config.accountToken);
   if (config.from > config.through) throw new Error('Sequoia Fund date range is invalid');
   const outputDir = resolve(config.outputDir);
   await mkdir(outputDir, { recursive: true });
@@ -1496,6 +1456,7 @@ export async function runSequoiaFundSync(
           outputDir,
           from: config.from,
           through: config.through,
+          accountToken: config.accountToken,
         }, progress),
       },
     },

@@ -196,12 +196,13 @@ Supported:
 - Statement PDF.
 
 Useful parser filename:
-- `sequoia-fund-account-<account-token>-activity-YYYY-MM-DD-to-YYYY-MM-DD.csv`
+- `sequoia-fund-account-<account-token>-scope-key-<scope-hash>-activity-YYYY-MM-DD-to-YYYY-MM-DD.csv`
 - `sequoia-fund-2026-06-30.pdf`
 
 Notes:
-- The authenticated activity workflow expects one real investment account per login and ignores the page's all-accounts placeholder.
-- Activity export is bound to server-observed account state before the CSV form is submitted and validated.
+- Each connector run targets one local Sequoia Fund account/login. The activity dropdown entries are export scopes, not separate accounts.
+- Every enabled, nonempty scope—including an all-funds scope—is reselected and bound to its server-observed state immediately before its CSV is submitted and validated.
+- All activity scopes and statements from the run retain the selected local account's canonical identity.
 - Statements provide balance and purchase activity.
 
 ## Other CSV Profiles

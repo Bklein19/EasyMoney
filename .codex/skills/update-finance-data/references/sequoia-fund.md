@@ -34,12 +34,12 @@ The one-year activity export overlaps the required 2026-03-24 through 2026-08-13
 
 ## Verified Workflow
 
-- Activity: open History, require exactly one investment-account choice, select one year and all transaction types, then POST the page's CSV form directly inside the authenticated browser context.
+- Activity: open History, treat every enabled nonempty account-dropdown entry as an export scope, select one year and all transaction types, then revalidate and POST each scope's CSV form sequentially inside the authenticated browser context.
 - Statements: open Statements, locate each required quarterly date, open its transient document tab, and download the PDF through the same authenticated browser context.
 - Each response is checked before saving. The completed local files are checked again for extension, size, and CSV/PDF signature.
 
 ## Limitations
 
 - The activity page does not offer a custom date range, so the script downloads a one-year overlapping export.
-- EasyMoney supports both the connector-generated activity CSV and statement PDFs. The activity filename carries the validated account identity used during import.
+- EasyMoney supports both the connector-generated activity CSVs and statement PDFs. Each scope filename carries the selected local account identity plus a PII-free stable scope hash; all files from the login map to that one account.
 - The script is intentionally fixed to this catch-up window, output directory, one-account expectation, and the two statements that were available during verification.
