@@ -65,4 +65,10 @@ describe('Electrobun 2 packaging contract', () => {
       expect(ignoredPaths.has(pathPattern)).toBeTrue();
     }
   });
+
+  test('uses explicit one-shot desktop rebuilds by default', () => {
+    expect(packageJson.scripts.dev).toBe('bun scripts/electrobun.ts dev');
+    expect(packageJson.scripts['dev:watch']).toBe('bun scripts/electrobun.ts dev --watch');
+    expect(packageJson.scripts.start).toBe(packageJson.scripts.dev);
+  });
 });

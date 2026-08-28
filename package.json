@@ -5,7 +5,8 @@
   "type": "module",
   "packageManager": "bun@1.4.0",
   "scripts": {
-    "dev": "bun scripts/electrobun.ts dev --watch",
+    "dev": "bun scripts/electrobun.ts dev",
+    "dev:watch": "bun scripts/electrobun.ts dev --watch",
     "dev:web": "bun --hot server/index.ts --open",
     "api": "bun server/index.ts",
     "data:freshness": "bun scripts/data-freshness.ts",

@@ -10,7 +10,8 @@ The repository uses Bun for installation, scripts, tests, frontend bundling, the
 
 ```bash
 bun install
-bun run dev              # build and open the Electrobun development app
+bun run dev              # one-shot build and open; rerun explicitly after changes
+bun run dev:watch        # optional full rebuild/relaunch watcher (not HMR)
 bun run dev:web          # optional browser-only development server
 bun run build            # stable Electrobun package and update artifact
 ```
@@ -88,6 +89,8 @@ Start the desktop app:
 ```bash
 bun run dev
 ```
+
+The default desktop workflow is intentionally one-shot so source edits do not repeatedly quit and reopen the app. Rerun `bun run dev` when a change set is ready to test. `bun run dev:watch` is available when an explicit full rebuild/relaunch loop is useful; it is not hot module replacement.
 
 For browser-only development, start the Bun web server:
 
