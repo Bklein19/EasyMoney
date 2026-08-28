@@ -41,5 +41,5 @@ The one-year activity export overlaps the required 2026-03-24 through 2026-08-13
 ## Limitations
 
 - The activity page does not offer a custom date range, so the script downloads a one-year overlapping export.
-- The current EasyMoney Sequoia parser supports statement PDFs, not the downloaded activity CSV. Keep the CSV as source data, but expect import preview to reject it until a Sequoia activity parser exists.
+- EasyMoney supports both the connector-generated activity CSV and statement PDFs. The activity filename carries the validated account identity used during import.
 - The script is intentionally fixed to this catch-up window, output directory, one-account expectation, and the two statements that were available during verification.

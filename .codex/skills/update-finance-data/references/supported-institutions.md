@@ -192,12 +192,16 @@ Notes:
 ## Sequoia Fund
 
 Supported:
+- Activity CSV from History.
 - Statement PDF.
 
 Useful parser filename:
+- `sequoia-fund-account-<account-token>-activity-YYYY-MM-DD-to-YYYY-MM-DD.csv`
 - `sequoia-fund-2026-06-30.pdf`
 
 Notes:
+- The authenticated activity workflow expects one real investment account per login and ignores the page's all-accounts placeholder.
+- Activity export is bound to server-observed account state before the CSV form is submitted and validated.
 - Statements provide balance and purchase activity.
 
 ## Other CSV Profiles

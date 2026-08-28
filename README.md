@@ -61,7 +61,7 @@ Parsers try to extract durable source facts plus account context when the file f
 | Merrill | CSV activity, PDF CMA statements | Yes | Yes | Yes | No | CSV account number or statement account number |
 | Morgan Stanley | PDF activity, PDF statements | Yes | Yes | Yes | Yes for activity exports | Full or last-four statement/account number |
 | Robinhood | CSV banking, PDF statements | Yes | Yes for statements | Yes | Yes for personal statement headings | Last four from statement account number |
-| Sequoia Fund | PDF statements | Yes | Yes | Fixed fund account | No | No |
+| Sequoia Fund | CSV activity, PDF statements | Yes | Yes | Fixed fund account | No | Selector suffix when present |
 | TIAA | CSV activity, PDF statements | Yes | Yes | Fixed retirement account | No | No |
 | Vanguard | PDF activity, PDF statements | Yes | Yes | Yes | No | Masked suffix when present |
 | Wells Fargo | CSV activity, PDF statements | Yes | Yes for statements | Yes when filename/statement identifies it | No | Last four from filename or statement |

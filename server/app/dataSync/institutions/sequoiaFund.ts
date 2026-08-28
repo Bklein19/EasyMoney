@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { basename, join, resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 
-import type { Page } from 'playwright';
+import type { Download, Page, Request } from 'playwright';
 
 import { parseCsvRows } from '../../importParsers/csvRows.ts';
 import { sequoiaFundActivityParser } from '../../importParsers/sequoiaFundActivity.ts';
@@ -22,6 +22,8 @@ const sequoiaFundHost = 'secureaccountview.com';
 const sequoiaFundClientPath = '/BFWeb/clients/sequoiafund';
 const sequoiaFundLoginUrl = `https://${sequoiaFundHost}${sequoiaFundClientPath}/index`;
 const sequoiaFundHistoryPath = `${sequoiaFundClientPath}/transactionhistory`;
+const sequoiaFundHistoryJsonPath = `${sequoiaFundClientPath}/transactionhistoryJSON`;
+const sequoiaFundActivityCsvPath = `${sequoiaFundClientPath}/transactionHistoryCSV`;
 const sequoiaFundStatementsPath = `${sequoiaFundClientPath}/viewStatements`;
 const sequoiaFundStatementListPath = `${sequoiaFundClientPath}/statements/getStatementList`;
 
@@ -119,6 +121,61 @@ export type SequoiaFundActivityFormCandidate = Pick<
   'action' | 'method' | 'enctype' | 'fields'
 > & {
   hints: string[];
+  duplicateFieldNames?: string[];
+};
+
+const sequoiaFundObservedHistoryFields = [
+  'acctNumber',
+  'customFormField_MaxReturnCount',
+  'endDate',
+  'groupKey',
+  'range',
+  'requestCode',
+  'securityID',
+  'startDate',
+] as const;
+
+const sequoiaFundRequiredHistoryFields = ['groupKey', 'range', 'requestCode'] as const;
+const sequoiaFundAccountBindingFields = ['acctNumber', 'groupKey', 'range', 'securityID'] as const;
+
+export type SequoiaFundRequestSnapshot = {
+  url: string;
+  method: string;
+  contentType: string;
+  body: string;
+};
+
+export type SequoiaFundArtifactByteClass =
+  | 'empty'
+  | 'pdf'
+  | 'html'
+  | 'json'
+  | 'csv'
+  | 'tabular-text'
+  | 'utf16-or-binary'
+  | 'text';
+
+export type SequoiaFundActivityAccountState = {
+  accountValue: string;
+  historyFields: Record<string, string>;
+};
+
+export type SequoiaFundActivityAccountCrosswalk = {
+  changedFieldNames: string[];
+  bindingFieldNames: string[];
+  bindings: Array<{
+    accountValue: string;
+    bindingIdentity: string;
+  }>;
+};
+
+export type SequoiaFundSubmitterCandidate = {
+  index: number;
+  visible: boolean;
+  disabled: boolean;
+  exportSemantic: boolean;
+  resetSemantic: boolean;
+  hasFormOverride: boolean;
 };
 
 export type SequoiaFundApiRequest = {
@@ -212,7 +269,10 @@ export function sequoiaFundAccountsFromOptions(
   for (const option of options) {
     const value = option.value.trim();
     const label = option.label.replace(/\s+/g, ' ').trim();
-    if (!value || byValue.has(value)) continue;
+    const normalizedLabel = label.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    if (!value || /^(?:all|all (?:fund|funds|account|accounts|fund accounts)|select|select an? account|choose an? account)$/.test(
+      normalizedLabel,
+    ) || byValue.has(value)) continue;
     const last4 = accountLast4(label, value);
     const accountToken = last4 ? `last4-${last4}` : `key-${opaqueAccountToken(value)}`;
     byValue.set(value, {
@@ -233,6 +293,16 @@ export function sequoiaFundAccountsFromOptions(
     tokens.add(account.accountToken);
   }
   return [...byValue.values()];
+}
+
+export function sequoiaFundLoginAccountFromOptions(
+  options: SequoiaFundSelectOption[],
+): SequoiaFundRemoteAccount {
+  const accounts = sequoiaFundAccountsFromOptions(options);
+  if (accounts.length !== 1) {
+    throw new Error('Sequoia Fund login must expose exactly one investment account');
+  }
+  return accounts[0]!;
 }
 
 function durationDays(label: string, today: Date): number | null {
@@ -291,38 +361,29 @@ export function selectSequoiaFundActivityExportForm(
   referer: string,
 ): SequoiaFundActivityFormCandidate {
   const refererUrl = validatedSequoiaFundUrl(referer);
-  const scored = candidates.flatMap(candidate => {
+  const matching = candidates.flatMap(candidate => {
     let action: URL;
     try {
       action = validatedSequoiaFundUrl(candidate.action, refererUrl.toString());
     } catch {
       return [];
     }
-    if (action.origin !== refererUrl.origin || (candidate.method !== 'GET' && candidate.method !== 'POST')) {
+    if (action.origin !== refererUrl.origin ||
+      action.pathname.toLowerCase() !== sequoiaFundActivityCsvPath.toLowerCase() ||
+      candidate.method !== 'POST' ||
+      candidate.enctype.toLowerCase() !== 'application/x-www-form-urlencoded') {
       return [];
     }
-    const signal = [
-      action.pathname,
-      ...candidate.hints,
-      ...Object.keys(candidate.fields),
-      ...Object.values(candidate.fields).filter(value => /^(?:csv|export|download)$/i.test(value)),
-    ].join(' ').toLowerCase();
-    if (!/(?:csv|export|download)/.test(signal) || /(?:tax.?lot|cost.?basis)/.test(signal)) return [];
-    const score = (signal.includes('csv') ? 4 : 0) +
-      (signal.includes('export') ? 2 : 0) +
-      (signal.includes('download') ? 2 : 0) +
-      (signal.includes('transaction') ? 4 : 0) +
-      (signal.includes('history') ? 2 : 0) +
-      (signal.includes('activity') ? 2 : 0);
-    return score > 0 ? [{ candidate: { ...candidate, action: action.toString() }, score }] : [];
-  }).sort((left, right) => right.score - left.score);
-
-  const selected = scored[0];
-  if (!selected) throw new Error('Sequoia Fund activity export form is unavailable');
-  if (scored[1]?.score === selected.score) {
+    if (candidate.duplicateFieldNames?.length) {
+      throw new Error('Sequoia Fund activity export form has duplicate fields');
+    }
+    return [{ ...candidate, action: action.toString() }];
+  });
+  if (matching.length === 0) throw new Error('Sequoia Fund activity export form is unavailable');
+  if (matching.length !== 1) {
     throw new Error('Sequoia Fund activity export form is ambiguous');
   }
-  return selected.candidate;
+  return matching[0]!;
 }
 
 export function sequoiaFundActivityRequest(
@@ -352,6 +413,171 @@ export function sequoiaFundActivityRequest(
     return { url: action.toString(), method: 'POST', multipart: fields, headers };
   }
   throw new Error('Sequoia Fund activity form encoding is unsupported');
+}
+
+function requestedActivityDate(template: string, value: string): string {
+  return template.includes('/')
+    ? `${value.slice(5, 7)}/${value.slice(8, 10)}/${value.slice(0, 4)}`
+    : value;
+}
+
+export function populateSequoiaFundActivityForm(
+  exportForm: SequoiaFundActivityFormCandidate,
+  historyFields: Record<string, string>,
+  from: string,
+  through: string,
+): SequoiaFundActivityFormCandidate {
+  validateDate(from, 'Sequoia Fund activity start');
+  validateDate(through, 'Sequoia Fund activity through date');
+  const missingHistory = sequoiaFundObservedHistoryFields.filter(name => !(name in historyFields));
+  const missingExport = sequoiaFundObservedHistoryFields.filter(name => !(name in exportForm.fields));
+  if (missingHistory.length > 0 || missingExport.length > 0) {
+    throw new Error('Sequoia Fund activity export metadata is incomplete');
+  }
+  if (sequoiaFundRequiredHistoryFields.some(name => !historyFields[name])) {
+    throw new Error('Sequoia Fund activity export account state is incomplete');
+  }
+  const fields = Object.fromEntries(Object.entries(exportForm.fields).map(([name, value]) => {
+    if (name === 'startDate' && historyFields[name]) {
+      return [name, requestedActivityDate(historyFields[name], from)];
+    }
+    if (name === 'endDate' && historyFields[name]) {
+      return [name, requestedActivityDate(historyFields[name], through)];
+    }
+    return [name, historyFields[name] ?? value];
+  }));
+  return { ...exportForm, fields };
+}
+
+export function parseSequoiaFundHistoryRequest(
+  snapshot: SequoiaFundRequestSnapshot,
+): Record<string, string> | null {
+  let url: URL;
+  try {
+    url = validatedSequoiaFundUrl(snapshot.url);
+  } catch {
+    return null;
+  }
+  if (url.pathname.toLowerCase() !== sequoiaFundHistoryJsonPath.toLowerCase() ||
+    snapshot.method !== 'POST' ||
+    !/application\/x-www-form-urlencoded/i.test(snapshot.contentType)) return null;
+  const fields: Record<string, string> = {};
+  for (const [name, value] of new URLSearchParams(snapshot.body)) {
+    if (name in fields) return null;
+    fields[name] = value;
+  }
+  if (sequoiaFundObservedHistoryFields.some(name => !(name in fields)) ||
+    sequoiaFundRequiredHistoryFields.some(name => !fields[name])) return null;
+  return fields;
+}
+
+function historyFields(request: Request): Record<string, string> | null {
+  return parseSequoiaFundHistoryRequest({
+    url: request.url(),
+    method: request.method(),
+    contentType: request.headers()['content-type'] ?? '',
+    body: request.postData() ?? '',
+  });
+}
+
+export function sequoiaFundHistoryAccountIdentity(fields: Record<string, string>): string {
+  if (sequoiaFundRequiredHistoryFields.some(name => !fields[name])) {
+    throw new Error('Sequoia Fund activity account state is incomplete');
+  }
+  return JSON.stringify(sequoiaFundAccountBindingFields.map(name => fields[name] ?? ''));
+}
+
+export function sequoiaFundActivityAccountCrosswalk(
+  states: SequoiaFundActivityAccountState[],
+): SequoiaFundActivityAccountCrosswalk {
+  if (states.length === 0) throw new Error('Sequoia Fund activity account crosswalk is empty');
+  const accountValues = new Set<string>();
+  for (const state of states) {
+    if (!state.accountValue || accountValues.has(state.accountValue)) {
+      throw new Error('Sequoia Fund activity account crosswalk is ambiguous');
+    }
+    accountValues.add(state.accountValue);
+    if (sequoiaFundObservedHistoryFields.some(name => !(name in state.historyFields)) ||
+      sequoiaFundRequiredHistoryFields.some(name => !state.historyFields[name])) {
+      throw new Error('Sequoia Fund activity account state is incomplete');
+    }
+  }
+
+  const changedFieldNames = sequoiaFundObservedHistoryFields.filter(name =>
+    new Set(states.map(state => state.historyFields[name] ?? '')).size > 1);
+  const bindingFieldNames = sequoiaFundAccountBindingFields.filter(name => changedFieldNames.includes(name));
+  const bindings = states.map(state => ({
+    accountValue: state.accountValue,
+    bindingIdentity: sequoiaFundHistoryAccountIdentity(state.historyFields),
+  }));
+  if (states.length > 1 && (bindingFieldNames.length === 0 ||
+    new Set(bindings.map(binding => binding.bindingIdentity)).size !== states.length)) {
+    throw new Error('Sequoia Fund activity account crosswalk is not one-to-one');
+  }
+  return { changedFieldNames, bindingFieldNames, bindings };
+}
+
+export function selectSequoiaFundActivityExportSubmitter(
+  candidates: SequoiaFundSubmitterCandidate[],
+): number | null {
+  const viable = candidates.filter(candidate =>
+    candidate.visible && !candidate.disabled && !candidate.resetSemantic);
+  const semantic = viable.filter(candidate => candidate.exportSemantic);
+  const selected = semantic.length === 1 ? semantic[0] : viable.length === 1 ? viable[0] : null;
+  if (viable.length > 0 && !selected) {
+    throw new Error('Sequoia Fund activity export submitter is ambiguous');
+  }
+  if (selected?.hasFormOverride) {
+    throw new Error('Sequoia Fund activity export submitter overrides the observed form contract');
+  }
+  return selected?.index ?? null;
+}
+
+export function sequoiaFundActivityFilterRequestMatches(options: {
+  url: string;
+  method: string;
+  accountField: string;
+  accountValue: string;
+  durationField: string;
+  durationValue: string;
+  transactionTypeField: string;
+  transactionTypeValue: string;
+}): boolean {
+  let url: URL;
+  try {
+    url = validatedSequoiaFundUrl(options.url);
+  } catch {
+    return false;
+  }
+  return options.method === 'GET' &&
+    url.pathname.toLowerCase() === sequoiaFundHistoryPath.toLowerCase() &&
+    url.searchParams.get(options.accountField) === options.accountValue &&
+    url.searchParams.get(options.durationField) === options.durationValue &&
+    url.searchParams.get(options.transactionTypeField) === options.transactionTypeValue;
+}
+
+export function parseSequoiaFundActivityCsvRequest(
+  snapshot: SequoiaFundRequestSnapshot,
+  expectedFields: Record<string, string>,
+): Record<string, string> | null {
+  let url: URL;
+  try {
+    url = validatedSequoiaFundUrl(snapshot.url);
+  } catch {
+    return null;
+  }
+  if (snapshot.method !== 'POST' ||
+    url.pathname.toLowerCase() !== sequoiaFundActivityCsvPath.toLowerCase() ||
+    !/application\/x-www-form-urlencoded/i.test(snapshot.contentType)) return null;
+  const fields: Record<string, string> = {};
+  for (const [name, value] of new URLSearchParams(snapshot.body)) {
+    if (name in fields) return null;
+    fields[name] = value;
+  }
+  if (sequoiaFundObservedHistoryFields.some(name => !(name in fields)) ||
+    Object.entries(expectedFields).some(([name, value]) => fields[name] !== value) ||
+    sequoiaFundRequiredHistoryFields.some(name => !fields[name])) return null;
+  return fields;
 }
 
 function stringsFromAccountFields(value: Record<string, unknown>): string[] {
@@ -418,23 +644,14 @@ function directStatementTarget(
 
 export function sequoiaFundStatementDownloadRequest(
   document: SequoiaFundStatementDocument,
-  list: SequoiaFundStatementList,
+  _list: SequoiaFundStatementList,
   access: SequoiaFundStatementAccess,
   baseUrl: string,
 ): SequoiaFundApiRequest {
   const base = validatedSequoiaFundUrl(baseUrl);
   const direct = directStatementTarget(document, access, base.toString());
-  const url = direct ?? new URL([
-    sequoiaFundClientPath,
-    'statements',
-    encodeURIComponent(document.documentId),
-    encodeURIComponent(document.statementType),
-    encodeURIComponent(list.sessionId),
-  ].join('/'), base.origin);
-  if (!direct) {
-    if (!access.csrfToken) throw new Error('Sequoia Fund statement access token is unavailable');
-    url.searchParams.set('csrf_token', access.csrfToken);
-  }
+  if (!direct) throw new Error('Sequoia Fund statement download metadata is unavailable');
+  const url = direct;
   if (url.origin !== base.origin) throw new Error('Sequoia Fund statement download is not same-origin');
   return {
     url: url.toString(),
@@ -489,11 +706,22 @@ function responseContentType(response: BrowserNativeResponse): string {
   return response.headers['content-type']?.toLowerCase() ?? '';
 }
 
+export function classifySequoiaFundArtifactBytes(bytes: Uint8Array): SequoiaFundArtifactByteClass {
+  if (bytes.length === 0) return 'empty';
+  const sample = Buffer.from(bytes).subarray(0, Math.min(bytes.length, 4096));
+  if (sample.subarray(0, 5).toString('ascii') === '%PDF-') return 'pdf';
+  if (sample.includes(0)) return 'utf16-or-binary';
+  const text = sample.toString('utf8').replace(/^\uFEFF/, '').trimStart();
+  const lower = text.toLowerCase();
+  if (/^(?:<!doctype\s+html|<html\b|<head\b|<body\b|<\?xml\b)/.test(lower)) return 'html';
+  if (/^[{[]/.test(text)) return 'json';
+  if (/[\r\n]/.test(text) && text.includes(',')) return 'csv';
+  if (/[\r\n]/.test(text) && text.includes('\t')) return 'tabular-text';
+  return 'text';
+}
+
 function assertCsvResponse(response: BrowserNativeResponse, body: Buffer): void {
-  const sample = body.subarray(0, Math.min(body.length, 1024));
-  const text = sample.toString('utf8').trimStart().toLowerCase();
-  if (!browserNativeResponseOk(response) || body.length < 32 || sample.includes(0) || !sample.includes(44) || !/[\r\n]/.test(text) ||
-    text.startsWith('<') || text.startsWith('%pdf-') ||
+  if (!browserNativeResponseOk(response) || body.length < 32 || classifySequoiaFundArtifactBytes(body) !== 'csv' ||
     !/(?:csv|text|excel|octet-stream)/.test(responseContentType(response))) {
     throw new Error('Sequoia Fund activity response failed CSV validation');
   }
@@ -542,12 +770,10 @@ export async function validateSequoiaFundArtifact(
   if (!info.isFile() || info.size < minimum) throw new Error('Sequoia Fund artifact is empty or too small');
   const bytes = await readFile(path);
   if (kind === 'activity') {
-    const sample = bytes.subarray(0, Math.min(bytes.length, 1024));
-    const text = sample.toString('utf8').trimStart().toLowerCase();
-    if (sample.includes(0) || !sample.includes(44) || !/[\r\n]/.test(text) || text.startsWith('<')) {
+    if (classifySequoiaFundArtifactBytes(bytes) !== 'csv') {
       throw new Error('Sequoia Fund activity file signature is invalid');
     }
-  } else if (bytes.subarray(0, 5).toString('ascii') !== '%PDF-') {
+  } else if (classifySequoiaFundArtifactBytes(bytes) !== 'pdf') {
     throw new Error('Sequoia Fund statement file signature is invalid');
   }
 
@@ -644,34 +870,84 @@ async function discoverActivityFilters(page: Page): Promise<SequoiaFundActivityF
   });
 }
 
-async function discoverActivityRequest(
+type SequoiaFundActivityExportState = {
+  exportForm: SequoiaFundActivityFormCandidate;
+  historyFields: Record<string, string>;
+  accountIdentity: string;
+  referer: string;
+};
+
+async function discoverActivityExportState(
   page: Page,
   filters: SequoiaFundActivityFilters,
   account: SequoiaFundRemoteAccount,
   duration: SequoiaFundSelectOption,
   transactionType: SequoiaFundSelectOption,
-  referer: string,
-): Promise<SequoiaFundApiRequest> {
-  const discovered = await page.evaluate(async selection => {
-    const setSelection = (name: string, value: string) => {
-      const select = Array.from(document.querySelectorAll('select'))
-        .find(candidate => candidate.name === name);
-      if (!(select instanceof HTMLSelectElement) ||
-        !Array.from(select.options).some(option => option.value === value)) {
-        throw new Error('Sequoia Fund activity selection is unavailable');
+  from: string,
+  through: string,
+): Promise<SequoiaFundActivityExportState> {
+  await page.waitForLoadState('networkidle', { timeout: 30_000 });
+  let filterRequestObserved = false;
+  const historyRequestPromise = page.waitForRequest(request => {
+    if (sequoiaFundActivityFilterRequestMatches({
+      url: request.url(),
+      method: request.method(),
+      accountField: filters.accountField,
+      accountValue: account.value,
+      durationField: filters.durationField,
+      durationValue: duration.value,
+      transactionTypeField: filters.transactionTypeField,
+      transactionTypeValue: transactionType.value,
+    })) {
+      filterRequestObserved = true;
+      return false;
+    }
+    return filterRequestObserved && historyFields(request) !== null;
+  }, { timeout: 30_000 });
+  for (const [name, value] of [
+    [filters.accountField, account.value],
+    [filters.durationField, duration.value],
+    [filters.transactionTypeField, transactionType.value],
+  ] as const) {
+    const locator = page.locator(`select[name="${name}"]`).first();
+    await locator.waitFor({ state: 'attached', timeout: 30_000 });
+    await locator.selectOption(value);
+  }
+  const [, historyRequest] = await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30_000 }),
+    historyRequestPromise,
+    page.locator(`select[name="${filters.accountField}"]`).first().evaluate(element => {
+      if (!(element instanceof HTMLSelectElement) || !element.form) {
+        throw new Error('Sequoia Fund activity form is unavailable');
       }
-      select.value = value;
-      select.dispatchEvent(new Event('input', { bubbles: true }));
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    };
-    setSelection(selection.accountField, selection.accountValue);
-    setSelection(selection.durationField, selection.durationValue);
-    setSelection(selection.transactionTypeField, selection.transactionTypeValue);
-    await Promise.resolve();
-
-    return Array.from(document.forms).map(form => {
+      element.form.requestSubmit();
+    }),
+  ]);
+  const observedHistory = historyFields(historyRequest);
+  if (!observedHistory) {
+    throw new Error('Sequoia Fund activity account mapping is ambiguous');
+  }
+  const historyResponse = await historyRequest.response();
+  await historyResponse?.finished();
+  const selectedAccount = await page.locator(`select[name="${filters.accountField}"]`).first().inputValue();
+  if (selectedAccount !== account.value) {
+    throw new Error('Sequoia Fund activity account selection was not preserved');
+  }
+  await page.waitForFunction(expectedPath => Array.from(document.forms).some(form => {
+    try {
+      return new URL(form.action, location.href).pathname.toLowerCase() === expectedPath &&
+        (form.method || 'GET').toUpperCase() === 'POST' &&
+        form.enctype.toLowerCase() === 'application/x-www-form-urlencoded';
+    } catch {
+      return false;
+    }
+  }), sequoiaFundActivityCsvPath.toLowerCase(), { timeout: 30_000 });
+  const discovered = await page.evaluate(() => Array.from(document.forms).map(form => {
+      const entries = Array.from(new FormData(form).entries());
       const fields: Record<string, string> = {};
-      for (const [key, value] of new FormData(form).entries()) {
+      const duplicateFieldNames = [...new Set(entries.map(([name]) => name)
+        .filter((name, index, names) => names.indexOf(name) !== index))];
+      for (const [key, value] of entries) {
         if (typeof value === 'string') fields[key] = value;
       }
       const submitHints = Array.from(form.elements).flatMap(element => {
@@ -689,22 +965,115 @@ async function discoverActivityRequest(
         enctype: form.enctype,
         fields,
         hints: [form.id, form.name, ...submitHints].filter(Boolean),
+        duplicateFieldNames,
       };
-    });
-  }, {
-    accountField: filters.accountField,
-    accountValue: account.value,
-    durationField: filters.durationField,
-    durationValue: duration.value,
-    transactionTypeField: filters.transactionTypeField,
-    transactionTypeValue: transactionType.value,
-  });
+    }));
   const candidates = discovered.flatMap(candidate =>
     candidate.method === 'GET' || candidate.method === 'POST'
       ? [candidate as SequoiaFundActivityFormCandidate]
       : []);
-  const exportForm = selectSequoiaFundActivityExportForm(candidates, referer);
-  return sequoiaFundActivityRequest(exportForm, referer);
+  const referer = page.url();
+  const exportForm = populateSequoiaFundActivityForm(
+    selectSequoiaFundActivityExportForm(candidates, referer),
+    observedHistory,
+    from,
+    through,
+  );
+  return {
+    exportForm,
+    historyFields: observedHistory,
+    accountIdentity: sequoiaFundHistoryAccountIdentity(observedHistory),
+    referer,
+  };
+}
+
+async function populateActivityExportForm(
+  page: Page,
+  state: SequoiaFundActivityExportState,
+): Promise<void> {
+  const populated = await page.locator('form').evaluateAll((forms, expected) => {
+    const candidates = forms.filter((candidate): candidate is HTMLFormElement => {
+      if (!(candidate instanceof HTMLFormElement)) return false;
+      try {
+        return new URL(candidate.action, location.href).toString() === expected.action &&
+          (candidate.method || 'GET').toUpperCase() === expected.method;
+      } catch {
+        return false;
+      }
+    });
+    if (candidates.length !== 1) return { formCount: candidates.length, missingFields: [] as string[] };
+    const form = candidates[0]!;
+    for (const candidate of forms) candidate.removeAttribute('data-easymoney-sequoia-export');
+    form.setAttribute('data-easymoney-sequoia-export', 'true');
+    const missingFields: string[] = [];
+    for (const [name, value] of Object.entries(expected.fields)) {
+      const controls = Array.from(form.elements).filter((control): control is HTMLInputElement |
+        HTMLSelectElement | HTMLTextAreaElement =>
+        (control instanceof HTMLInputElement || control instanceof HTMLSelectElement ||
+          control instanceof HTMLTextAreaElement) && control.name === name);
+      if (controls.length === 0) {
+        missingFields.push(name);
+        continue;
+      }
+      for (const control of controls) control.value = value;
+    }
+    return { formCount: candidates.length, missingFields };
+  }, {
+    action: state.exportForm.action,
+    method: state.exportForm.method,
+    fields: state.exportForm.fields,
+  });
+  if (populated.formCount !== 1 || populated.missingFields.length > 0) {
+    throw new Error('Sequoia Fund activity export form changed before download');
+  }
+}
+
+async function submitActivityExport(
+  page: Page,
+  state: SequoiaFundActivityExportState,
+): Promise<{ download: Download; request: Request }> {
+  await populateActivityExportForm(page, state);
+  const requestPromise = page.waitForRequest(request => parseSequoiaFundActivityCsvRequest({
+    url: request.url(),
+    method: request.method(),
+    contentType: request.headers()['content-type'] ?? '',
+    body: request.postData() ?? '',
+  }, state.exportForm.fields) !== null, { timeout: 30_000 });
+  const downloadPromise = page.waitForEvent('download', { timeout: 30_000 });
+  const exportForm = page.locator('form[data-easymoney-sequoia-export="true"]');
+  if (await exportForm.count() !== 1) throw new Error('Sequoia Fund activity export form is ambiguous');
+  const submitters = exportForm.locator(
+    'button,input[type="button"],input[type="image"],input[type="submit"]',
+  );
+  const submitterCandidates = await submitters.evaluateAll(elements => elements.map((element, index) => {
+    if (!(element instanceof HTMLButtonElement) && !(element instanceof HTMLInputElement)) {
+      throw new Error('Sequoia Fund activity export submitter is invalid');
+    }
+    const style = getComputedStyle(element);
+    const signal = [element.name, element.id, element.value,
+      element instanceof HTMLButtonElement ? element.textContent ?? '' : '']
+      .join(' ').replace(/\s+/g, ' ').trim().toLowerCase();
+    return {
+      index,
+      visible: style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0,
+      disabled: element.disabled,
+      exportSemantic: /\b(?:csv|export|download)\b/.test(signal),
+      resetSemantic: /\b(?:reset|clear|cancel)\b/.test(signal),
+      hasFormOverride: ['formaction', 'formmethod', 'formenctype', 'formtarget']
+        .some(name => element.hasAttribute(name)),
+    };
+  }));
+  const submitterIndex = selectSequoiaFundActivityExportSubmitter(submitterCandidates);
+  const submitPromise = submitterIndex === null
+    ? exportForm.evaluate(candidate => {
+        if (!(candidate instanceof HTMLFormElement)) {
+          throw new Error('Sequoia Fund activity export form is invalid');
+        }
+        candidate.requestSubmit();
+      })
+    : submitters.nth(submitterIndex).click({ noWaitAfter: true });
+  const [request, download] = await Promise.all([requestPromise, downloadPromise, submitPromise]);
+  return { request, download };
 }
 
 async function fetchStatementList(page: Page): Promise<SequoiaFundStatementList> {
@@ -762,6 +1131,60 @@ async function existingArtifact(
   }
 }
 
+async function downloadActivityArtifact(options: {
+  page: Page;
+  outputDir: string;
+  fileName: string;
+  account: SequoiaFundRemoteAccount;
+  state: SequoiaFundActivityExportState;
+  progress: Progress;
+  key: string;
+  data: Record<string, number | string | boolean>;
+}): Promise<SequoiaFundDownloadedArtifact> {
+  const path = resolve(options.outputDir, options.fileName);
+  const existing = await existingArtifact(path, 'activity', options.account);
+  if (existing) return existing;
+
+  options.progress(options.key, 'activity-download', 'start', 'Downloading Sequoia Fund activity', options.data);
+  try {
+    const { request, download } = await submitActivityExport(options.page, options.state);
+    const failure = await download.failure();
+    if (failure) throw new Error('Sequoia Fund activity browser download failed');
+    await download.saveAs(path);
+    const bytes = await readFile(path);
+    const byteClass = classifySequoiaFundArtifactBytes(bytes);
+    const response = await request.response();
+    const responseStatus = response?.status() ?? 0;
+    const responseContentType = response?.headers()['content-type']?.split(';')[0]?.trim().toLowerCase() ?? '';
+    if (!response?.ok() || !/(?:csv|text|excel|octet-stream)/.test(responseContentType)) {
+      throw new Error('Sequoia Fund activity browser response failed');
+    }
+    if (byteClass !== 'csv') {
+      throw new Error(`Sequoia Fund activity browser download was ${byteClass}`);
+    }
+    options.progress(options.key, 'activity-download', 'complete', 'Downloaded Sequoia Fund activity', {
+      ...options.data,
+      byteClass,
+      responseStatus,
+      responseContentType: responseContentType || 'unknown',
+      responseBytes: bytes.length,
+    });
+
+    const validationKey = `${options.key}:validation`;
+    options.progress(validationKey, 'validation', 'start', 'Validating Sequoia Fund activity', options.data);
+    const validated = await validateSequoiaFundArtifact(path, 'activity', options.account);
+    options.progress(validationKey, 'validation', 'complete', 'Validated Sequoia Fund activity', {
+      ...options.data,
+      transactionCount: validated.transactionCount,
+      balanceCount: validated.balanceCount,
+    });
+    return { ...validated, status: 'downloaded' };
+  } catch (error) {
+    await rm(path, { force: true });
+    throw error;
+  }
+}
+
 async function downloadArtifact(options: {
   page: Page;
   outputDir: string;
@@ -815,31 +1238,65 @@ async function syncAuthenticated(
   const discoveryKey = 'discovery';
   progress(discoveryKey, 'discovery', 'start', 'Discovering Sequoia Fund accounts and artifacts');
   const activityFilters = await discoverActivityFilters(page);
-  const accounts = sequoiaFundAccountsFromOptions(activityFilters.accounts);
+  const accounts = [sequoiaFundLoginAccountFromOptions(activityFilters.accounts)];
   const duration = selectSequoiaFundDuration(activityFilters.durations, config.from);
   const transactionType = selectAllSequoiaFundTransactions(activityFilters.transactionTypes);
-  const historyUrl = page.url();
-  const activityRequests: SequoiaFundApiRequest[] = [];
-  const activityRequestIdentities = new Set<string>();
-  for (const account of accounts) {
-    const request = await discoverActivityRequest(
+  const artifacts: SequoiaFundDownloadedArtifact[] = [];
+  const discoveredStates: Array<{
+    account: SequoiaFundRemoteAccount;
+    state: SequoiaFundActivityExportState;
+  }> = [];
+  for (let index = 0; index < accounts.length; index += 1) {
+    const account = accounts[index]!;
+    const state = await discoverActivityExportState(
       page,
       activityFilters,
       account,
       duration,
       transactionType,
-      historyUrl,
+      config.from,
+      config.through,
     );
-    const requestIdentity = JSON.stringify([
-      request.method,
-      request.url,
-      Object.entries(request.form ?? request.multipart ?? {}).sort(([left], [right]) => left.localeCompare(right)),
-    ]);
-    if (activityRequestIdentities.has(requestIdentity)) {
-      throw new Error('Sequoia Fund activity request mapping is ambiguous');
+    discoveredStates.push({ account, state });
+  }
+  const crosswalk = sequoiaFundActivityAccountCrosswalk(discoveredStates.map(({ account, state }) => ({
+    accountValue: account.value,
+    historyFields: state.historyFields,
+  })));
+  progress('activity-crosswalk', 'discovery', 'complete', 'Validated Sequoia Fund activity account crosswalk', {
+    accountCount: accounts.length,
+    changedFieldNames: crosswalk.changedFieldNames.join(','),
+    bindingFieldNames: crosswalk.bindingFieldNames.join(','),
+  });
+  const bindingByAccount = new Map(crosswalk.bindings.map(binding => [
+    binding.accountValue,
+    binding.bindingIdentity,
+  ]));
+  for (let index = 0; index < accounts.length; index += 1) {
+    const account = accounts[index]!;
+    const state = await discoverActivityExportState(
+      page,
+      activityFilters,
+      account,
+      duration,
+      transactionType,
+      config.from,
+      config.through,
+    );
+    if (bindingByAccount.get(account.value) !== state.accountIdentity) {
+      throw new Error('Sequoia Fund activity account crosswalk changed before download');
     }
-    activityRequestIdentities.add(requestIdentity);
-    activityRequests.push(request);
+    const fileName = `sequoia-fund-account-${account.accountToken}-activity-${config.from}-to-${config.through}.csv`;
+    artifacts.push(await downloadActivityArtifact({
+      page,
+      outputDir: config.outputDir,
+      fileName,
+      account,
+      state,
+      progress,
+      key: `activity:${index}`,
+      data: { accountIndex: index + 1, accountCount: accounts.length },
+    }));
   }
   const statementList = await fetchStatementList(page);
   const statementAccess = await discoverStatementAccess(page, statementList.documents.length);
@@ -855,25 +1312,9 @@ async function syncAuthenticated(
     accountCount: accounts.length,
     activityCount: accounts.length,
     statementCount: statementJobs.length,
+    activityChangedFieldNames: crosswalk.changedFieldNames.join(','),
+    activityBindingFieldNames: crosswalk.bindingFieldNames.join(','),
   });
-
-  const artifacts: SequoiaFundDownloadedArtifact[] = [];
-  for (let index = 0; index < accounts.length; index += 1) {
-    const account = accounts[index]!;
-    const fileName = `sequoia-fund-account-${account.accountToken}-activity-${config.from}-to-${config.through}.csv`;
-    artifacts.push(await downloadArtifact({
-      page,
-      outputDir: config.outputDir,
-      fileName,
-      kind: 'activity',
-      account,
-      request: activityRequests[index]!,
-      progress,
-      key: `activity:${index}`,
-      phase: 'activity-download',
-      data: { accountIndex: index + 1, accountCount: accounts.length },
-    }));
-  }
 
   for (let index = 0; index < statementJobs.length; index += 1) {
     const job = statementJobs[index]!;
