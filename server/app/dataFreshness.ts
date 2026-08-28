@@ -1,4 +1,5 @@
 import { getDb } from '../database.ts';
+import { localCalendarDate } from './calendarDate.ts';
 import { importDownloadSuggestions } from './importParsers/index.ts';
 
 const STALE_AFTER_DAYS = 45;
@@ -159,7 +160,7 @@ function buildCatchUpPlan(accounts: DataFreshnessAccount[], today: string) {
 }
 
 export function getDataFreshnessReport(options: { today?: string } = {}) {
-  const today = options.today || isoDate(new Date());
+  const today = options.today || localCalendarDate();
   const rows = getDb().prepare(`
     WITH transactionFacts AS (
       SELECT

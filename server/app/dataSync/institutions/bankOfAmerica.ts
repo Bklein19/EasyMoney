@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 
+import { localCalendarDate } from "../../calendarDate.ts";
 import { runInstitutionBrowserProgram } from "../browserSession.ts";
 import {
   browserNativeResponseBody,
@@ -233,8 +234,8 @@ export async function waitUntilBankOfAmericaAuthenticated(page: Page, timeoutMs:
   }, undefined, { timeout: timeoutMs });
 }
 
-export function parseBankOfAmericaArgs(args: string[]): BankOfAmericaSyncConfig {
-  const today = new Date().toISOString().slice(0, 10);
+export function parseBankOfAmericaArgs(args: string[], now = new Date()): BankOfAmericaSyncConfig {
+  const today = localCalendarDate(now);
   const config: BankOfAmericaSyncConfig = {
     outputDir: join(
       homedir(),

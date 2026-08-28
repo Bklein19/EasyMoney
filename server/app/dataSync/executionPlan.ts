@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 
+import { localCalendarDate } from '../calendarDate.ts';
 import type { SyncConnector } from './connector.ts';
 import { loadSyncAccountCoverage } from './coverage.ts';
 import { syncApplicationDataRoot } from './paths.ts';
@@ -12,13 +13,9 @@ import {
   type SyncTarget,
 } from './types.ts';
 
-function isoDate(value = new Date()): string {
-  return value.toISOString().slice(0, 10);
-}
-
 export function listSyncTargets(): SyncTarget[] {
   const context = {
-    today: isoDate(),
+    today: localCalendarDate(),
     accounts: loadSyncAccountCoverage(),
   };
   const connectors: readonly SyncConnector<SyncInstitutionId>[] = syncConnectors;
@@ -34,6 +31,7 @@ export function createSyncExecutionPlan(
   request: SyncRunRequest,
   options: {
     today?: string;
+    now?: Date;
     accounts?: SyncExecutionPlan['accounts'];
     outputDir?: string;
   } = {},
@@ -42,7 +40,7 @@ export function createSyncExecutionPlan(
     protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
     runId: request.runId,
     institutionId: request.institutionId,
-    today: options.today ?? isoDate(),
+    today: options.today ?? localCalendarDate(options.now),
     accounts: options.accounts ?? loadSyncAccountCoverage(),
     ...(request.connectionId ? { connectionId: request.connectionId } : {}),
     goal: request.goal,
