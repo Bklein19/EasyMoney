@@ -13,9 +13,14 @@ import type {
 } from '../../../server/app/dataSync/types.ts';
 import { syncArtifactSubtitle, syncArtifactTitle } from './syncArtifactLabels.ts';
 import {
+  syncAccountMappingWarning,
   syncClaimRequiresExplicitMapping,
 } from '../../../server/app/dataSync/accountMapping.ts';
-import { syncAccountGroupAutoDestination } from './syncAccountMapping.ts';
+import {
+  groupSyncAccountClaims,
+  syncAccountGroupAutoDestination,
+  syncAccountGroupClaim,
+} from './syncAccountMapping.ts';
 
 type FreshnessStatus = 'current' | 'due' | 'stale' | 'no-data' | 'closed';
 interface FreshnessAccount {
@@ -69,10 +74,6 @@ type SyncMappingChoice =
 
 type SyncMappingChoices = Record<string, SyncMappingChoice>;
 
-function syncAccountIdentityKey(claim: SyncAccountClaim) {
-  return claim.remoteAccountId;
-}
-
 function syncAccountDraft(claim: SyncAccountClaim): SyncAccountDraft {
   const name = claim.accountName && claim.accountName !== 'Selected account' ? claim.accountName : '';
   const normalized = `${name} ${claim.institution || ''}`.toLowerCase();
@@ -106,13 +107,6 @@ function initialSyncGroupMappingChoice(claims: SyncAccountClaim[]): SyncMappingC
     return { mode: 'needs-selection', accountId: '', account: syncAccountDraft(representative) };
   }
   return initialSyncMappingChoice(representative);
-}
-
-function syncAccountGroupClaim(claims: SyncAccountClaim[]): SyncAccountClaim {
-  const representative = claims[0]!;
-  return syncAccountGroupAutoDestination(claims) === null
-    ? { ...representative, requiresExplicitMapping: true }
-    : representative;
 }
 
 function syncMappingChoiceComplete(choice: SyncMappingChoice | undefined, claim: SyncAccountClaim) {
@@ -223,6 +217,13 @@ function artifactCoverage(artifact: SyncArtifactReview) {
   if (!artifact.coveredFrom && !artifact.coveredTo) return 'No dated facts';
   if (artifact.coveredFrom === artifact.coveredTo) return formatFreshnessDate(artifact.coveredFrom);
   return `${formatFreshnessDate(artifact.coveredFrom)} – ${formatFreshnessDate(artifact.coveredTo)}`;
+}
+
+function syncArtifactNonMappingWarnings(artifact: SyncArtifactReview) {
+  const mappingWarnings = new Set(artifact.accountClaims
+    .map(syncAccountMappingWarning)
+    .filter((warning): warning is string => Boolean(warning)));
+  return artifact.warnings.filter(warning => !mappingWarnings.has(warning));
 }
 
 function SyncAccountMappingControl({
@@ -342,20 +343,13 @@ function SyncAccountMappingControl({
 function SyncArtifactDetails({
   artifact,
   initiallyOpen,
-  accounts,
-  mappingChoices,
-  explicitMappingIdentityKeys,
-  onMappingChange,
 }: {
   artifact: SyncArtifactReview;
   initiallyOpen: boolean;
-  accounts: AccountRow[];
-  mappingChoices: SyncMappingChoices;
-  explicitMappingIdentityKeys: Set<string>;
-  onMappingChange: (identityKey: string, choice: SyncMappingChoice) => void;
 }) {
   const title = syncArtifactTitle(artifact);
   const subtitle = syncArtifactSubtitle(artifact);
+  const warnings = syncArtifactNonMappingWarnings(artifact);
   return (
     <details className="sync-review__artifact" open={initiallyOpen}>
       <summary>
@@ -365,7 +359,7 @@ function SyncArtifactDetails({
         </div>
         <div className="sync-review__destination">
           <span>Import to</span>
-          <strong>{artifact.accountName || (artifact.accountClaims.length > 1 ? 'Mapped per account' : 'Needs mapping')}</strong>
+          <strong>{artifact.accountName || (artifact.status === 'ready' ? 'Account mapping above' : 'Previously imported')}</strong>
         </div>
         <div className="sync-review__coverage">
           <span>Coverage</span>
@@ -381,9 +375,9 @@ function SyncArtifactDetails({
       </summary>
 
       <div className="sync-review__artifact-body">
-        {artifact.warnings.length > 0 && (
+        {warnings.length > 0 && (
           <div className="sync-review__warnings">
-            {artifact.warnings.map(warning => (
+            {warnings.map(warning => (
               <p key={warning}><AlertTriangle size={14} />{warning}</p>
             ))}
           </div>
@@ -392,32 +386,16 @@ function SyncArtifactDetails({
         <div className="sync-review__claim-grid">
           <section>
             <h4>Account claims</h4>
-            {artifact.accountClaims.map(claim => {
-              const identityKey = syncAccountIdentityKey(claim);
-              const mappingClaim = explicitMappingIdentityKeys.has(identityKey)
-                ? { ...claim, requiresExplicitMapping: true }
-                : claim;
-              const choice = mappingChoices[identityKey] || initialSyncMappingChoice(mappingClaim);
-              return (
-                <div className="sync-review__claim-row sync-review__claim-row--mapping" key={claim.sourceAccountId}>
-                  <div>
-                    <strong>{claim.accountName || 'Unidentified account'}</strong>
-                    <small>{[claim.accountHolder, claim.institution].filter(Boolean).join(' · ') || 'No holder or institution stated'}</small>
-                    <small>{claim.transactionCount} tx · {claim.balanceCount} bal</small>
-                  </div>
-                  {artifact.status === 'ready' ? (
-                    <SyncAccountMappingControl
-                      claim={mappingClaim}
-                      accounts={accounts}
-                      choice={choice}
-                      onChange={next => onMappingChange(identityKey, next)}
-                    />
-                  ) : (
-                    <span>{claim.resolvedAccountName || 'Previously imported'}</span>
-                  )}
+            {artifact.accountClaims.map(claim => (
+              <div className="sync-review__claim-row" key={claim.sourceAccountId}>
+                <div>
+                  <strong>{claim.accountName || 'Unidentified account'}</strong>
+                  <small>{[claim.accountHolder, claim.institution].filter(Boolean).join(' · ') || 'No holder or institution stated'}</small>
+                  <small>{claim.transactionCount} tx · {claim.balanceCount} bal</small>
                 </div>
-              );
-            })}
+                <span>{artifact.status === 'ready' ? 'Uses mapping above' : claim.resolvedAccountName || 'Previously imported'}</span>
+              </div>
+            ))}
           </section>
 
           <section>
@@ -508,34 +486,27 @@ function SyncReviewPanel({
     [review.artifacts],
   );
   const readyClaimGroups = useMemo(() => {
-    const groups = new Map<string, SyncAccountClaim[]>();
-    for (const claim of readyClaims) {
-      const identityKey = syncAccountIdentityKey(claim);
-      const claims = groups.get(identityKey) ?? [];
-      claims.push(claim);
-      groups.set(identityKey, claims);
-    }
-    return [...groups.entries()];
+    return groupSyncAccountClaims(readyClaims);
   }, [readyClaims]);
   const explicitMappingIdentityKeys = useMemo(() => new Set(
     readyClaimGroups
-      .filter(([, claims]) => syncAccountGroupAutoDestination(claims) === null)
-      .map(([identityKey]) => identityKey),
+      .filter(group => syncAccountGroupAutoDestination(group.claims) === null)
+      .map(group => group.identityKey),
   ), [readyClaimGroups]);
   const [mappingChoices, setMappingChoices] = useState<SyncMappingChoices>(() => Object.fromEntries(
-    readyClaimGroups.map(([identityKey, claims]) => [identityKey, initialSyncGroupMappingChoice(claims)]),
+    readyClaimGroups.map(group => [group.identityKey, initialSyncGroupMappingChoice(group.claims)]),
   ));
   useEffect(() => {
     setMappingChoices(Object.fromEntries(
-      readyClaimGroups.map(([identityKey, claims]) => [identityKey, initialSyncGroupMappingChoice(claims)]),
+      readyClaimGroups.map(group => [group.identityKey, initialSyncGroupMappingChoice(group.claims)]),
     ));
   }, [review.runId, readyClaimGroups]);
-  const mappingsComplete = readyClaimGroups.every(([identityKey, claims]) =>
-    syncMappingChoiceComplete(mappingChoices[identityKey], syncAccountGroupClaim(claims))
+  const mappingsComplete = readyClaimGroups.every(group =>
+    syncMappingChoiceComplete(mappingChoices[group.identityKey], syncAccountGroupClaim(group.claims))
   );
-  const buildAccountMappings = (): SyncAccountMappingDecision[] => readyClaimGroups.map(([identityKey, claims]) => {
-    const claim = syncAccountGroupClaim(claims);
-    const choice = mappingChoices[identityKey];
+  const buildAccountMappings = (): SyncAccountMappingDecision[] => readyClaimGroups.map(group => {
+    const claim = syncAccountGroupClaim(group.claims);
+    const choice = mappingChoices[group.identityKey];
     if (!choice || !syncMappingChoiceComplete(choice, claim)) {
       throw new Error('Resolve every source account before confirming the catch-up.');
     }
@@ -596,19 +567,50 @@ function SyncReviewPanel({
         </p>
       )}
       {error && <p className="sync-review__error">{error}</p>}
+      {readyClaimGroups.length > 0 && (
+        <section className="sync-review__mapping-groups" aria-label="Account mappings">
+          <div className="sync-review__mapping-groups-header">
+            <div>
+              <h4>Account mappings</h4>
+              <p>Choose once per account. Each choice applies to every downloaded file for that account.</p>
+            </div>
+            <span>{readyClaimGroups.length} account{readyClaimGroups.length === 1 ? '' : 's'}</span>
+          </div>
+          {readyClaimGroups.map(group => {
+            const representative = syncAccountGroupClaim(group.claims);
+            const mappingClaim = explicitMappingIdentityKeys.has(group.identityKey)
+              ? { ...representative, requiresExplicitMapping: true }
+              : representative;
+            const choice = mappingChoices[group.identityKey] || initialSyncMappingChoice(mappingClaim);
+            return (
+              <div className="sync-review__mapping-group" key={group.identityKey}>
+                <div>
+                  <strong>{representative.accountName || 'Unidentified account'}</strong>
+                  <small>{[representative.accountHolder, representative.institution].filter(Boolean).join(' · ') || 'No holder or institution stated'}</small>
+                  <small>
+                    {group.claims.length} file{group.claims.length === 1 ? '' : 's'} · {group.transactionCount} tx · {group.balanceCount} bal
+                  </small>
+                </div>
+                <SyncAccountMappingControl
+                  claim={mappingClaim}
+                  accounts={accounts}
+                  choice={choice}
+                  onChange={next => setMappingChoices(previous => ({
+                    ...previous,
+                    [group.identityKey]: next,
+                  }))}
+                />
+              </div>
+            );
+          })}
+        </section>
+      )}
       <div className="sync-review__artifacts">
         {review.artifacts.length > 0
           ? review.artifacts.map((artifact, index) => (
               <SyncArtifactDetails
                 artifact={artifact}
-                accounts={accounts}
-                initiallyOpen={review.artifacts.length === 1 || artifact.warnings.length > 0 || index === 0}
-                mappingChoices={mappingChoices}
-                explicitMappingIdentityKeys={explicitMappingIdentityKeys}
-                onMappingChange={(identityKey, choice) => setMappingChoices(previous => ({
-                  ...previous,
-                  [identityKey]: choice,
-                }))}
+                initiallyOpen={review.artifacts.length === 1 || syncArtifactNonMappingWarnings(artifact).length > 0 || index === 0}
                 key={`${artifact.importFileId}-${artifact.fileName}`}
               />
             ))

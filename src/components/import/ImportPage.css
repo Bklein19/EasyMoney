@@ -254,6 +254,72 @@
   color: var(--color-danger);
 }
 
+.sync-review__mapping-groups {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--bg-surface);
+}
+
+.sync-review__mapping-groups-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.45rem;
+}
+
+.sync-review__mapping-groups-header h4,
+.sync-review__mapping-groups-header p {
+  margin: 0;
+}
+
+.sync-review__mapping-groups-header p,
+.sync-review__mapping-groups-header > span {
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
+.sync-review__mapping-groups-header p {
+  margin-top: 0.15rem;
+}
+
+.sync-review__mapping-groups-header > span {
+  white-space: nowrap;
+}
+
+.sync-review__mapping-group {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
+  align-items: start;
+  gap: 1rem;
+  padding: 0.65rem 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.sync-review__mapping-group > div:first-child {
+  min-width: 0;
+}
+
+.sync-review__mapping-group strong,
+.sync-review__mapping-group small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sync-review__mapping-group strong {
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.sync-review__mapping-group small {
+  margin-top: 0.1rem;
+  color: var(--text-tertiary);
+  font-size: var(--text-xs);
+}
+
 .sync-review__artifact {
   border-bottom: 1px solid var(--hairline);
 }
@@ -1238,6 +1304,14 @@
     grid-template-columns: 1fr;
   }
 
+  .sync-review__mapping-group {
+    grid-template-columns: 1fr;
+  }
+
+  .sync-review__mapping-control {
+    width: 100%;
+  }
+
   .sync-review__transactions-header {
     align-items: flex-start;
     flex-direction: column;
@@ -1299,6 +1373,14 @@
 
   .sync-review__claim-grid {
     grid-template-columns: 1fr;
+  }
+
+  .sync-review__mapping-group {
+    grid-template-columns: 1fr;
+  }
+
+  .sync-review__mapping-control {
+    width: 100%;
   }
 
   .sync-review__transactions-header {

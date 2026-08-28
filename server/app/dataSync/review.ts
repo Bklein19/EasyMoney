@@ -12,6 +12,7 @@ import {
 import { importParserDisplayName } from '../importParsers/index.ts';
 import {
   commonSafeSyncAccountDestination,
+  syncAccountMappingWarning,
   syncClaimRequiresExplicitMapping,
 } from './accountMapping.ts';
 import type { SyncArtifactAccountRoute } from './connector.ts';
@@ -231,20 +232,10 @@ function resolveAccountClaims(
 function reviewWarnings(claims: SyncAccountClaim[]): string[] {
   const warnings: string[] = [];
   for (const claim of claims) {
-    if (claim.resolution === 'ambiguous') {
-      warnings.push(`${claim.accountName || 'A source account'} matches multiple local accounts and needs an explicit choice.`);
+    const mappingWarning = syncAccountMappingWarning(claim);
+    if (mappingWarning) warnings.push(mappingWarning);
+    if (!claim.resolvedAccountId || claim.resolution === 'ambiguous' || claim.resolution === 'archived-match') {
       continue;
-    }
-    if (claim.resolution === 'archived-match') {
-      warnings.push(`${claim.accountName || 'A source account'} matches an archived account and needs an explicit choice.`);
-      continue;
-    }
-    if (!claim.resolvedAccountId) {
-      warnings.push(`${claim.accountName || 'A newly discovered source account'} needs an account mapping before import.`);
-      continue;
-    }
-    if (syncClaimRequiresExplicitMapping(claim)) {
-      warnings.push(`${claim.accountName || 'A source account'} needs an explicit account choice before import.`);
     }
     const account = destinationAccount(claim.resolvedAccountId, { allowArchived: true });
     const destinationHolder = account.accountHolder?.trim().toLowerCase();
