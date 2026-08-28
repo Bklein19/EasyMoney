@@ -34,8 +34,8 @@ The one-year activity export overlaps the required 2026-03-24 through 2026-08-13
 
 ## Verified Workflow
 
-- Activity: open History, treat every enabled nonempty account-dropdown entry as an export scope, select one year and all transaction types, then revalidate and POST each scope's CSV form sequentially inside the authenticated browser context.
-- Statements: open Statements, locate each required quarterly date, open its transient document tab, and download the PDF through the same authenticated browser context.
+- Activity: after login, fetch the single login-level portfolio from `portfolioJSON`, validate the aggregate activity request with `transactionhistoryJSON`, and POST the aggregate CSV request directly to `transactionHistoryCSV` through the authenticated HTTP transport. Do not read or mutate the rendered filters.
+- Statements: request the Statements HTML and statement-list JSON directly, then download each required quarterly PDF through the same authenticated HTTP transport.
 - Each response is checked before saving. The completed local files are checked again for extension, size, and CSV/PDF signature.
 
 ## Limitations

@@ -9,116 +9,25 @@ import {
 } from '../../importParsers/moneyParsers/sequoia-fund-pdf.ts';
 import {
   classifySequoiaFundArtifactBytes,
-  parseSequoiaFundActivityCsvRequest,
-  parseSequoiaFundHistoryRequest,
   parseSequoiaFundStatementList,
-  populateSequoiaFundActivityForm,
   safeSequoiaFundErrorMessage,
-  selectAllSequoiaFundTransactions,
-  selectSequoiaFundActivityExportSubmitter,
-  selectSequoiaFundDuration,
-  sequoiaFundActivityScopeBindings,
-  sequoiaFundActivityScopesFromOptions,
-  sequoiaFundActivityScopeToken,
-  sequoiaFundActivityFilterRequestMatches,
-  sequoiaFundActivityResponseMetadataAccepted,
-  sequoiaFundActivityRequest,
   sequoiaFundBrowserSession,
   sequoiaFundCanonicalAccount,
-  sequoiaFundHistoryAccountIdentity,
-  selectSequoiaFundActivityExportForm,
   sequoiaFundStatementJobs,
+  sequoiaFundStatementListRequest,
   validateSequoiaFundArtifact,
-  type SequoiaFundActivityForm,
-  type SequoiaFundActivityFormCandidate,
 } from './sequoiaFund.ts';
 
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(temporaryDirectories.splice(0).map(path => rm(path, { recursive: true, force: true })));
+  await Promise.all(temporaryDirectories.splice(0).map(path =>
+    rm(path, { recursive: true, force: true })
+  ));
 });
 
-function activityForm(
-  action: string,
-  method: SequoiaFundActivityForm['method'] = 'POST',
-  enctype = 'application/x-www-form-urlencoded',
-): SequoiaFundActivityForm {
-  return {
-    action,
-    method,
-    enctype,
-    fields: {
-      groupKey: 'fixture-group',
-      securityID: 'fixture-security',
-      acctNumber: 'fixture-account',
-      startDate: '2026-01-01',
-      endDate: '2026-08-23',
-    },
-  };
-}
-
-function observedHistory(groupKey: string, requestCode = 'fixture-request'): Record<string, string> {
-  return {
-    acctNumber: '',
-    customFormField_MaxReturnCount: '',
-    endDate: '',
-    groupKey,
-    range: 'fixture-range',
-    requestCode,
-    securityID: '',
-    startDate: '',
-  };
-}
-
-function blankObservedExportForm(): SequoiaFundActivityFormCandidate {
-  return {
-    action: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionHistoryCSV',
-    method: 'POST',
-    enctype: 'application/x-www-form-urlencoded',
-    fields: {
-      acctNumber: '',
-      customFormField_MaxReturnCount: '',
-      endDate: '',
-      groupKey: '',
-      range: '',
-      requestCode: '',
-      securityID: '',
-      startDate: '',
-      customFormField_fundName: '',
-      customFormField_requestCode: '',
-      customFormField_transType: '',
-      eventLinkTypeId: '',
-    },
-    hints: ['transactionHistoryCSV'],
-  };
-}
-
-describe('Sequoia Fund account and request discovery', () => {
-  test('discovers every nonempty activity scope, including all-funds, and deduplicates exact values', () => {
-    const scopes = sequoiaFundActivityScopesFromOptions([
-      { label: 'All fund accounts', value: 'all-funds' },
-      { label: 'Investment account ending 1111', value: 'remote-a' },
-      { label: 'Investment account ending 2222', value: 'remote-b' },
-      { label: 'Investment account ending 1111', value: 'remote-a' },
-      { label: 'Disabled scope', value: 'disabled-scope', disabled: true },
-      { label: 'Placeholder', value: '' },
-    ]);
-
-    expect(scopes).toEqual([
-      { label: 'All fund accounts', value: 'all-funds' },
-      { label: 'Investment account ending 1111', value: 'remote-a' },
-      { label: 'Investment account ending 2222', value: 'remote-b' },
-    ]);
-  });
-
-  test('requires at least one nonempty activity scope', () => {
-    expect(() => sequoiaFundActivityScopesFromOptions([
-      { label: 'Placeholder', value: '' },
-    ])).toThrow('no downloadable activity scopes');
-  });
-
-  test('keeps canonical account identity independent from stable scope filenames', () => {
+describe('Sequoia Fund canonical account', () => {
+  test('uses the selected local account identity independently of remote portfolio fields', () => {
     expect(sequoiaFundCanonicalAccount('last4-1111')).toEqual({
       accountToken: 'last4-1111',
       accountName: 'Sequoia Fund - 1111',
@@ -127,345 +36,27 @@ describe('Sequoia Fund account and request discovery', () => {
       accountToken: 'key-abc123abc123',
       accountName: 'Sequoia Fund account abc123abc123',
     });
-    expect(() => sequoiaFundCanonicalAccount('remote-account')).toThrow('canonical account token is invalid');
-
-    const first = sequoiaFundActivityScopeToken('opaque-scope-a');
-    expect(first).toMatch(/^key-[a-f0-9]{12}$/);
-    expect(sequoiaFundActivityScopeToken('opaque-scope-a')).toBe(first);
-    expect(sequoiaFundActivityScopeToken('opaque-scope-b')).not.toBe(first);
-  });
-
-  test('chooses the smallest discovered duration that covers the requested range', () => {
-    const options = [
-      { label: 'Prior 30 days', value: '30d' },
-      { label: 'Prior 3 months', value: '3m' },
-      { label: 'Prior 12 months', value: '12m' },
-      { label: 'All available history', value: 'all' },
-    ];
-    const today = new Date('2026-08-23T12:00:00Z');
-
-    expect(selectSequoiaFundDuration(options, '2026-03-01', today).value).toBe('12m');
-    expect(selectSequoiaFundDuration(options, '2020-01-01', today).value).toBe('all');
-    expect(selectAllSequoiaFundTransactions([
-      { label: 'Purchases', value: 'purchases' },
-      { label: 'All transaction types', value: 'all-types' },
-    ]).value).toBe('all-types');
-  });
-
-  test('selects the dynamically discovered export form instead of the visible filter form', () => {
-    const candidates: SequoiaFundActivityFormCandidate[] = [
-      {
-        action: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistory',
-        method: 'GET',
-        enctype: 'application/x-www-form-urlencoded',
-        fields: { duration: '12m' },
-        hints: ['transactionHistoryOptions'],
-      },
-      {
-        action: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionHistoryCSV',
-        method: 'POST',
-        enctype: 'application/x-www-form-urlencoded',
-        fields: { groupKey: 'fixture-group' },
-        hints: ['port-history-csv'],
-      },
-      {
-        action: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/posttaxltdetailsCSV',
-        method: 'POST',
-        enctype: 'application/x-www-form-urlencoded',
-        fields: { securityID: 'fixture-security' },
-        hints: ['taxlot-history-csv'],
-      },
-    ];
-
-    expect(selectSequoiaFundActivityExportForm(
-      candidates,
-      'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistory',
-    )).toMatchObject({
-      action: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionHistoryCSV',
-      method: 'POST',
-    });
-  });
-
-  test('encodes a dynamically discovered same-origin GET action as query parameters', () => {
-    const request = sequoiaFundActivityRequest(
-      activityForm(
-        'https://secureaccountview.com/BFWeb/clients/sequoiafund/export-current-history?stale=ignored',
-        'GET',
-      ),
-      'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistory',
+    expect(() => sequoiaFundCanonicalAccount('remote-account')).toThrow(
+      'canonical account token is invalid',
     );
-
-    expect(request).toEqual({
-      url: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/export-current-history?groupKey=fixture-group&securityID=fixture-security&acctNumber=fixture-account&startDate=2026-01-01&endDate=2026-08-23',
-      method: 'GET',
-      headers: { Referer: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistory' },
-    });
-  });
-
-  test('encodes a dynamically discovered same-origin POST action using its form encoding', () => {
-    const request = sequoiaFundActivityRequest(
-      activityForm('https://secureaccountview.com/BFWeb/clients/sequoiafund/export-current-history'),
-      'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistory',
-    );
-
-    expect(request).toEqual({
-      url: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/export-current-history',
-      method: 'POST',
-      headers: { Referer: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistory' },
-      form: {
-        groupKey: 'fixture-group',
-        securityID: 'fixture-security',
-        acctNumber: 'fixture-account',
-        startDate: '2026-01-01',
-        endDate: '2026-08-23',
-      },
-    });
-    expect(() => sequoiaFundActivityRequest(
-      activityForm('https://example.test/BFWeb/clients/sequoiafund/export'),
-      'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistory',
-    )).toThrow('same-origin');
-  });
-
-  test('crosswalks populated history fields into the blank export form and applies the requested range', () => {
-    const populated = populateSequoiaFundActivityForm({
-      ...blankObservedExportForm(),
-      fields: { ...blankObservedExportForm().fields, exportType: 'csv' },
-    }, {
-      groupKey: 'fixture-group-b',
-      securityID: 'fixture-security-b',
-      acctNumber: 'fixture-account-b',
-      customFormField_MaxReturnCount: '500',
-      range: 'fixture-range',
-      requestCode: 'fixture-request',
-      startDate: '01/01/2025',
-      endDate: '08/27/2026',
-    }, '2026-03-01', '2026-08-27');
-
-    expect(populated.fields).toEqual({
-      groupKey: 'fixture-group-b',
-      securityID: 'fixture-security-b',
-      acctNumber: 'fixture-account-b',
-      customFormField_MaxReturnCount: '500',
-      range: 'fixture-range',
-      requestCode: 'fixture-request',
-      startDate: '03/01/2026',
-      endDate: '08/27/2026',
-      customFormField_fundName: '',
-      customFormField_requestCode: '',
-      customFormField_transType: '',
-      eventLinkTypeId: '',
-      exportType: 'csv',
-    });
-  });
-
-  test('preserves legitimate blank optional history fields while requiring server-issued account state', () => {
-    const populated = populateSequoiaFundActivityForm(
-      blankObservedExportForm(),
-      observedHistory('fixture-group'),
-      '2026-01-01',
-      '2026-08-27',
-    );
-
-    expect(populated.fields).toMatchObject({
-      acctNumber: '',
-      endDate: '',
-      groupKey: 'fixture-group',
-      range: 'fixture-range',
-      requestCode: 'fixture-request',
-      securityID: '',
-      startDate: '',
-    });
-    expect(() => populateSequoiaFundActivityForm(
-      blankObservedExportForm(),
-      observedHistory(''),
-      '2026-01-01',
-      '2026-08-27',
-    )).toThrow('account state is incomplete');
-  });
-
-  test('rejects a blank export form without the observed account crosswalk fields', () => {
-    expect(() => populateSequoiaFundActivityForm({
-      ...activityForm('https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionHistoryCSV'),
-      fields: { groupKey: '' },
-      hints: ['transactionHistoryCSV'],
-    }, {
-      groupKey: 'fixture-group',
-      securityID: 'fixture-security',
-      acctNumber: 'fixture-account',
-      customFormField_MaxReturnCount: '500',
-      range: 'fixture-range',
-      requestCode: 'fixture-request',
-      startDate: '2026-01-01',
-      endDate: '2026-08-27',
-    }, '2026-01-01', '2026-08-27')).toThrow('metadata is incomplete');
-  });
-
-  test('binds every scope to stable server state while allowing many scopes to share it', () => {
-    const first = observedHistory('fixture-group-a');
-    const second = observedHistory('fixture-group-b');
-    const bindings = sequoiaFundActivityScopeBindings([
-      { scopeValue: 'fixture-scope-a', historyFields: first },
-      { scopeValue: 'fixture-scope-b', historyFields: second },
-    ]);
-
-    expect(bindings.changedFieldNames).toEqual(['groupKey']);
-    expect(bindings.bindingFieldNames).toEqual(['groupKey']);
-    expect(bindings.bindings.map(binding => binding.bindingIdentity)).toEqual([
-      sequoiaFundHistoryAccountIdentity(first),
-      sequoiaFundHistoryAccountIdentity(second),
-    ]);
-    expect(new Set(bindings.bindings.map(binding => binding.bindingIdentity)).size).toBe(2);
-
-    const shared = sequoiaFundActivityScopeBindings([
-      { scopeValue: 'fixture-scope-a', historyFields: observedHistory('fixture-shared', 'request-a') },
-      { scopeValue: 'fixture-scope-b', historyFields: observedHistory('fixture-shared', 'request-b') },
-    ]);
-    expect(shared.bindings).toHaveLength(2);
-    expect(new Set(shared.bindings.map(binding => binding.bindingIdentity)).size).toBe(1);
-    expect(shared.changedFieldNames).toEqual(['requestCode']);
-    expect(shared.bindingFieldNames).toEqual([]);
-
-    expect(() => sequoiaFundActivityScopeBindings([
-      { scopeValue: 'fixture-scope-a', historyFields: first },
-      { scopeValue: 'fixture-scope-a', historyFields: second },
-    ])).toThrow('binding map is ambiguous');
-  });
-
-  test('classifies the exact filter, history, and CSV request sequence without ordinal replay', () => {
-    const filterOptions = {
-      method: 'GET',
-      accountField: 'fundAccount',
-      accountValue: 'fixture-account-a',
-      durationField: 'duration',
-      durationValue: 'fixture-duration',
-      transactionTypeField: 'transActionType',
-      transactionTypeValue: 'fixture-type',
-    };
-    expect(sequoiaFundActivityFilterRequestMatches({
-      ...filterOptions,
-      url: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistory' +
-        '?fundAccount=fixture-account-a&duration=fixture-duration&transActionType=fixture-type',
-    })).toBe(true);
-    expect(sequoiaFundActivityFilterRequestMatches({
-      ...filterOptions,
-      url: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistory' +
-        '?fundAccount=fixture-account-b&duration=fixture-duration&transActionType=fixture-type',
-    })).toBe(false);
-
-    const firstHistory = observedHistory('fixture-group-a');
-    const secondHistory = observedHistory('fixture-group-b');
-    const historySnapshot = (fields: Record<string, string>) => ({
-      url: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistoryJSON',
-      method: 'POST',
-      contentType: 'application/x-www-form-urlencoded; charset=UTF-8',
-      body: new URLSearchParams(fields).toString(),
-    });
-    expect(parseSequoiaFundHistoryRequest(historySnapshot(firstHistory))).toEqual(firstHistory);
-    expect(parseSequoiaFundHistoryRequest(historySnapshot(secondHistory))).toEqual(secondHistory);
-    expect(parseSequoiaFundHistoryRequest({
-      ...historySnapshot(firstHistory),
-      method: 'GET',
-    })).toBeNull();
-    expect(parseSequoiaFundHistoryRequest(historySnapshot({ ...firstHistory, groupKey: '' }))).toBeNull();
-
-    const exportState = populateSequoiaFundActivityForm(
-      blankObservedExportForm(),
-      firstHistory,
-      '2026-01-01',
-      '2026-08-27',
-    ).fields;
-    const csvSnapshot = {
-      url: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionHistoryCSV',
-      method: 'POST',
-      contentType: 'application/x-www-form-urlencoded',
-      body: new URLSearchParams({ ...exportState, csrf_token: 'fixture-csrf' }).toString(),
-    };
-    expect(parseSequoiaFundActivityCsvRequest(csvSnapshot, exportState)).toMatchObject(exportState);
-    expect(parseSequoiaFundActivityCsvRequest({
-      ...csvSnapshot,
-      body: new URLSearchParams({ ...exportState, groupKey: 'fixture-other' }).toString(),
-    }, exportState)).toBeNull();
-    expect(parseSequoiaFundActivityCsvRequest({
-      ...csvSnapshot,
-      body: new URLSearchParams({ ...exportState, eventLinkTypeId: 'fixture-other' }).toString(),
-    }, exportState)).toBeNull();
-    expect(parseSequoiaFundActivityCsvRequest({
-      ...csvSnapshot,
-      body: `${csvSnapshot.body}&groupKey=fixture-duplicate`,
-    }, exportState)).toBeNull();
-    expect(parseSequoiaFundActivityCsvRequest({
-      ...csvSnapshot,
-      url: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/unknown.csv',
-    }, exportState)).toBeNull();
-  });
-
-  test('rejects a discovered export form with duplicate successful control names', () => {
-    expect(() => selectSequoiaFundActivityExportForm([{
-      ...blankObservedExportForm(),
-      duplicateFieldNames: ['groupKey'],
-    }], 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistory')).toThrow(
-      'duplicate fields',
-    );
-  });
-
-  test('uses the unique observed export submitter and rejects ambiguous or overridden controls', () => {
-    expect(selectSequoiaFundActivityExportSubmitter([])).toBeNull();
-    expect(selectSequoiaFundActivityExportSubmitter([{
-      index: 2,
-      visible: true,
-      disabled: false,
-      exportSemantic: false,
-      resetSemantic: false,
-      hasFormOverride: false,
-    }])).toBe(2);
-    expect(selectSequoiaFundActivityExportSubmitter([
-      {
-        index: 0,
-        visible: true,
-        disabled: false,
-        exportSemantic: false,
-        resetSemantic: false,
-        hasFormOverride: false,
-      },
-      {
-        index: 1,
-        visible: true,
-        disabled: false,
-        exportSemantic: true,
-        resetSemantic: false,
-        hasFormOverride: false,
-      },
-    ])).toBe(1);
-    expect(() => selectSequoiaFundActivityExportSubmitter([
-      {
-        index: 0,
-        visible: true,
-        disabled: false,
-        exportSemantic: true,
-        resetSemantic: false,
-        hasFormOverride: false,
-      },
-      {
-        index: 1,
-        visible: true,
-        disabled: false,
-        exportSemantic: true,
-        resetSemantic: false,
-        hasFormOverride: false,
-      },
-    ])).toThrow('ambiguous');
-    expect(() => selectSequoiaFundActivityExportSubmitter([{
-      index: 0,
-      visible: true,
-      disabled: false,
-      exportSemantic: true,
-      resetSemantic: false,
-      hasFormOverride: true,
-    }])).toThrow('overrides');
   });
 });
 
 describe('Sequoia Fund statement discovery', () => {
+  test('posts the statement-list query with the page CSRF state', () => {
+    expect(sequoiaFundStatementListRequest({
+      csrfToken: 'opaque-csrf',
+      referer: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/viewStatements',
+    })).toEqual({
+      url: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/statements/getStatementList?csrf_token=opaque-csrf',
+      method: 'POST',
+      form: { queryType: 'all' },
+      headers: {
+        Referer: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/viewStatements',
+      },
+    });
+  });
+
   test('expands every API document under the canonical login-level account', () => {
     const account = sequoiaFundCanonicalAccount('last4-1111');
     const list = parseSequoiaFundStatementList({
@@ -475,19 +66,17 @@ describe('Sequoia Fund statement discovery', () => {
         statements: [
           {
             documentId: 'document-a',
-            statementType: 'quarterly',
             statementDate: '2026-03-31',
             fundAccount: 'Account ending 1111',
           },
           {
             documentId: 'document-b',
-            statementType: 'quarterly',
+            statementType: 'ignored-by-the-site',
             statementDate: '06/30/2026',
             accountDescription: 'Account ending 2222',
           },
           {
             documentId: 'outside-range',
-            statementType: 'quarterly',
             statementDate: '2025-12-31',
             fundAccount: 'Account ending 1111',
           },
@@ -498,19 +87,9 @@ describe('Sequoia Fund statement discovery', () => {
       account,
       list,
       {
-        csrfToken: null,
-        links: [
-          {
-            rawTarget: '/BFWeb/clients/sequoiafund/statements/document-a/quarterly?token=fixture-a',
-            context: 'Account ending 1111',
-          },
-          {
-            rawTarget: '/BFWeb/clients/sequoiafund/statements/document-b/quarterly?token=fixture-b',
-            context: 'Account ending 2222',
-          },
-        ],
+        csrfToken: 'fixture-csrf',
+        referer: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/viewStatements',
       },
-      'https://secureaccountview.com/BFWeb/clients/sequoiafund/viewStatements',
       '2026-01-01',
       '2026-12-31',
     );
@@ -521,12 +100,18 @@ describe('Sequoia Fund statement discovery', () => {
     expect(jobs.every(job => job.request.url.startsWith(
       'https://secureaccountview.com/BFWeb/clients/sequoiafund/statements/',
     ))).toBe(true);
-    expect(jobs.every(job => /^sequoia-fund-account-last4-\d{4}-\d{4}-\d{2}-\d{2}-statement-[a-f0-9]{10}\.pdf$/.test(
-      job.fileName,
-    ))).toBe(true);
+    expect(jobs.map(job => job.request.url)).toEqual([
+      'https://secureaccountview.com/BFWeb/clients/sequoiafund/statements/document-a/pdf/fixture-session?csrf_token=fixture-csrf',
+      'https://secureaccountview.com/BFWeb/clients/sequoiafund/statements/document-b/pdf/fixture-session?csrf_token=fixture-csrf',
+    ]);
+    expect(jobs.every(job =>
+      /^sequoia-fund-account-last4-\d{4}-\d{4}-\d{2}-\d{2}-statement-[a-f0-9]{10}\.pdf$/.test(
+        job.fileName,
+      )
+    )).toBe(true);
   });
 
-  test('rejects statement documents without an observed direct download target', () => {
+  test('rejects statement documents without complete direct-download state', () => {
     const account = sequoiaFundCanonicalAccount('last4-1111');
     const list = parseSequoiaFundStatementList({
       success: true,
@@ -534,7 +119,6 @@ describe('Sequoia Fund statement discovery', () => {
         sessionId: 'fixture-session',
         statements: [{
           documentId: 'document-a',
-          statementType: 'quarterly',
           statementDate: '2026-03-31',
         }],
       },
@@ -543,8 +127,10 @@ describe('Sequoia Fund statement discovery', () => {
     expect(() => sequoiaFundStatementJobs(
       account,
       list,
-      { csrfToken: 'fixture-csrf', links: [] },
-      'https://secureaccountview.com/BFWeb/clients/sequoiafund/viewStatements',
+      {
+        csrfToken: '',
+        referer: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/viewStatements',
+      },
       '2026-01-01',
       '2026-12-31',
     )).toThrow('download metadata is unavailable');
@@ -552,22 +138,16 @@ describe('Sequoia Fund statement discovery', () => {
 });
 
 describe('Sequoia Fund parser validation', () => {
-  test('accepts missing response metadata while still rejecting an observed failed response', () => {
-    expect(sequoiaFundActivityResponseMetadataAccepted(null)).toBe(true);
-    expect(sequoiaFundActivityResponseMetadataAccepted({ ok: true })).toBe(true);
-    expect(sequoiaFundActivityResponseMetadataAccepted({ ok: false })).toBe(false);
-  });
-
-  test('redacts discovered selector values from browser errors', () => {
-    const selector = 'opaqueSelector-9qZ';
+  test('redacts discovered server values from errors', () => {
+    const sensitiveValue = 'opaqueValue-9qZ';
     const message = safeSequoiaFundErrorMessage(
-      new Error(`selectOption failed for ${selector} at https://secureaccountview.com/private`),
-      [selector],
+      new Error('request failed for ' + sensitiveValue + ' at https://secureaccountview.com/private'),
+      [sensitiveValue],
     );
 
     expect(message).toContain('<redacted-selection>');
     expect(message).toContain('<redacted-url>');
-    expect(message).not.toContain(selector);
+    expect(message).not.toContain(sensitiveValue);
     expect(message).not.toContain('secureaccountview.com');
   });
 
@@ -576,9 +156,15 @@ describe('Sequoia Fund parser validation', () => {
     expect(classifySequoiaFundArtifactBytes(Buffer.from('%PDF-1.7 fixture'))).toBe('pdf');
     expect(classifySequoiaFundArtifactBytes(Buffer.from('<html>login</html>'))).toBe('html');
     expect(classifySequoiaFundArtifactBytes(Buffer.from('{"error":true}'))).toBe('json');
-    expect(classifySequoiaFundArtifactBytes(Buffer.from('Date,Amount\n01/01/2026,1.00'))).toBe('csv');
-    expect(classifySequoiaFundArtifactBytes(Buffer.from('Date\tAmount\n01/01/2026\t1.00'))).toBe('tabular-text');
-    expect(classifySequoiaFundArtifactBytes(Uint8Array.from([65, 0, 66, 0]))).toBe('utf16-or-binary');
+    expect(classifySequoiaFundArtifactBytes(
+      Buffer.from('Date,Amount\n01/01/2026,1.00'),
+    )).toBe('csv');
+    expect(classifySequoiaFundArtifactBytes(
+      Buffer.from('Date\tAmount\n01/01/2026\t1.00'),
+    )).toBe('tabular-text');
+    expect(classifySequoiaFundArtifactBytes(
+      Uint8Array.from([65, 0, 66, 0]),
+    )).toBe('utf16-or-binary');
     expect(classifySequoiaFundArtifactBytes(Buffer.from('plain text'))).toBe('text');
   });
 
@@ -586,7 +172,8 @@ describe('Sequoia Fund parser validation', () => {
     const directory = await mkdtemp('/private/tmp/easymoney-sequoia-test-');
     temporaryDirectories.push(directory);
     const account = sequoiaFundCanonicalAccount('last4-1111');
-    const fileName = 'sequoia-fund-account-last4-1111-scope-key-abc123abc123-activity-2026-01-01-to-2026-08-23.csv';
+    const fileName =
+      'sequoia-fund-account-last4-1111-activity-2026-01-01-to-2026-08-23.csv';
     const path = join(directory, fileName);
     await writeFile(path, [
       'Transaction Date,Transaction Type,Description,Dollar Amount',
@@ -610,8 +197,14 @@ describe('Sequoia Fund parser validation', () => {
       text: await Bun.file(path).text(),
       filePath: path,
     });
-    expect(parsed.transactions[0]).toMatchObject({ amountCents: 40_000, account: 'Sequoia Fund - 1111' });
-    expect(parsed.transactions[1]).toMatchObject({ amountCents: -2_500, account: 'Sequoia Fund - 1111' });
+    expect(parsed.transactions[0]).toMatchObject({
+      amountCents: 40_000,
+      account: 'Sequoia Fund - 1111',
+    });
+    expect(parsed.transactions[1]).toMatchObject({
+      amountCents: -2_500,
+      account: 'Sequoia Fund - 1111',
+    });
   });
 
   test('rejects HTML masquerading as an activity artifact before parser success', async () => {
@@ -624,13 +217,19 @@ describe('Sequoia Fund parser validation', () => {
     );
     await writeFile(path, '<html>,authentication required\nnot financial data');
 
-    await expect(validateSequoiaFundArtifact(path, 'activity', account)).rejects.toThrow('signature is invalid');
+    await expect(validateSequoiaFundArtifact(path, 'activity', account)).rejects.toThrow(
+      'signature is invalid',
+    );
   });
 
   test('statement parser accepts account-identifiable names and checks visible last four digits', () => {
-    const fileName = 'sequoia-fund-account-last4-1111-2026-06-30-statement-a1b2c3d4e5.pdf';
+    const fileName =
+      'sequoia-fund-account-last4-1111-2026-06-30-statement-a1b2c3d4e5.pdf';
     expect(sequoiaFundStatementMeta.matches({ filename: fileName, sample: '' })).toBe(true);
-    expect(sequoiaFundStatementAccount(fileName, 'Fund account number: XXXX1111')).toBe('Sequoia Fund - 1111');
+    expect(sequoiaFundStatementAccount(
+      fileName,
+      'Fund account number: XXXX1111',
+    )).toBe('Sequoia Fund - 1111');
     expect(() => sequoiaFundStatementAccount(
       fileName,
       'Fund account number: XXXX2222',
@@ -638,22 +237,29 @@ describe('Sequoia Fund parser validation', () => {
   });
 });
 
-test('Sequoia Fund uses observed browser exports and the shared browser-native request transport', async () => {
+test('Sequoia Fund uses direct authenticated HTTP after login', async () => {
   const source = await Bun.file(new URL('./sequoiaFund.ts', import.meta.url)).text();
 
-  expect(source).toContain('runBrowserNativeRequest(page');
+  expect(source).toContain('runAuthenticatedHttpRequest(page');
+  expect(source).toContain('parseSequoiaFundPortfolio');
+  expect(source).toContain('sequoiaFundActivityExportFields');
+  expect(source).not.toContain('runBrowserNativeRequest(page');
   expect(source).not.toContain('page.context().request');
-  expect(source).toContain('page.waitForRequest');
-  expect(source).toContain('locator.selectOption(value)');
-  expect(source).toContain('option.parentElement instanceof HTMLOptGroupElement');
-  expect(source).toContain('element.form.requestSubmit()');
-  expect(source).toContain("page.waitForEvent('download'");
-  expect(source).not.toContain('replay');
+  expect(source).not.toContain('page.waitForRequest');
+  expect(source).not.toContain('page.goto(');
+  expect(source).not.toContain('page.locator(');
+  expect(source).not.toContain('page.waitForFunction(');
+  expect(source).not.toContain('locator.selectOption');
+  expect(source).not.toContain('requestSubmit');
+  expect(source).not.toContain("page.waitForEvent('download'");
   expect(source).not.toContain('waitForTimeout');
 });
 
 test('Sequoia Fund always starts headed without reading or writing saved authentication', async () => {
-  expect(sequoiaFundBrowserSession('sequoia-fund-catchup', '/private/tmp/fixture-profile')).toEqual({
+  expect(sequoiaFundBrowserSession(
+    'sequoia-fund-catchup',
+    '/private/tmp/fixture-profile',
+  )).toEqual({
     name: 'sequoia-fund-catchup',
     startUrl: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/index',
     profilePath: '/private/tmp/fixture-profile',

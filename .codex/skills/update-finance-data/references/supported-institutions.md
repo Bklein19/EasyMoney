@@ -200,9 +200,9 @@ Useful parser filename:
 - `sequoia-fund-2026-06-30.pdf`
 
 Notes:
-- Each connector run targets one local Sequoia Fund account/login. The activity dropdown entries are export scopes, not separate accounts.
-- Every enabled, nonempty scope—including an all-funds scope—is reselected and bound to its server-observed state immediately before its CSV is submitted and validated.
-- All activity scopes and statements from the run retain the selected local account's canonical identity.
+- Each connector run targets one local Sequoia Fund account/login and requires exactly one login-level portfolio group from `portfolioJSON`.
+- Activity is requested once at the aggregate portfolio level with direct history JSON and CSV HTTP requests; rendered dropdown entries are not treated as accounts or automation targets.
+- The aggregate activity export and all statements retain the selected local account's canonical identity.
 - Statements provide balance and purchase activity.
 
 ## Other CSV Profiles
