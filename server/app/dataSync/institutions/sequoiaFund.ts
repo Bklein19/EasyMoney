@@ -213,8 +213,17 @@ export type SequoiaFundStatementJob = {
   fileName: string;
 };
 
-function safeErrorMessage(error: unknown): string {
-  return String(error instanceof Error ? error.message : error)
+export function safeSequoiaFundErrorMessage(
+  error: unknown,
+  sensitiveValues: Iterable<string> = [],
+): string {
+  let message = String(error instanceof Error ? error.message : error);
+  const values = [...new Set(sensitiveValues)]
+    .map(value => value.trim())
+    .filter(Boolean)
+    .sort((left, right) => right.length - left.length);
+  for (const value of values) message = message.split(value).join('<redacted-selection>');
+  return message
     .replace(/https?:\/\/\S+/g, '<redacted-url>')
     .replace(/\b[a-f0-9-]{16,}\b/gi, '<redacted-id>')
     .replace(/\b\d{4,}\b/g, '<digits>');
@@ -720,6 +729,12 @@ export function classifySequoiaFundArtifactBytes(bytes: Uint8Array): SequoiaFund
   return 'text';
 }
 
+export function sequoiaFundActivityResponseMetadataAccepted(
+  response: { ok: boolean } | null,
+): boolean {
+  return response === null || response.ok;
+}
+
 function assertCsvResponse(response: BrowserNativeResponse, body: Buffer): void {
   if (!browserNativeResponseOk(response) || body.length < 32 || classifySequoiaFundArtifactBytes(body) !== 'csv' ||
     !/(?:csv|text|excel|octet-stream)/.test(responseContentType(response))) {
@@ -885,7 +900,9 @@ async function discoverActivityExportState(
   transactionType: SequoiaFundSelectOption,
   from: string,
   through: string,
+  sensitiveValues: Set<string>,
 ): Promise<SequoiaFundActivityExportState> {
+  sensitiveValues.add(account.value);
   await page.waitForLoadState('networkidle', { timeout: 30_000 });
   let filterRequestObserved = false;
   const historyRequestPromise = page.waitForRequest(request => {
@@ -926,6 +943,9 @@ async function discoverActivityExportState(
   const observedHistory = historyFields(historyRequest);
   if (!observedHistory) {
     throw new Error('Sequoia Fund activity account mapping is ambiguous');
+  }
+  for (const value of Object.values(observedHistory)) {
+    if (value) sensitiveValues.add(value);
   }
   const historyResponse = await historyRequest.response();
   await historyResponse?.finished();
@@ -1156,7 +1176,7 @@ async function downloadActivityArtifact(options: {
     const response = await request.response();
     const responseStatus = response?.status() ?? 0;
     const responseContentType = response?.headers()['content-type']?.split(';')[0]?.trim().toLowerCase() ?? '';
-    if (!response?.ok() || !/(?:csv|text|excel|octet-stream)/.test(responseContentType)) {
+    if (!sequoiaFundActivityResponseMetadataAccepted(response ? { ok: response.ok() } : null)) {
       throw new Error('Sequoia Fund activity browser response failed');
     }
     if (byteClass !== 'csv') {
@@ -1235,9 +1255,27 @@ async function syncAuthenticated(
   config: Required<Pick<SequoiaFundSyncConfig, 'outputDir' | 'from' | 'through'>>,
   progress: Progress,
 ): Promise<SequoiaFundSyncResult> {
+  const sensitiveValues = new Set<string>();
+  try {
+    return await syncAuthenticatedWithSensitiveValues(page, config, progress, sensitiveValues);
+  } catch (error) {
+    throw new Error(safeSequoiaFundErrorMessage(error, sensitiveValues));
+  }
+}
+
+async function syncAuthenticatedWithSensitiveValues(
+  page: Page,
+  config: Required<Pick<SequoiaFundSyncConfig, 'outputDir' | 'from' | 'through'>>,
+  progress: Progress,
+  sensitiveValues: Set<string>,
+): Promise<SequoiaFundSyncResult> {
   const discoveryKey = 'discovery';
   progress(discoveryKey, 'discovery', 'start', 'Discovering Sequoia Fund accounts and artifacts');
   const activityFilters = await discoverActivityFilters(page);
+  for (const option of activityFilters.accounts) {
+    if (option.value) sensitiveValues.add(option.value);
+    if (option.label) sensitiveValues.add(option.label);
+  }
   const accounts = [sequoiaFundLoginAccountFromOptions(activityFilters.accounts)];
   const duration = selectSequoiaFundDuration(activityFilters.durations, config.from);
   const transactionType = selectAllSequoiaFundTransactions(activityFilters.transactionTypes);
@@ -1256,6 +1294,7 @@ async function syncAuthenticated(
       transactionType,
       config.from,
       config.through,
+      sensitiveValues,
     );
     discoveredStates.push({ account, state });
   }
@@ -1282,6 +1321,7 @@ async function syncAuthenticated(
       transactionType,
       config.from,
       config.through,
+      sensitiveValues,
     );
     if (bindingByAccount.get(account.value) !== state.accountIdentity) {
       throw new Error('Sequoia Fund activity account crosswalk changed before download');
@@ -1451,7 +1491,7 @@ export async function runSequoiaFundSync(
           progress(authenticationKey, 'authentication', 'waiting', 'Waiting for Sequoia Fund authentication');
         },
         isAuthenticated: isSequoiaFundAuthenticatedPage,
-        safeErrorMessage,
+        safeErrorMessage: safeSequoiaFundErrorMessage,
         syncAuthenticated: (page: Page) => syncAuthenticated(page, {
           outputDir,
           from: config.from,

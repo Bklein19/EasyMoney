@@ -13,6 +13,7 @@ import {
   parseSequoiaFundHistoryRequest,
   parseSequoiaFundStatementList,
   populateSequoiaFundActivityForm,
+  safeSequoiaFundErrorMessage,
   selectAllSequoiaFundTransactions,
   selectSequoiaFundActivityExportSubmitter,
   selectSequoiaFundDuration,
@@ -20,6 +21,7 @@ import {
   sequoiaFundLoginAccountFromOptions,
   sequoiaFundActivityAccountCrosswalk,
   sequoiaFundActivityFilterRequestMatches,
+  sequoiaFundActivityResponseMetadataAccepted,
   sequoiaFundActivityRequest,
   sequoiaFundBrowserSession,
   sequoiaFundHistoryAccountIdentity,
@@ -580,6 +582,25 @@ describe('Sequoia Fund statement discovery', () => {
 });
 
 describe('Sequoia Fund parser validation', () => {
+  test('accepts missing response metadata while still rejecting an observed failed response', () => {
+    expect(sequoiaFundActivityResponseMetadataAccepted(null)).toBe(true);
+    expect(sequoiaFundActivityResponseMetadataAccepted({ ok: true })).toBe(true);
+    expect(sequoiaFundActivityResponseMetadataAccepted({ ok: false })).toBe(false);
+  });
+
+  test('redacts discovered selector values from browser errors', () => {
+    const selector = 'opaqueSelector-9qZ';
+    const message = safeSequoiaFundErrorMessage(
+      new Error(`selectOption failed for ${selector} at https://secureaccountview.com/private`),
+      [selector],
+    );
+
+    expect(message).toContain('<redacted-selection>');
+    expect(message).toContain('<redacted-url>');
+    expect(message).not.toContain(selector);
+    expect(message).not.toContain('secureaccountview.com');
+  });
+
   test('classifies parser-safe and rejected artifact byte signatures without exposing content', () => {
     expect(classifySequoiaFundArtifactBytes(new Uint8Array())).toBe('empty');
     expect(classifySequoiaFundArtifactBytes(Buffer.from('%PDF-1.7 fixture'))).toBe('pdf');
