@@ -48,6 +48,8 @@ describe('Electrobun 2 packaging contract', () => {
       'utf8',
     );
     expect(wrapper).toContain('EASYMONEY_BUN_EXECUTABLE ||= process.execPath');
+    expect(wrapper).toContain('EASYMONEY_LEGACY_DB_PATH ||= developmentDatabasePath()');
+    expect(wrapper).not.toContain('EASYMONEY_DB_PATH ||= developmentDatabasePath()');
     expect(wrapper).toContain('verify-electrobun-bundle.ts');
   });
 

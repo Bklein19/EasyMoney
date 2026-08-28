@@ -4,7 +4,7 @@ EasyMoney is a local-first personal finance app for importing bank, credit card,
 
 ## Desktop App
 
-EasyMoney is packaged with Electrobun `1.18.1`. Electrobun RPC is used only as the transport between the webview and Bun main process: the existing tRPC router, validation, error shapes, and React Query integration remain unchanged. Browser development keeps the HTTP tRPC transport as a fallback.
+EasyMoney is packaged with Electrobun `2.0.1`. Electrobun RPC is used only as the transport between the webview and Bun main process: the existing tRPC router, validation, error shapes, and React Query integration remain unchanged. Browser development keeps the HTTP tRPC transport as a fallback.
 
 The repository uses Bun for installation, scripts, tests, frontend bundling, the Electrobun CLI bootstrap, and the packaged main process. Do not invoke the Electrobun package's `node` shebang directly; the checked-in launcher runs it explicitly with Bun.
 
@@ -19,7 +19,7 @@ Desktop builds use the operating system webview rather than bundling Chromium. T
 
 The stable build produces a native package for the host operating system. macOS uses WebKit, Windows uses WebView2, and Linux uses GTK 3 with WebKitGTK 4.1. Linux installations therefore require the distribution packages that provide `libwebkit2gtk-4.1` and `libayatana-appindicator3` (for example, `libwebkit2gtk-4.1-0` and `libayatana-appindicator3-1` on current Debian/Ubuntu releases). Google Chrome is required only for the optional institution-sync browser automation.
 
-Installed builds store their database and local environment file under Electrobun's channel-specific user-data directory. On first launch, an existing `~/src/EasyMoney/data/easymoney.sqlite` database and `~/src/EasyMoney/.env.local` are copied into that directory as a consistent local snapshot; existing desktop data is never overwritten. Set `EASYMONEY_LEGACY_DB_PATH` or `EASYMONEY_LEGACY_ENV_PATH` to migrate from another checkout location.
+Desktop builds store their database and local environment file under Electrobun's channel-specific user-data directory. On first launch, an existing `~/src/EasyMoney/data/easymoney.sqlite` database and `~/src/EasyMoney/.env.local` are copied there as a consistent local snapshot. If an earlier launch already created a provably pristine database, recovery is published to a separate sibling database and selected without replacing the original SQLite file or its journal. Development and installed launches use the same channel data path; `EASYMONEY_LEGACY_DB_PATH` and `EASYMONEY_LEGACY_ENV_PATH` can select another migration source, while explicit `EASYMONEY_DB_PATH` and `EASYMONEY_ENV_PATH` overrides remain untouched.
 
 ## Features
 

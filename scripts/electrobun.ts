@@ -32,8 +32,8 @@ function developmentDatabasePath() {
 }
 
 if (args[0] === 'dev' || args[0] === 'run') {
-  environment.EASYMONEY_DB_PATH ||= developmentDatabasePath();
-  environment.EASYMONEY_ENV_PATH ||= path.join(projectRoot, '.env.local');
+  environment.EASYMONEY_LEGACY_DB_PATH ||= developmentDatabasePath();
+  environment.EASYMONEY_LEGACY_ENV_PATH ||= path.join(projectRoot, '.env.local');
 }
 
 const child = Bun.spawn([process.execPath, bootstrap, ...args], {

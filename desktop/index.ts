@@ -16,18 +16,22 @@ fs.mkdirSync(dataDirectory, { recursive: true });
 process.env.EASYMONEY_DESKTOP = '1';
 const configuredDatabasePath = process.env.EASYMONEY_DB_PATH;
 const configuredEnvironmentPath = process.env.EASYMONEY_ENV_PATH;
-const databasePath = configuredDatabasePath || path.join(dataDirectory, 'easymoney.sqlite');
+let databasePath = configuredDatabasePath || path.join(dataDirectory, 'easymoney.sqlite');
 const environmentPath = configuredEnvironmentPath || path.join(dataDirectory, '.env.local');
 
-if (!configuredDatabasePath && !configuredEnvironmentPath) {
-  const migration = migrateLegacyData({
-    homeDirectory: Utils.paths.home,
-    databasePath,
-    environmentPath,
-  });
-  if (migration.migratedDatabaseFrom) {
-    console.log(`Migrated the legacy EasyMoney database from ${migration.migratedDatabaseFrom}`);
-  }
+const migration = migrateLegacyData({
+  homeDirectory: Utils.paths.home,
+  databasePath,
+  environmentPath,
+  allowDatabaseMigration: !configuredDatabasePath,
+  allowEnvironmentMigration: !configuredEnvironmentPath,
+});
+databasePath = migration.databasePath;
+if (migration.migratedDatabaseFrom) {
+  const action = migration.recoveredEmptyDatabase ? 'Recovered' : 'Migrated';
+  console.log(`${action} the EasyMoney database from ${migration.migratedDatabaseFrom}`);
+} else if (migration.recoveredEmptyDatabase) {
+  console.log(`Using the recovered EasyMoney database at ${migration.databasePath}`);
 }
 
 process.env.EASYMONEY_DB_PATH = databasePath;
