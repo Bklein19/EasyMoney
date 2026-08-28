@@ -58,6 +58,7 @@ describe('Electrobun 2 packaging contract', () => {
       'desktop-dist/**',
       'data/**',
       '.env.local',
+      '.git/**',
     ]) {
       expect(ignoredPaths.has(pathPattern)).toBeTrue();
     }
