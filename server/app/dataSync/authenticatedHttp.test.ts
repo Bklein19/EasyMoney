@@ -65,7 +65,7 @@ describe('authenticated HTTP transport', () => {
     expect(() => assertAuthenticatedHttpStatus(response({ status: 500 }))).toThrow('status 500');
     expect(() => assertAuthenticatedHttpContentType(response({
       headers: { 'content-type': 'text/html' },
-    }), ['text/csv'])).toThrow('content type');
+    }), ['text/csv'])).toThrow('content type "text/html" was not accepted');
     expect(() => assertAuthenticatedHttpBody(response({ body: Buffer.alloc(0) }))).toThrow('too small');
     expect(() => assertAuthenticatedHttpBody(csv, { startsWith: ['%PDF-'] })).toThrow('signature');
     expect(() => assertAuthenticatedHttpBody(csv, { validate: () => false })).toThrow('body was not accepted');

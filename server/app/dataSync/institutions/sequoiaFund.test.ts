@@ -9,14 +9,17 @@ import {
 } from '../../importParsers/moneyParsers/sequoia-fund-pdf.ts';
 import {
   classifySequoiaFundArtifactBytes,
+  parseSequoiaFundHistoryHttpResponse,
   parseSequoiaFundStatementList,
   safeSequoiaFundErrorMessage,
+  sequoiaFundAjaxHeaders,
   sequoiaFundBrowserSession,
   sequoiaFundCanonicalAccount,
   sequoiaFundStatementJobs,
   sequoiaFundStatementListRequest,
   validateSequoiaFundArtifact,
 } from './sequoiaFund.ts';
+import type { AuthenticatedHttpResponse } from '../authenticatedHttp.ts';
 
 const temporaryDirectories: string[] = [];
 
@@ -43,6 +46,16 @@ describe('Sequoia Fund canonical account', () => {
 });
 
 describe('Sequoia Fund statement discovery', () => {
+  test('matches the authenticated site JSON AJAX headers', () => {
+    expect(sequoiaFundAjaxHeaders(
+      'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistory',
+    )).toEqual({
+      Accept: 'application/json, text/javascript, */*; q=0.01',
+      'X-Requested-With': 'XMLHttpRequest',
+      Referer: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistory',
+    });
+  });
+
   test('posts the statement-list query with the page CSRF state', () => {
     expect(sequoiaFundStatementListRequest({
       csrfToken: 'opaque-csrf',
@@ -52,6 +65,8 @@ describe('Sequoia Fund statement discovery', () => {
       method: 'POST',
       form: { queryType: 'all' },
       headers: {
+        Accept: 'application/json, text/javascript, */*; q=0.01',
+        'X-Requested-With': 'XMLHttpRequest',
         Referer: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/viewStatements',
       },
     });
@@ -149,6 +164,40 @@ describe('Sequoia Fund parser validation', () => {
     expect(message).toContain('<redacted-url>');
     expect(message).not.toContain(sensitiveValue);
     expect(message).not.toContain('secureaccountview.com');
+  });
+
+  test('does not let short protocol constants corrupt safe diagnostics', () => {
+    expect(safeSequoiaFundErrorMessage(
+      new Error('Authenticated HTTP response content type "text/html" was not accepted'),
+      ['H', '90'],
+    )).toBe('Authenticated HTTP response content type "text/html" was not accepted');
+  });
+
+  test('validates history JSON by body when the legacy server mislabels its media type', () => {
+    const response = (body: string, overrides: Partial<AuthenticatedHttpResponse> = {}):
+    AuthenticatedHttpResponse => ({
+      requestUrl: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistoryJSON',
+      finalUrl: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistoryJSON',
+      status: 200,
+      statusText: 'OK',
+      headers: { 'content-type': 'text/html; charset=UTF-8' },
+      body: Buffer.from(body),
+      redirects: [],
+      ...overrides,
+    });
+
+    expect(parseSequoiaFundHistoryHttpResponse(response(JSON.stringify({
+      data: { portHistList: [{}, {}] },
+    })))).toBe(2);
+    expect(parseSequoiaFundHistoryHttpResponse(response(JSON.stringify({
+      data: { portHistList: [] },
+    }), { headers: {} }))).toBe(0);
+    expect(() => parseSequoiaFundHistoryHttpResponse(
+      response('<html><body>Session expired</body></html>'),
+    )).toThrow('history response was not valid JSON');
+    expect(() => parseSequoiaFundHistoryHttpResponse(
+      response('{"data":{"portHistList":[]}}', { status: 500, statusText: 'Error' }),
+    )).toThrow('status 500');
   });
 
   test('classifies parser-safe and rejected artifact byte signatures without exposing content', () => {

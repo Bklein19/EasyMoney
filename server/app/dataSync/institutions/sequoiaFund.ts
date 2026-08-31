@@ -35,6 +35,7 @@ const sequoiaFundActivityCsvPath = `${sequoiaFundClientPath}/transactionHistoryC
 const sequoiaFundPortfolioPath = `${sequoiaFundClientPath}/portfolioJSON`;
 const sequoiaFundStatementsPath = `${sequoiaFundClientPath}/viewStatements`;
 const sequoiaFundStatementListPath = `${sequoiaFundClientPath}/statements/getStatementList`;
+const sequoiaFundJsonAccept = 'application/json, text/javascript, */*; q=0.01';
 
 export type SequoiaFundProgressPhase =
   | 'authentication'
@@ -157,7 +158,7 @@ export function safeSequoiaFundErrorMessage(
   let message = String(error instanceof Error ? error.message : error);
   const values = [...new Set(sensitiveValues)]
     .map(value => value.trim())
-    .filter(Boolean)
+    .filter(value => value.length >= 4)
     .sort((left, right) => right.length - left.length);
   for (const value of values) message = message.split(value).join('<redacted-selection>');
   return message
@@ -177,6 +178,15 @@ function validatedSequoiaFundUrl(value: string, base?: string): URL {
     throw new Error('Sequoia Fund API destination is outside the authenticated client origin');
   }
   return url;
+}
+
+export function sequoiaFundAjaxHeaders(referer: string): Record<string, string> {
+  const refererUrl = validatedSequoiaFundUrl(referer);
+  return {
+    Accept: sequoiaFundJsonAccept,
+    'X-Requested-With': 'XMLHttpRequest',
+    Referer: refererUrl.toString(),
+  };
 }
 
 function validateDate(value: string, label: string): void {
@@ -277,7 +287,7 @@ export function sequoiaFundStatementListRequest(
     url: url.toString(),
     method: 'POST',
     form: { queryType: 'all' },
-    headers: { Referer: base.toString() },
+    headers: sequoiaFundAjaxHeaders(base.toString()),
   };
 }
 
@@ -489,6 +499,33 @@ function acceptedHttpBody(
   });
 }
 
+function acceptedResponseBody(
+  response: AuthenticatedHttpResponse,
+  minimumBytes = 1,
+): Buffer {
+  return assertAuthenticatedHttpResponse(response, {
+    isLoginUrl: isSequoiaFundLoginResponseUrl,
+    status: status => status >= 200 && status < 300,
+    body: { minimumBytes },
+  });
+}
+
+export function parseSequoiaFundHistoryHttpResponse(
+  response: AuthenticatedHttpResponse,
+): number {
+  const body = acceptedResponseBody(response);
+  if (classifySequoiaFundArtifactBytes(body) !== 'json') {
+    throw new Error('Sequoia Fund history response was not valid JSON');
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(body.toString('utf8')) as unknown;
+  } catch {
+    throw new Error('Sequoia Fund history response was not valid JSON');
+  }
+  return parseSequoiaFundHistoryResponse(value);
+}
+
 async function initializeSequoiaFundHistory(page: Page): Promise<string> {
   const current = validatedSequoiaFundUrl(page.url());
   const historyUrl = new URL(sequoiaFundHistoryPath, current.origin).toString();
@@ -506,7 +543,7 @@ async function fetchSequoiaFundPortfolio(page: Page, referer: string) {
   const response = await executeRequest(page, {
     url: new URL(sequoiaFundPortfolioPath, current.origin).toString(),
     method: 'GET',
-    headers: { Referer: current.toString() },
+    headers: sequoiaFundAjaxHeaders(current.toString()),
   });
   const body = acceptedHttpBody(response, ['application/json', 'text/json', 'text/plain']);
   let value: unknown;
@@ -529,27 +566,14 @@ async function discoverActivityExportState(
   sensitiveValues.add(groupKey);
   const window = sequoiaFundActivityWindow(from, through);
   const observedHistory = sequoiaFundHistoryFields(groupKey, window);
-  for (const value of Object.values(observedHistory)) {
-    if (value) sensitiveValues.add(value);
-  }
   const current = validatedSequoiaFundUrl(referer);
   const historyResponse = await executeRequest(page, {
     url: new URL(sequoiaFundHistoryJsonPath, current.origin).toString(),
     method: 'POST',
     form: observedHistory,
-    headers: { Referer: current.toString() },
+    headers: sequoiaFundAjaxHeaders(current.toString()),
   });
-  const historyBody = acceptedHttpBody(
-    historyResponse,
-    ['application/json', 'text/json', 'text/plain'],
-  );
-  let historyValue: unknown;
-  try {
-    historyValue = JSON.parse(historyBody.toString('utf8')) as unknown;
-  } catch {
-    throw new Error('Sequoia Fund history response was not valid JSON');
-  }
-  const transactionCount = parseSequoiaFundHistoryResponse(historyValue);
+  const transactionCount = parseSequoiaFundHistoryHttpResponse(historyResponse);
   const exportForm: SequoiaFundActivityForm = {
     action: new URL(sequoiaFundActivityCsvPath, current.origin).toString(),
     method: 'POST',
@@ -802,7 +826,7 @@ export async function isSequoiaFundAuthenticatedPage(page: Page): Promise<boolea
     const response = await executeRequest(page, {
       url: new URL(sequoiaFundPortfolioPath, current.origin).toString(),
       method: 'GET',
-      headers: { Referer: current.toString() },
+      headers: sequoiaFundAjaxHeaders(current.toString()),
     });
     const body = acceptedHttpBody(response, ['application/json', 'text/json', 'text/plain']);
     parseSequoiaFundPortfolio(JSON.parse(body.toString('utf8')) as unknown);

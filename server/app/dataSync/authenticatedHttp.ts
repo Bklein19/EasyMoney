@@ -255,7 +255,11 @@ export function assertAuthenticatedHttpContentType(
   const valid = expected.some(expectation => typeof expectation === 'string'
     ? contentType === expectation.toLowerCase()
     : expectation.test(contentType));
-  if (!valid) throw new Error('Authenticated HTTP response content type was not accepted');
+  if (!valid) {
+    throw new Error(
+      `Authenticated HTTP response content type "${contentType || '<missing>'}" was not accepted`,
+    );
+  }
   return contentType;
 }
 
