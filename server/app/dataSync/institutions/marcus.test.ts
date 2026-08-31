@@ -547,6 +547,41 @@ test('Marcus returns to documents after a documents-first partial capture needs 
   expect(listeners.size).toBe(0);
 });
 
+test('Marcus stops catalog navigation as soon as an authenticated-looking route redirects to login', async () => {
+  type ResponseListener = (response: never) => void;
+  type FrameListener = (frame: { url: () => string }) => void;
+  const listeners = new Set<ResponseListener>();
+  const frameListeners = new Set<FrameListener>();
+  const navigations: string[] = [];
+  let currentUrl = 'https://www.marcus.com/us/en/documents';
+  const mainFrame = { url: () => currentUrl };
+  const context = {
+    on: (_event: 'response', listener: ResponseListener) => listeners.add(listener),
+    off: (_event: 'response', listener: ResponseListener) => listeners.delete(listener),
+  };
+  const page = {
+    url: () => currentUrl,
+    goto: async (url: string) => {
+      navigations.push(url);
+    },
+    locator: () => ({ count: async () => 0 }),
+    waitForLoadState: async () => {
+      currentUrl = 'https://www.marcus.com/us/en/login';
+      for (const listener of frameListeners) listener(mainFrame);
+      await new Promise<void>(() => {});
+    },
+    mainFrame: () => mainFrame,
+    on: (_event: 'framenavigated', listener: FrameListener) => frameListeners.add(listener),
+    off: (_event: 'framenavigated', listener: FrameListener) => frameListeners.delete(listener),
+    context: () => context,
+  } as unknown as Page;
+
+  expect(await discoverMarcusRemoteCatalog(page)).toBeNull();
+  expect(navigations).toEqual([]);
+  expect(listeners.size).toBe(1);
+  expect(frameListeners.size).toBe(0);
+});
+
 test('Marcus ignores stale 401 and non-JSON catalog responses before later valid JSON responses', async () => {
   type CatalogResponse = Parameters<typeof readMarcusApiPayload>[0];
   const listeners = new Set<(response: CatalogResponse) => void>();

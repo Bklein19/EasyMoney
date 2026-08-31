@@ -10,7 +10,7 @@ import {
 } from '../browserSession.ts';
 import { reportSyncStep } from '../observability.ts';
 import type { SyncReporter } from '../types.ts';
-import type { BrowserContext, Download, Locator, Page, Request, Response } from 'playwright';
+import type { BrowserContext, Download, Frame, Locator, Page, Request, Response } from 'playwright';
 
 const LOGIN_URL = 'https://www.marcus.com/us/en/login';
 const ACCOUNTS_URL = 'https://www.marcus.com/us/en/accounts';
@@ -665,10 +665,40 @@ async function settleMarcusCatalogBootstrap(
   capture: MarcusCatalogRequestCapture,
 ): Promise<void> {
   if (capture.accounts && capture.documents) return;
-  await Promise.race([
-    capture.captured,
-    page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => {}),
-  ]);
+  let resolveAuthenticationRedirect: (() => void) | undefined;
+  const authenticationRedirect = new Promise<void>(resolve => {
+    resolveAuthenticationRedirect = resolve;
+  });
+  const authenticationWasLost = (url: string) => {
+    try {
+      const parsed = new URL(url);
+      return parsed.origin !== MARCUS_ORIGIN || !isMarcusAuthenticatedPath(parsed.pathname);
+    } catch {
+      return true;
+    }
+  };
+  const handleFrameNavigation = (frame: Frame) => {
+    if (frame === page.mainFrame() && authenticationWasLost(frame.url())) {
+      resolveAuthenticationRedirect?.();
+    }
+  };
+  const canObserveNavigation = typeof page.on === 'function' &&
+    typeof page.off === 'function' &&
+    typeof page.mainFrame === 'function';
+  if (canObserveNavigation) {
+    page.on('framenavigated', handleFrameNavigation);
+    if (authenticationWasLost(page.url())) resolveAuthenticationRedirect?.();
+  }
+  try {
+    await Promise.race([
+      capture.captured,
+      authenticationRedirect,
+      page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => {}),
+    ]);
+  } finally {
+    resolveAuthenticationRedirect = undefined;
+    if (canObserveNavigation) page.off('framenavigated', handleFrameNavigation);
+  }
 }
 
 export function isMarcusApiCatalogRequest(
@@ -726,13 +756,16 @@ async function waitForMarcusCatalogResponses(
   try {
     if (!await isMarcusAuthenticatedPage(page)) return null;
     await settleMarcusCatalogBootstrap(page, capture);
+    if (!await isMarcusAuthenticatedPage(page)) return null;
     if (!capture.accounts) {
       if (!await openMarcusAuthenticatedRoute(page, ACCOUNTS_URL, 'accounts')) return null;
       await settleMarcusCatalogBootstrap(page, capture);
+      if (!await isMarcusAuthenticatedPage(page)) return null;
     }
     if (!capture.documents) {
       if (!await openMarcusAuthenticatedRoute(page, DOCUMENTS_URL, 'documents')) return null;
       await settleMarcusCatalogBootstrap(page, capture);
+      if (!await isMarcusAuthenticatedPage(page)) return null;
     }
     if (!capture.accounts || !capture.documents) {
       let timeout: ReturnType<typeof setTimeout> | undefined;
