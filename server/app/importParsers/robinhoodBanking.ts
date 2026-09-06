@@ -1,5 +1,6 @@
 import type { AppImportParseInput, AppImportParseResult, AppImportParser, ParsedImportTransaction } from '../importTypes.ts';
 import { parseAmount, parseDate } from './csvMapping.ts';
+import { robinhoodBankingCrossSourceIdentity } from './robinhoodCrossSourceIdentity.ts';
 
 export const robinhoodBankingParser: AppImportParser = {
   id: 'robinhood-banking-csv',
@@ -43,6 +44,7 @@ function parseRow(row: Record<string, string>, sourceRowIndex: number): ParsedIm
     sourceRole: 'activity',
     raw: {
       parser: 'robinhood-banking-csv',
+      crossSourceIdentity: robinhoodBankingCrossSourceIdentity(description),
     },
   };
 }

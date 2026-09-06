@@ -564,6 +564,57 @@ test('source rebuild reconciles statement posting-date drift without collapsing 
   ]);
 });
 
+test('source rebuild uses parser-provided Robinhood identities across CSV and statement descriptions', () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Robinhood Gold Card',
+    institution: 'Robinhood',
+    type: 'credit',
+    currentBalance: 0,
+  }));
+  const activity = insertCommittedSourceFile({
+    fileName: 'robinhood.csv',
+    parserName: 'robinhood-credit-card-csv',
+    sourceType: 'activity-export',
+    priority: 10,
+    institution: 'Robinhood',
+  });
+  const statement = insertCommittedSourceFile({
+    fileName: 'robinhood-statement.pdf',
+    parserName: 'robinhood-credit-card-statement-pdf',
+    sourceType: 'statement',
+    priority: 50,
+    institution: 'Robinhood',
+  });
+  const activityAccount = insertSourceAccount(activity.sourceFileId, accountId, 'activity-card', { institution: 'Robinhood' });
+  const statementAccount = insertSourceAccount(statement.sourceFileId, accountId, 'statement-card', { institution: 'Robinhood' });
+
+  insertSourceTransaction({
+    sourceFileId: activity.sourceFileId,
+    sourceAccountId: activityAccount,
+    stableSourceId: 'activity-instacart',
+    date: '2026-08-01',
+    amountCents: -4200,
+    description: 'INSTACART.COMCA',
+    priority: 10,
+    raw: { crossSourceIdentity: 'robinhood-credit:instacartcomca' },
+  });
+  insertSourceTransaction({
+    sourceFileId: statement.sourceFileId,
+    sourceAccountId: statementAccount,
+    stableSourceId: 'statement-instacart',
+    date: '2026-08-02',
+    amountCents: -4200,
+    description: 'INSTACART.COM CA',
+    priority: 50,
+    raw: { crossSourceIdentity: 'robinhood-credit:instacartcomca' },
+  });
+
+  const ledger = buildLedgerFromSourceFacts(getDb());
+
+  expect(ledger.transactions).toHaveLength(1);
+  expect(ledger.transactions[0]?.description).toBe('INSTACART.COMCA');
+});
+
 test('source rebuild keeps the larger multiplicity from uneven overlapping activity exports', () => {
   const accountId = Number(insertRow('accounts', {
     name: 'WF Checking',

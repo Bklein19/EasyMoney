@@ -372,10 +372,15 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
       transaction.sourceRole !== 'activity' ||
       !['activity-export', 'statement'].includes(transaction.sourceType || '')
     ) continue;
+    const crossSourceIdentity = typeof transaction.raw.crossSourceIdentity === 'string'
+      ? transaction.raw.crossSourceIdentity.trim()
+      : '';
     const key = [
       transaction.accountId,
       transaction.amountCents,
-      normalizeText(transaction.originalDescription || transaction.description || transaction.merchant),
+      crossSourceIdentity || normalizeText(
+        transaction.originalDescription || transaction.description || transaction.merchant,
+      ),
     ].join('\0');
     const group = crossSourceGroups.get(key);
     if (group) {

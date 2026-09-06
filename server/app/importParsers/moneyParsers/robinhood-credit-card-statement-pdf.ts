@@ -1,6 +1,7 @@
 import { getDocumentProxy, extractText } from "unpdf";
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { cents, makeTx } from "./_helpers";
+import { robinhoodCreditCrossSourceIdentity } from "../robinhoodCrossSourceIdentity.ts";
 
 export const meta: ParserMeta = {
   id: "robinhood-credit-card-statement-pdf",
@@ -71,6 +72,7 @@ function parseActivity(text: string, account: string, coveredTo: string): ParseR
         transactionDate: `${row[1]}/${row[2]}`,
         postDate: `${row[3]}/${row[4]}`,
         reference: row[5],
+        crossSourceIdentity: robinhoodCreditCrossSourceIdentity(row[6]!),
       },
     });
     transaction.id = `${transaction.id}:${row[5]}`;

@@ -1,6 +1,7 @@
 import { getDocumentProxy, extractText } from "unpdf";
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { cents, makeTx } from "./_helpers";
+import { robinhoodBankingCrossSourceIdentity } from "../robinhoodCrossSourceIdentity.ts";
 
 export const meta: ParserMeta = {
   id: "robinhood-banking-statement-pdf",
@@ -71,6 +72,7 @@ function parseActivity(text: string, account: string): ParseResult["transactions
       raw: {
         source: "robinhood-banking-statement",
         category,
+        crossSourceIdentity: robinhoodBankingCrossSourceIdentity(description),
       },
     });
     const occurrenceIndex = occurrenceByTransactionId.get(transaction.id) ?? 0;

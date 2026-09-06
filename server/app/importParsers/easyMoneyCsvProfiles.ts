@@ -1,10 +1,13 @@
 import type { AppImportParseInput, AppImportParseResult, AppImportParser, ImportProfile, ParsedImportTransaction } from '../importTypes.ts';
 import { enhanceProfileWithHeaders, normalizeMappedCsvTransaction, type NormalizedCsvTransaction } from './csvMapping.ts';
+import { robinhoodCreditCrossSourceIdentity } from './robinhoodCrossSourceIdentity.ts';
 
 type EasyMoneyCsvProfile = ImportProfile & {
   headerFingerprint: string[];
   fileNamePatterns?: string[];
   requireFileNameMatch?: boolean;
+  includedRowValues?: Record<string, string[]>;
+  crossSourceIdentity?: (description: string) => string;
 };
 
 const EASYMONEY_CSV_PROFILES = [
@@ -62,6 +65,8 @@ const EASYMONEY_CSV_PROFILES = [
     merchantColumn: 'Merchant',
     amountConfig: { type: 'single', column: 'Amount', positiveIsCharge: true },
     categoryColumn: null,
+    includedRowValues: { Status: ['Posted'] },
+    crossSourceIdentity: robinhoodCreditCrossSourceIdentity,
   },
 ] as EasyMoneyCsvProfile[];
 
@@ -105,8 +110,18 @@ function toParsedTransaction(
       status: normalized.status,
       transactionKind: normalized.transactionKind,
       parser: parserId(profile.name),
+      ...(profile.crossSourceIdentity
+        ? { crossSourceIdentity: profile.crossSourceIdentity(normalized.originalDescription) }
+        : {}),
     },
   };
+}
+
+function includesRow(row: Record<string, string>, profile: EasyMoneyCsvProfile): boolean {
+  return Object.entries(profile.includedRowValues ?? {}).every(([column, included]) => {
+    const value = row[column]?.trim().toLowerCase() ?? '';
+    return included.some(candidate => candidate.toLowerCase() === value);
+  });
 }
 
 function createEasyMoneyCsvParser(profile: EasyMoneyCsvProfile): AppImportParser {
@@ -122,9 +137,9 @@ function createEasyMoneyCsvParser(profile: EasyMoneyCsvProfile): AppImportParser
     parse(input: AppImportParseInput): AppImportParseResult {
       const resolvedProfile = enhanceProfileWithHeaders(profile, input.headers);
       return {
-        transactions: input.rows.map((row, index) =>
-          toParsedTransaction(normalizeMappedCsvTransaction(row, resolvedProfile), profile, index)
-        ),
+        transactions: input.rows.map((row, index) => includesRow(row, profile)
+          ? toParsedTransaction(normalizeMappedCsvTransaction(row, resolvedProfile), profile, index)
+          : null),
         balances: [],
       };
     },
@@ -132,3 +147,7 @@ function createEasyMoneyCsvParser(profile: EasyMoneyCsvProfile): AppImportParser
 }
 
 export const easyMoneyCsvProfileParsers = EASYMONEY_CSV_PROFILES.map(createEasyMoneyCsvParser);
+
+export const robinhoodCreditCardCsvParser = easyMoneyCsvProfileParsers.find(
+  parser => parser.id === 'robinhood-credit-card-csv',
+)!;
