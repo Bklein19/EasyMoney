@@ -164,14 +164,16 @@ Notes:
 ## Robinhood
 
 Supported:
-- Statement PDF.
-- Banking CSV.
-- Robinhood Credit Card CSV.
+- Brokerage statement PDF.
+- Banking activity CSV and monthly statement PDF.
+- Robinhood Gold Card activity CSV and monthly statement PDF.
 
 Useful parser filenames:
 - `robinhood-1234-2026-06-30-statement.pdf`
 - UUID-style Robinhood statement PDFs are also recognized.
 - UUID-style banking CSVs with `Date,Description,Amount` are recognized.
+- Mobile bank statements named `Bank Statement ...pdf` are recognized by content.
+- Mobile Gold Card statements named `Credit Statement ...pdf` are recognized by content.
 
 Credit-card CSV expected headers:
 - `Date`
@@ -187,7 +189,10 @@ Credit-card CSV expected headers:
 
 Notes:
 - Statement parser recognizes individual investing and consolidated IRA statements by content.
-- Banking and credit-card CSVs may need explicit account mapping.
+- Robinhood Banking and Gold Card are mobile-export workflows. The dedicated connector scans the folder in `EASYMONEY_ROBINHOOD_EXPORT_DIR`, or the current user's Downloads folder when it is unset.
+- Export the activity CSV for transaction detail and the monthly statement PDF for its closing balance. Both are useful; the connector selects the newest activity export and statements whose balance dates are missing.
+- Gold Card activity imports only rows whose status is `Posted`; pending and declined rows are ignored.
+- Banking and credit-card CSVs do not carry account numbers, so each account type must map to one unambiguous local Robinhood account. Statement account suffixes are used when available.
 
 ## Sequoia Fund
 

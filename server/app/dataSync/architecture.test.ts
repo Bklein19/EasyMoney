@@ -12,9 +12,9 @@ function sharedDataSyncFiles(): string[] {
     cwd: dataSyncDirectory,
     absolute: true,
   })].filter(file =>
-    !file.includes('/institutions/') &&
+    !file.replaceAll('\\', '/').includes('/institutions/') &&
     !file.endsWith('.test.ts') &&
-    !file.endsWith('/registry.ts')
+    !file.replaceAll('\\', '/').endsWith('/registry.ts')
   );
 }
 
