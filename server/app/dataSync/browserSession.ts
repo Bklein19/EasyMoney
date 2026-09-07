@@ -290,6 +290,20 @@ const browserLaunchWatchdogGraceMs = 1_000;
 const restoredPageCloseTimeoutMs = 1_000;
 export const institutionAutomationControlledLaunchArgument =
   '--disable-blink-features=AutomationControlled';
+export const playwrightEnableAutomationLaunchArgument = '--enable-automation';
+
+export function institutionBrowserIgnoredDefaultArguments(
+  ignoredDefaultArguments?: boolean | readonly string[],
+): boolean | string[] {
+  if (ignoredDefaultArguments === true) return true;
+  const ignoredArguments = Array.isArray(ignoredDefaultArguments)
+    ? ignoredDefaultArguments
+    : [];
+  return [...new Set([
+    ...ignoredArguments,
+    playwrightEnableAutomationLaunchArgument,
+  ])];
+}
 
 export function institutionBrowserLaunchArguments(
   ...argumentGroups: Array<readonly string[] | undefined>
@@ -355,6 +369,7 @@ export async function deriveNormalChromeUserAgent(
     headless: true,
     chromiumSandbox: true,
     timeout: timeoutMs,
+    ignoreDefaultArgs: institutionBrowserIgnoredDefaultArguments(),
     args: institutionBrowserLaunchArguments(),
   }));
   const closeBrowser = () => {
@@ -593,6 +608,9 @@ async function launchPlaywrightPage<T>(
         chromiumSandbox: true,
         ...contextOptions,
         timeout: browserLaunchTimeoutMs,
+        ignoreDefaultArgs: institutionBrowserIgnoredDefaultArguments(
+          contextOptions.ignoreDefaultArgs,
+        ),
         args: institutionBrowserLaunchArguments(contextOptions.args, options.launchArgs),
       }),
       {

@@ -50,9 +50,12 @@ function dependencyClosure(entrypoint: string): string[] {
 }
 
 describe('data sync architecture', () => {
-  test('keeps AutomationControlled suppression in the shared browser launcher', () => {
+  test('keeps automation-signal suppression in the shared browser launcher', () => {
     const violations = institutionProductionFiles()
-      .filter(file => readFileSync(file, 'utf8').includes('AutomationControlled'));
+      .filter(file => {
+        const source = readFileSync(file, 'utf8');
+        return source.includes('AutomationControlled') || source.includes('--enable-automation');
+      });
 
     expect(violations.map(displayPath)).toEqual([]);
   });

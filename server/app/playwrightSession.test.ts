@@ -13,6 +13,7 @@ import {
   decodeInstitutionBrowserProgramResult,
   deriveNormalChromeUserAgent,
   institutionAutomationControlledLaunchArgument,
+  institutionBrowserIgnoredDefaultArguments,
   institutionBrowserLaunchArguments,
   institutionBrowserContextOptions,
   institutionBrowserLaunchStrategy,
@@ -22,6 +23,7 @@ import {
   openInstitutionStartPage,
   persistBrowserAuthentication,
   playwrightAuthStatePath,
+  playwrightEnableAutomationLaunchArgument,
   playwrightHasSavedAuthentication,
   playwrightProfilePath,
   playwrightSessionStoragePath,
@@ -173,6 +175,20 @@ describe('Playwright session helper', () => {
       '--window-size=1200,800',
       '--start-maximized',
     ]);
+  });
+
+  test('ignores Playwright enable-automation defaults for every institution browser launch', () => {
+    expect(playwrightEnableAutomationLaunchArgument).toBe('--enable-automation');
+    expect(institutionBrowserIgnoredDefaultArguments()).toEqual(['--enable-automation']);
+    expect(institutionBrowserIgnoredDefaultArguments([
+      '--mute-audio',
+      '--enable-automation',
+    ])).toEqual([
+      '--mute-audio',
+      '--enable-automation',
+    ]);
+    expect(institutionBrowserIgnoredDefaultArguments(true)).toBe(true);
+    expect(institutionBrowserIgnoredDefaultArguments(false)).toEqual(['--enable-automation']);
   });
 
   test('caches one successful normal Chrome user-agent derivation', async () => {
