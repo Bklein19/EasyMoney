@@ -49,9 +49,20 @@ interface TooltipProps {
   showTotalSpend?: boolean;
 }
 
-function getActivePeriodPayload(state: unknown) {
+export function getActivePeriodPayload(state: unknown, data: AnalyticsPeriodRow[]) {
   if (!state || typeof state !== 'object') return null;
-  const activePayload = (state as { activePayload?: Array<{ payload?: AnalyticsPeriodRow }> }).activePayload;
+  const { activeTooltipIndex, activeIndex, activePayload } = state as {
+    activeTooltipIndex?: number | string;
+    activeIndex?: number | string;
+    activePayload?: Array<{ payload?: AnalyticsPeriodRow }>;
+  };
+  const rawIndex = activeTooltipIndex ?? activeIndex;
+  const index = typeof rawIndex === 'number' ? rawIndex : Number(rawIndex);
+
+  if (Number.isInteger(index) && index >= 0 && index < data.length) {
+    return data[index] ?? null;
+  }
+
   return activePayload?.[0]?.payload ?? null;
 }
 
@@ -121,7 +132,7 @@ export default function SpendingTrends({
           margin={{ top: 10, right: 18, left: 12, bottom: 0 }}
           style={{ cursor: 'pointer' }}
           onClick={(state: unknown) => {
-            const period = getActivePeriodPayload(state);
+            const period = getActivePeriodPayload(state, data);
             if (period && onSelectPeriod) {
               onSelectPeriod(period);
             }
