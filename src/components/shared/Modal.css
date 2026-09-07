@@ -29,7 +29,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: modal-in 300ms var(--transition-spring);
+  animation: modal-in 200ms ease-out both;
 }
 
 .modal-container--fullscreen {

@@ -751,7 +751,7 @@ select option:hover {
   max-width: 520px;
   max-height: 85vh;
   overflow-y: auto;
-  animation: modal-in 300ms var(--transition-spring);
+  animation: modal-in 200ms ease-out both;
 }
 
 @keyframes modal-in {
