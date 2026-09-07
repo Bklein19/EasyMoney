@@ -1,4 +1,4 @@
-import { getDb, syncLedgerReadModelFromLegacyTables } from '../database.ts';
+import { getDb } from '../database.ts';
 import { ensureLedgerTransactionId, upsertTransactionAnnotation } from './transactionAnnotations.ts';
 import { buildAccountMap, buildCategoryMap, getTransactionFlow } from './transactionSemantics.ts';
 import type {
@@ -433,7 +433,6 @@ function getTransactionCategoryUndoChanges(undoOperationId: string | number): Ca
 }
 
 export function listTransactions(options: ListTransactionsOptions = {}): TransactionListResponse {
-  syncLedgerReadModelFromLegacyTables();
   const { where, params } = buildTransactionFilter(options);
   const limit = clampLimit(optionalNumber(options.limit));
   const offset = clampOffset(optionalNumber(options.offset));
@@ -473,7 +472,6 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
 }
 
 export function getTransactionCategorizationCoverage() {
-  syncLedgerReadModelFromLegacyTables();
   const row = getDb().prepare(`
     SELECT
       COUNT(*) AS totalCount,
@@ -551,7 +549,6 @@ export function categorizeTransactionsByQuery(input: {
   query?: ListTransactionsOptions;
   categoryId?: number | string | null;
 }): CategoryUndoResult {
-  syncLedgerReadModelFromLegacyTables();
   const { where, params } = buildTransactionFilter(input.query ?? {});
   const db = getDb();
   const rows = db.prepare(`

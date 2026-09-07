@@ -1,4 +1,4 @@
-import { getDb, syncLedgerReadModelFromLegacyTables } from '../database.ts';
+import { getDb } from '../database.ts';
 import type { NetWorthReport } from './types.ts';
 
 interface CurrentLedgerBalanceRow {
@@ -20,7 +20,6 @@ function dollarsFromCents(cents: number) {
 }
 
 export function getNetWorthReport(): NetWorthReport {
-  syncLedgerReadModelFromLegacyTables();
 
   const currentRows = getDb()
     .prepare(

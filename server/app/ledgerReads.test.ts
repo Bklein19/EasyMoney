@@ -1,0 +1,36 @@
+import { expect, test } from 'bun:test';
+import os from 'node:os';
+import path from 'node:path';
+process.env.EASYMONEY_DB_PATH ||= path.join(os.tmpdir(), `easymoney-ledger-reads-${process.pid}.sqlite`);
+const { getDb, initDatabase, insertRow } = await import('../database');
+const { listTransactions, getTransactionCategorizationCoverage, categorizeTransactions } = await import('./transactions');
+const { getNetWorthReport } = await import('./netWorth');
+const { getInvestmentNetWorthReport, getSavingsRateReport } = await import('./investmentReports');
+const { getAnalyticsReport } = await import('./analytics');
+
+test('reads never overwrite the ledger or resurrect legacy rows; annotations use only ledger identities', () => {
+  initDatabase();
+  const db = getDb();
+  const accountId = insertRow('accounts', { name: `Read-only ${crypto.randomUUID()}`, type: 'checking' });
+  const categoryId = insertRow('categories', { name: `Read category ${crypto.randomUUID()}`, type: 'expense' });
+  const ledgerTransactionId = `txn_${crypto.randomUUID()}`;
+  const legacyId = insertRow('transactions', { accountId, date: '2026-09-01', amount: -9999, description: 'Obsolete', ledgerTransactionId });
+  insertRow('ledgerTransactions', { accountId, ledgerTransactionId, legacyTransactionId: legacyId, date: '2026-09-01', amountCents: -1234, description: 'Current ledger' });
+  const orphan = insertRow('transactions', { accountId, date: '2026-09-02', amount: -1, description: 'Legacy only' });
+  insertRow('ledgerBalances', { accountId, month: '2026-09', balanceCents: 50000 });
+  insertRow('balanceSnapshots', { accountId, month: '2026-09', balance: 9999 });
+  const changes = () => db.prepare('SELECT total_changes() AS value').get()?.value;
+  const before = changes();
+  expect(listTransactions({ accountId }).transactions).toHaveLength(1);
+  expect(listTransactions({ accountId }).transactions[0]?.amount).toBe(-12.34);
+  getTransactionCategorizationCoverage(); getNetWorthReport(); getInvestmentNetWorthReport(); getSavingsRateReport(); getAnalyticsReport({ accountId });
+  expect(changes()).toBe(before);
+  expect(() => categorizeTransactions({ transactionIds: [orphan], categoryId })).toThrow('active ledger');
+  categorizeTransactions({ transactionIds: [String(legacyId)], categoryId });
+  expect(db.prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId = ?').get(ledgerTransactionId)?.categoryId).toBe(categoryId);
+  expect(db.prepare('SELECT categoryId FROM transactions WHERE id = ?').get(legacyId)?.categoryId).toBeNull();
+  initDatabase();
+  expect(listTransactions({ accountId }).transactions).toHaveLength(1);
+  expect(listTransactions({ accountId }).transactions[0]?.amount).toBe(-12.34);
+  expect(db.prepare('SELECT balanceCents FROM ledgerBalances WHERE accountId = ?').get(accountId)?.balanceCents).toBe(50000);
+});

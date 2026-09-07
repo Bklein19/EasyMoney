@@ -944,6 +944,7 @@ export function initDatabase() {
   }
   db.prepare('CREATE INDEX IF NOT EXISTS idx_transactions_ledger_id ON transactions (ledgerTransactionId)').run();
 
+  runSchemaMigration('2026-09-07-legacy-annotations', () => {
   const transactionsNeedingLedgerIds = db.prepare(`
     SELECT
       t.id,
@@ -997,6 +998,7 @@ export function initDatabase() {
       AND ledgerTransactionId != ''
       AND (categoryId IS NOT NULL OR COALESCE(notes, '') != '')
   `).run();
+  });
 
   const importFileColumns = tableColumnNames('importFiles');
   for (const [column, definition] of [
@@ -1071,10 +1073,11 @@ export function initDatabase() {
   db.prepare('CREATE INDEX IF NOT EXISTS idx_ledger_transactions_account_date ON ledgerTransactions (accountId, date)').run();
   db.prepare('CREATE INDEX IF NOT EXISTS idx_ledger_transactions_legacy_id ON ledgerTransactions (legacyTransactionId)').run();
   db.prepare('CREATE INDEX IF NOT EXISTS idx_ledger_balances_account_month ON ledgerBalances (accountId, month)').run();
-  syncLedgerReadModelFromLegacyTables();
+  runSchemaMigration('2026-09-07-ledger-read-cutover', () => syncLedgerReadModelFromLegacyTables({ onlyMissing: true }));
 }
 
-export function syncLedgerReadModelFromLegacyTables() {
+// Compatibility migration and legacy fixture setup only. Application reads never synchronize tables.
+export function syncLedgerReadModelFromLegacyTables(options: { onlyMissing?: boolean } = {}) {
   assignMissingLegacyTransactionIds();
   const now = new Date().toISOString();
   db.transaction(() => {
@@ -1130,6 +1133,10 @@ export function syncLedgerReadModelFromLegacyTables() {
       WHERE t.ledgerTransactionId IS NOT NULL
         AND t.ledgerTransactionId != ''
         AND t.accountId IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM importRows inactiveRow JOIN sourceFiles inactiveFile ON inactiveFile.importFileId = inactiveRow.importFileId
+          WHERE inactiveRow.transactionId = t.id AND inactiveFile.status != 'committed'
+        )
       ON CONFLICT(ledgerTransactionId) DO UPDATE SET
         legacyTransactionId = excluded.legacyTransactionId,
         accountId = excluded.accountId,
@@ -1150,7 +1157,8 @@ export function syncLedgerReadModelFromLegacyTables() {
         importRowId = excluded.importRowId,
         sourceTransactionId = excluded.sourceTransactionId,
         updatedAt = excluded.updatedAt
-    `).run({ now });
+      WHERE @overwriteExisting = 1
+    `).run({ now, overwriteExisting: options.onlyMissing ? 0 : 1 });
 
     db.prepare(`
       INSERT INTO ledgerBalances (
@@ -1186,7 +1194,8 @@ export function syncLedgerReadModelFromLegacyTables() {
         capturedAt = excluded.capturedAt,
         sourceBalanceId = excluded.sourceBalanceId,
         updatedAt = excluded.updatedAt
-    `).run({ now });
+      WHERE @overwriteExisting = 1
+    `).run({ now, overwriteExisting: options.onlyMissing ? 0 : 1 });
   })();
 }
 

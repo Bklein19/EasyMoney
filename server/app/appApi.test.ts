@@ -10,7 +10,7 @@ process.env.EASYMONEY_DB_PATH = path.join(os.tmpdir(), `easymoney-app-api-${proc
 process.env.EASYMONEY_SYNC_ROOT = path.join(os.tmpdir(), `easymoney-sync-runs-${process.pid}`);
 
 const { appRouter } = await import('./router.ts');
-const { getDb, initDatabase, insertRow } = await import('../database.ts');
+const { getDb, initDatabase, insertRow, syncLedgerReadModelFromLegacyTables } = await import('../database.ts');
 const { hashImportContent } = await import('./imports.ts');
 const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
 const { buildSyncArtifactReview, stageSyncArtifact } = await import('./dataSync/review.ts');
@@ -23,6 +23,13 @@ const {
   shouldReviewInvestmentAccountTransferDecision,
 } = await import('./aiCategorization.ts');
 const caller = appRouter.createCaller({});
+
+// Legacy-shaped fixtures explicitly materialize during setup. Reads must never do this work.
+function insertLegacyFixture(table: string, row: Record<string, unknown>) {
+  const id = insertRow(table, row);
+  syncLedgerReadModelFromLegacyTables();
+  return id;
+}
 
 function resetAppTables() {
   const db = getDb();
@@ -875,7 +882,7 @@ test('category delete reassigns annotations to Uncategorized and protects Uncate
   });
   const uncategorizedId = insertRow('categories', { name: 'Uncategorized', type: 'expense' });
   const groceriesId = insertRow('categories', { name: 'Groceries', type: 'expense' });
-  const transactionId = insertRow('transactions', {
+  const transactionId = insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-16',
     amount: -25,
@@ -944,7 +951,7 @@ test('trpc category delete reassigns annotations to Uncategorized', async () => 
   });
   const uncategorizedId = insertRow('categories', { name: 'Uncategorized', type: 'expense' });
   const diningId = insertRow('categories', { name: 'Dining', type: 'expense' });
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-01',
     amount: -12,
@@ -975,7 +982,7 @@ test('app transactions endpoint joins account and category details', async () =>
     color: '#22c55e',
     icon: 'shopping-cart',
   });
-  const transactionId = insertRow('transactions', {
+  const transactionId = insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-14',
     amount: -42.5,
@@ -1039,7 +1046,7 @@ test('app transactions endpoint supports domain query filters', async () => {
   const foodId = insertRow('categories', { name: 'Food', type: 'expense' });
   const incomeId = insertRow('categories', { name: 'Income', type: 'income' });
 
-  const cafeId = insertRow('transactions', {
+  const cafeId = insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-14',
     amount: -20,
@@ -1049,7 +1056,7 @@ test('app transactions endpoint supports domain query filters', async () => {
   });
   await updateTransactionForTest(cafeId, { categoryId: foodId });
 
-  const payrollId = insertRow('transactions', {
+  const payrollId = insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-15',
     amount: 100,
@@ -1076,21 +1083,21 @@ test('app transactions endpoint supports infinite-scroll paging metadata', async
     type: 'checking',
   });
 
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-16',
     amount: -30,
     description: 'Newest',
     type: 'expense',
   });
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-15',
     amount: 100,
     description: 'Middle',
     type: 'income',
   });
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-14',
     amount: -20,
@@ -1140,7 +1147,7 @@ test('trpc transaction totals classify bank-side card payments and investment tr
     type: 'investment',
   });
 
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId: checkingId,
     date: '2026-06-16',
     amount: -300,
@@ -1148,7 +1155,7 @@ test('trpc transaction totals classify bank-side card payments and investment tr
     merchant: 'Chase Card',
     type: 'expense',
   });
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId: checkingId,
     date: '2026-06-17',
     amount: -400,
@@ -1156,7 +1163,7 @@ test('trpc transaction totals classify bank-side card payments and investment tr
     merchant: 'Vanguard',
     type: 'expense',
   });
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId: checkingId,
     date: '2026-06-18',
     amount: -25,
@@ -1198,7 +1205,7 @@ test('trpc analytics report aggregates backend-owned cashflow semantics', async 
     color: '#22c55e',
   });
 
-  const cafeId = insertRow('transactions', {
+  const cafeId = insertLegacyFixture('transactions', {
     accountId: checkingId,
     date: '2026-06-10',
     amount: -25,
@@ -1207,7 +1214,7 @@ test('trpc analytics report aggregates backend-owned cashflow semantics', async 
     type: 'expense',
   });
   await updateTransactionForTest(cafeId, { categoryId: diningId });
-  const payrollId = insertRow('transactions', {
+  const payrollId = insertLegacyFixture('transactions', {
     accountId: checkingId,
     date: '2026-06-15',
     amount: 1000,
@@ -1216,7 +1223,7 @@ test('trpc analytics report aggregates backend-owned cashflow semantics', async 
     type: 'income',
   });
   await updateTransactionForTest(payrollId, { categoryId: incomeId });
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId: checkingId,
     date: '2026-06-16',
     amount: -400,
@@ -1281,7 +1288,7 @@ test('app transactions endpoint supports column sort keys', async () => {
   const groceriesId = insertRow('categories', { name: 'Groceries', type: 'expense' });
   const travelId = insertRow('categories', { name: 'Travel', type: 'expense' });
 
-  const betaId = insertRow('transactions', {
+  const betaId = insertLegacyFixture('transactions', {
     accountId: savingsId,
     date: '2026-06-15',
     amount: -20,
@@ -1290,7 +1297,7 @@ test('app transactions endpoint supports column sort keys', async () => {
   });
   await updateTransactionForTest(betaId, { categoryId: travelId });
 
-  const alphaId = insertRow('transactions', {
+  const alphaId = insertLegacyFixture('transactions', {
     accountId: checkingId,
     date: '2026-06-16',
     amount: -10,
@@ -1323,14 +1330,14 @@ test('app transactions endpoint filters uncategorized transactions by missing or
   const uncategorizedId = insertRow('categories', { name: 'Uncategorized', type: 'expense' });
   const foodId = insertRow('categories', { name: 'Food', type: 'expense' });
 
-  const missingCategoryId = insertRow('transactions', {
+  const missingCategoryId = insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-14',
     amount: -10,
     description: 'Missing category',
     type: 'expense',
   });
-  const explicitUncategorizedId = insertRow('transactions', {
+  const explicitUncategorizedId = insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-15',
     amount: -20,
@@ -1338,7 +1345,7 @@ test('app transactions endpoint filters uncategorized transactions by missing or
     type: 'expense',
   });
   await updateTransactionForTest(explicitUncategorizedId, { categoryId: uncategorizedId });
-  const categorizedId = insertRow('transactions', {
+  const categorizedId = insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-16',
     amount: -30,
@@ -1366,7 +1373,7 @@ test('app transactions search includes notes', async () => {
     type: 'checking',
   });
 
-  const transactionId = insertRow('transactions', {
+  const transactionId = insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-16',
     amount: -12,
@@ -1388,21 +1395,21 @@ test('app transactions search includes signed and unsigned amounts with optional
     type: 'checking',
   });
 
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-17',
     amount: -1234.56,
     description: 'Large expense',
     type: 'expense',
   });
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-18',
     amount: 1234.56,
     description: 'Large income',
     type: 'income',
   });
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-19',
     amount: -12.34,
@@ -1434,21 +1441,21 @@ test('app transactions search requires all terms to match', async () => {
     type: 'checking',
   });
 
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-17',
     amount: -930,
     description: 'Check 1234',
     type: 'expense',
   });
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-18',
     amount: -930,
     description: 'Online transfer',
     type: 'expense',
   });
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-19',
     amount: -120,
@@ -1471,14 +1478,14 @@ test('app transactions search supports quoted phrase terms', async () => {
     type: 'checking',
   });
 
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-17',
     amount: -9000,
     description: 'Customer Withdrawal Image',
     type: 'expense',
   });
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-18',
     amount: -9000,
@@ -1500,7 +1507,7 @@ test('app transactions ignore legacy category and notes columns without annotati
     type: 'checking',
   });
   const categoryId = insertRow('categories', { name: 'Legacy Category', type: 'expense' });
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId,
     categoryId,
     date: '2026-06-16',
@@ -1529,7 +1536,7 @@ test('app transaction updates store category and notes only as annotations', asy
     type: 'checking',
   });
   const categoryId = insertRow('categories', { name: 'Groceries', type: 'expense' });
-  const transactionId = insertRow('transactions', {
+  const transactionId = insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-16',
     amount: -12,
@@ -1562,7 +1569,7 @@ test('transaction annotations survive transaction row rebuild', async () => {
     type: 'checking',
   });
   const categoryId = insertRow('categories', { name: 'Groceries', type: 'expense' });
-  const transactionId = insertRow('transactions', {
+  const transactionId = insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-16',
     amount: -12,
@@ -1585,7 +1592,7 @@ test('transaction annotations survive transaction row rebuild', async () => {
   expect(annotation.notes).toBe('household groceries');
 
   getDb().prepare('DELETE FROM transactions WHERE id = ?').run(transactionId);
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId,
     ledgerTransactionId: annotation.ledgerTransactionId,
     date: '2026-06-16',
@@ -1607,7 +1614,7 @@ test('app transactions endpoint reads and annotates ledger rows without legacy t
     type: 'checking',
   }));
   const categoryId = Number(insertRow('categories', { name: 'Dining', type: 'expense' }));
-  const transactionId = Number(insertRow('transactions', {
+  const transactionId = Number(insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-16',
     amount: -12.34,
@@ -1658,7 +1665,7 @@ test('app transactions endpoint reads and annotates ledger rows without legacy t
 test('trpc transactions procedures read and categorize transactions', async () => {
   const accountId = insertRow('accounts', { name: 'Checking', type: 'checking', currentBalance: 0 });
   const categoryId = insertRow('categories', { name: 'Food', type: 'expense' });
-  const transactionId = Number(insertRow('transactions', {
+  const transactionId = Number(insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-02',
     amount: -18.25,
@@ -1687,7 +1694,7 @@ test('trpc transactions procedures read and categorize transactions', async () =
 test('trpc transactions categorize matching applies to the full filtered result set', async () => {
   const accountId = insertRow('accounts', { name: 'Checking', type: 'checking', currentBalance: 0 });
   const categoryId = insertRow('categories', { name: 'Coffee', type: 'expense' });
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-03',
     amount: -4.25,
@@ -1695,7 +1702,7 @@ test('trpc transactions categorize matching applies to the full filtered result 
     type: 'expense',
     status: 'cleared',
   });
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-04',
     amount: -5.75,
@@ -1703,7 +1710,7 @@ test('trpc transactions categorize matching applies to the full filtered result 
     type: 'expense',
     status: 'cleared',
   });
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId,
     date: '2026-06-05',
     amount: -18.25,
@@ -1864,7 +1871,7 @@ test('trpc budgeting report computes period actuals and variance on the backend'
   }));
   await caller.budgets.set({ categoryId: diningId, month: '2026-06', amount: 100 });
 
-  const cafeId = insertRow('transactions', {
+  const cafeId = insertLegacyFixture('transactions', {
     accountId: checkingId,
     date: '2026-06-10',
     amount: -126,
@@ -1873,7 +1880,7 @@ test('trpc budgeting report computes period actuals and variance on the backend'
     type: 'expense',
   });
   await updateTransactionForTest(cafeId, { categoryId: diningId });
-  const payrollId = insertRow('transactions', {
+  const payrollId = insertLegacyFixture('transactions', {
     accountId: checkingId,
     date: '2026-06-15',
     amount: 1000,
@@ -1882,7 +1889,7 @@ test('trpc budgeting report computes period actuals and variance on the backend'
     type: 'income',
   });
   await updateTransactionForTest(payrollId, { categoryId: incomeId });
-  insertRow('transactions', {
+  insertLegacyFixture('transactions', {
     accountId: checkingId,
     date: '2026-06-16',
     amount: -400,
@@ -2583,13 +2590,13 @@ test('trpc net worth report is backend-owned and reads ledger balances', async (
     currentBalance: 250,
   });
 
-  insertRow('balanceSnapshots', {
+  insertLegacyFixture('balanceSnapshots', {
     accountId: checkingId,
     month: '2026-05',
     balance: 1000,
     capturedAt: '2026-05-31T00:00:00.000Z',
   });
-  insertRow('balanceSnapshots', {
+  insertLegacyFixture('balanceSnapshots', {
     accountId: creditId,
     month: '2026-05',
     balance: 200,
@@ -2944,6 +2951,8 @@ test('init database backfills ledger read model from legacy app tables', () => {
     capturedAt: '2026-06-30T00:00:00.000Z',
   });
 
+  getDb().prepare('DELETE FROM schemaMigrations WHERE name = ?').run('2026-09-07-ledger-read-cutover');
+  getDb().prepare('DELETE FROM schemaMigrations WHERE name = ?').run('2026-09-07-legacy-annotations');
   initDatabase();
 
   const transaction = getDb().prepare('SELECT ledgerTransactionId FROM transactions WHERE id = ?').get(transactionId) as {

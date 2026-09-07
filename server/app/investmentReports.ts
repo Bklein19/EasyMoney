@@ -1,4 +1,4 @@
-import { getDb, syncLedgerReadModelFromLegacyTables } from '../database.ts';
+import { getDb } from '../database.ts';
 import { classifyFlow } from './flowClassification.ts';
 import { summarizeReturns, type ReturnSummary } from './returns.ts';
 import { deriveTransferLinks, type TransferLink } from './transferLinks.ts';
@@ -234,7 +234,6 @@ function getAccountType(accountId: number) {
 }
 
 export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
-  syncLedgerReadModelFromLegacyTables();
   accountTypeCache.clear();
 
   const accounts = getAccounts();
