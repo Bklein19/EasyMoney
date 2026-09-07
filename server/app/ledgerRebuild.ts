@@ -300,17 +300,21 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
 
   const bestExactPriority = new Map<string, number>();
   const bestMonthBucketDetailPriority = new Map<string, number>();
+  const exactRepresentatives = new Map<string, (typeof transactionInputs)[number]>();
+  const bucketRepresentatives = new Map<string, (typeof transactionInputs)[number]>();
   for (const transaction of sourceUniqueTransactionInputs) {
     if (transaction.sourceRole !== 'activity') continue;
     const priority = getTransactionSourceScore(transaction);
     const key = exactKey(transaction);
     if (priority > (bestExactPriority.get(key) ?? -Infinity)) {
       bestExactPriority.set(key, priority);
+      exactRepresentatives.set(key, transaction);
     }
     if (!isStatementSummary(transaction)) {
       const bucketKey = monthBucketKey(transaction);
       if (priority > (bestMonthBucketDetailPriority.get(bucketKey) ?? -Infinity)) {
         bestMonthBucketDetailPriority.set(bucketKey, priority);
+        bucketRepresentatives.set(bucketKey, transaction);
       }
     }
   }
@@ -320,7 +324,7 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
     if (isStatementSummary(transaction)) {
       const best = bestMonthBucketDetailPriority.get(monthBucketKey(transaction));
       if (best !== undefined && priority < best) {
-        const representative = sourceUniqueTransactionInputs.find(candidate => !isStatementSummary(candidate) && monthBucketKey(candidate) === monthBucketKey(transaction) && getTransactionSourceScore(candidate) === best);
+        const representative = bucketRepresentatives.get(monthBucketKey(transaction));
         if (representative) decisions.set(transaction.id, { representative: representative.id, reason: 'Monthly statement summary excluded because more detailed activity covers this bucket. This is a summary, not an individual duplicate.' });
       }
       return best === undefined || priority >= best;
@@ -328,7 +332,7 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
     if (transaction.sourceRole !== 'activity') return true;
     const best = bestExactPriority.get(exactKey(transaction));
     if (best !== undefined && priority < best) {
-      const representative = sourceUniqueTransactionInputs.find(candidate => candidate.sourceRole === 'activity' && exactKey(candidate) === exactKey(transaction) && getTransactionSourceScore(candidate) === best);
+      const representative = exactRepresentatives.get(exactKey(transaction));
       if (representative) decisions.set(transaction.id, { representative: representative.id, reason: 'Lower priority activity excluded by the existing same-date and amount source-priority rule.' });
     }
     return best === undefined || priority >= best;

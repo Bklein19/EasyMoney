@@ -2,6 +2,11 @@ import { Database } from 'bun:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 
+export function flushSnapshotFile(filePath: string) {
+  const descriptor = fs.openSync(filePath, 'r+');
+  try { fs.fsyncSync(descriptor); } finally { fs.closeSync(descriptor); }
+}
+
 export function validateSnapshot(filePath: string) {
   const candidate = new Database(filePath, { readonly: true });
   try {
@@ -27,8 +32,7 @@ export function writeSnapshot(database: Database, directory: string, reason: str
   try {
     fs.writeFileSync(temporary, database.serialize(), { mode: 0o600, flag: 'wx' });
     validateSnapshot(temporary);
-    const fd = fs.openSync(temporary, 'r+');
-    try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    flushSnapshotFile(temporary);
     fs.renameSync(temporary, destination);
     return { id, path: destination };
   } finally {

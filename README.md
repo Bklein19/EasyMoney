@@ -70,6 +70,22 @@ Parsers try to extract durable source facts plus account context when the file f
 
 ## Local Data
 
+### Budget plans and recovery
+
+Global period budgets, dream budgets, and saved budget templates live in SQLite. The Budgeting page imports browser-stored plans the first time it opens against a database without plans. Existing database plans take precedence, and concurrent edits use revision checks. Save failures stay visible with a retry action.
+
+Open **Backups** to create a consistent database snapshot, review a backup's account and transaction counts, or restore it. Snapshots include parsed import facts, account mappings, annotations, and budget plans. Original downloaded files, API keys, and browser authentication are separate. The page shows the backup directory so you can copy snapshots to another drive or place a previous snapshot there for restoration.
+
+Before a schema migration or restore, EasyMoney saves a snapshot. Restore validates database integrity and references, saves the current database, and selects a separate restored database for the next launch. Quit and reopen the app to finish. Mutations pause while a restore is scheduled; the previous database stays on disk. The `<database>.restore.json` file selects the restored database, so retain it with the application data directory.
+
+### Source details and report coverage
+
+Click a transaction description to inspect its source file, parser, original description, account mapping, and the ledger's deduplication explanation. Rebuilds retain explanations separately from user annotations. Older ledgers can compute explanations without changing stored data.
+
+Reports show transaction coverage and balance freshness separately. Coverage is declared only when the parser supplies a file date range for a single source account. Older or inferred ranges remain unverified. An unverified date range may contain no activity; it does not prove transactions are missing. Report links open the corresponding account in Import.
+
+Transaction and report queries read the ledger without copying legacy tables. Historical compatibility runs through recorded schema migrations. Ordinary category edits resolve active ledger identities and write annotations only.
+
 EasyMoney stores local app data in `data/easymoney.sqlite`.
 
 The `data/` directory is ignored by Git. Do not commit personal financial exports, databases, or generated import files.

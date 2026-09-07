@@ -161,6 +161,8 @@ function defaultSeedFingerprint(databasePath: string) {
 }
 
 function fsyncDirectory(directoryPath: string) {
+  // Windows does not support fsync on a directory handle. Snapshot file contents are flushed before publication.
+  if (process.platform === 'win32') return;
   const directory = fs.openSync(directoryPath, fs.constants.O_RDONLY);
   try {
     fs.fsyncSync(directory);
@@ -267,7 +269,7 @@ function createSnapshotFile(
     } finally {
       snapshotDatabase.close();
     }
-    const snapshotFile = fs.openSync(temporaryPath, 'r');
+    const snapshotFile = fs.openSync(temporaryPath, 'r+');
     try {
       fs.fsyncSync(snapshotFile);
     } finally {

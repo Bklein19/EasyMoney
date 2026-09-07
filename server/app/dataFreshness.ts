@@ -252,6 +252,8 @@ export function getDataFreshnessReport(options: { today?: string } = {}) {
       accountStatus,
       latestTransactionDate: row.latestTransactionDate,
       latestBalanceDate: row.latestBalanceDate,
+      transactionStatus: freshnessStatusFor(accountStatus, daysBetween(row.latestTransactionDate, today)),
+      balanceStatus: freshnessStatusFor(accountStatus, daysBetween(row.latestBalanceDate, today)),
       latestFactDate,
       daysSinceLatestFact,
       status,

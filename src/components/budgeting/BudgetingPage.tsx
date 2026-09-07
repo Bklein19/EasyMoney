@@ -399,7 +399,7 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
     <>
       <div className="page budgeting-page stagger-in">
       <DataCompleteness startDate={period.startDate} endDate={period.endDate} />
-      {planSave.error ? <p role="alert">Budget changes have not been saved. {planSave.error} Copy your changes before reloading.</p>
+      {planSave.error ? <p role="alert">Budget changes have not been saved. {planSave.error} <button onClick={planSave.retry}>Retry save</button> Copy your changes before reloading.</p>
         : <p role="status">{planSave.pending ? 'Saving budget plans…' : 'Budget plans saved on this computer.'}</p>}
       <div className="page__header budgeting-page__header">
         <div>

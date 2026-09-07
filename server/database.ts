@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { commonAccountLast4 } from './app/accountLast4.ts';
 import { hashContent } from './hash.ts';
-import { selectedDatabasePath, writeSnapshot, validateSnapshot } from './databaseSnapshots.ts';
+import { selectedDatabasePath, writeSnapshot, validateSnapshot, flushSnapshotFile } from './databaseSnapshots.ts';
 
 type DatabaseValue = string | number | bigint | boolean | null | Uint8Array | Date;
 type DatabaseParams = DatabaseValue | object | undefined;
@@ -140,9 +140,11 @@ export function stageDatabaseRestore(snapshotPath: string) {
   const destination = path.join(path.dirname(baseDbPath), fileName);
   fs.copyFileSync(snapshotPath, destination, fs.constants.COPYFILE_EXCL);
   validateSnapshot(destination);
+  flushSnapshotFile(destination);
   const pointer = `${baseDbPath}.restore.json`;
   const temporary = `${pointer}.${crypto.randomUUID()}.tmp`;
   fs.writeFileSync(temporary, JSON.stringify({ fileName }), { mode: 0o600, flag: 'wx' });
+  flushSnapshotFile(temporary);
   fs.renameSync(temporary, pointer);
   restorePending = true;
   return { summary, beforeRestore, restartRequired: true };

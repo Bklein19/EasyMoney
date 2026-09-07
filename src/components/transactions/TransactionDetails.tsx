@@ -11,7 +11,7 @@ export default function TransactionDetails({ ledgerTransactionId, onClose }: { l
     {query.isPending && <p role="status">Loading source details…</p>}
     {query.error && <p role="alert">{query.error.message}</p>}
     {detail && <>
-      <p><strong>{detail.transaction.description}</strong> · {formatCurrency(detail.transaction.amountCents / 100)} · {detail.transaction.date}</p>
+      <p><strong>{detail.transaction.description}</strong> · {formatCurrency(detail.transaction.amountCents / 100)} · {detail.transaction.date.slice(0, 10)}</p>
       <p>Account: {detail.transaction.accountName}. Category: {detail.transaction.categoryName || 'Uncategorized'}.</p>
       <p>Original description: {detail.transaction.originalDescription || detail.transaction.description}</p>
       {detail.transaction.notes && <p>Notes: {detail.transaction.notes}</p>}
@@ -20,7 +20,7 @@ export default function TransactionDetails({ ledgerTransactionId, onClose }: { l
         <strong>{source.selected ? 'Retained source' : 'Related source excluded during rebuild'}</strong>
         <p>{source.fileName} · {source.parserName || 'Unknown parser'} · {source.status}</p>
         <p>{source.sourceAccountName || 'Unnamed source account'} → {source.mappedAccountName || 'Unmapped account'}</p>
-        <p>{source.date} · {formatCurrency(source.amountCents / 100)} · {source.description}</p>
+        <p>{source.date.slice(0, 10)} · {formatCurrency(source.amountCents / 100)} · {source.description}</p>
         <p>{source.reason}</p>
       </section>)}
       <Link to="/import">Open import history</Link>

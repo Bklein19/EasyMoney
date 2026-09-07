@@ -38,12 +38,15 @@ export function useSaveBudgetPlans(plans: BudgetPlans, initialRevision: number) 
   const revision = useRef(initialRevision);
   const queue = useRef(Promise.resolve());
   const saved = useRef(JSON.stringify(plans));
+  const enqueued = useRef(saved.current);
   const failed = useRef(false);
   const [error, setError] = useState('');
   const [pending, setPending] = useState(0);
+  const [attempt, setAttempt] = useState(0);
   const serialized = JSON.stringify(plans);
   useEffect(() => {
-    if (serialized === saved.current) return;
+    if (serialized === enqueued.current && attempt === 0) return;
+    enqueued.current = serialized;
     // Serialize writes so rapid edits cannot arrive at the server out of order.
     queue.current = queue.current.then(async () => {
       if (failed.current) return;
@@ -59,7 +62,7 @@ export function useSaveBudgetPlans(plans: BudgetPlans, initialRevision: number) 
         setPending(value => value - 1);
       }
     });
-  }, [serialized]);
+  }, [serialized, attempt]);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
       if (serialized !== saved.current) event.preventDefault();
@@ -67,5 +70,9 @@ export function useSaveBudgetPlans(plans: BudgetPlans, initialRevision: number) 
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [serialized]);
-  return { error, pending: pending > 0 || serialized !== saved.current };
+  return { error, pending: pending > 0 || serialized !== saved.current, retry: () => {
+    failed.current = false;
+    setError('');
+    setAttempt(value => value + 1);
+  } };
 }

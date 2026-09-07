@@ -36,3 +36,13 @@ test('inactive and consolidated file ranges cannot claim single-account coverage
   expect(getDataCompleteness(input).accounts[0]?.transactionCoverage).toBe('declared');
   expect(getDataCompleteness({ ...input, accountIds: [] }).accounts).toEqual([]);
 });
+test('historical reports exclude later transactions and future periods never claim verified coverage', () => {
+  const { file, account } = source('2026-01-01', '2026-09-30', 'observed');
+  for (const date of ['2026-01-10', '2026-09-05']) {
+    insertRow('sourceTransactions', { sourceFileId: file, sourceAccountId: account, stableSourceId: crypto.randomUUID(), date, amountCents: -100 });
+  }
+  const past = getDataCompleteness({ accountIds: [accountId], startDate: '2026-01-01', endDate: '2026-01-31', today: '2026-09-07' });
+  expect(past.accounts[0]?.latestTransactionDate).toBe('2026-01-10');
+  const future = getDataCompleteness({ accountIds: [accountId], startDate: '2026-10-01', endDate: '2026-10-31', today: '2026-09-07' });
+  expect(future.accounts[0]?.transactionCoverage).toBe('future');
+});

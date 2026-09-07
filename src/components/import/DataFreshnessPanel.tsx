@@ -32,6 +32,8 @@ interface FreshnessAccount {
   accountType: string;
   latestTransactionDate: string | null;
   latestBalanceDate: string | null;
+  transactionStatus: FreshnessStatus;
+  balanceStatus: FreshnessStatus;
   latestFactDate: string | null;
   daysSinceLatestFact: number | null;
   status: FreshnessStatus;
@@ -755,7 +757,7 @@ export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPa
           <h2>Data Freshness</h2>
           <p>
             {report
-              ? `${needsUpdate} account${needsUpdate === 1 ? '' : 's'} need attention. Stale after ${report.staleAfterDays} days.`
+              ? `${needsUpdate} accounts have overdue source facts. ${report.accounts.filter(account => account.balanceStatus !== 'current' && account.balanceStatus !== 'closed').length} need newer balances. Stale after ${report.staleAfterDays} days.`
               : 'Checking latest imported activity and balances.'}
           </p>
         </div>
@@ -848,6 +850,8 @@ export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPa
                         <StatusIcon size={13} />
                         {STATUS_LABELS[account.status]}
                       </span>
+                      <small>Transactions: {STATUS_LABELS[account.transactionStatus]}</small>
+                      <small>Balance: {STATUS_LABELS[account.balanceStatus]}</small>
                     </td>
                     <td>
                       <strong>{formatFreshnessDate(account.latestFactDate)}</strong>

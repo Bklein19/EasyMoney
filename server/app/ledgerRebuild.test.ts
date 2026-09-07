@@ -7,6 +7,7 @@ process.env.EASYMONEY_DB_PATH = path.join(os.tmpdir(), `easymoney-ledger-rebuild
 const { getDb, initDatabase, insertRow } = await import('../database.ts');
 const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
 const { upsertTransactionAnnotation } = await import('./transactionAnnotations.ts');
+const { getTransactionDetails } = await import('./transactionDetails.ts');
 
 function resetAppTables() {
   const db = getDb();
@@ -415,6 +416,16 @@ test('source rebuild de-duplicates overlapping activity exports by source-file m
   materializeLedger(getDb(), ledger);
   expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerProvenance').get()).toEqual({ count: 2 });
   expect(getDb().prepare('SELECT sourceTransactionId FROM ledgerTransactions').get()?.sourceTransactionId).toBeGreaterThan(0);
+  const detail = getTransactionDetails(ledger.transactions[0]!.ledgerTransactionId);
+  expect(detail.sources.map(source => source.fileName).sort()).toEqual(['checking-a.csv', 'checking-b.csv']);
+  expect(detail.sources.every(source => source.mappedAccountName === 'WF Checking')).toBe(true);
+  upsertTransactionAnnotation(ledger.transactions[0]!.ledgerTransactionId, { notes: 'Preserve this note' });
+  getDb().prepare("UPDATE sourceFiles SET status = 'unimported' WHERE id = ?").run(exportA.sourceFileId);
+  materializeLedger(getDb(), buildLedgerFromSourceFacts(getDb()));
+  const remaining = getTransactionDetails(ledger.transactions[0]!.ledgerTransactionId);
+  expect(remaining.transaction.notes).toBe('Preserve this note');
+  expect(remaining.sources.map(source => source.fileName)).toEqual(['checking-b.csv']);
+  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(accountA)?.accountId).toBe(accountId);
 });
 
 test('source rebuild preserves same-day identical transactions seen multiple times in one activity export', () => {

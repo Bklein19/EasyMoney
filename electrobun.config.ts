@@ -39,7 +39,7 @@ export default {
     },
     win: {
       bundleCEF: false,
-      icon: 'assets/app-icon.png',
+      icon: 'assets/icon.iconset/icon_256x256.png',
     },
   },
   scripts: {
