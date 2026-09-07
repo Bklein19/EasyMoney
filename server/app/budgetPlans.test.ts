@@ -22,3 +22,10 @@ test('stale saves and invalid allocations leave stored plans unchanged', () => {
   expect(() => saveBudgetPlans({ plans: { ...plans, dreamBudget: { globalBudget: -1, categoryPercents: {} } }, revision: initial.revision })).toThrow();
   expect(getBudgetPlans()).toEqual(initial);
 });
+
+test('over-budget dollar allocations retain their full percentage after saving', () => {
+  const initial = migrateBudgetPlans(plans);
+  const updated = { ...plans, dreamBudget: { globalBudget: 3000, categoryPercents: { rent: 4100 / 3000 * 100 } } };
+  saveBudgetPlans({ plans: updated, revision: initial.revision });
+  expect(getBudgetPlans().plans.dreamBudget).toEqual(updated.dreamBudget);
+});

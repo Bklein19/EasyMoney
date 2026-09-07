@@ -3,7 +3,7 @@ import { getDb } from '../database.ts';
 
 export const budgetTemplateSchema = z.object({
   globalBudget: z.number().finite().nonnegative(),
-  categoryPercents: z.record(z.string(), z.number().finite().min(0).max(100)),
+  categoryPercents: z.record(z.string(), z.number().finite().nonnegative()),
 });
 export const budgetPlansSchema = z.object({
   globalBudgets: z.record(z.string().max(100), z.number().finite().nonnegative()),

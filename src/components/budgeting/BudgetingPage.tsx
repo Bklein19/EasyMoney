@@ -6,6 +6,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { ArrowDown, ArrowUp, Calendar, CheckCircle2, CircleAlert, PiggyBank, RotateCcw, Target, Wand2 } from 'lucide-react';
 import { useBudgets } from '../../hooks/useBudgets';
 import { useLoadBudgetPlans, useSaveBudgetPlans } from '../../hooks/useBudgetPlans';
+import { budgetAmounts, budgetPercentages } from '../../../server/app/budgetAllocation';
 import type { BudgetPlans } from '../../../server/app/budgetPlans';
 import { useCategories } from '../../hooks/useCategories';
 import { trpc } from '../../api/trpc';
@@ -95,7 +96,7 @@ interface BudgetTooltipProps {
 
 const toMonthKey = (date: Date) => format(date, 'yyyy-MM');
 const toDateInput = (date: Date) => format(date, 'yyyy-MM-dd');
-const clampPercent = (value: number) => Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
+const clampPercent = (value: number) => Math.max(0, Number.isFinite(value) ? value : 0);
 const formatPercentValue = (value: number) => `${value.toFixed(value >= 10 || value === 0 ? 0 : 1)}%`;
 
 function BudgetTooltip({ active, payload }: BudgetTooltipProps) {
@@ -139,6 +140,12 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
   const [isDesigningBudget, setIsDesigningBudget] = useState(false);
   const [isSavingPeriodBudget, setIsSavingPeriodBudget] = useState(false);
   const [draftDreamBudget, setDraftDreamBudget] = useState(initialPlans.dreamBudget);
+  const [draftAmounts, setDraftAmounts] = useState(() => budgetAmounts(initialPlans.dreamBudget));
+  const draftTotal = Object.values(draftAmounts).reduce((sum, value) => sum + value, 0);
+  const setDraftTemplate = (template: DreamBudget) => {
+    setDraftDreamBudget(template);
+    setDraftAmounts(budgetAmounts(template));
+  };
   const [draftBudgetName, setDraftBudgetName] = useState('Budget Template');
   const [periodBudgetName, setPeriodBudgetName] = useState('');
   const [savingCategoryId, setSavingCategoryId] = useState<CategoryId | null>(null);
@@ -281,7 +288,7 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
       categoryPercents
     };
     setDreamBudget(cleaned);
-    setDraftDreamBudget(cleaned);
+    setDraftTemplate(cleaned);
     return cleaned;
   };
 
@@ -298,7 +305,7 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
     });
     setSelectedSavedBudgetId(budget.id);
     setDraftBudgetName(budget.name);
-    setDraftDreamBudget(applied);
+    setDraftTemplate(applied);
   };
 
   const buildDreamFromDisplayedPeriod = (): DreamBudget => {
@@ -359,7 +366,7 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
   };
 
   const openDesignBudget = () => {
-    setDraftDreamBudget(dreamBudget);
+    setDraftTemplate(dreamBudget);
     const selectedBudget = savedBudgets.find(item => item.id === selectedSavedBudgetId);
     setDraftBudgetName(selectedBudget?.name || 'Budget Template');
     setIsDesigningBudget(true);
@@ -367,6 +374,7 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
 
   const updateDraftCategoryPercent = (categoryId: CategoryId, value: string) => {
     const nextValue = clampPercent(Number(value));
+    setDraftAmounts(previous => ({ ...previous, [String(categoryId)]: Math.round(draftDreamBudget.globalBudget * nextValue) / 100 }));
     setDraftDreamBudget(previous => ({
       ...previous,
       categoryPercents: {
@@ -377,7 +385,8 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
   };
 
   const saveDraftDreamBudget = () => {
-    const applied = persistDreamBudget(draftDreamBudget);
+    if (draftDreamBudget.globalBudget <= 0) return;
+    const applied = persistDreamBudget({ ...draftDreamBudget, categoryPercents: budgetPercentages(draftAmounts, draftDreamBudget.globalBudget) });
     const name = draftBudgetName.trim() || 'Budget Template';
     const existing = savedBudgets.find(item => item.id === selectedSavedBudgetId || item.name.toLowerCase() === name.toLowerCase());
     const savedBudget = {
@@ -787,11 +796,11 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
             <button className="btn btn--ghost" type="button" onClick={() => setIsDesigningBudget(false)}>
               Cancel
             </button>
-            <button className="btn btn--secondary" type="button" onClick={() => setDraftDreamBudget(buildDreamFromDisplayedPeriod())}>
+            <button className="btn btn--secondary" type="button" onClick={() => setDraftTemplate(buildDreamFromDisplayedPeriod())}>
               <Wand2 size={15} />
               Use This Period
             </button>
-            <button className="btn btn--primary" type="button" onClick={saveDraftDreamBudget}>
+            <button className="btn btn--primary" type="button" onClick={saveDraftDreamBudget} disabled={draftDreamBudget.globalBudget <= 0}>
               Save and Apply Budget
             </button>
           </>
@@ -814,21 +823,28 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
                 className="input"
                 type="number"
                 min="0"
-                step="50"
+                step="0.01"
                 value={draftDreamBudget.globalBudget || ''}
                 onChange={(event) => setDraftDreamBudget(previous => ({
                   ...previous,
-                  globalBudget: Number(event.target.value) || 0
+                  globalBudget: Math.max(0, Number(event.target.value) || 0),
+                  categoryPercents: budgetPercentages(draftAmounts, Math.max(0, Number(event.target.value) || 0))
                 }))}
                 placeholder={autoGlobalBudget ? String(Math.round(autoGlobalBudget)) : '0'}
               />
             </label>
             <div className="budgeting-design-total">
-              <span>Category targets</span>
+              <span>Planned monthly costs</span>
+              <strong>{formatCurrency(draftTotal)}</strong>
               <strong>{formatPercentValue(Object.values(draftDreamBudget.categoryPercents).reduce((sum, value) => sum + (Number(value) || 0), 0))}</strong>
             </div>
           </div>
 
+          <p className="budgeting-muted" role="status">{draftDreamBudget.globalBudget <= 0
+            ? 'Enter a monthly budget amount to calculate percentages and save. You can enter costs first.'
+            : draftTotal > draftDreamBudget.globalBudget
+              ? `Planned costs exceed your monthly budget by ${formatCurrency(draftTotal - draftDreamBudget.globalBudget)}.`
+              : `${formatCurrency(draftDreamBudget.globalBudget - draftTotal)} left to allocate.`}</p>
           <div className="budgeting-design-list">
             {expenseCategories.map(category => {
               const value = Number(draftDreamBudget.categoryPercents[String(category.id)]) || 0;
@@ -838,27 +854,30 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
                     <span className="budgeting-category__dot" style={{ backgroundColor: category.color || '#94a3b8' }} />
                     <div>
                       <strong>{category.name}</strong>
-                      <span>{formatCurrency(((draftDreamBudget.globalBudget || globalBudget) * value) / 100)} target</span>
+                      <span>{formatCurrency(draftAmounts[String(category.id)] || 0)} target</span>
                     </div>
                   </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={Math.round(value)}
-                    onChange={(event) => updateDraftCategoryPercent(category.id, event.target.value)}
-                    aria-label={`${category.name} budget percentage`}
-                  />
+                  <label className="budgeting-dollar-input">
+                    <span>$</span>
+                    <input className="input input--sm" type="number" min="0" step="0.01"
+                      value={draftAmounts[String(category.id)] || ''}
+                      placeholder="0.00"
+                      aria-label={`${category.name} monthly cost in dollars`}
+                      onChange={event => {
+                        const amounts = { ...draftAmounts, [String(category.id)]: Math.max(0, Number(event.target.value) || 0) };
+                        setDraftAmounts(amounts);
+                        setDraftDreamBudget(previous => ({ ...previous, categoryPercents: budgetPercentages(amounts, previous.globalBudget) }));
+                      }} />
+                  </label>
                   <div className="budgeting-percent-input">
                     <input
                       className="input input--sm"
                       type="number"
                       min="0"
-                      max="100"
-                      step="1"
-                      value={Math.round(value)}
+                      step="0.01"
+                      value={Number(value.toFixed(2))}
                       onChange={(event) => updateDraftCategoryPercent(category.id, event.target.value)}
+                      disabled={draftDreamBudget.globalBudget <= 0}
                       aria-label={`${category.name} budget percentage number`}
                     />
                     <span>%</span>

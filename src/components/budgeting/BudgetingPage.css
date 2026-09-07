@@ -601,6 +601,17 @@
   border-bottom: 0;
 }
 
+.budgeting-dollar-input {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.budgeting-dollar-input input {
+  min-width: 0;
+  width: 100%;
+}
+
 .budgeting-design-row input[type="range"] {
   width: 100%;
   accent-color: var(--accent-cyan);
