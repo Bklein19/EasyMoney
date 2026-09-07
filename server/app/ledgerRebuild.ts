@@ -68,6 +68,7 @@ export interface RebuiltBalanceSnapshot {
 export interface RebuiltLedger {
   transactions: RebuiltTransaction[];
   balanceSnapshots: RebuiltBalanceSnapshot[];
+  provenance?: Array<{ ledgerTransactionId: string; sourceTransactionId: number; reason: string; selected: boolean }>;
 }
 
 function normalizeText(value = '') {
@@ -195,6 +196,7 @@ function activityBucket(transaction: {
 }
 
 export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
+  const decisions = new Map<number, { representative: number; reason: string }>();
   const sourceTransactions = db.prepare(`
     SELECT
       st.id,
@@ -276,7 +278,10 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
     const key = sourceIdentityKey(transaction);
     const existing = uniqueTransactionInputs.get(key);
     if (!existing || (transaction.priority ?? 0) > (existing.priority ?? 0)) {
+      if (existing) decisions.set(existing.id, { representative: transaction.id, reason: 'Same parser source identity; higher priority source retained.' });
       uniqueTransactionInputs.set(key, transaction);
+    } else {
+      decisions.set(transaction.id, { representative: existing.id, reason: 'Same parser source identity already represented.' });
     }
   }
   const sourceUniqueTransactionInputs = [...uniqueTransactionInputs.values()];
@@ -314,10 +319,18 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
     const priority = getTransactionSourceScore(transaction);
     if (isStatementSummary(transaction)) {
       const best = bestMonthBucketDetailPriority.get(monthBucketKey(transaction));
+      if (best !== undefined && priority < best) {
+        const representative = sourceUniqueTransactionInputs.find(candidate => !isStatementSummary(candidate) && monthBucketKey(candidate) === monthBucketKey(transaction) && getTransactionSourceScore(candidate) === best);
+        if (representative) decisions.set(transaction.id, { representative: representative.id, reason: 'Monthly statement summary excluded because more detailed activity covers this bucket. This is a summary, not an individual duplicate.' });
+      }
       return best === undefined || priority >= best;
     }
     if (transaction.sourceRole !== 'activity') return true;
     const best = bestExactPriority.get(exactKey(transaction));
+    if (best !== undefined && priority < best) {
+      const representative = sourceUniqueTransactionInputs.find(candidate => candidate.sourceRole === 'activity' && exactKey(candidate) === exactKey(transaction) && getTransactionSourceScore(candidate) === best);
+      if (representative) decisions.set(transaction.id, { representative: representative.id, reason: 'Lower priority activity excluded by the existing same-date and amount source-priority rule.' });
+    }
     return best === undefined || priority >= best;
   });
 
@@ -361,6 +374,9 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
 
     for (const transaction of group) {
       if (!selected.has(transaction)) {
+        const siblings = [...(bySourceFile.get(transaction.sourceFileId) ?? [])].sort((a, b) => getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b)));
+        const representativeRow = [...selected][siblings.indexOf(transaction)];
+        if (representativeRow) decisions.set(transaction.id, { representative: representativeRow.id, reason: 'Overlapping activity export; matched by occurrence within the file. The largest file occurrence count is retained.' });
         retainedTransactionInputs.delete(transaction);
       }
     }
@@ -428,6 +444,7 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
           )[0];
 
         if (match) {
+          decisions.set(transaction.id, { representative: match.candidate.id, reason: 'Activity and statement occurrence matched by account, amount, description or parser identity, within three posting days.' });
           matchedCanonical.add(match.index);
           retainedTransactionInputs.delete(transaction);
         } else {
@@ -437,7 +454,24 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
     }
   }
 
-  const transactions = assignLedgerTransactionIdentities([...retainedTransactionInputs]).map((item) => ({
+  const assigned = assignLedgerTransactionIdentities([...retainedTransactionInputs]);
+  const ledgerIdsBySource = new Map(assigned.map(item => [item.transaction.id, item.ledgerTransactionId]));
+  const provenance: NonNullable<RebuiltLedger['provenance']> = [];
+  for (const row of sourceTransactions) {
+    let representative = row.id;
+    const visited = new Set<number>();
+    const reasons: string[] = [];
+    while (decisions.has(representative) && !visited.has(representative)) {
+      visited.add(representative);
+      const decision = decisions.get(representative)!;
+      reasons.push(decision.reason);
+      representative = decision.representative;
+    }
+    const ledgerTransactionId = ledgerIdsBySource.get(representative);
+    if (ledgerTransactionId) provenance.push({ ledgerTransactionId, sourceTransactionId: row.id, selected: row.id === representative,
+      reason: reasons.join(' ') || 'Source occurrence retained in the ledger.' });
+  }
+  const transactions = assigned.map((item) => ({
     ledgerTransactionId: item.ledgerTransactionId,
     occurrenceIndex: item.occurrenceIndex,
     accountId: item.transaction.accountId,
@@ -496,6 +530,7 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
 
   return {
     transactions,
+    provenance,
     balanceSnapshots: [...balancesByAccountMonth.values()].sort((a, b) =>
       `${a.accountId}|${a.month}`.localeCompare(`${b.accountId}|${b.month}`)
     ),
@@ -511,6 +546,7 @@ export function ledgerFingerprint(ledger: RebuiltLedger) {
 
 export function materializeLedger(db = getDb(), ledger = buildLedgerFromSourceFacts(db)) {
   db.transaction(() => {
+    db.prepare('DELETE FROM ledgerProvenance').run();
     db.prepare('DELETE FROM ledgerTransactions').run();
     db.prepare('DELETE FROM ledgerBalances').run();
     db.prepare('DELETE FROM transactions').run();
@@ -637,6 +673,12 @@ export function materializeLedger(db = getDb(), ledger = buildLedgerFromSourceFa
         createdAt: now,
         updatedAt: now,
       });
+    }
+    for (const source of ledger.provenance ?? []) {
+      db.prepare('INSERT INTO ledgerProvenance (ledgerTransactionId, sourceTransactionId, reason, selected) VALUES (?, ?, ?, ?)')
+        .run(source.ledgerTransactionId, source.sourceTransactionId, source.reason, source.selected ? 1 : 0);
+      if (source.selected) db.prepare('UPDATE ledgerTransactions SET sourceTransactionId = ? WHERE ledgerTransactionId = ?')
+        .run(source.sourceTransactionId, source.ledgerTransactionId);
     }
 
     const insertBalance = db.prepare(`

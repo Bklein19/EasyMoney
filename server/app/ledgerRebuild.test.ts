@@ -409,6 +409,12 @@ test('source rebuild de-duplicates overlapping activity exports by source-file m
   expect(ledger.transactions.map(transaction => transaction.description)).toEqual([
     'STARBUCKS STORE 123',
   ]);
+  expect(ledger.provenance).toHaveLength(2);
+  expect(ledger.provenance?.filter(item => item.selected)).toHaveLength(1);
+  expect(ledger.provenance?.find(item => !item.selected)?.reason).toContain('occurrence');
+  materializeLedger(getDb(), ledger);
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerProvenance').get()).toEqual({ count: 2 });
+  expect(getDb().prepare('SELECT sourceTransactionId FROM ledgerTransactions').get()?.sourceTransactionId).toBeGreaterThan(0);
 });
 
 test('source rebuild preserves same-day identical transactions seen multiple times in one activity export', () => {

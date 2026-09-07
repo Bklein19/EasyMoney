@@ -5,6 +5,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { ArrowDown, ArrowUp, X } from 'lucide-react';
 import { useTransactions } from '../../hooks/useTransactions';
 import TransactionRow from './TransactionRow';
+import TransactionDetails from './TransactionDetails';
 import TransactionFilters from './TransactionFilters';
 import type { TransactionFilterState } from './TransactionFilters';
 import { formatCurrency } from '../../utils/formatters';
@@ -42,6 +43,7 @@ interface TransactionTotals {
 }
 
 export default function TransactionsPage() {
+  const [inspectedId, setInspectedId] = useState<string | null>(null);
   const navigate = useNavigate();
   const [filters, setFilters] = useState<TransactionFilterState>({});
   const [isCreatingBulkCategory, setIsCreatingBulkCategory] = useState(false);
@@ -270,6 +272,7 @@ export default function TransactionsPage() {
 
   return (
     <div className="page">
+      {inspectedId && <TransactionDetails ledgerTransactionId={inspectedId} onClose={() => setInspectedId(null)} />}
       <div className="page__header transactions-page__header stagger-in">
         <div>
           <h1 className="page__title">Transactions</h1>
@@ -428,6 +431,7 @@ export default function TransactionsPage() {
                         </div>
                       ) : (
                         <TransactionRow
+                          onInspect={setInspectedId}
                           transaction={tx}
                           onUpdate={updateTransaction}
                           categories={categories}

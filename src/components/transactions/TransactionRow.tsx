@@ -4,6 +4,7 @@ import type { CategorySummary } from '../../../server/app/types';
 
 interface TransactionRowItem {
   id: number | string;
+  ledgerTransactionId?: string | null;
   categoryId: number | string | null;
   date: string;
   amount: number;
@@ -14,13 +15,14 @@ interface TransactionRowItem {
 }
 
 interface TransactionRowProps {
+  onInspect?: (ledgerTransactionId: string) => void;
   transaction: TransactionRowItem;
   onUpdate: (id: number | string, changes: { categoryId: number | string | null }) => void;
   categories: CategorySummary[];
   addCategory: (category: Record<string, unknown>) => Promise<number | string>;
 }
 
-export default function TransactionRow({ transaction, onUpdate, categories, addCategory }: TransactionRowProps) {
+export default function TransactionRow({ transaction, onUpdate, categories, addCategory, onInspect }: TransactionRowProps) {
   const handleCategoryChange = (categoryId: number | string | null) => {
     onUpdate(transaction.id, { categoryId });
   };
@@ -29,7 +31,11 @@ export default function TransactionRow({ transaction, onUpdate, categories, addC
     <div className="transaction-row">
       <div className="tx-date">{formatDate(transaction.date, 'medium')}</div>
       <div className="tx-desc">
-        <span className="truncate">{transaction.merchant || transaction.description}</span>
+        {onInspect && transaction.ledgerTransactionId
+          ? <button type="button" className="transaction-source-button truncate" onClick={() => onInspect(transaction.ledgerTransactionId!)} aria-label={`View source details for ${transaction.merchant || transaction.description}`}>
+            {transaction.merchant || transaction.description}
+          </button>
+          : <span className="truncate">{transaction.merchant || transaction.description}</span>}
         {transaction.merchant && transaction.merchant !== transaction.description && (
           <span className="tx-notes truncate">{transaction.description}</span>
         )}

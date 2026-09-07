@@ -35,6 +35,7 @@ import { listImportProfiles, upsertImportProfile } from './importProfiles.ts';
 import { getInvestmentNetWorthReport, getSavingsRateReport } from './investmentReports.ts';
 import { saveLocalEnvValue } from './localEnv.ts';
 import { getNetWorthReport } from './netWorth.ts';
+import { getTransactionDetails } from './transactionDetails.ts';
 import {
   categorizeTransactions,
   categorizeTransactionsByQuery,
@@ -348,6 +349,8 @@ export const appRouter = t.router({
   }),
 
   transactions: t.router({
+    details: t.procedure.input(z.object({ ledgerTransactionId: z.string().min(1) }))
+      .query(({ input }) => getTransactionDetails(input.ledgerTransactionId)),
     list: t.procedure
       .input(z.object({
         accountId: optionalId,

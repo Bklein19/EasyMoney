@@ -618,6 +618,13 @@ export function initDatabase() {
       payloadJson TEXT NOT NULL,
       revision INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS ledgerProvenance (
+      ledgerTransactionId TEXT NOT NULL,
+      sourceTransactionId INTEGER NOT NULL,
+      reason TEXT NOT NULL,
+      selected INTEGER NOT NULL,
+      PRIMARY KEY (ledgerTransactionId, sourceTransactionId)
+    );
 
     CREATE TABLE IF NOT EXISTS accounts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
