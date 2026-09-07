@@ -189,9 +189,10 @@
 .sync-review {
   container-type: inline-size;
   overflow: hidden;
-  border: 1px solid var(--glass-border);
+  border: 1px solid color-mix(in srgb, var(--accent-blue) 48%, var(--glass-border));
   border-radius: var(--radius-lg);
   background: var(--bg-elevated);
+  box-shadow: 0 0 0 3px var(--focus-ring), var(--shadow-md);
 }
 
 .sync-review__header {
@@ -201,6 +202,7 @@
   gap: 1rem;
   padding: 0.85rem 1rem;
   border-bottom: 1px solid var(--hairline);
+  background: color-mix(in srgb, var(--accent-blue) 5%, var(--bg-elevated));
 }
 
 .sync-review__header h3,
@@ -211,6 +213,23 @@
 .sync-review__header h3 {
   color: var(--text-primary);
   font-size: var(--text-base);
+}
+
+.sync-review__state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  margin-bottom: 0.3rem;
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--accent-blue) 28%, var(--glass-border));
+  border-radius: var(--radius-sm);
+  background: var(--color-info-bg);
+  color: var(--accent-blue);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1.1;
+  text-transform: uppercase;
 }
 
 .sync-review__header p {

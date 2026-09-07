@@ -551,10 +551,15 @@ function SyncReviewPanel({
   const transactionCount = review.artifacts.reduce((sum, artifact) => sum + artifact.transactionCount, 0);
   const balanceCount = review.artifacts.reduce((sum, artifact) => sum + artifact.balanceCount, 0);
   return (
-    <section className="sync-review" aria-label="Review downloaded data">
+    <section
+      className="sync-review"
+      aria-labelledby="sync-review-title"
+      aria-busy={isWorking}
+    >
       <div className="sync-review__header">
         <div>
-          <h3>Review downloaded data</h3>
+          <span className="sync-review__state">Review required</span>
+          <h3 id="sync-review-title">Review downloaded data</h3>
           <p>Nothing changes in your ledger until you confirm.</p>
         </div>
         <div className="sync-review__totals">
@@ -580,7 +585,7 @@ function SyncReviewPanel({
           {review.alreadyImported} downloaded file{review.alreadyImported === 1 ? ' is' : 's are'} already in the ledger and will be skipped.
         </p>
       )}
-      {error && <p className="sync-review__error">{error}</p>}
+      {error && <p className="sync-review__error" role="alert">{error}</p>}
       {readyClaimGroups.length > 0 && (
         <section className="sync-review__mapping-groups" aria-label="Account mappings">
           <div className="sync-review__mapping-groups-header">
