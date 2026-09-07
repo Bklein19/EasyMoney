@@ -390,7 +390,7 @@ describe('Playwright session helper', () => {
     expect(await stat(transientProfilePath).then(() => true, () => false)).toBe(false);
   });
 
-  test('hands off to a fresh headless attempt immediately after interactive authentication is saved', async () => {
+  test('continues in the authenticated headed attempt and saves a future headless probe', async () => {
     const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-auth-resume-'));
     temporaryDirectories.push(root);
     const canonicalProfilePath = join(root, 'profiles', 'fidelity-catchup');
@@ -457,7 +457,7 @@ describe('Playwright session helper', () => {
     const fakeWithTransientBrowserProfile: typeof withTransientBrowserProfile = async operation =>
       withTransientBrowserProfile(operation, { temporaryRoot: transientRoot });
 
-    const result = await runInstitutionBrowserProgram(
+    const run = () => runInstitutionBrowserProgram(
       {
         name: 'fidelity-catchup',
         startUrl: 'https://digital.fidelity.com/ftgw/digital/portfolio/activity',
@@ -481,21 +481,34 @@ describe('Playwright session helper', () => {
       },
     );
 
-    expect(result.status).toBe('complete');
-    expect(attempts).toHaveLength(3);
-    expect(attempts.map(attempt => attempt.headless)).toEqual([true, false, true]);
+    const firstResult = await run();
+
+    expect(firstResult.status).toBe('complete');
+    expect(attempts).toHaveLength(2);
+    expect(attempts.map(attempt => attempt.headless)).toEqual([true, false]);
     expect(attempts.map(attempt => attempt.authenticationProfilePath)).toEqual([
-      canonicalProfilePath,
       canonicalProfilePath,
       canonicalProfilePath,
     ]);
     expect(attempts[0]?.profilePath).not.toBe(canonicalProfilePath);
     expect(attempts[1]?.profilePath).toBe(canonicalProfilePath);
-    expect(attempts[2]?.profilePath).not.toBe(canonicalProfilePath);
-    expect(attempts[0]?.profilePath).not.toBe(attempts[2]?.profilePath);
-    expect(attempts.map(attempt => attempt.forceStartUrl)).toEqual([false, true, false]);
-    expect(attempts.map(attempt => attempt.restoredFreshAuthentication)).toEqual([false, false, true]);
-    expect(programCalls).toEqual([1, 1, 1]);
+    expect(attempts.map(attempt => attempt.forceStartUrl)).toEqual([false, true]);
+    expect(attempts.map(attempt => attempt.restoredFreshAuthentication)).toEqual([false, false]);
+    expect(programCalls).toEqual([1, 2]);
+
+    const secondResult = await run();
+
+    expect(secondResult.status).toBe('complete');
+    expect(attempts).toHaveLength(3);
+    expect(attempts[2]).toEqual({
+      headless: true,
+      profilePath: expect.not.stringMatching(canonicalProfilePath),
+      authenticationProfilePath: canonicalProfilePath,
+      forceStartUrl: false,
+      restoredFreshAuthentication: true,
+    });
+    expect(attempts[2]?.profilePath).not.toBe(attempts[0]?.profilePath);
+    expect(programCalls).toEqual([1, 2, 1]);
   });
 
   test('keeps an explicitly headed session in the authenticated browser', async () => {
