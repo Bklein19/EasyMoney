@@ -1159,6 +1159,7 @@ test('import parser registry resolves Robinhood banking UUID exports', async () 
     sourceRole: 'activity',
     raw: {
       parser: 'robinhood-banking-csv',
+      crossSourceIdentity: 'robinhood-banking:incoming transfer',
     },
   }, {
     sourceRowIndex: 1,
@@ -1170,6 +1171,7 @@ test('import parser registry resolves Robinhood banking UUID exports', async () 
     sourceRole: 'activity',
     raw: {
       parser: 'robinhood-banking-csv',
+      crossSourceIdentity: 'robinhood-banking:card purchase',
     },
   }]);
 });
