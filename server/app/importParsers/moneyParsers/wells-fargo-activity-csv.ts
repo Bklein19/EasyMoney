@@ -8,7 +8,7 @@ export const meta: ParserMeta = {
   kind: "activity-export",
   priority: 100,
   matches: ({ filename, sample }) =>
-    /^wells-fargo-(checking|autograph-visa|platinum-card)-\d{4}-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv$/i.test(filename),
+    /^wells-fargo-(checking|savings|credit-card|autograph-visa|platinum-card)-\d{4}-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv$/i.test(filename),
 };
 
 function parseCsv(text: string): string[][] {
@@ -78,12 +78,14 @@ function isWellsFargoActivityHeader(row: string[]): boolean {
 
 function accountFromFilename(filePath: string): { account: string; liability: boolean } {
   const filename = basename(filePath).replace(/^[0-9a-f]{64}-/, "");
-  const m = filename.match(/^wells-fargo-(checking|autograph-visa|platinum-card)-(\d{4})-/i);
+  const m = filename.match(/^wells-fargo-(checking|savings|credit-card|autograph-visa|platinum-card)-(\d{4})-/i);
   if (!m) throw new Error(`Could not infer Wells Fargo account from filename: ${filename}`);
 
   const slug = m[1]!.toLowerCase();
   const last4 = m[2]!;
   if (slug === "checking") return { account: `Checking - ${last4}`, liability: false };
+  if (slug === "savings") return { account: `Savings - ${last4}`, liability: false };
+  if (slug === "credit-card") return { account: `Wells Fargo Credit Card - ${last4}`, liability: true };
   if (slug === "autograph-visa") return { account: `Autograph Visa - ${last4}`, liability: true };
   return { account: `Platinum Card - ${last4}`, liability: true };
 }

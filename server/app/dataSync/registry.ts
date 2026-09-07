@@ -6,11 +6,13 @@ import { robinhoodBankingConnector } from './institutions/robinhoodBankingConnec
 import { sequoiaFundConnector } from './institutions/sequoiaFundConnector.ts';
 import { tiaaConnector } from './institutions/tiaaConnector.ts';
 import { vanguardConnector } from './institutions/vanguardConnector.ts';
+import { wellsFargoConnector } from './institutions/wellsFargoConnector.ts';
 
 export const syncConnectors = [
   bankOfAmericaConnector,
   fidelityConnector,
   vanguardConnector,
+  wellsFargoConnector,
   sequoiaFundConnector,
   tiaaConnector,
   marcusConnector,

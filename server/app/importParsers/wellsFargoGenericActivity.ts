@@ -19,7 +19,7 @@ function normalizeHeader(value = '') {
 }
 
 function hasNormalizedAccountFilename(fileName: string) {
-  return /^wells-fargo-(checking|autograph-visa|platinum-card)-\d{4}-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv$/i.test(fileName);
+  return /^wells-fargo-(checking|savings|credit-card|autograph-visa|platinum-card)-\d{4}-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv$/i.test(fileName);
 }
 
 function hasWellsFargoActivityHeaders(headers: string[]) {

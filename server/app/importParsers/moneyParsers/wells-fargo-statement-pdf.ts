@@ -8,9 +8,10 @@ export const meta: ParserMeta = {
   kind: "statement",
   priority: 50,
   matches: ({ filename, sample }) =>
-    /^wells-fargo-(checking|autograph-visa|platinum-card)-\d{4}-\d{4}-\d{2}-\d{2}\.pdf$/i.test(filename) ||
+    /^wells-fargo-(checking|savings|credit-card|autograph-visa|platinum-card)-\d{4}-\d{4}-\d{2}-\d{2}\.pdf$/i.test(filename) ||
     (/\.pdf$/i.test(filename) && /Wells Fargo/i.test(sample) &&
       (/Wells Fargo Everyday Checking/.test(sample) ||
+        /Wells Fargo[^\n]*Savings/i.test(sample) ||
         /WELLS FARGO AUTOGRAPH VISA/i.test(sample) ||
         (/WELLS FARGO CREDIT CARD/i.test(sample) && /Account ending in/.test(sample)))),
 };
@@ -21,7 +22,7 @@ function cleanDescription(value: string): string {
 
 function filenameAccount(filePath: string): { slug?: string; last4?: string; date?: string } {
   const filename = basename(filePath).replace(/^[0-9a-f]{64}-/, "");
-  const m = filename.match(/wells-fargo-(checking|autograph-visa|platinum-card)(?:-(\d{4}))?(?:-statement)?-(\d{4}-\d{2}-\d{2})\.pdf$/i);
+  const m = filename.match(/wells-fargo-(checking|savings|credit-card|autograph-visa|platinum-card)(?:-(\d{4}))?(?:-statement)?-(\d{4}-\d{2}-\d{2})\.pdf$/i);
   return { slug: m?.[1]?.toLowerCase(), last4: m?.[2], date: m?.[3] };
 }
 
@@ -49,13 +50,18 @@ function accountLast4(text: string, filePath: string): string {
     text.match(/Account ending in\s+(\d{4})/i)?.[1] ??
     text.match(/Account number:\s*\d*(\d{4})/i)?.[1] ??
     text.match(/Account Number\s+(?:\d{4}\s+){3}(\d{4})/i)?.[1];
+  if (fromFilename && fromText && fromFilename !== fromText) {
+    throw new Error("Wells Fargo statement account number does not match its filename");
+  }
   const last4 = fromFilename ?? fromText;
   if (!last4) throw new Error("Could not find Wells Fargo account number");
   return last4;
 }
 
 function depositAccountName(text: string, filePath: string): string {
+  const { slug } = filenameAccount(filePath);
   const last4 = accountLast4(text, filePath);
+  if (slug === "savings" || (!slug && /\bSavings\b/i.test(text))) return `Savings - ${last4}`;
   return `Checking - ${last4}`;
 }
 
@@ -63,14 +69,15 @@ function cardAccountName(text: string, filePath: string): string {
   const { slug } = filenameAccount(filePath);
   const last4 = accountLast4(text, filePath);
   if (slug === "autograph-visa" || /AUTOGRAPH VISA/i.test(text)) return `Autograph Visa - ${last4}`;
-  return `Platinum Card - ${last4}`;
+  if (slug === "platinum-card" || /PLATINUM CARD/i.test(text)) return `Platinum Card - ${last4}`;
+  return `Wells Fargo Credit Card - ${last4}`;
 }
 
 function parseDepositPeriod(text: string, filePath: string): { covered_from: string; covered_to: string } {
   const filenameDate = filenameAccount(filePath).date;
   const ending = text.match(/Ending balance on\s+(\d{1,2})\/(\d{1,2})\s+\$?[\d,]+\.\d{2}/);
   const beginning = text.match(/Beginning balance on\s+(\d{1,2})\/(\d{1,2})\s+\$?[\d,]+\.\d{2}/);
-  if (!filenameDate || !ending || !beginning) throw new Error("Could not find Wells Fargo checking statement period");
+  if (!filenameDate || !ending || !beginning) throw new Error("Could not find Wells Fargo deposit statement period");
 
   const covered_to = filenameDate;
   const covered_from = isoStatementMonthDate(beginning[1]!, beginning[2]!, covered_to);
@@ -351,7 +358,7 @@ function parseDeposit(text: string, filePath: string): ParseResult {
   const account = depositAccountName(text, filePath);
   const { covered_from, covered_to } = parseDepositPeriod(text, filePath);
   const balance = text.match(/Ending balance on\s+\d{1,2}\/\d{1,2}\s+\$?([\d,]+\.\d{2})/);
-  if (!balance) throw new Error("Could not find Wells Fargo checking ending balance");
+  if (!balance) throw new Error("Could not find Wells Fargo deposit ending balance");
 
   return {
     transactions: parseDepositTransactions(text, account, covered_to),
@@ -390,7 +397,10 @@ function parseCreditCard(text: string, filePath: string): ParseResult {
 }
 
 export function parseWellsFargoStatementText(text: string, filePath: string): ParseResult {
-  if (/Wells Fargo Everyday Checking/i.test(text)) return parseDeposit(text, filePath);
+  const slug = filenameAccount(filePath).slug;
+  if (slug === "checking" || slug === "savings" || /Wells Fargo[^\n]*(?:Checking|Savings)/i.test(text)) {
+    return parseDeposit(text, filePath);
+  }
   return parseCreditCard(text, filePath);
 }
 
