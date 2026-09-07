@@ -14,6 +14,7 @@ import IncomeVsExpense from './IncomeVsExpense';
 import TopMerchants from './TopMerchants';
 import IncomeStreams from './IncomeStreams';
 import InvestmentTrends from './InvestmentTrends';
+import { sortAnalyticsPeriodsChronologically } from './periodOrder';
 import Tooltip from '../shared/Tooltip';
 import Modal from '../shared/Modal';
 import GroupedCategorySelect, { isUncategorized } from '../shared/GroupedCategorySelect';
@@ -273,7 +274,10 @@ export default function AnalyticsPage() {
   const totalExpense = reportSummary.expenses;
   const filteredInternalMovement = reportSummary.internalMovement;
   const filteredInvestments = reportSummary.investments;
-  const cashFlowRows = useMemo(() => [...deferredCashFlow].sort((a, b) => b.key.localeCompare(a.key)), [deferredCashFlow]);
+  const cashFlowRows = useMemo(
+    () => sortAnalyticsPeriodsChronologically(deferredCashFlow),
+    [deferredCashFlow]
+  );
 
   const drilldownTransactions = useMemo(() => {
     if (!drilldown) return [];
