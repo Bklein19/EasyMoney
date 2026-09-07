@@ -24,6 +24,16 @@ export function validateSnapshot(filePath: string) {
   }
 }
 
+function makeSnapshotPortable(filePath: string) {
+  const candidate = new Database(filePath);
+  try {
+    const result = candidate.query('PRAGMA journal_mode = DELETE').get() as { journal_mode: string };
+    if (result.journal_mode !== 'delete') throw new Error('Could not finalize the database backup.');
+  } finally {
+    candidate.close();
+  }
+}
+
 export function writeSnapshot(database: Database, directory: string, reason: string) {
   fs.mkdirSync(directory, { recursive: true });
   const id = `${new Date().toISOString().replace(/[:.]/g, '-')}-${reason}-${crypto.randomUUID()}.sqlite`;
@@ -31,12 +41,15 @@ export function writeSnapshot(database: Database, directory: string, reason: str
   const temporary = `${destination}.tmp`;
   try {
     fs.writeFileSync(temporary, database.serialize(), { mode: 0o600, flag: 'wx' });
+    makeSnapshotPortable(temporary);
     validateSnapshot(temporary);
     flushSnapshotFile(temporary);
     fs.renameSync(temporary, destination);
     return { id, path: destination };
   } finally {
-    if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+    for (const candidate of [temporary, `${temporary}-wal`, `${temporary}-shm`]) {
+      if (fs.existsSync(candidate)) fs.unlinkSync(candidate);
+    }
   }
 }
 

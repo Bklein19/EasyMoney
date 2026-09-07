@@ -40,6 +40,11 @@ test('restore switches databases after restart, preserves annotations and plans,
     expect(stage.blocked).toBe(true);
     expect(stage.pending).toBe(true);
     expect(fs.existsSync(stage.restored.beforeRestore.path)).toBe(true);
+    expect(fs.existsSync(`${stage.restored.beforeRestore.path}-wal`)).toBe(false);
+    expect(fs.existsSync(`${stage.restored.beforeRestore.path}-shm`)).toBe(false);
+    const portableBackup = new Database(stage.restored.beforeRestore.path, { readonly: true });
+    try { expect(portableBackup.query('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'delete' }); }
+    finally { portableBackup.close(); }
     const original = new Database(databasePath, { readonly: true });
     try { expect(original.query('SELECT name FROM accounts').get()).toEqual({ name: 'After backup' }); }
     finally { original.close(); }
