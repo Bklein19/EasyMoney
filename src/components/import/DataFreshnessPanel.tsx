@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router';
 import { AlertTriangle, CheckCircle2, ChevronDown, CircleDashed, Clock3, History, LoaderCircle, Lock, RefreshCw, X } from 'lucide-react';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import { useAccounts, type AccountRow } from '../../hooks/useAccounts';
@@ -643,6 +644,8 @@ interface DataFreshnessPanelProps {
 }
 
 export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPanelProps) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const focusedAccountId = Number(searchParams.get('accountId')) || null;
   const [syncRunId, setSyncRunId] = useState(() => localStorage.getItem('easymoney-active-sync-run') || '');
   const [syncAction, setSyncAction] = useState<'confirm' | 'discard' | ''>('');
   const [syncActionError, setSyncActionError] = useState('');
@@ -658,8 +661,8 @@ export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPa
   const error = freshnessQuery.error ? freshnessQuery.error.message : '';
 
   const accounts = useMemo(
-    () => [...(report?.accounts || [])].sort(accountSort),
-    [report?.accounts]
+    () => [...(report?.accounts || [])].filter(account => !focusedAccountId || account.accountId === focusedAccountId).sort(accountSort),
+    [report?.accounts, focusedAccountId]
   );
   const needsUpdate = (report?.summary.staleAccounts || 0) +
     (report?.summary.dueAccounts || 0) +
@@ -811,6 +814,7 @@ export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPa
 
       {report && (
         <div className="data-freshness__table-wrap">
+          {focusedAccountId && <p>Showing the account selected in your report. <button onClick={() => setSearchParams({})}>Show all accounts</button></p>}
           <table className="data-freshness__table">
             <colgroup>
               <col className="data-freshness__col-account" />

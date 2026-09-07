@@ -26,6 +26,7 @@ import {
 } from './categorizationRules.ts';
 import { createCategory, deleteCategory, listCategories, updateCategory } from './categories.ts';
 import { getDataFreshnessReport } from './dataFreshness.ts';
+import { getDataCompleteness } from './dataCompleteness.ts';
 import { cancelSyncJob, confirmSyncJob, discardSyncJob, getSyncJob, startSyncJob } from './dataSync/jobs.ts';
 import { isSyncInstitutionId } from './dataSync/registry.ts';
 import { listSyncTargets } from './dataSync/executionPlan.ts';
@@ -308,6 +309,10 @@ export const appRouter = t.router({
   }),
 
   dataFreshness: t.router({
+    completeness: t.procedure.input(z.object({
+      accountIds: z.array(z.number().int().positive()).optional(),
+      startDate: z.iso.date().nullish(), endDate: z.iso.date().nullish(),
+    }).optional()).query(({ input }) => getDataCompleteness(input)),
     report: t.procedure
       .input(z.object({ today: z.string().optional() }).optional())
       .query(({ input }) => getDataFreshnessReport(input ?? {})),

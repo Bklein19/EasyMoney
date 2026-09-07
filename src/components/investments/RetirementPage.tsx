@@ -261,6 +261,8 @@ function runProjection({
   };
 }
 
+import DataCompleteness from '../shared/DataCompleteness';
+
 export function RetirementPage({ selectedIds: selectedIdsProp }: { selectedIds?: Set<number> }) {
   const netWorthQuery = useQuery(trpc.reports.netWorth.queryOptions());
   const savingsRateQuery = useQuery(trpc.reports.savingsRate.queryOptions());
@@ -394,6 +396,7 @@ export function RetirementPage({ selectedIds: selectedIdsProp }: { selectedIds?:
       </div>
 
       <div className="totals-row retirement-summary-row">
+        <div style={{ gridColumn: '1 / -1' }}><DataCompleteness accountIds={[...selectedIds]} /></div>
         <div className="total-card total-card-highlight">
           <div className="total-label">Success probability</div>
           <div className="total-value">{fmtPct(projection.successRate)}</div>

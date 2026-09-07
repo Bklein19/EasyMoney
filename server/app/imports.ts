@@ -1141,6 +1141,7 @@ function saveImportPreview({
     institution,
     coveredFrom: coveredFrom?.trim() || factDates[0] || null,
     coveredTo: coveredTo?.trim() || factDates.at(-1) || null,
+    coverageBasis: coveredFrom?.trim() && coveredTo?.trim() ? 'declared' : 'observed',
     status: 'previewed',
     createdAt: now,
   });

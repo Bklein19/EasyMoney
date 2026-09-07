@@ -15,6 +15,7 @@ import {
 } from "recharts";
 import "./ReportPages.css";
 import { trpc } from "../../api/trpc";
+import DataCompleteness from '../shared/DataCompleteness';
 
 interface AccountSummary {
   id: number;
@@ -458,6 +459,7 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
         </div>
       </div>
 
+      <DataCompleteness accountIds={[...selectedIds]} />
       {view === "networth" ? (
         <div className="networth-dashboard">
           <div className="networth-dashboard-main">

@@ -573,7 +573,7 @@ const TABLES = {
   ],
   sourceFiles: [
     'id', 'importFileId', 'fileName', 'contentHash', 'parserName', 'sourceType',
-    'parserPriority', 'institution', 'coveredFrom', 'coveredTo', 'status', 'createdAt', 'committedAt'
+    'parserPriority', 'institution', 'coveredFrom', 'coveredTo', 'coverageBasis', 'status', 'createdAt', 'committedAt'
   ],
   sourceAccounts: [
     'id', 'sourceFileId', 'accountId', 'institution', 'sourceAccountKey', 'sourceAccountName', 'accountHolder', 'rawJson', 'createdAt'
@@ -893,6 +893,9 @@ export function initDatabase() {
     if (!tableColumnNames('accounts').includes('accountHolder')) {
       db.prepare('ALTER TABLE accounts ADD COLUMN accountHolder TEXT').run();
     }
+  });
+  runSchemaMigration('2026-09-07-source-coverage-basis', () => {
+    if (!tableColumnNames('sourceFiles').includes('coverageBasis')) db.exec('ALTER TABLE sourceFiles ADD COLUMN coverageBasis TEXT');
   });
 
   runSchemaMigration('2026-08-27-account-last4', () => {
