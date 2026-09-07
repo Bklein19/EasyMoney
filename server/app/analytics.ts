@@ -13,6 +13,7 @@ import {
 import { listAccounts } from './accounts.ts';
 import { listCategories } from './categories.ts';
 import { listTransactions } from './transactions.ts';
+import { resolveAutoGrouping } from './analyticsGrouping.ts';
 import {
   buildAccountMap,
   buildCategoryMap,
@@ -46,11 +47,7 @@ function resolveGrouping(transactions: TransactionListItem[], groupMode: Analyti
     ? (Math.max(...dates) - Math.min(...dates)) / (1000 * 60 * 60 * 24)
     : 0;
 
-  return diffDays > 400
-    ? { labelFormat: 'yyyy', keyFormat: 'yyyy' }
-    : diffDays > 60
-      ? { labelFormat: 'MMM yyyy', keyFormat: 'yyyy-MM' }
-      : { labelFormat: 'week', keyFormat: 'week' };
+  return resolveAutoGrouping(diffDays);
 }
 
 function periodFor(date: string, keyFormat: string, labelFormat: string) {
