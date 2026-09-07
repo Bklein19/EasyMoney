@@ -15,6 +15,7 @@ import { RetirementPage } from './components/investments/RetirementPage';
 import { SavingsRatePage } from './components/investments/SavingsRatePage';
 import { trpc } from './api/trpc';
 import './App.css';
+import BackupsPage from './components/settings/BackupsPage';
 
 interface ReportAccount {
   id: number;
@@ -138,6 +139,7 @@ function AppRoutes({ reportSelectedIds }: AppRoutesProps) {
       <Route path="/retirement" element={<RetirementPage selectedIds={reportSelectedIds} />} />
       <Route path="/investments" element={<Navigate to="/net-worth" replace />} />
       <Route path="/import" element={<ImportPage />} />
+      <Route path="/backups" element={<BackupsPage />} />
       <Route path="/analytics" element={<Navigate to="/" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

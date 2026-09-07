@@ -76,6 +76,7 @@ const Sidebar = ({
     { path: '/accounts', label: 'Accounts', icon: WalletCards },
     { path: '/categories', label: 'Categories', icon: Tags },
     { path: '/budgeting', label: 'Budgeting', icon: PiggyBank },
+    { path: '/backups', label: 'Backups', icon: WalletCards },
     { path: '/net-worth', label: 'Net Worth', icon: Wallet },
     { path: '/performance', label: 'Performance', icon: LineChart },
     { path: '/savings-rate', label: 'Savings Rate', icon: Activity },

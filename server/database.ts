@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { commonAccountLast4 } from './app/accountLast4.ts';
 import { hashContent } from './hash.ts';
+import { selectedDatabasePath, writeSnapshot, validateSnapshot } from './databaseSnapshots.ts';
 
 type DatabaseValue = string | number | bigint | boolean | null | Uint8Array | Date;
 type DatabaseParams = DatabaseValue | object | undefined;
@@ -112,12 +113,40 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 if (process.env.NODE_ENV === 'test' && !process.env.EASYMONEY_DB_PATH) {
   throw new Error('Tests must set EASYMONEY_DB_PATH before importing the database');
 }
-const dbPath = process.env.EASYMONEY_DB_PATH
+const baseDbPath = process.env.EASYMONEY_DB_PATH
   ? path.resolve(process.env.EASYMONEY_DB_PATH)
   : path.resolve(__dirname, '..', 'data', 'easymoney.sqlite');
+const dbPath = selectedDatabasePath(baseDbPath);
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
 const sqlite = new Database(dbPath, { create: true });
+let migrationSnapshotCreated = false;
+let restorePending = false;
+const backupDirectory = path.join(path.dirname(baseDbPath), `${path.basename(baseDbPath)}.backups`);
+
+export function databaseBackupStatus() {
+  return { databasePath: dbPath, backupDirectory, restorePending };
+}
+
+export function createDatabaseBackup(reason = 'manual') {
+  return writeSnapshot(sqlite, backupDirectory, reason);
+}
+
+export function stageDatabaseRestore(snapshotPath: string) {
+  if (restorePending) throw new Error('A restore is already scheduled. Restart EasyMoney.');
+  const summary = validateSnapshot(snapshotPath);
+  const beforeRestore = createDatabaseBackup('before-restore');
+  const fileName = `restored-${crypto.randomUUID()}.sqlite`;
+  const destination = path.join(path.dirname(baseDbPath), fileName);
+  fs.copyFileSync(snapshotPath, destination, fs.constants.COPYFILE_EXCL);
+  validateSnapshot(destination);
+  const pointer = `${baseDbPath}.restore.json`;
+  const temporary = `${pointer}.${crypto.randomUUID()}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify({ fileName }), { mode: 0o600, flag: 'wx' });
+  fs.renameSync(temporary, pointer);
+  restorePending = true;
+  return { summary, beforeRestore, restartRequired: true };
+}
 sqlite.run('PRAGMA journal_mode = WAL');
 sqlite.run('PRAGMA foreign_keys = ON');
 
@@ -240,6 +269,11 @@ function runSchemaMigration(name: string, migrate: () => void) {
 
   const existing = db.prepare('SELECT name FROM schemaMigrations WHERE name = ?').get(name);
   if (existing) return;
+
+  if (!migrationSnapshotCreated && db.prepare("SELECT name FROM sqlite_master WHERE name = 'sourceTransactions'").get()) {
+    createDatabaseBackup('before-migration');
+    migrationSnapshotCreated = true;
+  }
 
   db.transaction(() => {
     migrate();
@@ -579,6 +613,12 @@ const ORDER_BY: Partial<Record<TableName, string>> = {
 
 export function initDatabase() {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS budgetPlans (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      payloadJson TEXT NOT NULL,
+      revision INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS accounts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,

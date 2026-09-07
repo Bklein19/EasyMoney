@@ -60,6 +60,9 @@ type ManagedSyncJob = SyncJob & {
 };
 
 const jobs = new Map<string, ManagedSyncJob>();
+export function hasActiveSyncJobs() {
+  return [...jobs.values()].some(job => ['running', 'importing'].includes(job.status) || job.reviewAction !== null);
+}
 const childEventTypes = new Set<SyncEvent['type']>([
   'phase',
   'action',

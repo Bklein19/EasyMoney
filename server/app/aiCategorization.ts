@@ -161,6 +161,9 @@ interface AutoApplyAiCategorizationJob extends AutoApplyAiCategorizationSnapshot
 }
 
 const autoApplyJobs = new Map<string, AutoApplyAiCategorizationJob>();
+export function hasActiveCategorizationJobs() {
+  return [...autoApplyJobs.values()].some(job => job.status === 'queued' || job.status === 'running');
+}
 
 function getOpenAiKey() {
   return process.env.OPENAI_API_KEY?.trim() || '';

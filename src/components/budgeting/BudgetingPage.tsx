@@ -5,6 +5,8 @@ import { addMonths, differenceInCalendarDays, endOfDay, endOfMonth, endOfYear, f
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 import { ArrowDown, ArrowUp, Calendar, CheckCircle2, CircleAlert, PiggyBank, RotateCcw, Target, Wand2 } from 'lucide-react';
 import { useBudgets } from '../../hooks/useBudgets';
+import { useLoadBudgetPlans, useSaveBudgetPlans } from '../../hooks/useBudgetPlans';
+import type { BudgetPlans } from '../../../server/app/budgetPlans';
 import { useCategories } from '../../hooks/useCategories';
 import { trpc } from '../../api/trpc';
 import { formatCurrency } from '../../utils/formatters';
@@ -16,8 +18,6 @@ const PERIOD_MODES = {
   YEAR: 'year',
   CUSTOM: 'custom'
 } as const;
-const DREAM_BUDGET_KEY = 'easymoney:dream-budget';
-const SAVED_BUDGETS_KEY = 'easymoney:saved-budgets';
 const AVERAGE_DAYS_PER_MONTH = 365.2425 / 12;
 
 type PeriodMode = typeof PERIOD_MODES[keyof typeof PERIOD_MODES];
@@ -97,51 +97,6 @@ const toDateInput = (date: Date) => format(date, 'yyyy-MM-dd');
 const clampPercent = (value: number) => Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
 const formatPercentValue = (value: number) => `${value.toFixed(value >= 10 || value === 0 ? 0 : 1)}%`;
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
-}
-
-function getStoredGlobalBudget(periodKey: string) {
-  const value = window.localStorage.getItem(`easymoney:global-budget:${periodKey}`);
-  if (!value) return '';
-  const numberValue = Number(value);
-  return Number.isFinite(numberValue) && numberValue > 0 ? String(numberValue) : '';
-}
-
-function getStoredDreamBudget(): DreamBudget {
-  try {
-    const stored: unknown = JSON.parse(window.localStorage.getItem(DREAM_BUDGET_KEY) || '{}');
-    const storedRecord = isRecord(stored) ? stored : {};
-    const storedPercents = storedRecord.categoryPercents;
-    return {
-      globalBudget: Number(storedRecord.globalBudget) > 0 ? Number(storedRecord.globalBudget) : 0,
-      categoryPercents: isRecord(storedPercents)
-        ? Object.fromEntries(Object.entries(storedPercents).map(([key, value]) => [key, Number(value) || 0]))
-        : {}
-    };
-  } catch {
-    return { globalBudget: 0, categoryPercents: {} };
-  }
-}
-
-function isSavedBudget(value: unknown): value is SavedBudget {
-  return isRecord(value) &&
-    typeof value.id === 'string' &&
-    typeof value.name === 'string' &&
-    typeof value.updatedAt === 'string' &&
-    typeof value.globalBudget === 'number' &&
-    isRecord(value.categoryPercents);
-}
-
-function getStoredSavedBudgets(): SavedBudget[] {
-  try {
-    const stored: unknown = JSON.parse(window.localStorage.getItem(SAVED_BUDGETS_KEY) || '[]');
-    return Array.isArray(stored) ? stored.filter(isSavedBudget) : [];
-  } catch {
-    return [];
-  }
-}
-
 function BudgetTooltip({ active, payload }: BudgetTooltipProps) {
   if (!active || !payload?.length) return null;
   const item = payload[0];
@@ -157,6 +112,13 @@ function BudgetTooltip({ active, payload }: BudgetTooltipProps) {
 }
 
 export default function BudgetingPage() {
+  const { data, error } = useLoadBudgetPlans();
+  if (error) return <p role="alert">Unable to load budget plans: {error} <button onClick={() => window.location.reload()}>Retry</button></p>;
+  if (!data) return <p role="status">Loading budget plans…</p>;
+  return <BudgetingEditor initialPlans={data.plans} revision={data.revision} />;
+}
+
+function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans; revision: number }) {
   const today = new Date();
   const [periodMode, setPeriodMode] = useState<PeriodMode>(PERIOD_MODES.MONTH);
   const [month, setMonth] = useState(() => toMonthKey(new Date()));
@@ -164,15 +126,18 @@ export default function BudgetingPage() {
   const [customStartDate, setCustomStartDate] = useState(() => toDateInput(startOfMonth(today)));
   const [customEndDate, setCustomEndDate] = useState(() => toDateInput(endOfMonth(today)));
   const [globalBudgetByPeriod, setGlobalBudgetByPeriod] = useState<Record<string, string>>(() => {
-    const currentMonth = toMonthKey(new Date());
-    return { [`month:${currentMonth}`]: getStoredGlobalBudget(`month:${currentMonth}`) };
+    return Object.fromEntries(Object.entries(initialPlans.globalBudgets).map(([key, value]) => [key, String(value)]));
   });
-  const [dreamBudget, setDreamBudget] = useState(getStoredDreamBudget);
-  const [savedBudgets, setSavedBudgets] = useState(getStoredSavedBudgets);
+  const [dreamBudget, setDreamBudget] = useState(initialPlans.dreamBudget);
+  const [savedBudgets, setSavedBudgets] = useState(initialPlans.savedBudgets);
+  const planSave = useSaveBudgetPlans({
+    globalBudgets: Object.fromEntries(Object.entries(globalBudgetByPeriod).map(([key, value]) => [key, Math.max(0, Number(value) || 0)])),
+    dreamBudget, savedBudgets,
+  }, revision);
   const [selectedSavedBudgetId, setSelectedSavedBudgetId] = useState('');
   const [isDesigningBudget, setIsDesigningBudget] = useState(false);
   const [isSavingPeriodBudget, setIsSavingPeriodBudget] = useState(false);
-  const [draftDreamBudget, setDraftDreamBudget] = useState(() => getStoredDreamBudget());
+  const [draftDreamBudget, setDraftDreamBudget] = useState(initialPlans.dreamBudget);
   const [draftBudgetName, setDraftBudgetName] = useState('Budget Template');
   const [periodBudgetName, setPeriodBudgetName] = useState('');
   const [savingCategoryId, setSavingCategoryId] = useState<CategoryId | null>(null);
@@ -267,19 +232,13 @@ export default function BudgetingPage() {
   const handleGlobalBudgetChange = (event: ChangeEvent<HTMLInputElement>) => {
     const nextValue = event.target.value;
     setGlobalBudgetByPeriod(previous => ({ ...previous, [period.key]: nextValue }));
-    const nextNumber = Number(nextValue);
-    if (Number.isFinite(nextNumber) && nextNumber > 0) {
-      window.localStorage.setItem(`easymoney:global-budget:${period.key}`, String(nextNumber));
-    } else {
-      window.localStorage.removeItem(`easymoney:global-budget:${period.key}`);
-    }
   };
 
   const hydratePeriodBudget = (periodKey: string) => {
     setGlobalBudgetByPeriod(previous => (
       Object.prototype.hasOwnProperty.call(previous, periodKey)
         ? previous
-        : { ...previous, [periodKey]: getStoredGlobalBudget(periodKey) }
+        : { ...previous, [periodKey]: '' }
     ));
   };
 
@@ -307,7 +266,6 @@ export default function BudgetingPage() {
   };
 
   const resetGlobalBudget = () => {
-    window.localStorage.removeItem(`easymoney:global-budget:${period.key}`);
     setGlobalBudgetByPeriod(previous => ({ ...previous, [period.key]: '' }));
   };
 
@@ -321,14 +279,12 @@ export default function BudgetingPage() {
       globalBudget: Number(nextDreamBudget.globalBudget) > 0 ? Number(nextDreamBudget.globalBudget) : 0,
       categoryPercents
     };
-    window.localStorage.setItem(DREAM_BUDGET_KEY, JSON.stringify(cleaned));
     setDreamBudget(cleaned);
     setDraftDreamBudget(cleaned);
     return cleaned;
   };
 
   const persistSavedBudgets = (nextSavedBudgets: SavedBudget[]) => {
-    window.localStorage.setItem(SAVED_BUDGETS_KEY, JSON.stringify(nextSavedBudgets));
     setSavedBudgets(nextSavedBudgets);
   };
 
@@ -441,6 +397,8 @@ export default function BudgetingPage() {
   return (
     <>
       <div className="page budgeting-page stagger-in">
+      {planSave.error ? <p role="alert">Budget changes have not been saved. {planSave.error} Copy your changes before reloading.</p>
+        : <p role="status">{planSave.pending ? 'Saving budget plans…' : 'Budget plans saved on this computer.'}</p>}
       <div className="page__header budgeting-page__header">
         <div>
           <h1 className="page__title">Budgeting</h1>

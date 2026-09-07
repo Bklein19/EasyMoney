@@ -1,4 +1,8 @@
 import { initTRPC } from '@trpc/server';
+import { databaseBackupStatus } from '../database.ts';
+import { createBackup, inspectBackup, listBackups, restoreBackup } from './backups.ts';
+import { hasActiveSyncJobs } from './dataSync/jobs.ts';
+import { hasActiveCategorizationJobs } from './aiCategorization.ts';
 import { z } from 'zod';
 import { archiveAccount, closeAccount, listAccounts, unarchiveAccount, updateAccountMetadata } from './accounts.ts';
 import { getAnalyticsReport } from './analytics.ts';
@@ -13,6 +17,7 @@ import {
   startAutoApplyAiCategorizationJob,
 } from './aiCategorization.ts';
 import { listBudgets, setBudget, deleteBudget } from './budgets.ts';
+import { budgetPlansSchema, getBudgetPlans, migrateBudgetPlans, saveBudgetPlans } from './budgetPlans.ts';
 import {
   createCategorizationRule,
   deleteCategorizationRule,
@@ -39,7 +44,14 @@ import {
   restoreTransactionCategories,
 } from './transactions.ts';
 
-const t = initTRPC.create();
+const base = initTRPC.create();
+let activeMutations = 0;
+const t = { ...base, procedure: base.procedure.use(async ({ type, next }) => {
+  if (type !== 'mutation') return next();
+  if (databaseBackupStatus().restorePending) throw new Error('A backup restore is scheduled. Restart EasyMoney before making changes.');
+  activeMutations++;
+  try { return await next(); } finally { activeMutations--; }
+}) };
 
 const optionalId = z.union([z.string(), z.number()]).nullish();
 const categoryInput = z.object({
@@ -125,6 +137,17 @@ function bytesFromBase64(value?: string | null) {
 }
 
 export const appRouter = t.router({
+  backups: t.router({
+    list: t.procedure.query(() => listBackups()),
+    create: t.procedure.mutation(() => createBackup()),
+    inspect: t.procedure.input(z.object({ id: z.string() })).query(({ input }) => inspectBackup(input.id)),
+    restore: t.procedure.input(z.object({ id: z.string() })).mutation(({ input }) => {
+      if (activeMutations > 1 || hasActiveSyncJobs() || hasActiveCategorizationJobs()) {
+        throw new Error('Wait for imports, sync, and categorization to finish before restoring.');
+      }
+      return restoreBackup(input.id);
+    }),
+  }),
   accounts: t.router({
     list: t.procedure
       .input(z.object({
@@ -199,6 +222,10 @@ export const appRouter = t.router({
   }),
 
   budgets: t.router({
+    plans: t.procedure.query(() => getBudgetPlans()),
+    migratePlans: t.procedure.input(budgetPlansSchema).mutation(({ input }) => migrateBudgetPlans(input)),
+    savePlans: t.procedure.input(z.object({ plans: budgetPlansSchema, revision: z.number().int().nonnegative() }))
+      .mutation(({ input }) => saveBudgetPlans(input)),
     list: t.procedure
       .input(z.object({ month: z.string().nullish() }).optional())
       .query(({ input }) => listBudgets(input ?? {})),
