@@ -6,6 +6,10 @@ import { getDb, insertRow, updateRow } from '../database.ts';
 import { hashContent } from '../hash.ts';
 import { normalizeAccountLast4, sourceAccountLast4 } from './accountLast4.ts';
 import { hashImportContent } from './importContentHash.ts';
+import {
+  discardImportArtifactPreview,
+  findCommittedImportArtifactDuplicate,
+} from './importArtifactIdentity.ts';
 import type { CommitImportTransaction, ImportAccountMapping, ImportAccountMappingDecision, ImportPreviewTransaction, ImportProfile, ParsedImportBalance, ParsedImportTransaction } from './importTypes.ts';
 import { CUSTOM_CSV_PARSER_ID, parseCustomCsv } from './importParsers/customCsv.ts';
 import { mappingFromProfile } from './importParsers/csvMapping.ts';
@@ -1365,9 +1369,13 @@ export async function previewImport({ fileName, text, fileBytes, customProfile =
       preview.importFileId,
       transactions.map(transaction => preview.rowIds[transaction.sourceRowIndex])
     );
+    const duplicateOfImportFileId = findCommittedImportArtifactDuplicate(preview.importFileId);
+    if (duplicateOfImportFileId !== null) discardImportArtifactPreview(preview.importFileId);
 
     return {
       importFileId: preview.importFileId,
+      alreadyImported: duplicateOfImportFileId !== null,
+      duplicateOfImportFileId,
       requiresMapping: false,
       profileUsed: appParser.name,
       profile: customProfile || null,
@@ -1787,6 +1795,27 @@ function commitImportUnsafe({
   importMeta = null,
   rebuildLedger = true,
 }: CommitImportOptions) {
+  const stagedImportFileId = Number(importFileId || importMeta?.importFileId || 0);
+  if (stagedImportFileId) {
+    const metadata = getDb().prepare('SELECT status FROM importFiles WHERE id = ?')
+      .get(stagedImportFileId) as { status: string | null } | undefined;
+    if (metadata?.status === 'previewed') {
+      const duplicateOfImportFileId = findCommittedImportArtifactDuplicate(stagedImportFileId);
+      if (duplicateOfImportFileId !== null) {
+        discardImportArtifactPreview(stagedImportFileId);
+        return {
+          importedCount: 0,
+          skippedDuplicateCount: 0,
+          importedBalanceCount: 0,
+          importBatchId: null,
+          insertedFingerprints: [],
+          skippedArtifact: true,
+          duplicateOfImportFileId,
+        };
+      }
+    }
+  }
+
   const result = materializeImportTransactions({
     accountId,
     importFileId,

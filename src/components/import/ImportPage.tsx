@@ -176,6 +176,7 @@ export default function ImportPage() {
   ): Promise<ImportPreviewResult | null> => {
     let result = initialResult;
     if (!result) return null;
+    if (result.alreadyImported) return result;
 
     const headerSignature = getHeaderSignature(result.headers);
     const savedProfile = typedImportProfiles.find(profile => profile.headerSignature === headerSignature);
@@ -199,6 +200,7 @@ export default function ImportPage() {
     const hasImportableFacts = (result?.transactions?.length || 0) > 0 || (result?.balanceRowIds?.length || 0) > 0;
     return Boolean(
       result &&
+      !result.alreadyImported &&
       !result.requiresMapping &&
       hasImportableFacts &&
       accountMappings.length > 0 &&
@@ -384,6 +386,14 @@ export default function ImportPage() {
         const result = index === startIndex && initialResult
           ? initialResult
           : await previewFile(file, { throwOnError: true });
+
+        if (result?.alreadyImported) {
+          setBatchState(previous => ({
+            ...(previous ?? getBatchStateFallback(files, index, nextImportedCount, nextSkippedCount)),
+            completedFiles: index + 1,
+          }));
+          continue;
+        }
 
         if (!result || !canCommitAutomatically(result)) {
           setImportResult(result);
@@ -601,6 +611,7 @@ export default function ImportPage() {
               savedImportProfile: importResult.savedImportProfile,
               accountMappings: importResult.accountMappings || [],
               balanceRowIds: importResult.balanceRowIds || [],
+              alreadyImported: importResult.alreadyImported || false,
             }}
             onComplete={handleImportComplete}
             onCancel={resetImport}

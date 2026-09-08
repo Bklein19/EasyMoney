@@ -12,6 +12,10 @@ process.env.EASYMONEY_SYNC_ROOT = path.join(os.tmpdir(), `easymoney-sync-runs-${
 const { appRouter } = await import('./router.ts');
 const { getDb, initDatabase, insertRow, syncLedgerReadModelFromLegacyTables } = await import('../database.ts');
 const { hashImportContent } = await import('./imports.ts');
+const {
+  findCommittedImportArtifactFactDuplicate,
+  importArtifactFactFingerprint,
+} = await import('./importArtifactIdentity.ts');
 const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
 const { buildSyncArtifactReview, stageSyncArtifact } = await import('./dataSync/review.ts');
 const { stageSyncArtifactManifest } = await import('./dataSync/staging.ts');
@@ -156,6 +160,7 @@ function stageConsolidatedSyncFacts(claims: Array<{
   accountName: string;
   amountCents?: number;
   balanceCents?: number;
+  description?: string;
 }>, requestedFileName?: string, sourceType = 'activity-export') {
   const fileName = requestedFileName || `consolidated-${++consolidatedSyncFixtureSequence}.csv`;
   const sourceRole = sourceType === 'statement' ? 'statement-only' : 'activity';
@@ -191,6 +196,7 @@ function stageConsolidatedSyncFacts(claims: Array<{
       createdAt,
     }));
     const amountCents = claim.amountCents ?? (index + 1) * 1000;
+    const description = claim.description ?? `Example transaction ${index + 1}`;
     const importRowId = Number(insertRow('importRows', {
       importFileId,
       rowIndex: index,
@@ -200,7 +206,7 @@ function stageConsolidatedSyncFacts(claims: Array<{
         sourceRowIndex: index,
         date: '2026-08-01',
         amountCents,
-        description: `Example transaction ${index + 1}`,
+        description,
         institution: 'Example Institution',
         account: claim.accountName,
         remoteAccountId: claim.remoteAccountId,
@@ -216,7 +222,7 @@ function stageConsolidatedSyncFacts(claims: Array<{
       stableSourceId: `${fileName}:${claim.remoteAccountId}:transaction`,
       date: '2026-08-01',
       amountCents,
-      description: `Example transaction ${index + 1}`,
+      description,
       sourceRole,
       rawJson: '{}',
       createdAt,
@@ -3927,6 +3933,257 @@ test('independent sync previews arbitrate identical content once at confirmation
       JOIN sourceFiles sf ON sf.id = sa.sourceFileId
       WHERE sf.status = 'committed'
     `).all()).toEqual([{ accountId: firstAccountId }]);
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('artifact fact identity ignores storage provenance and row order but preserves semantic differences', () => {
+  const claims = [
+    {
+      remoteAccountId: 'remote:checking',
+      accountName: 'Remote Checking',
+      amountCents: -1200,
+      balanceCents: 98_800,
+      description: 'Example debit',
+    },
+    {
+      remoteAccountId: 'remote:savings',
+      accountName: 'Remote Savings',
+      amountCents: 3400,
+      balanceCents: 203_400,
+      description: 'Example credit',
+    },
+  ];
+  const first = stageConsolidatedSyncFacts(claims, 'first-storage-name.csv');
+  const reordered = stageConsolidatedSyncFacts([...claims].reverse(), 'different-storage-name.csv');
+
+  expect(importArtifactFactFingerprint(reordered.importFileId))
+    .toBe(importArtifactFactFingerprint(first.importFileId));
+  getDb().prepare("UPDATE importFiles SET status = 'committed' WHERE id = ?").run(first.importFileId);
+  getDb().prepare("UPDATE sourceFiles SET status = 'committed' WHERE importFileId = ?").run(first.importFileId);
+  expect(findCommittedImportArtifactFactDuplicate(reordered.importFileId)).toBe(first.importFileId);
+
+  const changedBalance = stageConsolidatedSyncFacts([
+    { ...claims[0]!, balanceCents: 98_801 },
+    claims[1]!,
+  ], 'changed-balance.csv');
+  expect(findCommittedImportArtifactFactDuplicate(changedBalance.importFileId)).toBeNull();
+
+  const changedCoverage = stageConsolidatedSyncFacts(claims, 'changed-coverage.csv');
+  getDb().prepare("UPDATE sourceFiles SET coveredTo = '2026-08-02' WHERE importFileId = ?")
+    .run(changedCoverage.importFileId);
+  expect(findCommittedImportArtifactFactDuplicate(changedCoverage.importFileId)).toBeNull();
+
+  const changedParser = stageConsolidatedSyncFacts(claims, 'changed-parser.csv');
+  getDb().prepare("UPDATE sourceFiles SET parserName = 'different-parser' WHERE importFileId = ?")
+    .run(changedParser.importFileId);
+  expect(findCommittedImportArtifactFactDuplicate(changedParser.importFileId)).toBeNull();
+
+  const changedSourceType = stageConsolidatedSyncFacts(claims, 'changed-source-type.csv');
+  getDb().prepare("UPDATE sourceFiles SET sourceType = 'statement' WHERE importFileId = ?")
+    .run(changedSourceType.importFileId);
+  expect(findCommittedImportArtifactFactDuplicate(changedSourceType.importFileId)).toBeNull();
+
+  const changedAccount = stageConsolidatedSyncFacts([
+    { ...claims[0]!, remoteAccountId: 'remote:other-checking' },
+    claims[1]!,
+  ], 'changed-account.csv');
+  expect(findCommittedImportArtifactFactDuplicate(changedAccount.importFileId)).toBeNull();
+
+  const changedTransaction = stageConsolidatedSyncFacts([
+    { ...claims[0]!, description: 'Materially different debit' },
+    claims[1]!,
+  ], 'changed-transaction.csv');
+  expect(findCommittedImportArtifactFactDuplicate(changedTransaction.importFileId)).toBeNull();
+
+  const changedOccurrence = stageConsolidatedSyncFacts(claims, 'changed-occurrence.csv');
+  const occurrenceSourceFile = getDb().prepare('SELECT id FROM sourceFiles WHERE importFileId = ?')
+    .get(changedOccurrence.importFileId) as { id: number };
+  const occurrenceAccount = getDb().prepare('SELECT id FROM sourceAccounts WHERE sourceFileId = ? ORDER BY id LIMIT 1')
+    .get(occurrenceSourceFile.id) as { id: number };
+  insertRow('sourceTransactions', {
+    sourceFileId: occurrenceSourceFile.id,
+    sourceAccountId: occurrenceAccount.id,
+    stableSourceId: 'extra-occurrence',
+    date: '2026-08-01',
+    amountCents: -1200,
+    description: 'Example debit',
+    sourceRole: 'activity',
+    rawJson: '{}',
+  });
+  expect(findCommittedImportArtifactFactDuplicate(changedOccurrence.importFileId)).toBeNull();
+
+  getDb().prepare("UPDATE importFiles SET status = 'unimported' WHERE id = ?").run(first.importFileId);
+  getDb().prepare("UPDATE sourceFiles SET status = 'unimported' WHERE importFileId = ?").run(first.importFileId);
+  expect(findCommittedImportArtifactFactDuplicate(reordered.importFileId)).toBeNull();
+});
+
+test('manual balance-only preview marks byte-distinct repeated facts already imported', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Advantage Savings - 1234',
+    institution: 'Bank of America',
+    type: 'savings',
+    currentBalance: 0,
+    currency: 'USD',
+    last4: '1234',
+    status: 'active',
+  }));
+  const text = [
+    'Description,,Summary Amt.',
+    'Opening Balance,,1000.00',
+    'Date,Description,Amount,Running Bal.',
+    '01/05/2026,BALANCE SNAPSHOT,,1000.00',
+  ].join('\n');
+  const first = await postImportPreview(
+    'bofa-savings-1234-2026-01-01-to-2026-01-31.csv',
+    text,
+  );
+  expect(first.transactions).toHaveLength(0);
+  expect(first.balanceRowIds).toHaveLength(1);
+  await commitImportForTest({
+    accountId: null,
+    importFileId: first.importFileId,
+    importRowIds: [],
+    balanceRowIds: first.balanceRowIds,
+    accountMappings: [{
+      sourceAccountId: first.accountMappings[0].sourceAccountId,
+      mode: 'existing',
+      accountId,
+      last4: '1234',
+    }],
+  });
+
+  const repeated = await postImportPreview(
+    'bofa-savings-1234-2025-01-01-to-2027-01-31.csv',
+    `${text}\n`,
+  );
+  expect(getDb().prepare('SELECT contentHash FROM importFiles WHERE id = ?').get(repeated.importFileId))
+    .not.toEqual(getDb().prepare('SELECT contentHash FROM importFiles WHERE id = ?').get(first.importFileId));
+  expect(repeated).toMatchObject({
+    alreadyImported: true,
+    duplicateOfImportFileId: first.importFileId,
+    transactions: [],
+  });
+  expect(repeated.balanceRowIds).toHaveLength(1);
+  expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(repeated.importFileId))
+    .toEqual({ status: 'discarded' });
+  expect(getDb().prepare("SELECT COUNT(*) AS count FROM sourceFiles WHERE status = 'committed'").get())
+    .toEqual({ count: 1 });
+});
+
+test('sync review recognizes byte-distinct repeated balance facts before confirmation', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Advantage Savings - 1234',
+    institution: 'Bank of America',
+    type: 'savings',
+    currentBalance: 0,
+    currency: 'USD',
+    last4: '1234',
+    status: 'active',
+  }));
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-semantic-sync-'));
+  const firstName = 'bofa-savings-1234-2026-01-01-to-2026-01-31.csv';
+  const repeatedName = 'bofa-savings-1234-2025-01-01-to-2027-01-31.csv';
+  const text = [
+    'Description,,Summary Amt.',
+    'Opening Balance,,1000.00',
+    'Date,Description,Amount,Running Bal.',
+    '01/05/2026,BALANCE SNAPSHOT,,1000.00',
+  ].join('\n');
+  await fs.promises.writeFile(path.join(directory, firstName), text);
+  await fs.promises.writeFile(path.join(directory, repeatedName), `${text}\n`);
+
+  try {
+    const first = await stageSyncArtifact({
+      path: path.join(directory, firstName),
+      accountId,
+    });
+    const review = {
+      runId: 'sync-semantic-first',
+      institutionId: 'bank-of-america' as const,
+      downloaded: 1,
+      readyToImport: 1,
+      alreadyImported: 0,
+      artifacts: [first],
+    };
+    await saveAwaitingSyncReview(review);
+    await caller.dataSync.confirm({ runId: review.runId });
+
+    const repeated = await stageSyncArtifact({
+      path: path.join(directory, repeatedName),
+      accountId,
+    });
+    expect(repeated).toMatchObject({
+      importFileId: first.importFileId,
+      status: 'already-imported',
+      transactionCount: 0,
+      balanceCount: 1,
+    });
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('independent byte-distinct semantic previews arbitrate once at confirmation', async () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Advantage Savings - 1234',
+    institution: 'Bank of America',
+    type: 'savings',
+    currentBalance: 0,
+    currency: 'USD',
+    last4: '1234',
+    status: 'active',
+  }));
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-semantic-race-'));
+  const firstName = 'bofa-savings-1234-2026-01-01-to-2026-01-31.csv';
+  const secondName = 'bofa-savings-1234-2025-01-01-to-2027-01-31.csv';
+  const firstBytes = new TextEncoder().encode([
+    'Description,,Summary Amt.',
+    'Opening Balance,,1000.00',
+    'Date,Description,Amount,Running Bal.',
+    '01/05/2026,BALANCE SNAPSHOT,,1000.00',
+  ].join('\n'));
+  const secondBytes = new Uint8Array([...firstBytes, 10]);
+  await fs.promises.writeFile(path.join(directory, firstName), firstBytes);
+  await fs.promises.writeFile(path.join(directory, secondName), secondBytes);
+  const manifest = (runId: string, fileName: string, bytes: Uint8Array) => ({
+    protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+    runId,
+    institutionId: 'bank-of-america' as const,
+    artifacts: [{
+      fileName,
+      accountId,
+      sizeBytes: bytes.byteLength,
+      sha256: new Bun.CryptoHasher('sha256').update(bytes).digest('hex'),
+    }],
+  });
+
+  try {
+    const first = await stageSyncArtifactManifest(
+      manifest('sync-semantic-race-first', firstName, firstBytes), directory, () => {},
+    );
+    const second = await stageSyncArtifactManifest(
+      manifest('sync-semantic-race-second', secondName, secondBytes), directory, () => {},
+    );
+    expect(first.review.readyToImport).toBe(1);
+    expect(second.review.readyToImport).toBe(1);
+    await saveAwaitingSyncReview(first.review);
+    await saveAwaitingSyncReview(second.review);
+
+    expect(await caller.dataSync.confirm({ runId: first.review.runId })).toMatchObject({
+      status: 'complete',
+      result: { recordedBalanceFacts: 1, skippedArtifacts: 0 },
+    });
+    expect(await caller.dataSync.confirm({ runId: second.review.runId })).toMatchObject({
+      status: 'complete',
+      result: { recordedBalanceFacts: 0, skippedArtifacts: 1 },
+    });
+    expect(getDb().prepare("SELECT status, COUNT(*) AS count FROM importFiles GROUP BY status ORDER BY status").all())
+      .toEqual([
+        { status: 'committed', count: 1 },
+        { status: 'discarded', count: 1 },
+      ]);
   } finally {
     await fs.promises.rm(directory, { recursive: true, force: true });
   }

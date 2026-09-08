@@ -27,6 +27,7 @@ type ImportPreviewTransaction = Record<string, unknown> & {
 
 type ImportMeta = {
   importFileId?: string | number | null;
+  alreadyImported?: boolean;
   headers?: string[];
   profile?: unknown;
   mapping?: unknown;
@@ -351,6 +352,17 @@ function ImportPreviewContent({
     }
     onStartAutoImportAll?.();
   };
+
+  if (importMeta?.alreadyImported) {
+    return (
+      <div className="import-preview glass-card empty">
+        <Check size={32} className="success-icon" />
+        <h2>Already Imported</h2>
+        <p>This file's transactions and balances are already in the ledger. There is nothing new to import.</p>
+        <button className="btn btn-primary" onClick={onCancel}>Done</button>
+      </div>
+    );
+  }
 
   if (validTransactions.length === 0 && !hasBalances) {
     return (

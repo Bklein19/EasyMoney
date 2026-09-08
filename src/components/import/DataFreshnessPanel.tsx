@@ -548,8 +548,9 @@ function SyncReviewPanel({
       },
     };
   });
-  const transactionCount = review.artifacts.reduce((sum, artifact) => sum + artifact.transactionCount, 0);
-  const balanceCount = review.artifacts.reduce((sum, artifact) => sum + artifact.balanceCount, 0);
+  const readyArtifacts = review.artifacts.filter(artifact => artifact.status === 'ready');
+  const transactionCount = readyArtifacts.reduce((sum, artifact) => sum + artifact.transactionCount, 0);
+  const balanceCount = readyArtifacts.reduce((sum, artifact) => sum + artifact.balanceCount, 0);
   return (
     <section
       className="sync-review"
@@ -563,9 +564,9 @@ function SyncReviewPanel({
           <p>Nothing changes in your ledger until you confirm.</p>
         </div>
         <div className="sync-review__totals">
-          <span><strong>{review.artifacts.length}</strong> files</span>
-          <span><strong>{transactionCount}</strong> transactions</span>
-          <span><strong>{balanceCount}</strong> balances</span>
+          <span><strong>{readyArtifacts.length}</strong> new file{readyArtifacts.length === 1 ? '' : 's'}</span>
+          <span><strong>{transactionCount}</strong> new transaction{transactionCount === 1 ? '' : 's'}</span>
+          <span><strong>{balanceCount}</strong> new balance{balanceCount === 1 ? '' : 's'}</span>
         </div>
         <div className="sync-review__actions">
           <button className="btn btn--secondary btn--sm" type="button" disabled={isWorking} onClick={onDiscard}>Discard</button>

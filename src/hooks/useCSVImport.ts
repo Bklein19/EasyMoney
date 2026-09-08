@@ -14,6 +14,8 @@ export interface ImportProfile {
 
 export interface ImportPreviewResult {
   importFileId?: number;
+  alreadyImported?: boolean;
+  duplicateOfImportFileId?: number | null;
   requiresMapping: boolean;
   profileUsed?: string;
   profile?: ImportProfile;

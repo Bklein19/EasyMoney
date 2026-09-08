@@ -3,6 +3,7 @@ import { basename } from 'node:path';
 
 import { getDb } from '../../database.ts';
 import { normalizeAccountLast4, sourceAccountLast4 } from '../accountLast4.ts';
+import { findCommittedImportArtifactDuplicate } from '../importArtifactIdentity.ts';
 import {
   commitImport,
   getImportAccountMappings,
@@ -398,11 +399,15 @@ export async function stageSyncArtifactWithProvenance(
   const text = /\.(?:csv|json|txt)$/i.test(fileName) ? new TextDecoder().decode(fileBytes) : '';
   const contentHash = hashImportContent(text, fileBytes);
   const existing = getDb().prepare(`
-    SELECT id, status
-    FROM importFiles
-    WHERE contentHash = ?
-      AND (status = 'committed' OR (? = 1 AND status = 'previewed'))
-    ORDER BY status = 'committed' DESC, committedAt DESC, id DESC
+    SELECT DISTINCT ifs.id, ifs.status
+    FROM importFiles ifs
+    JOIN sourceFiles sf ON sf.importFileId = ifs.id
+    WHERE ifs.contentHash = ?
+      AND (
+        (ifs.status = 'committed' AND sf.status = 'committed')
+        OR (? = 1 AND ifs.status = 'previewed' AND sf.status = 'previewed')
+      )
+    ORDER BY ifs.status = 'committed' DESC, ifs.committedAt DESC, ifs.id DESC
     LIMIT 1
   `).get(contentHash, input.reusePreview === false ? 0 : 1) as
     | { id: number; status: 'committed' | 'previewed' }
@@ -424,6 +429,16 @@ export async function stageSyncArtifactWithProvenance(
 
   const preview = await previewImport({ fileName, text, fileBytes });
   const importFileId = Number(preview.importFileId);
+  if (preview.alreadyImported && preview.duplicateOfImportFileId) {
+    return {
+      review: buildSyncArtifactReview({
+        importFileId: preview.duplicateOfImportFileId,
+        fileName,
+        status: 'already-imported',
+      }),
+      createdPreview: false,
+    };
+  }
   if (preview.requiresMapping) {
     discardSyncPreviewIds([importFileId]);
     throw new Error(`No institution parser matched ${fileName}`);
@@ -688,13 +703,7 @@ function commitArtifact(
   if (metadata.status !== 'previewed') {
     throw new Error(`${artifact.fileName} is no longer awaiting import`);
   }
-  const committedDuplicate = getDb().prepare(`
-    SELECT id
-    FROM importFiles
-    WHERE contentHash = ? AND status = 'committed' AND id <> ?
-    LIMIT 1
-  `).get(metadata.contentHash, metadata.id) as { id: number } | undefined;
-  if (committedDuplicate) {
+  if (findCommittedImportArtifactDuplicate(metadata.id) !== null) {
     discardSyncPreviewIds([metadata.id]);
     return {
       importedCount: 0,
