@@ -10,6 +10,7 @@ import {
   createWellsFargoProgress,
   mapWellsFargoAccounts,
   parseWellsFargoAccountCandidates,
+  openWellsFargoAccount,
   safeWellsFargoDiagnostic,
   selectWellsFargoStatements,
   validateWellsFargoArtifact,
@@ -137,6 +138,13 @@ test('Wells Fargo discovery covers every supported account without a fixed count
     { kind: 'credit-card', last4: '3001' },
     { kind: 'credit-card', last4: '3002' },
   ]);
+  expect(accounts.map(account => account.destination)).toEqual([
+    'https://connect.secure.wellsfargo.com/accounts/deposit/one',
+    'https://connect.secure.wellsfargo.com/accounts/deposit/two',
+    'https://connect.secure.wellsfargo.com/accounts/deposit/three',
+    'https://connect.secure.wellsfargo.com/accounts/card/four',
+    'https://connect.secure.wellsfargo.com/accounts/card/five',
+  ]);
 });
 
 test('Wells Fargo discovery accepts the live button label ellipsis and detail-page kind', () => {
@@ -168,6 +176,42 @@ test('Wells Fargo discovery rejects cross-origin account destinations', () => {
       destination: 'https://example.test/accounts/one',
     },
   ])).toThrow('invalid API destination');
+});
+
+test('Wells Fargo reopens a discovered account directly without returning through account summary', async () => {
+  const destination = 'https://connect.secure.wellsfargo.com/accounts/card/detail';
+  let currentUrl = 'https://connect.secure.wellsfargo.com/accounts/deposit/detail';
+  const gotoCalls: string[] = [];
+  let clickCount = 0;
+  const locator = (count: number, headings: string[] = []) => ({
+    first() { return this; },
+    waitFor: async () => {},
+    count: async () => count,
+    allTextContents: async () => headings,
+    click: async () => { clickCount += 1; },
+  });
+  const page = {
+    url: () => currentUrl,
+    goto: async (url: string) => {
+      gotoCalls.push(url);
+      currentUrl = url;
+    },
+    locator: () => locator(0),
+    getByRole: (role: string, options?: { name?: RegExp }) => {
+      if (role === 'heading' && !options) return locator(1, ['Credit Card']);
+      if (role === 'link' && options?.name?.source.includes('Sign Off')) return locator(1);
+      return locator(0);
+    },
+  } as unknown as Parameters<typeof openWellsFargoAccount>[0];
+
+  await openWellsFargoAccount(page, {
+    kind: 'credit-card',
+    last4: '3001',
+    destination,
+  });
+
+  expect(gotoCalls).toEqual([destination]);
+  expect(clickCount).toBe(0);
 });
 
 test('Wells Fargo maps every planned local account while ignoring unrelated remote accounts', () => {

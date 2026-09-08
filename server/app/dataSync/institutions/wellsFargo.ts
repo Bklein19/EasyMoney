@@ -31,7 +31,9 @@ export interface WellsFargoAccountIdentity {
   last4: string;
 }
 
-export type WellsFargoRemoteAccount = WellsFargoAccountIdentity;
+export interface WellsFargoRemoteAccount extends WellsFargoAccountIdentity {
+  destination?: string;
+}
 
 export interface WellsFargoSyncAccount extends WellsFargoAccountIdentity {
   accountId: number;
@@ -260,12 +262,18 @@ export function parseWellsFargoAccountCandidates(
     if (!kind) continue;
     const last4 = wellsFargoAccountLast4FromLabel(candidate.label);
     if (!last4) throw new Error('A supported Wells Fargo account did not expose its last four digits');
-    if (candidate.destination) asWellsFargoUrl(candidate.destination, baseUrl);
+    const destination = candidate.destination
+      ? asWellsFargoUrl(candidate.destination, baseUrl).toString()
+      : undefined;
     const identity = `${kind}:${last4}`;
     if (accounts.has(identity)) {
       throw new Error(`Multiple Wells Fargo ${kind} accounts have an ambiguous routing identity`);
     }
-    accounts.set(identity, { kind, last4 });
+    accounts.set(identity, {
+      kind,
+      last4,
+      ...(destination ? { destination } : {}),
+    });
   }
   if (accounts.size === 0) throw new Error('Wells Fargo did not expose a supported checking, savings, or card account');
   return [...accounts.values()];
@@ -534,6 +542,10 @@ export async function discoverWellsFargoAccounts(page: Page): Promise<WellsFargo
     const control = wellsFargoAccountControls(page).nth(index);
     const label = (await control.textContent())?.replace(/\s+/g, ' ').trim() ?? '';
     if (!wellsFargoAccountLast4FromLabel(label)) continue;
+    const destinationAttribute = await control.getAttribute('href');
+    const destination = destinationAttribute
+      ? asWellsFargoUrl(destinationAttribute, page.url()).toString()
+      : undefined;
     await clickWellsFargoAccountControl(page, control);
     if (!isWellsFargoOrigin(page.url())) continue;
     const capabilities = await probeWellsFargoAccountCapabilities(page);
@@ -542,22 +554,30 @@ export async function discoverWellsFargoAccounts(page: Page): Promise<WellsFargo
     if (!observedKind) {
       throw new Error('Wells Fargo did not expose a supported account kind on its account detail page');
     }
-    candidates.push({ label, observedKind });
+    candidates.push({ label, destination, observedKind });
   }
   return parseWellsFargoAccountCandidates(candidates);
 }
 
-async function openWellsFargoAccount(page: Page, account: WellsFargoRemoteAccount): Promise<void> {
-  await ensureWellsFargoAccountSummary(page);
-  const controls = wellsFargoAccountControls(page);
-  const labels = await controls.allTextContents();
-  const matchingIndices = labels.flatMap((label, index) =>
-    wellsFargoAccountLast4FromLabel(label) === account.last4 ? [index] : []
-  );
-  if (matchingIndices.length !== 1) {
-    throw new Error('A Wells Fargo account control has an ambiguous routing identity');
+export async function openWellsFargoAccount(page: Page, account: WellsFargoRemoteAccount): Promise<void> {
+  if (account.destination) {
+    const destination = asWellsFargoUrl(account.destination, page.url());
+    if (page.url() !== destination.toString()) {
+      await page.goto(destination.toString(), { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    }
+    await waitForWellsFargoAccountDetails(page);
+  } else {
+    await ensureWellsFargoAccountSummary(page);
+    const controls = wellsFargoAccountControls(page);
+    const labels = await controls.allTextContents();
+    const matchingIndices = labels.flatMap((label, index) =>
+      wellsFargoAccountLast4FromLabel(label) === account.last4 ? [index] : []
+    );
+    if (matchingIndices.length !== 1) {
+      throw new Error('A Wells Fargo account control has an ambiguous routing identity');
+    }
+    await clickWellsFargoAccountControl(page, controls.nth(matchingIndices[0]!));
   }
-  await clickWellsFargoAccountControl(page, controls.nth(matchingIndices[0]!));
   if (!await isWellsFargoAuthenticatedPage(page)) {
     throw new Error('Wells Fargo authentication expired while opening an account');
   }
@@ -565,6 +585,17 @@ async function openWellsFargoAccount(page: Page, account: WellsFargoRemoteAccoun
   if (observedKind !== account.kind) {
     throw new Error('A Wells Fargo account detail page did not match its routing identity');
   }
+}
+
+async function waitForWellsFargoAccountDetails(page: Page): Promise<void> {
+  await Promise.race([
+    page.getByRole('button', { name: /^Download Account Activity$/i }).first()
+      .waitFor({ state: 'visible', timeout: 30_000 }),
+    page.getByRole('link', { name: /^View Statements$/i }).first()
+      .waitFor({ state: 'visible', timeout: 30_000 }),
+  ]).catch(() => {
+    throw new Error('A Wells Fargo account destination did not reveal account details');
+  });
 }
 
 function isWellsFargoOrigin(value: string): boolean {
