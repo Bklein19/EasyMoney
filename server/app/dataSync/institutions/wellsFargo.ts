@@ -645,17 +645,7 @@ async function prepareWellsFargoActivityRequest(
 ): Promise<WellsFargoApiRequest> {
   const control = page.getByRole('button', { name: /^Download Account Activity$/i }).first();
   await control.click();
-  const fields = page.getByRole('textbox', { name: /MM\/DD\/YYYY/i });
-  await fields.nth(1).waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {
-    throw new Error('Wells Fargo activity date controls did not load');
-  });
-  if (await fields.count() !== 2) throw new Error('Wells Fargo activity date controls are ambiguous');
-  const displayDate = (value: string) => {
-    const [year, month, day] = value.split('-');
-    return `${month}/${day}/${year}`;
-  };
-  await fields.nth(0).fill(displayDate(from));
-  await fields.nth(1).fill(displayDate(through));
+  await setWellsFargoActivityDates(page, from, through);
   const csv = page.getByRole('radio', { name: /CSV/i }).first();
   await csv.waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {
     throw new Error('Wells Fargo CSV activity option did not load');
@@ -684,6 +674,34 @@ async function prepareWellsFargoActivityRequest(
     throw new Error('Wells Fargo activity page did not expose a direct HTTP form contract');
   }
   return wellsFargoActivityRequestFromForm(snapshot, page.url());
+}
+
+export async function setWellsFargoActivityDates(
+  page: Page,
+  from: string,
+  through: string,
+): Promise<void> {
+  const fields = page.getByRole('textbox', { name: /MM\/DD\/YYYY/i });
+  await fields.nth(1).waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {
+    throw new Error('Wells Fargo activity date controls did not load');
+  });
+  if (await fields.count() !== 2) throw new Error('Wells Fargo activity date controls are ambiguous');
+  const displayDate = (value: string) => {
+    const [year, month, day] = value.split('-');
+    return `${month}/${day}/${year}`;
+  };
+  const setValue = (element: Element, value: string) => {
+    if (!(element instanceof HTMLInputElement)) {
+      throw new Error('Wells Fargo activity date control was not an input');
+    }
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    if (!setter) throw new Error('Wells Fargo activity date input setter was unavailable');
+    setter.call(element, value);
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  await fields.nth(0).evaluate(setValue, displayDate(from));
+  await fields.nth(1).evaluate(setValue, displayDate(through));
 }
 
 async function discoverWellsFargoStatements(

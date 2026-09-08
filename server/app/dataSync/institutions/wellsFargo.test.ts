@@ -12,6 +12,7 @@ import {
   mapWellsFargoAccounts,
   parseWellsFargoAccountCandidates,
   safeWellsFargoDiagnostic,
+  setWellsFargoActivityDates,
   selectWellsFargoStatements,
   validateWellsFargoArtifact,
   wellsFargoAccountLast4FromLabel,
@@ -348,6 +349,24 @@ test('Wells Fargo activity form metadata becomes a same-origin direct HTTP reque
     method: 'post',
     fields: [],
   }, 'https://connect.secure.wellsfargo.com/accounts/activity')).toThrow('invalid API destination');
+});
+
+test('Wells Fargo updates controlled activity dates without Playwright fill', async () => {
+  const values: string[] = [];
+  const fields = {
+    nth: (index: number) => ({
+      waitFor: async () => {},
+      evaluate: async (_callback: unknown, value: string) => { values[index] = value; },
+    }),
+    count: async () => 2,
+  };
+  const page = {
+    getByRole: () => fields,
+  } as unknown as Parameters<typeof setWellsFargoActivityDates>[0];
+
+  await setWellsFargoActivityDates(page, '2026-04-05', '2026-09-07');
+
+  expect(values).toEqual(['04/05/2026', '09/07/2026']);
 });
 
 test('Wells Fargo GET activity forms preserve every discovered field', () => {
