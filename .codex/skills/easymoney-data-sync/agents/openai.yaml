@@ -1,0 +1,4 @@
+interface:
+  display_name: "EasyMoney Data Sync"
+  short_description: "Develop connectors and validate finance data imports"
+  default_prompt: "Use $easymoney-data-sync to run a data catch-up or develop and live-validate an EasyMoney institution connector."

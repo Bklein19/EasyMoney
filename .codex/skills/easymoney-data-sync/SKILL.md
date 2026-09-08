@@ -1,9 +1,9 @@
 ---
-name: update-finance-data
+name: easymoney-data-sync
 description: "Guide EasyMoney data catch-up runs and build, repair, or live-validate its institution connectors. Use for supported bank, brokerage, retirement, and credit-card downloads; staging and importing finance files; connector implementation or parity work; authenticated connector iteration; and final app-button readiness testing."
 ---
 
-# Update Finance Data
+# EasyMoney Data Sync
 
 ## Choose The Mode
 
