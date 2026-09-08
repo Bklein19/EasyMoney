@@ -569,12 +569,15 @@ export async function deliverHeadedBrowserWindow(
     throw new Error('Cannot deliver an interactive authentication window from a headless browser');
   }
 
-  const screenBounds = await page.evaluate(() => ({
-    left: window.screen.availLeft,
-    top: window.screen.availTop,
-    width: window.screen.availWidth,
-    height: window.screen.availHeight,
-  }));
+  const screenBounds = await page.evaluate(() => {
+    const screen = window.screen as Screen & { availLeft?: number; availTop?: number };
+    return {
+      left: screen.availLeft ?? 0,
+      top: screen.availTop ?? 0,
+      width: screen.availWidth,
+      height: screen.availHeight,
+    };
+  });
   if (
     !Number.isFinite(screenBounds.left) ||
     !Number.isFinite(screenBounds.top) ||
@@ -592,13 +595,14 @@ export async function deliverHeadedBrowserWindow(
       windowId?: number;
       bounds?: BrowserWindowBounds;
     };
-    if (!Number.isInteger(initialWindow.windowId) || initialWindow.windowId! < 1 || !initialWindow.bounds) {
+    const windowId = initialWindow.windowId;
+    if (typeof windowId !== 'number' || !Number.isInteger(windowId) || windowId < 1 || !initialWindow.bounds) {
       throw new Error('Playwright did not expose a native authentication browser window');
     }
 
     if (initialWindow.bounds.windowState !== 'normal') {
       await cdp.send('Browser.setWindowBounds', {
-        windowId: initialWindow.windowId,
+        windowId,
         bounds: { windowState: 'normal' },
       });
     }
@@ -622,7 +626,7 @@ export async function deliverHeadedBrowserWindow(
       screenBounds.top + screenBounds.height - height,
     );
     await cdp.send('Browser.setWindowBounds', {
-      windowId: initialWindow.windowId,
+      windowId,
       bounds: { left, top, width, height },
     });
 
