@@ -1,15 +1,24 @@
 ---
 name: update-finance-data
-description: "Guide EasyMoney data catch-up runs: plan a safe user-driven tour through supported bank, brokerage, retirement, and credit-card sites; download recent CSV/PDF/HTML activity or statements; stage files for EasyMoney import; bulk import them; then run transaction review and categorization. Use when the user asks to update stale personal finance data, download recent bank data, navigate supported institution sites, prepare import files, or recover the import/categorization workflow after data is months out of date."
+description: "Guide EasyMoney data catch-up runs and build, repair, or live-validate its institution connectors. Use for supported bank, brokerage, retirement, and credit-card downloads; staging and importing finance files; connector implementation or parity work; authenticated connector iteration; and final app-button readiness testing."
 ---
 
 # Update Finance Data
+
+## Choose The Mode
+
+- For a user-driven finance-data catch-up, follow the workflow below and read
+  `references/supported-institutions.md`.
+- For connector implementation, repair, authenticated iteration, or readiness
+  claims, read `references/connector-development.md` first. Its evidence gates
+  are mandatory: offline success, live harness success, and final app-button
+  success are different states.
 
 ## Core Rule
 
 Do not automate bank logins, password entry, MFA, or sensitive account pages unless the user explicitly asks for interactive browser help and remains in control of credentials. Prefer a user-driven download checklist, then assist with file organization, EasyMoney import, and categorization.
 
-## Workflow
+## Catch-Up Workflow
 
 1. Establish the catch-up window.
    - Ask or infer the last good import date from EasyMoney import history.
@@ -52,7 +61,15 @@ Do not automate bank logins, password entry, MFA, or sensitive account pages unl
 
 ## Browser Automation Contract
 
-- Reusable institution scripts use the pinned Playwright JavaScript API under Bun. Do not introduce Playwright CLI daemons, session registries, Unix-socket discovery, CDP endpoints, or ad hoc cookie/token export.
+- Reusable institution scripts and production connectors use the pinned
+  Playwright JavaScript API under Bun. Do not add Playwright CLI daemons,
+  session registries, Unix-socket discovery, externally exposed CDP endpoints,
+  or ad hoc cookie/token export to the product architecture.
+- Computer Use's ordinary Google Chrome view cannot see or inspect Chrome
+  instances launched by Playwright. During connector iteration, inspect the
+  browser through the owning Playwright process, a purpose-built Playwright
+  script, or Playwright CLI only when it genuinely owns or attaches to that
+  session. A launch log is not proof that the user received a visible window.
 - Launch a headed `chromium.launchPersistentContext` through `scripts/playwrightSession.ts`. Each institution gets a PII-free profile name and a stable platform-specific profile directory outside the repository.
 - The script process owns the browser and controller for the whole run, waits while the user completes login/MFA/CAPTCHA, then closes the browser cleanly.
 - The helper checkpoints Playwright storage state inside the institution's private profile before closing and restores it on the next run. This preserves session cookies and IndexedDB-backed authentication that Chrome's profile alone may discard, so script iteration should not require another login until the institution expires or revokes the session.
