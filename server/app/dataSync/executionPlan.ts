@@ -1,12 +1,9 @@
-import { join } from 'node:path';
-
 import { localCalendarDate } from '../calendarDate.ts';
 import type { SyncConnector } from './connector.ts';
 import { loadSyncAccountCoverage } from './coverage.ts';
-import { syncApplicationDataRoot } from './paths.ts';
+import { createSyncExecutionPlanFromAccounts } from './executionPlanCore.ts';
 import { syncConnectors } from './registry.ts';
 import {
-  SYNC_WORKER_PROTOCOL_VERSION,
   type SyncExecutionPlan,
   type SyncInstitutionId,
   type SyncRunRequest,
@@ -36,14 +33,8 @@ export function createSyncExecutionPlan(
     outputDir?: string;
   } = {},
 ): SyncExecutionPlan {
-  return {
-    protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
-    runId: request.runId,
-    institutionId: request.institutionId,
-    today: options.today ?? localCalendarDate(options.now),
+  return createSyncExecutionPlanFromAccounts(request, {
+    ...options,
     accounts: options.accounts ?? loadSyncAccountCoverage(),
-    ...(request.connectionId ? { connectionId: request.connectionId } : {}),
-    goal: request.goal,
-    outputDir: options.outputDir ?? join(syncApplicationDataRoot(), request.runId, 'artifacts'),
-  };
+  });
 }

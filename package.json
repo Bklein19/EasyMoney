@@ -10,6 +10,7 @@
     "dev:web": "bun --hot server/index.ts --open",
     "api": "bun server/index.ts",
     "data:freshness": "bun scripts/data-freshness.ts",
+    "connector:develop": "bun scripts/develop-connector.ts",
     "sync": "bun scripts/sync.ts",
     "rebuild:ledger": "bun scripts/rebuild-ledger.ts",
     "build": "bun scripts/electrobun.ts build --env=stable",
