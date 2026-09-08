@@ -93,7 +93,7 @@ export function sequoiaFundBrowserSession(name: string, profilePath?: string) {
     name,
     startUrl: sequoiaFundLoginUrl,
     ...(profilePath ? { profilePath } : {}),
-    persistAuthentication: false,
+    persistAuthentication: true,
     contextOptions: { headless: false },
   } as const;
 }
@@ -880,9 +880,7 @@ export async function runSequoiaFundSync(
 
   const progress = createProgress(onProgress);
   const authenticationKey = 'authentication';
-  progress(authenticationKey, 'authentication', 'start', 'Checking Sequoia Fund authentication', {
-    cachedAuthentication: false,
-  });
+  progress(authenticationKey, 'authentication', 'start', 'Checking Sequoia Fund authentication');
   let authenticationWaiting = false;
   const startedAt = performance.now();
   const result = await runInstitutionBrowserProgram<SequoiaFundSyncResult>(

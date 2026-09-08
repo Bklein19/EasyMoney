@@ -17,7 +17,10 @@ bun run connector:develop -- \
 
 When the private plan contains multiple local Sequoia connections, preserve
 the app-selected `connectionId`; do not infer one from list order. The user
-completes fresh authentication in the one headed browser for the run.
+completes authentication when needed in the one headed browser for the run.
+The connector retains its Chrome profile and restores/checkpoints authentication
+through the shared session layer. A fresh login on every run is not a proven
+Sequoia requirement; do not disable persistence based on older iteration notes.
 
 ## Current Connector Contract
 

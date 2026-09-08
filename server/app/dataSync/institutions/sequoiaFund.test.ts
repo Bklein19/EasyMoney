@@ -304,7 +304,7 @@ test('Sequoia Fund uses direct authenticated HTTP after login', async () => {
   expect(source).not.toContain('waitForTimeout');
 });
 
-test('Sequoia Fund always starts headed without reading or writing saved authentication', async () => {
+test('Sequoia Fund retains its headed profile and enables shared authentication persistence', () => {
   expect(sequoiaFundBrowserSession(
     'sequoia-fund-catchup',
     '/private/tmp/fixture-profile',
@@ -312,11 +312,8 @@ test('Sequoia Fund always starts headed without reading or writing saved authent
     name: 'sequoia-fund-catchup',
     startUrl: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/index',
     profilePath: '/private/tmp/fixture-profile',
-    persistAuthentication: false,
+    persistAuthentication: true,
     contextOptions: { headless: false },
   });
 
-  const source = await Bun.file(new URL('./sequoiaFund.ts', import.meta.url)).text();
-  expect(source).not.toContain('playwrightHasSavedAuthentication');
-  expect(source).toContain('cachedAuthentication: false');
 });
