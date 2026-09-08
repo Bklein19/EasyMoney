@@ -1,68 +1,41 @@
 # Wells Fargo
 
-## Catch-up workflow
+Wells Fargo is a registered EasyMoney connector. The authoritative code is
+`server/app/dataSync/institutions/wellsFargoConnector.ts` plus
+`wellsFargo.ts`. Do not use or recreate the former fixed three-account skill
+script.
 
-The reusable script downloads posted CSV activity plus available statement PDFs
-for the checking account and two credit accounts through Playwright's
-JavaScript API and a persistent headed profile:
+## Run And Iterate
 
-```sh
-bun .codex/skills/update-finance-data/scripts/wells-fargo.ts \
-  --from 2026-05-29 --to YYYY-MM-DD \
-  --output /private/tmp/easymoney-wells-fargo-catchup \
-  --session wells-fargo-catchup
+Use the Wells Fargo **Catch up** action on the Import page only after the live
+harness is green. For authenticated connector development:
+
+```bash
+bun run connector:develop -- \
+  --institution wells-fargo \
+  --source-plan /absolute/path/to/private-source-plan.json
 ```
 
-The default start date is `2026-05-29`, preserving the requested overlap. The
-script is resumable: an existing CSV or statement PDF is reused only after it
-passes the corresponding EasyMoney Wells Fargo parser. Use `--clean-run` to
-remove only the expected Wells Fargo CSV/PDF artifacts in the private staging
-directory before a timed download. Use `--validate-only` to validate completed
-artifacts without using the browser.
+The user completes login and MFA in exactly one headed browser owned by that
+run. The source plan comes from current app account coverage and must remain
+private; never substitute a hard-coded checking/card list.
 
-The browser flow opens each account's **Download Account Activity** page, keeps
-CSV selected, fills the requested date range, and downloads posted
-transactions. It then opens **View Statements**, retrieves each in-range
-statement plus the latest pre-window statement as an opening balance anchor,
-and validates every artifact locally. Generic filenames omit account numbers,
-so EasyMoney import requires explicit account mapping in preview. No account
-numbers, balances, credentials, cookies, tokens, page contents, or transaction
-contents are written to logs or this staging plan.
+## Current Connector Contract
 
-## Parser and import notes
+- Plans all active Wells Fargo checking, savings, and credit-card accounts that
+  have an unambiguous account kind and last four.
+- Uses separate ledger-derived windows for activity and statement/balance
+  coverage.
+- Discovers live accounts by verified kind and last four, not product nickname
+  or list position.
+- Downloads posted activity CSVs and available statement PDFs through the
+  current authenticated site contract.
+- Requires the expected CSV structure or PDF signature plus successful
+  production parser validation before returning an artifact.
+- Routes every result to its planned local account and rejects unexpected or
+  ambiguous identities.
 
-The downloaded files are:
-
-- `wells-fargo-checking.csv`
-- `wells-fargo-autograph-visa.csv`
-- `wells-fargo-platinum-card.csv`
-- `wells-fargo-checking-statement-YYYY-MM-DD.pdf`
-- `wells-fargo-autograph-visa-statement-YYYY-MM-DD.pdf`
-- `wells-fargo-platinum-card-statement-YYYY-MM-DD.pdf`
-
-Each file must match the EasyMoney Wells Fargo generic activity CSV parser and
-contain at least one posted transaction before the script reports readiness.
-Each account must also have at least one statement parsed by EasyMoney's Wells
-Fargo statement parser with a nonzero balance anchor. Saved statement filenames
-remain PII-free; the checking parser's required dated normalized filename is
-supplied only as an in-memory validation path.
-The parser accepts the observed header shape `Date,Description,Amount,CHECK
-#,Status`. Overlapping exports are expected and should be committed through
-EasyMoney's source-fact dedupe flow rather than edited in the files.
-
-## Current site path
-
-After sign-in, open **Accounts**, choose an account, then choose **Download
-Account Activity**. Select **CSV**, set the date range, and choose **Download**.
-The current site offers posted activity for up to 25 months. The exact labels
-and account display names are treated as mutable; the script matches only the
-generic account-kind labels and checks that each match is unique.
-Statement controls must have unique dates. Missing or ambiguous account
-matches, statement dates, PDF responses, or balance anchors fail closed.
-
-## Gaps
-
-- Generic filenames intentionally omit account numbers; confirm the three
-  account mappings in the EasyMoney import preview.
-- Pending transactions are excluded because the catch-up source is posted
-  activity.
+Historically observed labels such as **Download Account Activity** and **View
+Statements** may help locate a changed flow, but they are not an alternative
+implementation. Inspect failures through the owning Playwright process and fix
+the in-codebase connector before any app-button test.

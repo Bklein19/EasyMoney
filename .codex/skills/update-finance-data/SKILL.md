@@ -18,6 +18,13 @@ description: "Guide EasyMoney data catch-up runs and build, repair, or live-vali
 
 Do not automate bank logins, password entry, MFA, or sensitive account pages unless the user explicitly asks for interactive browser help and remains in control of credentials. Prefer a user-driven download checklist, then assist with file organization, EasyMoney import, and categorization.
 
+For automated catch-up, the registered connectors under
+`server/app/dataSync/institutions/` and the shared `server/app/dataSync/`
+infrastructure are the only connector implementations. Do not add or revive
+institution executables under this skill. Run the production connector from
+the Import page, or use the production-backed development runner described in
+`references/connector-development.md` while iterating.
+
 ## Catch-Up Workflow
 
 1. Establish the catch-up window.
@@ -61,8 +68,8 @@ Do not automate bank logins, password entry, MFA, or sensitive account pages unl
 
 ## Browser Automation Contract
 
-- Reusable institution scripts and production connectors use the pinned
-  Playwright JavaScript API under Bun. Do not add Playwright CLI daemons,
+- In-codebase production connectors use the pinned Playwright JavaScript API
+  under Bun. Do not add skill-local institution runners, Playwright CLI daemons,
   session registries, Unix-socket discovery, externally exposed CDP endpoints,
   or ad hoc cookie/token export to the product architecture.
 - Computer Use's ordinary Google Chrome view cannot see or inspect Chrome
@@ -70,9 +77,16 @@ Do not automate bank logins, password entry, MFA, or sensitive account pages unl
   browser through the owning Playwright process, a purpose-built Playwright
   script, or Playwright CLI only when it genuinely owns or attaches to that
   session. A launch log is not proof that the user received a visible window.
-- Launch a headed `chromium.launchPersistentContext` through `scripts/playwrightSession.ts`. Each institution gets a PII-free profile name and a stable platform-specific profile directory outside the repository.
-- The script process owns the browser and controller for the whole run, waits while the user completes login/MFA/CAPTCHA, then closes the browser cleanly.
-- The helper checkpoints Playwright storage state inside the institution's private profile before closing and restores it on the next run. This preserves session cookies and IndexedDB-backed authentication that Chrome's profile alone may discard, so script iteration should not require another login until the institution expires or revokes the session.
+- Launch through the shared in-codebase browser/session infrastructure. Each
+  institution gets a PII-free profile name and a stable platform-specific
+  profile directory outside the repository.
+- The connector-owning Bun process owns the browser and controller for the whole
+  run, waits while the user completes login/MFA/CAPTCHA, then closes the browser
+  cleanly.
+- Shared infrastructure checkpoints browser authentication state inside the
+  institution's private profile and restores it on the next run. This preserves
+  session state that Chrome's profile alone may discard; it does not justify a
+  second skill-local browser implementation.
 - Treat browser profiles and `.easymoney-auth-state.json` files as secrets. They live outside the repository, must never be committed, copied between users, or logged, and are owner-readable only on Unix-like systems. They contain session tokens, not usernames or passwords.
 - Prefer `context.request` for authenticated artifact requests once the site contract is verified. Use native Playwright download events when the request contract is unclear or the site requires a browser gesture.
 - Validate file signatures and the matching EasyMoney parser before reporting an artifact as ready. Never log credentials, cookies, tokens, account identifiers, document identifiers, signed URLs, or downloaded contents.

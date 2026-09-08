@@ -19,7 +19,6 @@
     "types": ["bun-types"]
   },
   "include": [
-    ".codex/skills/update-finance-data/scripts/**/*.ts",
     "desktop/**/*.ts",
     "electrobun.config.ts",
     "server/index.ts",

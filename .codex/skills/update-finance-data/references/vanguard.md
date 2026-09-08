@@ -1,55 +1,40 @@
-# Vanguard Catch-Up
+# Vanguard
 
-Vanguard catch-up is a first-class EasyMoney data sync. The application owns
-planning, browser automation, artifact validation, import, and ledger rebuild.
-Do not recreate a standalone downloader in this skill.
+Vanguard is a registered first-class EasyMoney connector. The authoritative
+implementation is `server/app/dataSync/institutions/vanguardConnector.ts` plus
+`vanguard.ts`; the application owns planning, browser automation, artifact
+validation, routing, review staging, and import.
 
-## Run
+## Run And Iterate
 
-Use **Catch up Vanguard** on the Import page, or invoke the same backend path:
-
-```bash
-bun scripts/sync.ts --institution vanguard --goal current --overlap-days 7
-```
-
-For the oldest available history:
+Use the desired Vanguard connection's **Catch up** action on the Import page.
+For a production-backed live development run:
 
 ```bash
-bun scripts/sync.ts --institution vanguard --goal backfill
+bun run connector:develop -- \
+  --institution vanguard \
+  --source-plan /absolute/path/to/private-source-plan.json
 ```
 
-## Login Profiles
+The private source plan carries the current app's connection selection. Keep it
+outside the repository and do not replace it with holder names, account numbers,
+or a hand-written fixed profile. The user completes login and MFA in each
+connector-owned headed window.
 
-EasyMoney recovers PII-free login labels from committed artifact provenance.
-Each login has its own persistent Chrome profile, and known Vanguard logins run
-in parallel. Supported labels are `current`, `account-N`, and `login-N`; holder
-names and account numbers must never be used as browser profile names.
+## Current Connector Contract
 
-When authentication expires, complete login and MFA in each open Chrome window.
-EasyMoney waits on the existing page and continues without refreshing while
-credentials are entered.
+- Recovers PII-free login profile labels from committed artifact provenance.
+- Plans overlapping activity and missing completed statements from ledger
+  coverage for the accounts associated with each profile.
+- Matches site accounts and statement rows by verified identity, including last
+  four where required, rather than row position.
+- Downloads activity and statements through authenticated requests or browser
+  gestures as required by the current site contract.
+- Validates file signatures, exact production parser output, account identity,
+  and coverage before returning artifacts.
+- Skips accounts without an unambiguous supported profile/identity and reports
+  the reason rather than guessing.
 
-## Planning And Mapping
-
-- Activity starts with a seven-day overlap before each account's latest fact.
-- Backfill ends with overlap after each account's earliest fact.
-- Missing completed monthly statements are planned from balance-fact coverage.
-- Vanguard account controls and statement rows are matched by the account's
-  last four digits, not by row position.
-- Downloaded artifacts retain a PII-free login label in their filenames.
-- Each artifact is committed to the account associated with that login and
-  last-four identity, then the ledger is rebuilt once for the batch.
-- Active Vanguard accounts without a known login profile or usable last four
-  are skipped with a warning rather than guessed.
-
-## Runtime Behavior
-
-The Bun process owns headed Chrome contexts directly through Playwright. There
-is no Playwright CLI daemon or socket. Browser authentication remains in local
-EasyMoney profiles; credentials, cookies, tokens, and storage state are never
-written to the repository.
-
-The connector validates CSV structure and PDF magic/parser output before an
-artifact reaches the import pipeline. Existing committed content hashes are
-skipped, overlapping activity is deduplicated by the ledger rebuild, and the
-shared browser executor shows the final `Done` screencast chapter.
+Do not invoke `scripts/sync.ts` with command-line flags; that file is the app's
+stdin worker protocol entrypoint. `connector:develop` is the supported live
+iteration harness, and the app button is the required final path.

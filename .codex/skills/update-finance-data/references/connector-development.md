@@ -2,9 +2,35 @@
 
 Use this reference when implementing, repairing, or validating an EasyMoney
 institution connector. The production connector and current persisted run
-evidence are authoritative. Institution scripts and these notes are harnesses
-and guidance; update them when they drift instead of rebuilding an obsolete
-parallel connector.
+evidence are authoritative. The connector must live under
+`server/app/dataSync/institutions/` and use shared `server/app/dataSync/`
+infrastructure. Never create or revive a skill-local institution script: that
+would be a second implementation with different behavior from the app.
+
+## Production-Backed Development Runner
+
+Use the generic runner around the current registered connector for live
+iteration:
+
+```bash
+bun run connector:develop -- \
+  --institution <registered-institution-id> \
+  --source-plan /absolute/path/to/private-source-plan.json
+```
+
+The source plan must be generated from the current app planning context. It can
+contain account identifiers and other private metadata, so keep it outside the
+repository with owner-only permissions and never print or commit it. Do not
+invent a fixed-account plan, copy a stale plan between institutions, or redact
+fields the production connector needs. The runner creates a fresh output
+directory, executes the same registry, planning, browser/session, download,
+validation, and parser code used by the app, and persists only a PII-free
+result.
+
+Use `--profile <pii-free-label>` only when exercising a specific supported
+connection profile. Optional `--overlap-days`, `--root`, `--run-id`, and
+`--today` values are development controls, not institution behavior. The app's
+Import-page **Catch up** action remains the final user-driven path.
 
 ## Evidence Ladder
 
@@ -21,10 +47,9 @@ until the earlier evidence exists.
 2. **Live harness green**
    - A connector-owning subagent runs a thin harness around the same production
      connector/session code. Do not create a second DOM implementation.
-   - If no current harness exists, add a committed, institution-agnostic
-     development runner around the production connector primitives. Temporary
-     output directories are appropriate; deleted `/private/tmp` runner code and
-     legacy fixed-account scripts are not durable parity evidence.
+   - Use `bun run connector:develop` around the production connector. Extend
+     that institution-agnostic runner when shared capability is missing; never
+     add a per-institution executable to this skill.
    - The user completes credentials, MFA, and CAPTCHA in exactly one headed
      browser while the harness retains Playwright ownership.
    - The run dynamically identifies every intended remote account, performs

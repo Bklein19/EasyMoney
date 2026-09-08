@@ -2,6 +2,21 @@
 
 This reference tracks what EasyMoney can currently import. Exact website click paths should be updated as real download runs happen.
 
+## Registered Sync Connectors
+
+The production registry currently includes Bank of America, Fidelity, Vanguard,
+Wells Fargo, Sequoia Fund, TIAA, Marcus, and Robinhood mobile exports. Their
+authoritative implementations live under `server/app/dataSync/institutions/`
+and use shared `server/app/dataSync/` infrastructure. Run them from the Import
+page, or use `bun run connector:develop` as described in
+`connector-development.md` for authenticated iteration. This skill deliberately
+contains no per-institution executable implementations.
+
+The remaining sections describe file-import parser support as well as useful
+manual download formats. Parser support does not by itself mean an institution
+has a registered live connector, and a registered connector is not proven end
+to end until its current app-button run is confirmed and persisted.
+
 ## General Catch-Up Order
 
 1. Checking and savings activity CSVs.
@@ -69,10 +84,12 @@ Notes:
 ## Vanguard
 
 Supported:
+- Activity CSV.
 - Activity PDF.
 - Statement PDF.
 
 Useful parser filenames:
+- `vanguard-current-brokerage-2026-01-01-to-2026-06-30-activity-1234.csv`
 - `vanguard-1234-2026-01-01-to-2026-06-30-transaction-history.pdf`
 - `vanguard-1234-2026-06-30-statement.pdf`
 - `2026-06-30-Brokerage---Account.pdf`
@@ -80,7 +97,10 @@ Useful parser filenames:
 - `2026-06-30-Trad-IRA---Account.pdf`
 
 Notes:
-- Activity parser recognizes `customActivityReport.pdf` and transaction history PDFs with Vanguard content.
+- The registered connector downloads parser-validated activity CSVs and
+  statement PDFs.
+- Manual import also recognizes `customActivityReport.pdf` and transaction
+  history PDFs with Vanguard content.
 - Download activity for transaction detail and statements for balances.
 
 ## Fidelity
@@ -201,8 +221,8 @@ Supported:
 - Statement PDF.
 
 Useful parser filename:
-- `sequoia-fund-account-<account-token>-scope-key-<scope-hash>-activity-YYYY-MM-DD-to-YYYY-MM-DD.csv`
-- `sequoia-fund-2026-06-30.pdf`
+- `sequoia-fund-account-<account-token>-activity-YYYY-MM-DD-to-YYYY-MM-DD.csv`
+- `sequoia-fund-account-<account-token>-YYYY-MM-DD-statement-<document-token>.pdf`
 
 Notes:
 - Each connector run targets one local Sequoia Fund account/login and requires exactly one login-level portfolio group from `portfolioJSON`.
