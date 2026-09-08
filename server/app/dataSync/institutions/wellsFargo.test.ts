@@ -8,9 +8,9 @@ import { parseWellsFargoStatementText } from '../../importParsers/moneyParsers/w
 import {
   buildWellsFargoBrowserProgram,
   createWellsFargoProgress,
+  ensureWellsFargoAccountSummary,
   mapWellsFargoAccounts,
   parseWellsFargoAccountCandidates,
-  openWellsFargoAccount,
   safeWellsFargoDiagnostic,
   selectWellsFargoStatements,
   validateWellsFargoArtifact,
@@ -138,13 +138,6 @@ test('Wells Fargo discovery covers every supported account without a fixed count
     { kind: 'credit-card', last4: '3001' },
     { kind: 'credit-card', last4: '3002' },
   ]);
-  expect(accounts.map(account => account.destination)).toEqual([
-    'https://connect.secure.wellsfargo.com/accounts/deposit/one',
-    'https://connect.secure.wellsfargo.com/accounts/deposit/two',
-    'https://connect.secure.wellsfargo.com/accounts/deposit/three',
-    'https://connect.secure.wellsfargo.com/accounts/card/four',
-    'https://connect.secure.wellsfargo.com/accounts/card/five',
-  ]);
 });
 
 test('Wells Fargo discovery accepts the live button label ellipsis and detail-page kind', () => {
@@ -178,40 +171,105 @@ test('Wells Fargo discovery rejects cross-origin account destinations', () => {
   ])).toThrow('invalid API destination');
 });
 
-test('Wells Fargo reopens a discovered account directly without returning through account summary', async () => {
-  const destination = 'https://connect.secure.wellsfargo.com/accounts/card/detail';
-  let currentUrl = 'https://connect.secure.wellsfargo.com/accounts/deposit/detail';
-  const gotoCalls: string[] = [];
-  let clickCount = 0;
-  const locator = (count: number, headings: string[] = []) => ({
+test('Wells Fargo returns through same-document account history before using the login fallback', async () => {
+  let historyIndex = 2;
+  let linkClickCount = 0;
+  let gotoCount = 0;
+  const heading = {
     first() { return this; },
-    waitFor: async () => {},
-    count: async () => count,
-    allTextContents: async () => headings,
-    click: async () => { clickCount += 1; },
-  });
+    isVisible: async () => historyIndex === 0,
+    waitFor: async () => {
+      if (historyIndex !== 0) throw new Error('not visible');
+    },
+  };
+  const link = {
+    first() { return this; },
+    isVisible: async () => false,
+    click: async () => { linkClickCount += 1; },
+  };
+  const page = {
+    url: () => 'https://connect.secure.wellsfargo.com/accounts',
+    goBack: async () => {
+      if (historyIndex > 0) historyIndex -= 1;
+      return null;
+    },
+    goto: async () => { gotoCount += 1; },
+    getByRole: (role: string) => role === 'heading' ? heading : link,
+  } as unknown as Parameters<typeof ensureWellsFargoAccountSummary>[0];
+
+  await ensureWellsFargoAccountSummary(page);
+
+  expect(historyIndex).toBe(0);
+  expect(linkClickCount).toBe(0);
+  expect(gotoCount).toBe(0);
+});
+
+test('Wells Fargo uses a visible account-summary link without walking back into login history', async () => {
+  let summaryVisible = false;
+  let goBackCount = 0;
+  let gotoCount = 0;
+  const heading = {
+    first() { return this; },
+    isVisible: async () => summaryVisible,
+    waitFor: async () => {
+      if (!summaryVisible) throw new Error('not visible');
+    },
+  };
+  const link = {
+    first() { return this; },
+    isVisible: async () => true,
+    click: async () => { summaryVisible = true; },
+  };
+  const page = {
+    url: () => 'https://connect.secure.wellsfargo.com/accounts/detail',
+    goBack: async () => { goBackCount += 1; return null; },
+    goto: async () => { gotoCount += 1; },
+    getByRole: (role: string) => role === 'heading' ? heading : link,
+  } as unknown as Parameters<typeof ensureWellsFargoAccountSummary>[0];
+
+  await ensureWellsFargoAccountSummary(page);
+
+  expect(goBackCount).toBe(0);
+  expect(gotoCount).toBe(0);
+});
+
+test('Wells Fargo stops history traversal at a cross-origin page and returns through login', async () => {
+  let currentUrl = 'https://connect.secure.wellsfargo.com/accounts/detail';
+  let summaryVisible = false;
+  let goBackCount = 0;
+  let gotoCount = 0;
+  const heading = {
+    first() { return this; },
+    isVisible: async () => summaryVisible,
+    waitFor: async () => {
+      if (!summaryVisible) throw new Error('not visible');
+    },
+  };
+  const link = {
+    first() { return this; },
+    isVisible: async () => false,
+    click: async () => {},
+  };
   const page = {
     url: () => currentUrl,
+    goBack: async () => {
+      goBackCount += 1;
+      currentUrl = 'https://example.test/outside';
+      return null;
+    },
     goto: async (url: string) => {
-      gotoCalls.push(url);
+      gotoCount += 1;
       currentUrl = url;
+      summaryVisible = true;
     },
-    locator: () => locator(0),
-    getByRole: (role: string, options?: { name?: RegExp }) => {
-      if (role === 'heading' && !options) return locator(1, ['Credit Card']);
-      if (role === 'link' && options?.name?.source.includes('Sign Off')) return locator(1);
-      return locator(0);
-    },
-  } as unknown as Parameters<typeof openWellsFargoAccount>[0];
+    getByRole: (role: string) => role === 'heading' ? heading : link,
+  } as unknown as Parameters<typeof ensureWellsFargoAccountSummary>[0];
 
-  await openWellsFargoAccount(page, {
-    kind: 'credit-card',
-    last4: '3001',
-    destination,
-  });
+  await ensureWellsFargoAccountSummary(page);
 
-  expect(gotoCalls).toEqual([destination]);
-  expect(clickCount).toBe(0);
+  expect(goBackCount).toBe(1);
+  expect(gotoCount).toBe(1);
+  expect(currentUrl).toBe('https://connect.secure.wellsfargo.com/auth/login/present');
 });
 
 test('Wells Fargo maps every planned local account while ignoring unrelated remote accounts', () => {
