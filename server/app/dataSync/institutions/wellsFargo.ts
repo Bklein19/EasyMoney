@@ -542,12 +542,9 @@ export async function discoverWellsFargoAccounts(page: Page): Promise<WellsFargo
     const control = wellsFargoAccountControls(page).nth(index);
     const label = (await control.textContent())?.replace(/\s+/g, ' ').trim() ?? '';
     if (!wellsFargoAccountLast4FromLabel(label)) continue;
-    const destinationAttribute = await control.getAttribute('href');
-    const destination = destinationAttribute
-      ? asWellsFargoUrl(destinationAttribute, page.url()).toString()
-      : undefined;
     await clickWellsFargoAccountControl(page, control);
     if (!isWellsFargoOrigin(page.url())) continue;
+    const destination = asWellsFargoUrl(page.url()).toString();
     const capabilities = await probeWellsFargoAccountCapabilities(page);
     if (!capabilities.activity && !capabilities.statements) continue;
     const observedKind = await wellsFargoAccountKindFromDetailPage(page);
