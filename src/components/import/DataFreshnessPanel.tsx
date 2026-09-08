@@ -549,6 +549,8 @@ function SyncReviewPanel({
     };
   });
   const readyArtifacts = review.artifacts.filter(artifact => artifact.status === 'ready');
+  const allAlreadyImported = review.artifacts.length > 0
+    && review.artifacts.every(artifact => artifact.status === 'already-imported');
   const transactionCount = readyArtifacts.reduce((sum, artifact) => sum + artifact.transactionCount, 0);
   const balanceCount = readyArtifacts.reduce((sum, artifact) => sum + artifact.balanceCount, 0);
   return (
@@ -559,9 +561,11 @@ function SyncReviewPanel({
     >
       <div className="sync-review__header">
         <div>
-          <span className="sync-review__state">Review required</span>
-          <h3 id="sync-review-title">Review downloaded data</h3>
-          <p>Nothing changes in your ledger until you confirm.</p>
+          <span className="sync-review__state">{allAlreadyImported ? 'Already imported' : 'Review required'}</span>
+          <h3 id="sync-review-title">{allAlreadyImported ? 'Nothing new to import' : 'Review downloaded data'}</h3>
+          <p>{allAlreadyImported
+            ? 'These transactions and balances are already in your ledger. Finishing will close this review without importing them again.'
+            : 'Nothing changes in your ledger until you confirm.'}</p>
         </div>
         <div className="sync-review__totals">
           <span><strong>{readyArtifacts.length}</strong> new file{readyArtifacts.length === 1 ? '' : 's'}</span>
