@@ -13,6 +13,29 @@ export type InstitutionBrowserLaunchStrategy = {
   allowHeadedAuthenticationFallback: boolean;
 };
 
+type BrowserWindowBounds = {
+  left?: number;
+  top?: number;
+  width?: number;
+  height?: number;
+  windowState?: 'normal' | 'minimized' | 'maximized' | 'fullscreen';
+};
+
+type HeadedBrowserWindowDeliveryOptions = {
+  headless: boolean;
+  platform?: NodeJS.Platform;
+  activateApplication?: () => Promise<void>;
+  onDiagnostic?: (message: string) => void;
+};
+
+export type HeadedBrowserWindowDelivery = {
+  headed: true;
+  nativeWindow: true;
+  windowState: 'normal';
+  onScreen: true;
+  activation: 'macos-requested' | 'not-required';
+};
+
 type PersistentContextOptions = NonNullable<Parameters<typeof chromium.launchPersistentContext>[1]>;
 
 type SessionOptions = {
@@ -517,6 +540,132 @@ export function institutionBrowserLaunchStrategy(options: {
   };
 }
 
+async function activateGoogleChromeOnMac(): Promise<void> {
+  const chromeProcess = Bun.spawn(['/usr/bin/open', '-b', 'com.google.Chrome'], {
+    stdin: 'ignore',
+    stdout: 'ignore',
+    stderr: 'ignore',
+  });
+  const exitCode = await chromeProcess.exited;
+  if (exitCode !== 0) {
+    throw new Error('Could not bring the authentication browser to the foreground');
+  }
+}
+
+function finiteNumber(value: number | undefined, fallback: number): number {
+  return Number.isFinite(value) ? value! : fallback;
+}
+
+function clamp(value: number, minimum: number, maximum: number): number {
+  return Math.min(Math.max(value, minimum), maximum);
+}
+
+export async function deliverHeadedBrowserWindow(
+  page: Page,
+  context: Pick<BrowserContext, 'newCDPSession'>,
+  options: HeadedBrowserWindowDeliveryOptions,
+): Promise<HeadedBrowserWindowDelivery> {
+  if (options.headless) {
+    throw new Error('Cannot deliver an interactive authentication window from a headless browser');
+  }
+
+  const screenBounds = await page.evaluate(() => ({
+    left: window.screen.availLeft,
+    top: window.screen.availTop,
+    width: window.screen.availWidth,
+    height: window.screen.availHeight,
+  }));
+  if (
+    !Number.isFinite(screenBounds.left) ||
+    !Number.isFinite(screenBounds.top) ||
+    !Number.isFinite(screenBounds.width) ||
+    !Number.isFinite(screenBounds.height) ||
+    screenBounds.width < 1 ||
+    screenBounds.height < 1
+  ) {
+    throw new Error('Could not determine visible screen bounds for the authentication browser');
+  }
+
+  const cdp = await context.newCDPSession(page);
+  try {
+    const initialWindow = await cdp.send('Browser.getWindowForTarget') as {
+      windowId?: number;
+      bounds?: BrowserWindowBounds;
+    };
+    if (!Number.isInteger(initialWindow.windowId) || initialWindow.windowId! < 1 || !initialWindow.bounds) {
+      throw new Error('Playwright did not expose a native authentication browser window');
+    }
+
+    if (initialWindow.bounds.windowState !== 'normal') {
+      await cdp.send('Browser.setWindowBounds', {
+        windowId: initialWindow.windowId,
+        bounds: { windowState: 'normal' },
+      });
+    }
+
+    const width = Math.min(
+      Math.max(finiteNumber(initialWindow.bounds.width, Math.min(1280, screenBounds.width)), 640),
+      screenBounds.width,
+    );
+    const height = Math.min(
+      Math.max(finiteNumber(initialWindow.bounds.height, Math.min(900, screenBounds.height)), 480),
+      screenBounds.height,
+    );
+    const left = clamp(
+      finiteNumber(initialWindow.bounds.left, screenBounds.left),
+      screenBounds.left,
+      screenBounds.left + screenBounds.width - width,
+    );
+    const top = clamp(
+      finiteNumber(initialWindow.bounds.top, screenBounds.top),
+      screenBounds.top,
+      screenBounds.top + screenBounds.height - height,
+    );
+    await cdp.send('Browser.setWindowBounds', {
+      windowId: initialWindow.windowId,
+      bounds: { left, top, width, height },
+    });
+
+    await page.bringToFront();
+    const platform = options.platform ?? process.platform;
+    const activation = platform === 'darwin' ? 'macos-requested' : 'not-required';
+    if (platform === 'darwin') {
+      await (options.activateApplication ?? activateGoogleChromeOnMac)();
+      await page.bringToFront();
+    }
+
+    const deliveredWindow = await cdp.send('Browser.getWindowForTarget') as {
+      windowId?: number;
+      bounds?: BrowserWindowBounds;
+    };
+    const deliveredBounds = deliveredWindow.bounds;
+    const onScreen = deliveredWindow.windowId === initialWindow.windowId &&
+      deliveredBounds?.windowState === 'normal' &&
+      finiteNumber(deliveredBounds.left, Number.NaN) < screenBounds.left + screenBounds.width &&
+      finiteNumber(deliveredBounds.top, Number.NaN) < screenBounds.top + screenBounds.height &&
+      finiteNumber(deliveredBounds.left, Number.NaN) + finiteNumber(deliveredBounds.width, 0) > screenBounds.left &&
+      finiteNumber(deliveredBounds.top, Number.NaN) + finiteNumber(deliveredBounds.height, 0) > screenBounds.top;
+    if (!onScreen) {
+      throw new Error('Playwright could not place the authentication browser on a visible screen');
+    }
+
+    const delivery: HeadedBrowserWindowDelivery = {
+      headed: true,
+      nativeWindow: true,
+      windowState: 'normal',
+      onScreen: true,
+      activation,
+    };
+    options.onDiagnostic?.(
+      `Authentication browser delivered: headed=${delivery.headed} nativeWindow=${delivery.nativeWindow} ` +
+      `windowState=${delivery.windowState} onScreen=${delivery.onScreen} activation=${delivery.activation}`,
+    );
+    return delivery;
+  } finally {
+    await cdp.detach().catch(() => {});
+  }
+}
+
 function isLockedProfileError(error: unknown): boolean {
   const message = String(error instanceof Error ? error.message : error);
   return /SingletonLock|profile.*(?:in use|locked)|user data directory.*in use|ProcessSingleton/i.test(message);
@@ -630,16 +779,22 @@ async function launchPlaywrightPage<T>(
       context,
       profilePath,
       async () => {
-    if (hasSavedAuthentication) await restoreBrowserAuthentication(context, authenticationProfilePath);
-    const page = await institutionStartPage(context, options.forceStartUrl, browserLaunchTimeoutMs);
-    if (options.beforeStartNavigation) {
-      await settleBeforeBrowserDeadline(
-        Promise.resolve(options.beforeStartNavigation(page, context)),
-        browserLaunchTimeoutMs,
-        `Timed out preparing the ${options.name} browser page`,
-      );
-    }
-    await openInstitutionStartPage(page, options.startUrl, hasSavedAuthentication, options.forceStartUrl);
+        if (hasSavedAuthentication) await restoreBrowserAuthentication(context, authenticationProfilePath);
+        const page = await institutionStartPage(context, options.forceStartUrl, browserLaunchTimeoutMs);
+        if (options.beforeStartNavigation) {
+          await settleBeforeBrowserDeadline(
+            Promise.resolve(options.beforeStartNavigation(page, context)),
+            browserLaunchTimeoutMs,
+            `Timed out preparing the ${options.name} browser page`,
+          );
+        }
+        await openInstitutionStartPage(page, options.startUrl, hasSavedAuthentication, options.forceStartUrl);
+        if (contextOptions.headless !== true) {
+          await deliverHeadedBrowserWindow(page, context, {
+            headless: false,
+            onDiagnostic: options.onInteractiveBrowserWait,
+          });
+        }
         return operation(page, context);
       },
     );

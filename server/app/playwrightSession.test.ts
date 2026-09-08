@@ -12,6 +12,7 @@ import {
   createCachedNormalChromeUserAgent,
   decodeInstitutionBrowserProgramResult,
   deriveNormalChromeUserAgent,
+  deliverHeadedBrowserWindow,
   institutionAutomationControlledLaunchArgument,
   institutionBrowserIgnoredDefaultArguments,
   institutionBrowserLaunchArguments,
@@ -322,6 +323,89 @@ describe('Playwright session helper', () => {
       initialHeadless: false,
       allowHeadedAuthenticationFallback: false,
     });
+  });
+
+  test('delivers a normal on-screen headed browser and activates Chrome on macOS', async () => {
+    const events: string[] = [];
+    let bounds: {
+      left: number;
+      top: number;
+      width: number;
+      height: number;
+      windowState: 'normal' | 'minimized';
+    } = {
+      left: -2_000,
+      top: -1_500,
+      width: 1_400,
+      height: 1_000,
+      windowState: 'minimized',
+    };
+    const cdp = {
+      send: async (method: string, parameters?: {
+        bounds?: Partial<typeof bounds>;
+      }) => {
+        events.push(method);
+        if (method === 'Browser.getWindowForTarget') return { windowId: 7, bounds };
+        if (method === 'Browser.setWindowBounds' && parameters?.bounds) {
+          bounds = { ...bounds, ...parameters.bounds };
+        }
+        return {};
+      },
+      detach: async () => { events.push('detach'); },
+    };
+    const page = {
+      evaluate: async () => ({ left: 0, top: 25, width: 1_280, height: 775 }),
+      bringToFront: async () => { events.push('foreground'); },
+    } as unknown as Page;
+    const context = {
+      newCDPSession: async () => cdp,
+    } as unknown as BrowserContext;
+    const diagnostics: string[] = [];
+
+    const delivery = await deliverHeadedBrowserWindow(page, context, {
+      headless: false,
+      platform: 'darwin',
+      activateApplication: async () => { events.push('activate'); },
+      onDiagnostic: message => diagnostics.push(message),
+    });
+
+    expect(delivery).toEqual({
+      headed: true,
+      nativeWindow: true,
+      windowState: 'normal',
+      onScreen: true,
+      activation: 'macos-requested',
+    });
+    expect(bounds).toEqual({
+      left: 0,
+      top: 25,
+      width: 1_280,
+      height: 775,
+      windowState: 'normal',
+    });
+    expect(events).toEqual([
+      'Browser.getWindowForTarget',
+      'Browser.setWindowBounds',
+      'Browser.setWindowBounds',
+      'foreground',
+      'activate',
+      'foreground',
+      'Browser.getWindowForTarget',
+      'detach',
+    ]);
+    expect(diagnostics).toEqual([
+      'Authentication browser delivered: headed=true nativeWindow=true windowState=normal ' +
+      'onScreen=true activation=macos-requested',
+    ]);
+  });
+
+  test('rejects headed-window delivery from a headless browser', async () => {
+    const page = {} as Page;
+    const context = {} as Pick<BrowserContext, 'newCDPSession'>;
+
+    await expect(deliverHeadedBrowserWindow(page, context, {
+      headless: true,
+    })).rejects.toThrow('Cannot deliver an interactive authentication window from a headless browser');
   });
 
   test('uses a fresh transient profile for the cached-auth probe and the canonical profile for fallback', async () => {
