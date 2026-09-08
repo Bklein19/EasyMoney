@@ -79,8 +79,10 @@ async function main(): Promise<void> {
         status: 'started',
         institutionId: run.institutionId,
         runId: run.runId,
-        resultPath: run.resultPath,
       }));
+    },
+    onSafeEvent(event) {
+      if (event.diagnostic) console.log(event.diagnostic);
     },
   });
   console.log(JSON.stringify({

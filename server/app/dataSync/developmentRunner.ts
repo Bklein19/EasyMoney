@@ -50,6 +50,7 @@ export interface SafeConnectorDevelopmentEvent {
   byteLength?: number;
   durationMs?: number;
   parserValidated?: true;
+  diagnostic?: string;
 }
 
 export type ConnectorDevelopmentFailureCode =
@@ -90,6 +91,22 @@ interface ConnectorDevelopmentDependencies {
   writeResult?: (path: string, result: ConnectorDevelopmentResult) => Promise<void>;
   clock?: () => Date;
   onRunCreated?: (run: ConnectorDevelopmentRunCreated) => void;
+  onSafeEvent?: (event: SafeConnectorDevelopmentEvent) => void;
+}
+
+const WINDOW_DELIVERY_DIAGNOSTIC =
+  /^Authentication browser delivered: headed=(?:true|false) nativeWindow=(?:true|false) windowState=(?:normal|minimized|maximized|fullscreen) onScreen=(?:true|false) activation=(?:macos-requested|not-required)$/;
+
+function safeProgressDiagnostic(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const firstLine = value.split('\n')[0]!.trim();
+  if (!firstLine || firstLine.length > 500) return undefined;
+  return firstLine
+    .replace(/https?:\/\/\S+/gi, '<redacted-url>')
+    .replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, '<redacted-email>')
+    .replace(/\$[\d,]+(?:\.\d{2})?/g, '<redacted-amount>')
+    .replace(/\b\d(?:[ -]?\d){3,}\b/g, '<redacted-digits>')
+    .replace(/\b(?:bearer|cookie|csrf|session|token)\s*[:=]\s*\S+/gi, '<redacted-secret>');
 }
 
 function safeLabel(value: unknown): string | undefined {
@@ -123,6 +140,12 @@ function safeEvent(
     if (value !== undefined) safe[key] = value;
   }
   if (data.parserValidated === true) safe.parserValidated = true;
+  if (WINDOW_DELIVERY_DIAGNOSTIC.test(event.message)) {
+    safe.diagnostic = event.message;
+  } else if (event.type === 'warning' || event.type === 'error') {
+    const diagnostic = safeProgressDiagnostic(data.diagnostic);
+    if (diagnostic !== undefined) safe.diagnostic = diagnostic;
+  }
   return safe;
 }
 
@@ -252,6 +275,7 @@ export async function runConnectorDevelopment(
     result.events.push(persistedEvent);
     if (result.events.length > MAX_PERSISTED_EVENTS) result.events.shift();
     if (persistedEvent.parserValidated) result.parserValidationCount += 1;
+    dependencies.onSafeEvent?.(persistedEvent);
     result.updatedAt = clock().toISOString();
     const snapshot = structuredClone(result);
     pendingWrite = pendingWrite.then(() => writeResult(resultPath, snapshot));

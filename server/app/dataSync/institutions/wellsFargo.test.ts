@@ -17,6 +17,7 @@ import {
   wellsFargoActivityRequestFromForm,
   wellsFargoArtifactPlanFromFilename,
   wellsFargoDateFromText,
+  wellsFargoBrowserWindowProgress,
   type WellsFargoProgressEvent,
 } from './wellsFargo.ts';
 
@@ -85,6 +86,20 @@ test('Wells Fargo diagnostics redact URLs, account digits, email, amounts, and s
   expect(diagnostic).not.toContain('token=secret');
   expect(diagnostic).toContain('<redacted-secret>');
   expect(diagnostic).not.toContain('https://');
+});
+
+test('Wells Fargo forwards the shared headed-window proof through safe progress', () => {
+  const message = 'Authentication browser delivered: headed=true nativeWindow=true windowState=normal onScreen=true activation=macos-requested';
+  expect(wellsFargoBrowserWindowProgress(message)).toMatchObject({
+    step: 'browser-window',
+    status: 'completed',
+    message,
+  });
+  expect(wellsFargoBrowserWindowProgress('Waiting for account 1234 at https://example.test')).toMatchObject({
+    step: 'browser-window',
+    status: 'waiting',
+    message: 'Waiting for account <redacted-digits> at <redacted-url>',
+  });
 });
 
 test('Wells Fargo discovery covers every supported account without a fixed count or product name', () => {

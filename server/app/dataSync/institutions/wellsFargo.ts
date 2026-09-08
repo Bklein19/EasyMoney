@@ -109,6 +109,7 @@ export interface WellsFargoProgressEvent {
   step:
     | 'sync'
     | 'authentication'
+    | 'browser-window'
     | 'account-discovery'
     | 'capability-discovery'
     | 'activity-metadata'
@@ -132,6 +133,7 @@ export interface WellsFargoProgressEvent {
   transactionCount?: number;
   balanceCount?: number;
   parserValidated?: boolean;
+  diagnostic?: string;
   unavailableArtifactCount?: number;
 }
 
@@ -772,9 +774,18 @@ export function safeWellsFargoDiagnostic(error: unknown): string {
     .replace(/https?:\/\/\S+/gi, '<redacted-url>')
     .replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, '<redacted-email>')
     .replace(/\$[\d,]+(?:\.\d{2})?/g, '<redacted-amount>')
-    .replace(/\b(?:\d[ -]?){4,}\b/g, '<redacted-digits>')
+    .replace(/\b\d(?:[ -]?\d){3,}\b/g, '<redacted-digits>')
     .replace(/\b(?:bearer|cookie|csrf|session|token)\s*[:=]\s*\S+/gi, '<redacted-secret>')
     .slice(0, 500);
+}
+
+export function wellsFargoBrowserWindowProgress(message: string): WellsFargoProgressEvent {
+  return {
+    step: 'browser-window',
+    status: message.startsWith('Authentication browser delivered:') ? 'completed' : 'waiting',
+    timestamp: new Date().toISOString(),
+    message: safeWellsFargoDiagnostic(message),
+  };
 }
 
 export function buildWellsFargoBrowserProgram(config: Pick<WellsFargoSyncConfig, 'accounts'>): string {
@@ -966,8 +977,9 @@ export function buildWellsFargoBrowserProgram(config: Pick<WellsFargoSyncConfig,
         unavailable,
       });
     } catch (error) {
-      report({ step: 'sync', status: 'failed', message: 'Wells Fargo sync failed' });
-      return JSON.stringify({ status: 'error', message: bindings.safeError(error) });
+      const diagnostic = bindings.safeError(error);
+      report({ step: 'sync', status: 'failed', message: 'Wells Fargo sync failed', diagnostic });
+      return JSON.stringify({ status: 'error', message: diagnostic });
     }
   }`;
 }
@@ -1029,6 +1041,7 @@ export async function runWellsFargoSync(
       completionDescription: 'Wells Fargo downloads are ready for review.',
       isAuthenticated: isWellsFargoAuthenticatedPage,
       waitUntilAuthenticated: waitUntilWellsFargoAuthenticated,
+      onProgress: message => onProgress(wellsFargoBrowserWindowProgress(message)),
       programBindings: wellsFargoBrowserBindings(outputDir, onProgress),
     },
   );

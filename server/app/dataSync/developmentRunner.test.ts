@@ -56,6 +56,11 @@ test('development runner reuses a private plan without persisting identifiers', 
       expect(plan.accounts).toEqual(sourcePlan(join(root, 'private-artifacts')).accounts);
       report({
         type: 'phase',
+        message: 'Authentication browser delivered: headed=true nativeWindow=true windowState=normal onScreen=true activation=macos-requested',
+        data: { step: 'browser-window', status: 'completed' },
+      });
+      report({
+        type: 'phase',
         message: 'Discovering Private Person account 9876',
         data: {
           step: 'account-discovery',
@@ -103,6 +108,9 @@ test('development runner reuses a private plan without persisting identifiers', 
   expect(persisted).not.toContain('private-person-checking');
   expect(persisted).not.toContain('https://');
   expect(persisted).not.toContain('aaaaaaaa');
+  expect(persisted).toContain(
+    'Authentication browser delivered: headed=true nativeWindow=true windowState=normal onScreen=true activation=macos-requested',
+  );
   if (process.platform !== 'win32') {
     expect((await stat(resultPath)).mode & 0o777).toBe(0o600);
   }
@@ -129,6 +137,15 @@ test('development runner persists a safe failure code at the active production s
         message: 'Downloading account 9876 for Private Person',
         data: { step: 'activity-download', status: 'started', accountId: 71, last4: '9876' },
       });
+      report({
+        type: 'warning',
+        message: 'Wells Fargo sync failed',
+        data: {
+          step: 'sync',
+          status: 'failed',
+          diagnostic: 'Wells Fargo account control request timed out at https://private.example.test/9876',
+        },
+      });
       throw new Error('request timed out for Private Person account 9876 at https://private.example.test');
     },
   });
@@ -143,6 +160,7 @@ test('development runner persists a safe failure code at the active production s
   expect(persisted).not.toContain('Private Person');
   expect(persisted).not.toContain('9876');
   expect(persisted).not.toContain('https://');
+  expect(persisted).toContain('Wells Fargo account control request timed out at <redacted-url>');
 });
 
 test('development runner rejects a source plan for another connector before creating output', async () => {
