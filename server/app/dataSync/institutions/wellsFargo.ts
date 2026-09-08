@@ -592,14 +592,12 @@ function wellsFargoAccountControls(page: Page) {
   return page.getByRole('link').filter({ hasText: /Account(?: number)? ending in/i });
 }
 
-async function clickWellsFargoAccountControl(
+export async function clickWellsFargoAccountControl(
   page: Page,
   control: ReturnType<Page['getByRole']>,
 ): Promise<void> {
-  const beforeUrl = page.url();
   await control.click();
   await Promise.race([
-    page.waitForURL(url => url.toString() !== beforeUrl, { timeout: 30_000 }),
     page.getByRole('button', { name: /^Download Account Activity$/i }).first()
       .waitFor({ state: 'visible', timeout: 30_000 }),
     page.getByRole('link', { name: /^View Statements$/i }).first()

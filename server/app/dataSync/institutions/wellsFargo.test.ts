@@ -7,6 +7,7 @@ import { wellsFargoActivityParser } from '../../importParsers/wellsFargoActivity
 import { parseWellsFargoStatementText } from '../../importParsers/moneyParsers/wells-fargo-statement-pdf.ts';
 import {
   buildWellsFargoBrowserProgram,
+  clickWellsFargoAccountControl,
   createWellsFargoProgress,
   ensureWellsFargoAccountSummary,
   mapWellsFargoAccounts,
@@ -148,6 +149,29 @@ test('Wells Fargo discovery accepts the live button label ellipsis and detail-pa
     label: 'Synthetic Product Account number ending in...1234',
     observedKind: 'checking',
   }])).toEqual([{ kind: 'checking', last4: '1234' }]);
+});
+
+test('Wells Fargo account navigation waits for detail controls instead of URL change', async () => {
+  let clicked = false;
+  let waitForUrlCount = 0;
+  const waitedRoles: string[] = [];
+  const page = {
+    waitForURL: async () => { waitForUrlCount += 1; },
+    getByRole: (role: string) => ({
+      first() { return this; },
+      waitFor: async () => { waitedRoles.push(role); },
+    }),
+  } as unknown as Parameters<typeof clickWellsFargoAccountControl>[0];
+  const control = {
+    click: async () => { clicked = true; },
+  } as unknown as Parameters<typeof clickWellsFargoAccountControl>[1];
+
+  await clickWellsFargoAccountControl(page, control);
+
+  expect(clicked).toBe(true);
+  expect(waitForUrlCount).toBe(0);
+  expect(waitedRoles).toContain('button');
+  expect(waitedRoles).toContain('link');
 });
 
 test('Wells Fargo discovery rejects ambiguous routing identities', () => {
