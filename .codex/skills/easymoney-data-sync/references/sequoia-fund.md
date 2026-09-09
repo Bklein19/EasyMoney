@@ -31,6 +31,11 @@ authenticated landing route; let the server redirect to login when needed.
 
 ## Current Connector Contract
 
+Transport maturity: **direct HTTP after authentication**. Discovery, history
+initialization, activity, and statements use the shared authenticated HTTP client.
+Chrome still establishes/restores the session and opens the authenticated history
+route; the subsequent data flow does not manipulate rendered controls.
+
 - Each run selects exactly one local Sequoia account/connection.
 - Requires exactly one login-level portfolio group from the authenticated
   portfolio response.

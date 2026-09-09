@@ -23,13 +23,20 @@ connector-owned headed window.
 
 ## Current Connector Contract
 
+Transport maturity: **browser-hosted HTTP**. Account discovery, activity, and
+statements use API requests through browser `fetch`. The transport may navigate
+to the approved API application origin; authentication also inspects page state.
+There are no recurring account/date/download-control interactions in the data
+flow. Earlier API-origin recovery motivated the browser-hosted transport. A
+browser-independent claim still requires verifying the same requests with the
+shared direct HTTP client and equivalent session/origin metadata.
+
 - Recovers PII-free login profile labels from committed artifact provenance.
 - Plans overlapping activity and missing completed statements from ledger
   coverage for the accounts associated with each profile.
 - Matches site accounts and statement rows by verified identity, including last
   four where required, rather than row position.
-- Downloads activity and statements through authenticated requests or browser
-  gestures as required by the current site contract.
+- Downloads activity and statements through authenticated browser-hosted HTTP.
 - Validates file signatures, exact production parser output, account identity,
   and coverage before returning artifacts.
 - Skips accounts without an unambiguous supported profile/identity and reports

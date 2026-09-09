@@ -21,6 +21,14 @@ repository, owner-readable only, and never print or commit it.
 
 ## Current Connector Contract
 
+Transport maturity: **hybrid**. The data path still selects accounts and fills
+date filters to capture activity requests. Statements navigate Documents, select
+years, and click download controls to capture requests before replaying them
+through browser-hosted HTTP. These are transitional discovery mechanisms, not
+proof that Fidelity requires UI automation. Next, obtain account/request metadata
+from authenticated responses and build activity/list/download requests directly,
+preserving the existing exact identity and scope validation.
+
 - Combines the ledger-derived coverage windows for active Fidelity accounts.
 - Discovers retail and workplace/retirement accounts dynamically.
 - Uses authenticated activity and statement requests after capturing and

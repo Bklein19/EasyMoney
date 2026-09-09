@@ -34,6 +34,9 @@ Import-page **Catch up** action remains the final user-driven path.
 
 ## Evidence Ladder
 
+These states measure functional readiness. They do not imply that browser
+automation has been minimized; report transport maturity separately below.
+
 Advance one state at a time. Never describe a connector using a later state
 until the earlier evidence exists.
 
@@ -120,6 +123,63 @@ calling the result a button test.
   persistence, HTTP transport, and window-delivery infrastructure without
   institution opt-ins unless the site's protocol genuinely requires a narrower
   behavior.
+
+## HTTP Target And Transitional Implementations
+
+The intended endpoint is authenticated HTTP for the whole data flow: account
+discovery, account identity, date ranges, document lists, activity, and artifact
+downloads. Use the browser for user login/MFA and session establishment where
+required, and reuse authenticated state when the server accepts it.
+
+Browser automation is useful for discovering a working flow and observing its
+network protocol. Treat a connector that clicks controls to generate requests as
+an intermediate implementation, even when its final download uses HTTP. Replace
+those recurring clicks, date fills, dropdown selections, and download-event
+capture with requests built from live server metadata. HTML returned by HTTP may
+be parsed for tokens and forms; a rendered DOM is not inherently required.
+
+Use the working browser implementation as an instrumented reference:
+
+1. Observe requests, responses, redirects, and cookie/CSRF transitions around
+   each meaningful UI action. Identify endpoints, methods, body schemas, account
+   and document identifiers, pagination, date filters, and required ordering.
+   Inspect sensitive values only within the private live session; persist safe
+   protocol descriptions and synthetic fixtures, not raw bank traffic or tokens.
+2. Trace where dynamic request values originate. Obtain them from authenticated
+   responses in the HTTP implementation rather than hard-coding captured values
+   or replaying a stale authenticated request.
+3. Exercise equivalent requests through the shared transport in the same live
+   session, then through the production connector on a fresh run. Compare
+   discovered accounts, coverage, and parsed transaction/balance facts with the
+   working browser path, including pagination and empty results.
+4. Remove the corresponding recurring UI operations once equivalence is proven.
+   Keep any remaining browser requirement narrow and evidence-backed. Capturing
+   the same request by clicking the same control on every run is still a hybrid
+   implementation; instrumentation should teach the connector the protocol.
+
+Distinguish these implementation states when auditing or reporting progress:
+
+- **Direct HTTP after authentication:** discovery and downloads use an HTTP
+  client such as the shared Playwright request context, without rendered-page
+  interactions. This can still retain Chrome for authentication/session support.
+- **Browser-hosted HTTP:** explicit API requests run through browser `fetch` for
+  verified session, origin, or transport requirements. This minimizes UI
+  automation but is not browser-independent; identify any required navigation.
+- **Hybrid or UI-driven:** recurring DOM reads, clicks, form manipulation, or
+  request/download capture remain in the data flow. List them as migration work.
+
+Prefer direct HTTP when equivalent behavior is verified. Use browser-hosted HTTP
+when needed, and retain individual UI operations only with concrete evidence of
+why the server contract cannot currently be exercised directly. Record the
+remaining operation, reason, and next experiment in the institution reference.
+Do not infer that HTTP is impossible from a single rejected request: first check
+method, origin, cookies, CSRF state, headers, redirects, and request order.
+
+When connector development or HTTP migration is in scope, continue from a working
+UI prototype toward this target. A readiness audit alone does not authorize a
+rewrite or new live bank runs. Preserve account routing, parser validation, and
+the live-harness/app-button evidence gates during migration. Local-file ingestion
+connectors should be reported separately from bank HTTP integrations.
 
 ## Iteration Loop
 

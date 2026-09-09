@@ -25,6 +25,13 @@ institution executables under this skill. Run the production connector from
 the Import page, or use the production-backed development runner described in
 `references/connector-development.md` while iterating.
 
+The target architecture is authenticated HTTP for account discovery, request
+metadata, activity, statements, and downloads, with browser automation minimized.
+A browser-driven connector can establish a working flow and reveal the protocol,
+but is normally a stepping stone toward that target. A successful app-button run
+proves functionality, not completion of the HTTP migration. See the transport
+criteria in `references/connector-development.md`.
+
 ## Catch-Up Workflow
 
 1. Establish the catch-up window.
@@ -88,7 +95,7 @@ the Import page, or use the production-backed development runner described in
   session state that Chrome's profile alone may discard; it does not justify a
   second skill-local browser implementation.
 - Treat browser profiles and `.easymoney-auth-state.json` files as secrets. They live outside the repository, must never be committed, copied between users, or logged, and are owner-readable only on Unix-like systems. They contain session tokens, not usernames or passwords.
-- Prefer `context.request` for authenticated artifact requests once the site contract is verified. Use native Playwright download events when the request contract is unclear or the site requires a browser gesture.
+- Prefer the shared authenticated HTTP transport once the site contract is verified. Browser-hosted HTTP is appropriate when the server requires browser session or transport behavior. UI interactions used to discover the protocol should be replaced with direct requests where possible; retain browser gestures only for a demonstrated requirement.
 - Validate file signatures and the matching EasyMoney parser before reporting an artifact as ready. Never log credentials, cookies, tokens, account identifiers, document identifiers, signed URLs, or downloaded contents.
 
 ## File Handling

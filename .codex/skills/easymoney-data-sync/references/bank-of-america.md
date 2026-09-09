@@ -23,6 +23,13 @@ script or a fixed account list.
 
 ## Current Connector Contract
 
+Transport maturity: **hybrid**. Downloads use browser-hosted HTTP, but account
+discovery reads rendered account links, and credit-card activity navigates to the
+account page and reads period/file-format dropdowns. Those DOM dependencies are
+remaining HTTP migration work, not established server requirements. Next,
+inspect the account-list response and export-page HTML/API responses for the
+same account tokens and period/format metadata.
+
 - Plans active Bank of America checking, savings, deposit, and credit-card
   accounts from ledger coverage.
 - Requires an unambiguous account kind and last four for automatic routing.
