@@ -151,6 +151,20 @@ export function createBankOfAmericaConnector(
         context.report({ type: 'action', message });
       });
 
+      for (const artifact of downloaded.artifacts) {
+        context.report({
+          type: 'artifact',
+          message: 'Validated Bank of America artifact with its production parser',
+          data: {
+            parserValidated: true,
+            artifactKind: artifact.kind === 'pdf' ? 'statement' : 'activity',
+            transactionCount: artifact.transactionCount,
+            balanceCount: artifact.balanceCount,
+            byteLength: artifact.size,
+          },
+        });
+      }
+
       context.report({
         type: 'phase',
         message: `Validated ${downloaded.saved.length} new artifact${downloaded.saved.length === 1 ? '' : 's'}`,

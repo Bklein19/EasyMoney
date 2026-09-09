@@ -1,19 +1,18 @@
 #!/usr/bin/env bun
 
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, join } from "node:path";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 
 import { localCalendarDate } from "../../calendarDate.ts";
 import { runInstitutionBrowserProgram } from "../browserSession.ts";
-import {
-  browserNativeResponseBody,
-  browserNativeResponseOk,
-  runBrowserNativeRequest,
-  type BrowserNativeResponse,
-} from "../browserRequest.ts";
 import { parseCsvRows } from "../../importParsers/csvRows.ts";
+import { bofaActivityParser } from '../../importParsers/bofaActivity.ts';
+import { bofaCreditCardActivityParser } from '../../importParsers/bofaCreditCardActivity.ts';
+import { bofaStatementParser } from '../../importParsers/bofaStatement.ts';
 import type { Page } from "playwright";
+import { assertAuthenticatedHttpResponse, runAuthenticatedHttpRequest, type AuthenticatedHttpResponse } from '../authenticatedHttp.ts';
+import { parseBankOfAmericaAccountLinks, parseBankOfAmericaCardMetadata } from './bankOfAmericaHtml.ts';
 
 export type BankOfAmericaSyncConfig = {
   outputDir: string;
@@ -76,6 +75,8 @@ type ValidArtifact = {
   filename: string;
   kind: "csv" | "pdf";
   size: number;
+  transactionCount: number;
+  balanceCount: number;
 };
 
 const loginUrl = "https://secure.bankofamerica.com/myaccounts/signin/signIn.go";
@@ -163,14 +164,11 @@ function bankOfAmericaRemoteAccountKind(label: string, destination: string): Ban
 }
 
 export async function discoverBankOfAmericaAccounts(page: Page): Promise<BankOfAmericaRemoteAccount[]> {
-  const links = page.locator('a[href*="/myaccounts/brain/redirect.go"]');
-  await links.first().waitFor({ state: "attached", timeout: 30_000 }).catch(() => {
-    throw new Error("Timed out waiting for Bank of America accounts");
-  });
-  const candidates = await links.evaluateAll((elements, baseUrl) => elements.map(element => ({
-    label: (element.textContent || "").replace(/\s+/g, " ").trim(),
-    destination: new URL(element.getAttribute("href") || "", String(baseUrl)).toString(),
-  })), page.url());
+  const response = await fetchBankOfAmericaHtml(page, page.url());
+  return bankOfAmericaAccountsFromLinks(parseBankOfAmericaAccountLinks(response.html, response.url));
+}
+
+export function bankOfAmericaAccountsFromLinks(candidates: Array<{ label: string; destination: string }>): BankOfAmericaRemoteAccount[] {
   const accounts = new Map<string, BankOfAmericaRemoteAccount>();
   for (const candidate of candidates) {
     const url = new URL(candidate.destination);
@@ -198,14 +196,16 @@ export async function discoverBankOfAmericaAccounts(page: Page): Promise<BankOfA
   return [...accounts.values()];
 }
 
-export async function openBankOfAmericaAccount(
-  page: Page,
-  destination: string,
-): Promise<void> {
-  await page.goto(destination, {
-    waitUntil: "domcontentloaded",
-    timeout: 30_000,
-  });
+async function fetchBankOfAmericaHtml(page: Page, destination: string): Promise<{ html: string; url: string }> {
+  const response = await runAuthenticatedHttpRequest(page, { url: destination });
+  const body = assertAuthenticatedHttpResponse(response, { contentTypes: ['text/html'] });
+  return { html: body.toString('utf8'), url: response.finalUrl };
+}
+
+async function fetchBankOfAmericaCardMetadata(page: Page, destination: string) {
+  bankOfAmericaAccountToken(destination);
+  const response = await fetchBankOfAmericaHtml(page, destination);
+  return { ...parseBankOfAmericaCardMetadata(response.html), url: response.url };
 }
 
 export async function isBankOfAmericaAuthenticatedPage(page: Page): Promise<boolean> {
@@ -296,7 +296,7 @@ export function parseBankOfAmericaArgs(args: string[], now = new Date()): BankOf
   return config;
 }
 
-async function validateArtifact(path: string): Promise<ValidArtifact> {
+export async function validateBankOfAmericaArtifact(path: string): Promise<ValidArtifact> {
   const filename = basename(path);
   const extension = filename.split(".").pop()?.toLowerCase();
   if (extension !== "csv" && extension !== "pdf")
@@ -322,7 +322,32 @@ async function validateArtifact(path: string): Promise<ValidArtifact> {
     }
   }
 
-  return { filename, kind: extension, size: metadata.size };
+  const text = extension === 'csv' ? bytes.toString('utf8') : '';
+  const csv = extension === 'csv' ? parseCsvRows(text) : [];
+  const headers = csv[0] ?? [];
+  const rows = csv.slice(1).map(values => Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ''])));
+  const parser = extension === 'pdf' ? bofaStatementParser
+    : /^bofa-credit-card-/i.test(filename) ? bofaCreditCardActivityParser : bofaActivityParser;
+  if (!parser.matches({ fileName: filename, headers, sample: text.slice(0, 4096) })) {
+    throw new Error('Bank of America artifact did not match its production parser');
+  }
+  let parsed;
+  try {
+    parsed = await parser.parse({ fileName: filename, filePath: path, headers, rows, text });
+  } catch {
+    throw new Error('Bank of America artifact parser validation failed');
+  }
+  const transactions = parsed.transactions.filter((item): item is NonNullable<typeof item> => Boolean(item));
+  const records = [...transactions, ...parsed.balances];
+  const last4 = filename.match(/^bofa-(?:checking|savings|deposit|credit-card)-(\d{4})-/)?.[1];
+  if (!last4 || records.some(record => record.account?.match(/(\d{4})(?!.*\d)/)?.[1] !== last4)) {
+    throw new Error('Bank of America parser output did not match its artifact routing identity');
+  }
+  if (extension === 'pdf' && !parsed.balances.length) throw new Error('Bank of America statement parser returned no balance anchor');
+  if (/^bofa-credit-card-/i.test(filename) && extension === 'csv' && transactions.length !== rows.length) {
+    throw new Error('Bank of America activity parser did not accept every transaction row');
+  }
+  return { filename, kind: extension, size: metadata.size, transactionCount: transactions.length, balanceCount: parsed.balances.length };
 }
 
 async function validatedArtifacts(outputDir: string): Promise<ValidArtifact[]> {
@@ -331,7 +356,7 @@ async function validatedArtifacts(outputDir: string): Promise<ValidArtifact[]> {
   for (const filename of filenames) {
     if (!/^bofa-.*\.(csv|pdf)$/i.test(filename))
       continue;
-    results.push(await validateArtifact(join(outputDir, filename)));
+    results.push(await validateBankOfAmericaArtifact(join(outputDir, filename)));
   }
   return results.sort((left, right) => left.filename.localeCompare(right.filename));
 }
@@ -440,26 +465,25 @@ export function bankOfAmericaCardActivityRequest(
   };
 }
 
-async function executeBankOfAmericaRequest(
+export async function executeBankOfAmericaRequest(
   page: Page,
   request: BankOfAmericaApiRequest,
-): Promise<BrowserNativeResponse> {
+): Promise<AuthenticatedHttpResponse> {
+  const headers: Record<string, string> = {};
+  let body: Buffer | undefined;
   if (request.multipart) {
-    return runBrowserNativeRequest(page, {
-      url: request.url,
-      method: request.method,
-      multipart: request.multipart,
-    });
+    const form = new FormData();
+    for (const [key, value] of Object.entries(request.multipart)) form.set(key, value);
+    const encoded = new Response(form);
+    headers['content-type'] = encoded.headers.get('content-type')!;
+    body = Buffer.from(await encoded.arrayBuffer());
+  } else if (request.data) {
+    headers['content-type'] = 'application/json';
+    body = Buffer.from(JSON.stringify(request.data));
   }
-  if (request.data) {
-    return runBrowserNativeRequest(page, {
-      url: request.url,
-      method: request.method,
-      headers: { "content-type": "application/json" },
-      bodyBase64: Buffer.from(JSON.stringify(request.data), "utf8").toString("base64"),
-    });
-  }
-  return runBrowserNativeRequest(page, { url: request.url, method: request.method });
+  return runAuthenticatedHttpRequest(page, {
+    url: request.url, method: request.method, headers, ...(body ? { body } : {}),
+  });
 }
 
 async function saveBankOfAmericaArtifact(
@@ -473,7 +497,7 @@ async function saveBankOfAmericaArtifact(
     throw new Error("Bank of America artifact filename is invalid");
   }
   const response = await executeBankOfAmericaRequest(page, request);
-  if (!browserNativeResponseOk(response)) {
+  if (response.status < 200 || response.status >= 300) {
     throw new Error(`Bank of America ${kind.toUpperCase()} request failed with status ${response.status}`);
   }
   const contentType = response.headers["content-type"]?.toLowerCase() ?? "";
@@ -483,9 +507,9 @@ async function saveBankOfAmericaArtifact(
   if (kind === "pdf" && !contentType.includes("pdf") && !contentType.includes("octet-stream")) {
     throw new Error("Bank of America statement response was not PDF");
   }
-  const body = browserNativeResponseBody(response);
+  const body = response.body;
   if (body.length < 16) throw new Error(`Bank of America ${kind.toUpperCase()} response was empty`);
-  await writeFile(join(outputDir, filename), body);
+  await writeFile(join(outputDir, filename), body, { mode: 0o600 });
 }
 
 async function fetchBankOfAmericaStatements(
@@ -497,14 +521,14 @@ async function fetchBankOfAmericaStatements(
   const documents = new Map<string, BankOfAmericaStatementDocument>();
   for (const request of bankOfAmericaStatementIndexRequests(accountDestination, from, through)) {
     const response = await executeBankOfAmericaRequest(page, request);
-    if (!browserNativeResponseOk(response)) {
+    if (response.status < 200 || response.status >= 300) {
       throw new Error(`Bank of America statement index failed with status ${response.status}`);
     }
     const contentType = response.headers["content-type"]?.toLowerCase() ?? "";
     if (!contentType.includes("json")) throw new Error("Bank of America statement index was not JSON");
     let body: { documentList?: unknown };
     try {
-      body = JSON.parse(browserNativeResponseBody(response).toString("utf8")) as { documentList?: unknown };
+      body = JSON.parse(response.body.toString("utf8")) as { documentList?: unknown };
     } catch {
       throw new Error("Bank of America statement index was not JSON");
     }
@@ -569,7 +593,7 @@ async function downloadBankOfAmericaCardActivity(
   );
 }
 
-function buildBrowserProgram(
+export function buildBankOfAmericaBrowserProgram(
   config: BankOfAmericaSyncConfig,
   valid: ValidArtifact[],
   scope: BankOfAmericaSyncConfig["scope"],
@@ -614,6 +638,7 @@ function buildBrowserProgram(
     ) || plan.defaults[account.kind];
     const accountPrefix = account => \`bofa-\${account.kind}-\${account.last4}\`;
     const accountIsSelected = account => {
+      if (plan.accounts.length && !plan.accounts.some(candidate => candidate.kind === account.kind && candidate.last4 === account.last4)) return false;
       if (!plan.scope) return true;
       if (plan.scope === "card-activity" || plan.scope === "card-statements") {
         return account.kind === "credit-card";
@@ -665,23 +690,10 @@ function buildBrowserProgram(
       }
     };
     const apiDownloadCardActivity = async (account, window) => {
-      await bindings.openAccount(page, account.destination);
-      const period = page.locator("#select_transaction").first();
-      await period.waitFor({ state: "attached" });
-      const periodOptions = await period.locator("option").evaluateAll(options => options.map(option => ({
-        label: (option.textContent || "").trim(),
-        value: option.value,
-      })));
-      const fileType = page.locator("#select_filetype").first();
-      await fileType.waitFor({ state: "attached" });
-      const excelFileTypeValue = await fileType.locator("option").evaluateAll(options => {
-        const excel = options.find(option => /Microsoft Excel Format/i.test(option.textContent || ""));
-        return excel ? excel.value : null;
-      });
-      if (!excelFileTypeValue) throw new Error("Bank of America Excel download format was not found");
+      const metadata = await bindings.fetchCardMetadata(page, account.destination);
       const jobs = bindings.buildCardActivityJobs(
-        periodOptions,
-        excelFileTypeValue,
+        metadata.periods,
+        metadata.excelFileTypeValue,
         window.from,
         window.through,
         account.last4,
@@ -692,29 +704,29 @@ function buildBrowserProgram(
           continue;
         }
         reportProgress(\`Downloading Bank of America card activity: \${job.label}\`);
-        await bindings.downloadCardActivity(page, job.target, page.url(), job.filename);
+        await bindings.downloadCardActivity(page, job.target, metadata.url, job.filename);
         saved.push(job.filename);
       }
     };
     try {
-      page.setDefaultTimeout(12000);
-      await page.screencast.showActions({ position: "bottom-right", duration: 700, fontSize: 18 });
-      const authenticated = page.url().startsWith("https://secure.bankofamerica.com/") && !await page.locator('input[type="password"]').count();
-      if (!authenticated) {
+      if (!await bindings.isAuthenticated(page)) {
         return JSON.stringify({
           status: "login-required",
           action: "Sign in to Bank of America and complete MFA. EasyMoney will continue automatically.",
         });
       }
+      const discovered = await bindings.discoverAccounts(page);
+      for (const planned of plan.accounts) {
+        if (!discovered.some(account => account.kind === planned.kind && account.last4 === planned.last4)) {
+          throw new Error("A planned Bank of America account is unavailable in the authenticated login");
+        }
+      }
 
-      const accounts = (await bindings.discoverAccounts(page)).filter(accountIsSelected);
+      const accounts = discovered.filter(accountIsSelected);
       if (accounts.length === 0) throw new Error("Bank of America did not expose any accounts for this sync");
       reportProgress(\`Discovered \${accounts.length} Bank of America account\${accounts.length === 1 ? "" : "s"}\`);
       for (const account of accounts) {
         const window = windowFor(account);
-        await page.screencast.showChapter(\`Updating \${account.kind}\`, {
-          description: \`Downloading data for the account ending in \${account.last4}.\`,
-        });
         if (wantsActivity(account)) {
           if (account.kind === "credit-card") await apiDownloadCardActivity(account, window);
           else await apiDownloadDepositActivity(account, window);
@@ -744,13 +756,14 @@ export async function runBankOfAmericaSync(
 
   const parsed = await runInstitutionBrowserProgram<{ scope: BankOfAmericaSyncConfig["scope"]; saved: string[]; skipped: string[] }>(
     { name: config.session, startUrl: loginUrl },
-    buildBrowserProgram(config, before, config.scope),
+    buildBankOfAmericaBrowserProgram(config, before, config.scope),
     {
       completionDescription: "Bank of America downloads are complete.",
       isAuthenticated: isBankOfAmericaAuthenticatedPage,
       waitUntilAuthenticated: waitUntilBankOfAmericaAuthenticated,
       onProgress,
       programBindings: {
+        isAuthenticated: isBankOfAmericaAuthenticatedPage,
         buildCardActivityJobs: bankOfAmericaCardActivityJobs,
         discoverAccounts: discoverBankOfAmericaAccounts,
         downloadCardActivity: (
@@ -779,7 +792,7 @@ export async function runBankOfAmericaSync(
           filename: string,
         ) => downloadBankOfAmericaStatement(page, config.outputDir, statement, filename),
         fetchStatements: fetchBankOfAmericaStatements,
-        openAccount: openBankOfAmericaAccount,
+        fetchCardMetadata: fetchBankOfAmericaCardMetadata,
       },
     },
   );

@@ -1,17 +1,23 @@
 import { describe, expect, test } from 'bun:test';
 import type { Page } from 'playwright';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import {
   bankOfAmericaCardActivityRequest,
   bankOfAmericaCardActivityJobs,
   bankOfAmericaDepositActivityRequest,
   bankOfAmericaStatementIndexRequests,
-  discoverBankOfAmericaAccounts,
+  bankOfAmericaAccountsFromLinks,
+  buildBankOfAmericaBrowserProgram,
+  executeBankOfAmericaRequest,
   hasBankOfAmericaCreditCardActivity,
   isBankOfAmericaAuthenticatedPage,
-  openBankOfAmericaAccount,
   parseBankOfAmericaArgs,
+  validateBankOfAmericaArtifact,
 } from './bankOfAmerica.ts';
+import { parseBankOfAmericaAccountLinks, parseBankOfAmericaCardMetadata } from './bankOfAmericaHtml.ts';
 
 describe('Bank of America institution integration', () => {
   test('parses CLI arguments', () => {
@@ -44,6 +50,39 @@ describe('Bank of America institution integration', () => {
     } as unknown as Page;
 
     expect(await isBankOfAmericaAuthenticatedPage(page)).toBe(true);
+  });
+
+  test('asks the session runner for login before attempting HTTP discovery when authentication expired', async () => {
+    const program = new Function(`return (${buildBankOfAmericaBrowserProgram(parseBankOfAmericaArgs([]), [], null)});`)();
+    let discoveries = 0;
+    const page = {
+      url: () => 'https://secure.bankofamerica.com/myaccounts/signin/signIn.go',
+      title: async () => 'Bank of America | Sign In',
+      locator: () => ({ count: async () => 1 }),
+    } as unknown as Page;
+    const result = JSON.parse(await program(page, () => {}, {
+      isAuthenticated: isBankOfAmericaAuthenticatedPage,
+      discoverAccounts: async () => { discoveries++; throw new Error('Discovery must wait for authentication'); },
+    }));
+    expect(result.status).toBe('login-required');
+    expect(discoveries).toBe(0);
+  });
+
+  test('executes HTTP discovery after the authenticated overview is established', async () => {
+    const program = new Function(`return (${buildBankOfAmericaBrowserProgram(parseBankOfAmericaArgs([]), [], null)});`)();
+    let discoveries = 0;
+    const page = {
+      url: () => 'https://secure.bankofamerica.com/myaccounts/signin/signIn.go',
+      title: async () => 'Bank of America | Accounts Overview',
+      locator: () => ({ count: async () => 0 }),
+    } as unknown as Page;
+    const result = JSON.parse(await program(page, () => {}, {
+      isAuthenticated: isBankOfAmericaAuthenticatedPage,
+      discoverAccounts: async () => { discoveries++; throw new Error('Synthetic discovery stop'); },
+    }));
+    expect(result.status).toBe('error');
+    expect(result.message).toBe('Synthetic discovery stop');
+    expect(discoveries).toBe(1);
   });
 
   test('treats a header-only credit card export as no new activity', () => {
@@ -87,16 +126,8 @@ describe('Bank of America institution integration', () => {
       { label: 'Cash Rewards Credit Card - 5555', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=card-b&target=card' },
       { label: 'Adv Plus Banking \u2022\u2022\u2022\u2022 1111', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=checking-a&target=deposit' },
     ];
-    const page = {
-      url: () => 'https://secure.bankofamerica.com/myaccounts/signin/signIn.go',
-      locator: () => ({
-        first: () => ({ waitFor: async () => {} }),
-        evaluateAll: async () => links,
-      }),
-    } as unknown as Page;
-
     const kinds = ['checking', 'savings', 'savings', 'credit-card', 'credit-card'] as const;
-    expect(await discoverBankOfAmericaAccounts(page)).toEqual(links.slice(0, 5).map((link, index) => ({
+    expect(bankOfAmericaAccountsFromLinks(links)).toEqual(links.slice(0, 5).map((link, index) => ({
       kind: kinds[index],
       last4: link.label.slice(-4),
       label: link.label,
@@ -109,15 +140,7 @@ describe('Bank of America institution integration', () => {
       { label: 'Travel Rewards Visa - 4444', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=card-a&target=card' },
       { label: 'Cash Rewards Credit Card - 4444', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=card-b&target=card' },
     ];
-    const page = {
-      url: () => 'https://secure.bankofamerica.com/myaccounts/signin/signIn.go',
-      locator: () => ({
-        first: () => ({ waitFor: async () => {} }),
-        evaluateAll: async () => links,
-      }),
-    } as unknown as Page;
-
-    await expect(discoverBankOfAmericaAccounts(page)).rejects.toThrow(
+    expect(() => bankOfAmericaAccountsFromLinks(links)).toThrow(
       'Multiple Bank of America credit-card accounts end in the same four digits',
     );
   });
@@ -146,22 +169,50 @@ describe('Bank of America institution integration', () => {
     });
   });
 
-  test('opens a captured account destination without returning through sign-in', async () => {
-    const navigations: Array<{ destination: string; options: unknown }> = [];
+  test('reads nested labels and encoded account links from server HTML', () => {
+    const links = parseBankOfAmericaAccountLinks('<a href="/myaccounts/brain/redirect.go?adx=synthetic&amp;target=card"><span>Visa</span> &#8226;&#8226;&#8226;&#8226; 4444</a>', 'https://secure.bankofamerica.com/');
+    expect(bankOfAmericaAccountsFromLinks(links)).toMatchObject([{ kind: 'credit-card', last4: '4444', destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=synthetic&target=card' }]);
+  });
+
+  test('reads dynamic export parameters from server HTML without DOM selection', () => {
+    const metadata = parseBankOfAmericaCardMetadata('<select id="select_transaction"><option value="">Choose</option><option value="/myaccounts/details/card/download-transactions.go?adx=synthetic&amp;period=current&amp;">Current transactions</option></select><select id="select_filetype"><option value="format=excel">Microsoft Excel Format</option></select>');
+    expect(metadata.periods[1]!.value).toBe('/myaccounts/details/card/download-transactions.go?adx=synthetic&period=current&');
+    expect(metadata.excelFileTypeValue).toBe('format=excel');
+    expect(() => parseBankOfAmericaCardMetadata('<html>Sign in</html>')).toThrow('download format');
+  });
+
+  test('sends deposit multipart through the authenticated HTTP context', async () => {
+    let fields: FormData | undefined;
     const page = {
-      goto: async (destination: string, options: unknown) => {
-        navigations.push({ destination, options });
-      },
+      url: () => 'https://secure.bankofamerica.com/accounts',
+      request: { fetch: async (url: string, options: { headers: Record<string, string>; data: Buffer }) => {
+        fields = await new Response(new Uint8Array(options.data), { headers: options.headers }).formData();
+        return {
+          status: () => 200, statusText: () => 'OK', url: () => url,
+          headersArray: () => [{ name: 'content-type', value: 'text/csv' }],
+          body: async () => Buffer.from('synthetic csv'), dispose: async () => {},
+        };
+      } },
     } as unknown as Page;
+    const request = bankOfAmericaDepositActivityRequest('https://secure.bankofamerica.com/myaccounts/brain/redirect.go?adx=synthetic', '2026-08-01', '2026-08-22');
+    const result = await executeBankOfAmericaRequest(page, request);
+    expect(Object.fromEntries(fields!)).toEqual(request.multipart!);
+    expect(result.body.toString()).toBe('synthetic csv');
+  });
 
-    await openBankOfAmericaAccount(
-      page,
-      'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?kind=card',
-    );
-
-    expect(navigations).toEqual([{
-      destination: 'https://secure.bankofamerica.com/myaccounts/brain/redirect.go?kind=card',
-      options: { waitUntil: 'domcontentloaded', timeout: 30_000 },
-    }]);
+  test('parser-validates credit exports and rejects silent row loss', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'bofa-validation-'));
+    const path = join(directory, 'bofa-credit-card-1234-current-to-2026-08-22.csv');
+    const header = 'Posted Date,Reference Number,Payee,Address,Amount\n';
+    try {
+      await writeFile(path, `${header}08/20/2026,synthetic,EXAMPLE SHOP,,-1.00\n`);
+      expect(await validateBankOfAmericaArtifact(path)).toMatchObject({ transactionCount: 1, balanceCount: 0 });
+      await writeFile(path, `${header}not-a-date,synthetic,EXAMPLE SHOP,,-1.00\n`);
+      await expect(validateBankOfAmericaArtifact(path)).rejects.toThrow('every transaction row');
+      await writeFile(path, header);
+      expect(await validateBankOfAmericaArtifact(path)).toMatchObject({ transactionCount: 0 });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
