@@ -22,6 +22,13 @@ The connector retains its Chrome profile and restores/checkpoints authentication
 through the shared session layer. A fresh login on every run is not a proven
 Sequoia requirement; do not disable persistence based on older iteration notes.
 
+Start at `/BFWeb/clients/sequoiafund/transactionhistory`. A controlled live
+comparison proved restored authentication succeeds at that route, while opening
+the `/index` login entrypoint makes the same restored session require login.
+The shared checkpoint restored all six cookies in that comparison, including
+two session cookies absent from Chrome's native persisted profile. Keep the
+authenticated landing route; let the server redirect to login when needed.
+
 ## Current Connector Contract
 
 - Each run selects exactly one local Sequoia account/connection.

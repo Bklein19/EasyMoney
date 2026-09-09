@@ -28,7 +28,6 @@ import {
 
 const sequoiaFundHost = 'secureaccountview.com';
 const sequoiaFundClientPath = '/BFWeb/clients/sequoiafund';
-const sequoiaFundLoginUrl = `https://${sequoiaFundHost}${sequoiaFundClientPath}/index`;
 const sequoiaFundHistoryPath = `${sequoiaFundClientPath}/transactionhistory`;
 const sequoiaFundHistoryJsonPath = `${sequoiaFundClientPath}/transactionhistoryJSON`;
 const sequoiaFundActivityCsvPath = `${sequoiaFundClientPath}/transactionHistoryCSV`;
@@ -91,7 +90,9 @@ export type SequoiaFundSyncResult = {
 export function sequoiaFundBrowserSession(name: string, profilePath?: string) {
   return {
     name,
-    startUrl: sequoiaFundLoginUrl,
+    // The login entrypoint invalidates restored authentication; this route
+    // preserves an authenticated session and redirects to login when needed.
+    startUrl: `https://${sequoiaFundHost}${sequoiaFundHistoryPath}`,
     ...(profilePath ? { profilePath } : {}),
     persistAuthentication: true,
     contextOptions: { headless: false },
@@ -891,6 +892,9 @@ export async function runSequoiaFundSync(
       isAuthenticated: isSequoiaFundAuthenticatedPage,
       waitUntilAuthenticated: waitUntilSequoiaFundAuthenticated,
       onProgress: message => {
+        if (/^Authentication browser delivered: headed=(?:true|false) nativeWindow=(?:true|false) windowState=(?:normal|minimized|maximized|fullscreen) onScreen=(?:true|false) activation=(?:macos-requested|not-required)$/.test(message)) {
+          progress(authenticationKey, 'authentication', 'waiting', message);
+        }
         if (/waiting|authentication required|needs attention/i.test(message) && !authenticationWaiting) {
           authenticationWaiting = true;
           progress(authenticationKey, 'authentication', 'waiting', 'Waiting for Sequoia Fund authentication');

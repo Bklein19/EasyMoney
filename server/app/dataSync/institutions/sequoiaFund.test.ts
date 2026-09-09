@@ -304,13 +304,13 @@ test('Sequoia Fund uses direct authenticated HTTP after login', async () => {
   expect(source).not.toContain('waitForTimeout');
 });
 
-test('Sequoia Fund retains its headed profile and enables shared authentication persistence', () => {
+test('Sequoia Fund restores its headed session at the authenticated history route instead of the login entrypoint', () => {
   expect(sequoiaFundBrowserSession(
     'sequoia-fund-catchup',
     '/private/tmp/fixture-profile',
   )).toEqual({
     name: 'sequoia-fund-catchup',
-    startUrl: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/index',
+    startUrl: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistory',
     profilePath: '/private/tmp/fixture-profile',
     persistAuthentication: true,
     contextOptions: { headless: false },
