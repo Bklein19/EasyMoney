@@ -104,6 +104,15 @@ export function createFidelityConnector(
       for (const message of result.skipped) {
         context.report({ type: 'warning', message });
       }
+      for (const artifact of result.artifacts) {
+        context.report({
+          type: 'artifact', message: 'Fidelity downloaded artifact passed parser validation',
+          data: {
+            artifactKind: artifact.artifactType, parserValidated: true,
+            transactionCount: artifact.transactionCount, balanceCount: artifact.balanceCount,
+          },
+        });
+      }
 
       const routed: RoutedSyncArtifact[] = routeFidelityArtifacts(result.artifacts);
       context.report({

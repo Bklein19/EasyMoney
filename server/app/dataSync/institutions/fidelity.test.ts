@@ -854,9 +854,13 @@ test('Fidelity authentication waits classify login before maintenance copy', asy
 
 test('Fidelity institution code uses direct requests and no fixed browser sleeps', async () => {
   const source = await readFile(new URL('./fidelity.ts', import.meta.url), 'utf8');
-  expect(source).toContain('runBrowserNativeRequest(page');
-  expect(source).not.toContain('page.context().request');
-  expect(source).toContain('#account-selector:visible section[aria-label] a');
+  expect(source).toContain('runAuthenticatedHttpRequest(');
+  expect(source).not.toContain('runBrowserNativeRequest');
+  expect(source).not.toContain('waitForRequest');
+  expect(source).not.toContain('waitForResponse');
+  expect(source).not.toContain('.click(');
+  expect(source).not.toContain('.fill(');
+  expect(source).not.toContain('.selectOption(');
   expect(source).not.toContain('normalizeHeadlessUserAgent');
   expect(source).not.toContain('HeadlessChrome/');
   expect(source).not.toContain('newCDPSession');
