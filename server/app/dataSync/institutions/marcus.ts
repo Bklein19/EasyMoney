@@ -1181,7 +1181,6 @@ export async function runMarcusSync(
       name: session,
       startUrl: DOCUMENTS_URL,
       beforeStartNavigation: prepareMarcusCatalogCapture,
-      contextOptions: { headless: false },
       ...(config.profilePath ? { profilePath: config.profilePath } : {}),
     },
     browserProgram(),

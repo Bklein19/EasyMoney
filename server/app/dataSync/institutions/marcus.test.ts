@@ -1063,8 +1063,8 @@ test('Marcus download success emits progress, never a parent-owned completion ev
   }
 });
 
-test('Marcus stale cached-auth probes stay headed without enabling interactive authentication', async () => {
-  const outputDir = await mkdtemp(join(tmpdir(), 'marcus-headed-test-'));
+test.each([false, true])('Marcus delegates cached-headless and auth fallback policy (interactive=%s)', async (allowInteractiveAuthentication) => {
+  const outputDir = await mkdtemp(join(tmpdir(), 'marcus-session-policy-test-'));
   let browserSession: {
     startUrl: string;
     beforeStartNavigation?: (page: Page) => void | Promise<void>;
@@ -1098,16 +1098,16 @@ test('Marcus stale cached-auth probes stay headed without enabling interactive a
       outputDir,
       through: '2026-06-30',
       accounts: [plannedSavingsAccount()],
-      allowInteractiveAuthentication: false,
+      allowInteractiveAuthentication,
     }, undefined, dependencies)).toMatchObject({
       status: 'authentication-required',
       reason: 'expired',
     });
-    expect(browserSession?.contextOptions?.headless).toBe(false);
+    expect(browserSession?.contextOptions?.headless).toBeUndefined();
     expect(browserSession?.startUrl).toBe('https://www.marcus.com/us/en/documents');
     expect(browserSession?.beforeStartNavigation).toBeFunction();
     expect(authenticationRecoveryUrl).toBe('https://www.marcus.com/us/en/login');
-    expect(runnerAllowsInteractiveAuthentication).toBe(false);
+    expect(runnerAllowsInteractiveAuthentication).toBe(allowInteractiveAuthentication);
   } finally {
     await rm(outputDir, { recursive: true, force: true });
   }

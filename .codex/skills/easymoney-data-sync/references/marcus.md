@@ -39,6 +39,15 @@ the in-codebase connector at the first failing stage.
 
 ## Verified Transport And Readiness
 
+The 2026-09-10 headless counterfactual runs completed full discovery and five
+parser-validated PDFs both from the canonical profile and from a temporary
+profile restored through shared authentication infrastructure. A headed control
+also passed. Marcus therefore delegates launch policy to the shared session
+layer: saved authentication is tried headlessly, with a visible authentication
+fallback when permitted. Do not reinstate a forced-headed override based on the
+older, unreproduced headless rejection. Browser-hosted HTTP works headlessly;
+its separate direct-HTTP 403 behavior does not imply a visible window is needed.
+
 The 2026-09-10 local live harness succeeded after user login and on three fresh
 saved-session runs: each produced five parser-validated statements. The earlier
 statement 403 did not recur after fresh authentication. This is live-harness
