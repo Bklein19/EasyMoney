@@ -241,6 +241,20 @@ describe('TIAA parser claim identity', () => {
       .toBe(false);
   });
 
+  test('does not misclassify an opaque document redirect as expired authentication', async () => {
+    const page = {
+      url: () => 'https://my.tiaa.org/secure/account-statements/all',
+      on() {},
+      off() {},
+      async evaluate() {
+        return { status: 0, url: 'https://my.tiaa.org/private/ahstatementsui/getreport',
+          headers: {}, bodyBase64: '', redirected: true };
+      },
+    } as unknown as Page;
+    await expect(browserFetch(page, 'https://my.tiaa.org/private/ahstatementsui/getreport'))
+      .rejects.toThrow('opaque redirect without authentication evidence');
+  });
+
   test('maps a CORS-failed login redirect request chain to authentication required', async () => {
     const destination = 'https://my.tiaa.org/secure/account-statements/api/type';
     const requestListeners: Array<(request: unknown) => void> = [];

@@ -180,6 +180,17 @@ describe('TIAA connector execution', () => {
       session: 'tiaa-catchup',
     }]);
     expect(calls[0]).not.toHaveProperty('headless');
+    expect(events.find(event => event.data?.step === 'account-discovery')?.data?.status).toBe('completed');
+    expect(events.filter(event => event.type === 'artifact')).toEqual([{
+      type: 'artifact',
+      message: 'TIAA artifact passed production parser validation',
+      data: {
+        artifactKind: 'activity',
+        parserValidated: true,
+        transactionCount: 2,
+        balanceCount: 0,
+      },
+    }]);
     expect(events.at(-1)).toEqual({
       type: 'phase',
       message: 'Validated 1 TIAA artifact',

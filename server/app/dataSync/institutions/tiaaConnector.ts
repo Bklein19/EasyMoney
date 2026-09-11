@@ -58,6 +58,8 @@ function reportTiaaProgress(context: SyncConnectorRunContext, event: TiaaProgres
     type: event.state === 'progress' ? 'action' : 'phase',
     message: event.message,
     data: {
+      step: event.phase,
+      status: event.state,
       phase: event.phase,
       state: event.state,
       elapsedMs: event.elapsedMs,
@@ -101,6 +103,19 @@ export function createTiaaConnector(runSync: TiaaSyncRunner = runTiaaSync) {
         session: 'tiaa-catchup',
       }, event => reportTiaaProgress(context, event));
       const routed = routeTiaaArtifacts(result.artifacts);
+
+      for (const artifact of result.artifacts) {
+        context.report({
+          type: 'artifact',
+          message: 'TIAA artifact passed production parser validation',
+          data: {
+            artifactKind: artifact.artifactType,
+            parserValidated: true,
+            transactionCount: artifact.transactionCount,
+            balanceCount: artifact.balanceCount,
+          },
+        });
+      }
 
       context.report({
         type: 'phase',

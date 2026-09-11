@@ -18,6 +18,7 @@ import {
   type BrowserNativeResponse,
 } from '../browserRequest.ts';
 import { runInstitutionBrowserProgram } from '../browserSession.ts';
+import { runAuthenticatedHttpRequest } from '../authenticatedHttp.ts';
 
 const TIAA_SESSION = 'tiaa-catchup';
 const TIAA_HOME_URL = 'https://my.tiaa.org/private/participant/home';
@@ -407,10 +408,12 @@ export async function browserFetch(
     finalUrl: response.url,
     body: browserNativeResponseBody(response),
   };
-  if (response.redirected || response.status === 0 ||
-    tiaaResponseRequiresAuthentication(decoded.status, decoded.finalUrl) ||
+  if (authenticationEvidence || tiaaResponseRequiresAuthentication(decoded.status, decoded.finalUrl) ||
     tiaaResponseBodyRequiresAuthentication(decoded.contentType, decoded.body)) {
     throw new TiaaAuthenticationRequiredError('TIAA authentication is required');
+  }
+  if (response.redirected || response.status === 0) {
+    throw new Error('TIAA browser request returned an opaque redirect without authentication evidence');
   }
   return decoded;
 }
@@ -878,9 +881,21 @@ async function downloadStatementArtifact(
     validateTiaaStatementArtifact(path, logicalFileName, parseTiaaStatement, document);
   const existing = await existingValidatedArtifact({ outputDir, fileName, validate });
   const saved = existing ?? await (async () => {
-    const response = await browserFetch(page, tiaaStatementRequestUrl(document), {
+    const direct = await runAuthenticatedHttpRequest(page, {
+      url: tiaaStatementRequestUrl(document),
       headers: { accept: 'application/pdf' },
+      timeoutMs: 30_000,
     });
+    const response = {
+      status: direct.status,
+      contentType: direct.headers['content-type'] ?? '',
+      finalUrl: direct.finalUrl,
+      body: direct.body,
+    };
+    if (tiaaResponseRequiresAuthentication(response.status, response.finalUrl) ||
+      tiaaResponseBodyRequiresAuthentication(response.contentType, response.body)) {
+      throw new TiaaAuthenticationRequiredError('TIAA statement authentication is required');
+    }
     return writeValidatedArtifact({
       outputDir,
       fileName,
@@ -1135,6 +1150,9 @@ export async function runTiaaSync(
       isAuthenticated: isTiaaAuthenticatedPage,
       waitUntilAuthenticated: waitUntilTiaaAuthenticated,
       onProgress: message => {
+        if (/^Authentication browser delivered: headed=(?:true|false) nativeWindow=(?:true|false) windowState=(?:normal|minimized|maximized|fullscreen) onScreen=(?:true|false) activation=(?:macos-requested|not-required)$/.test(message)) {
+          progress.progress('authentication', message);
+        }
         if (/Authentication complete/i.test(message)) progress.progress('authentication', 'TIAA login and MFA completed');
       },
       programBindings: {
