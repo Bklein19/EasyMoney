@@ -23,12 +23,15 @@ import {
   normalizeHeadlessUserAgent,
   openInstitutionStartPage,
   persistBrowserAuthentication,
+  playwrightAuthenticationResumeUrlPath,
   playwrightAuthStatePath,
   playwrightEnableAutomationLaunchArgument,
   playwrightHasSavedAuthentication,
   playwrightProfilePath,
   playwrightSessionStoragePath,
   restoreBrowserAuthentication,
+  restoredInstitutionStartUrl,
+  savedAuthenticationResumeUrl,
   runInstitutionBrowserProgram,
   runWhileBrowserOpen,
   runWhilePersistentBrowserOpen,
@@ -70,6 +73,52 @@ describe('Playwright session helper', () => {
       .toBe('/profiles/tiaa-catchup/.easymoney-auth-state.json');
     expect(playwrightSessionStoragePath('/profiles/tiaa-catchup'))
       .toBe('/profiles/tiaa-catchup/.easymoney-session-storage.json');
+    expect(playwrightAuthenticationResumeUrlPath('/profiles/tiaa-catchup'))
+      .toBe('/profiles/tiaa-catchup/.easymoney-auth-resume-url.json');
+  });
+
+  test('restores only a query-free private same-origin URL and bypasses it after cached auth expires', async () => {
+    const profilePath = await mkdtemp(join(tmpdir(), 'easymoney-playwright-resume-url-'));
+    temporaryDirectories.push(profilePath);
+    const resumePath = playwrightAuthenticationResumeUrlPath(profilePath);
+    await writeFile(resumePath, JSON.stringify({
+      version: 1,
+      url: 'https://accounts.example.test/summary?SAMLart=one-time-state#resume',
+    }));
+
+    expect(await savedAuthenticationResumeUrl(
+      profilePath,
+      'https://accounts.example.test/login',
+    )).toBe('https://accounts.example.test/summary');
+    expect(await savedAuthenticationResumeUrl(
+      profilePath,
+      'https://login.example.test/start',
+    )).toBeNull();
+    expect(await restoredInstitutionStartUrl(
+      profilePath,
+      'https://accounts.example.test/login',
+      true,
+    )).toBe('https://accounts.example.test/summary');
+    expect(await restoredInstitutionStartUrl(
+      profilePath,
+      'https://accounts.example.test/login',
+      false,
+    )).toBe('https://accounts.example.test/login');
+    expect(await restoredInstitutionStartUrl(
+      profilePath,
+      'https://accounts.example.test/login',
+      true,
+      true,
+    )).toBe('https://accounts.example.test/login');
+
+    await writeFile(resumePath, JSON.stringify({
+      version: 1,
+      url: 'https://user:secret@accounts.example.test/summary',
+    }));
+    expect(await savedAuthenticationResumeUrl(
+      profilePath,
+      'https://accounts.example.test/login',
+    )).toBeNull();
   });
 
   test('detects saved authentication independently from the browser profile', async () => {
@@ -325,7 +374,7 @@ describe('Playwright session helper', () => {
     });
   });
 
-  test('delivers a normal on-screen headed browser and activates Chrome on macOS', async () => {
+  test.each([0, 2])('delivers a normal on-screen headed browser after %i context replacements', async (contextReplacements) => {
     const events: string[] = [];
     let bounds: {
       left: number;
@@ -353,8 +402,14 @@ describe('Playwright session helper', () => {
       },
       detach: async () => { events.push('detach'); },
     };
+    let evaluations = 0;
     const page = {
-      evaluate: async () => ({ left: 0, top: 25, width: 1_280, height: 775 }),
+      evaluate: async () => {
+        if (evaluations++ < contextReplacements) throw new Error('evaluate: Execution context was destroyed, most likely because of a navigation');
+        return { left: 0, top: 25, width: 1_280, height: 775 };
+      },
+      isClosed: () => false,
+      waitForLoadState: async () => {},
       bringToFront: async () => { events.push('foreground'); },
     } as unknown as Page;
     const context = {
@@ -376,6 +431,7 @@ describe('Playwright session helper', () => {
       onScreen: true,
       activation: 'macos-requested',
     });
+    expect(evaluations).toBe(contextReplacements + 1);
     expect(bounds).toEqual({
       left: 0,
       top: 25,
@@ -397,6 +453,30 @@ describe('Playwright session helper', () => {
       'Authentication browser delivered: headed=true nativeWindow=true windowState=normal ' +
       'onScreen=true activation=macos-requested',
     ]);
+  });
+
+  test.each([
+    ['Execution context was destroyed', false, 5],
+    ['Execution context was destroyed', true, 1],
+    ['Target page, context or browser has been closed', true, 1],
+    ['Unexpected evaluation failure', false, 1],
+  ] as const)('fails closed for screen-bound error %s (closed=%s)', async (message, closed, expectedAttempts) => {
+    let attempts = 0;
+    let nativeCalls = 0;
+    const page = {
+      evaluate: async () => { attempts += 1; throw new Error(message); },
+      isClosed: () => closed,
+      waitForLoadState: async () => {},
+    } as unknown as Page;
+    const context = { newCDPSession: async () => { nativeCalls += 1; } } as unknown as BrowserContext;
+    const diagnostics: string[] = [];
+    await expect(deliverHeadedBrowserWindow(page, context, {
+      headless: false,
+      onDiagnostic: message => diagnostics.push(message),
+    })).rejects.toThrow(message);
+    expect(attempts).toBe(expectedAttempts);
+    expect(nativeCalls).toBe(0);
+    expect(diagnostics).toEqual([]);
   });
 
   test('rejects headed-window delivery from a headless browser', async () => {
@@ -611,6 +691,61 @@ describe('Playwright session helper', () => {
     expect(programCalls).toEqual([1, 2, 1]);
   });
 
+  test('retains the first authenticated resume URL after connector navigation', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-auth-landing-'));
+    temporaryDirectories.push(root);
+    const canonicalProfilePath = join(root, 'profiles', 'wells-fargo-catchup');
+    await mkdir(canonicalProfilePath, { recursive: true });
+
+    const fakeWithPlaywrightPage: typeof withPlaywrightPage = async (_sessionOptions, operation) => {
+      const context = new EventEmitter();
+      const page = Object.assign(new EventEmitter(), {
+        authenticated: true,
+        currentUrl: 'https://accounts.example.test/account-summary?opaque=landing#resume',
+        isClosed: () => false,
+        context: () => context,
+        url() { return this.currentUrl; },
+        evaluate: async () => ({ origin: 'https://accounts.example.test', entries: {} }),
+        screencast: { showChapter: async () => {} },
+      }) as unknown as Page;
+      Object.assign(context, {
+        pages: () => [page],
+        storageState: async () => ({ cookies: [], origins: [] }),
+      });
+      return operation(page, context as unknown as BrowserContext);
+    };
+
+    const result = await runInstitutionBrowserProgram(
+      {
+        name: 'wells-fargo-catchup',
+        startUrl: 'https://accounts.example.test/login',
+        profilePath: canonicalProfilePath,
+        contextOptions: { headless: false },
+      },
+      `async page => {
+        page.currentUrl = 'https://accounts.example.test/activity?opaque=account#download';
+        return JSON.stringify({ status: 'complete' });
+      }`,
+      {
+        completionDescription: 'Downloads complete.',
+        isAuthenticated: async page => Boolean((page as unknown as { authenticated: boolean }).authenticated),
+      },
+      {
+        withPlaywrightPage: fakeWithPlaywrightPage,
+        withTransientBrowserProfile: async operation => operation(join(root, 'unexpected-transient')),
+      },
+    );
+
+    expect(result.status).toBe('complete');
+    expect(JSON.parse(await readFile(
+      playwrightAuthenticationResumeUrlPath(canonicalProfilePath),
+      'utf8',
+    ))).toEqual({
+      version: 1,
+      url: 'https://accounts.example.test/account-summary',
+    });
+  });
+
   test('keeps an explicitly headed session in the authenticated browser', async () => {
     const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-explicit-headed-'));
     temporaryDirectories.push(root);
@@ -686,6 +821,7 @@ describe('Playwright session helper', () => {
       const context = new EventEmitter();
       const page = Object.assign(new EventEmitter(), {
         context: () => context,
+        isClosed: () => false,
         bringToFront: async () => { authenticationChapters += 1; },
         waitForTimeout: async () => {},
         screencast: { showChapter: async () => {}, hideOverlays: async () => {} },
@@ -801,6 +937,7 @@ describe('Playwright session helper', () => {
       const context = new EventEmitter();
       const page = Object.assign(new EventEmitter(), {
         isClosed: () => false,
+        url: () => 'https://example.test/account?state=opaque#resume',
         context: () => context,
         evaluate: async () => ({
           origin: 'https://accounts.example.test',
@@ -849,6 +986,13 @@ describe('Playwright session helper', () => {
       .toEqual(authenticationState);
     expect(JSON.parse(await readFile(playwrightSessionStoragePath(canonicalProfilePath), 'utf8'))).toEqual({
       'https://accounts.example.test': { authenticatedFlow: 'fresh-resume-token' },
+    });
+    expect(JSON.parse(await readFile(
+      playwrightAuthenticationResumeUrlPath(canonicalProfilePath),
+      'utf8',
+    ))).toEqual({
+      version: 1,
+      url: 'https://example.test/account',
     });
     expect(await stat(transientProfilePath).then(() => true, () => false)).toBe(false);
   });
@@ -1439,10 +1583,19 @@ describe('Playwright session helper', () => {
       }],
     };
 
-    expect(await persistBrowserAuthentication(context as never, authStatePath)).toBe(true);
+    expect(await persistBrowserAuthentication(
+      context as never,
+      authStatePath,
+      5_000,
+      'https://accounts.example.test/summary?opaque=state#resume',
+    )).toBe(true);
     expect(JSON.parse(await readFile(authStatePath, 'utf8'))).toEqual(authenticationState);
     expect(JSON.parse(await readFile(playwrightSessionStoragePath(profilePath), 'utf8'))).toEqual({
       'https://accounts.example.test': { authenticatedFlow: 'resume-token' },
+    });
+    expect(JSON.parse(await readFile(playwrightAuthenticationResumeUrlPath(profilePath), 'utf8'))).toEqual({
+      version: 1,
+      url: 'https://accounts.example.test/summary',
     });
   });
 
@@ -1451,8 +1604,13 @@ describe('Playwright session helper', () => {
     temporaryDirectories.push(profilePath);
     const authStatePath = playwrightAuthStatePath(profilePath);
     const sessionStoragePath = playwrightSessionStoragePath(profilePath);
+    const resumeUrlPath = playwrightAuthenticationResumeUrlPath(profilePath);
     await writeFile(sessionStoragePath, JSON.stringify({
       'https://stale.example.test': { stale: 'value' },
+    }));
+    await writeFile(resumeUrlPath, JSON.stringify({
+      version: 1,
+      url: 'https://stale.example.test/account',
     }));
     const context = {
       storageState: async () => ({ cookies: [], origins: [] }),
@@ -1461,6 +1619,7 @@ describe('Playwright session helper', () => {
 
     expect(await persistBrowserAuthentication(context as never, authStatePath)).toBe(true);
     expect(await stat(sessionStoragePath).then(() => true, () => false)).toBe(false);
+    expect(await stat(resumeUrlPath).then(() => true, () => false)).toBe(false);
   });
 
   test('restores session storage before reopening the institution page', async () => {

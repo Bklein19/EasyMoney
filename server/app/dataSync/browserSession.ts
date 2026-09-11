@@ -95,6 +95,10 @@ export function playwrightSessionStoragePath(profilePath: string): string {
   return resolve(profilePath, '.easymoney-session-storage.json');
 }
 
+export function playwrightAuthenticationResumeUrlPath(profilePath: string): string {
+  return resolve(profilePath, '.easymoney-auth-resume-url.json');
+}
+
 export async function withTransientBrowserProfile<T>(
   operation: (profilePath: string) => Promise<T>,
   options: { temporaryRoot?: string } = {},
@@ -569,15 +573,29 @@ export async function deliverHeadedBrowserWindow(
     throw new Error('Cannot deliver an interactive authentication window from a headless browser');
   }
 
-  const screenBounds = await page.evaluate(() => {
-    const screen = window.screen as Screen & { availLeft?: number; availTop?: number };
-    return {
-      left: screen.availLeft ?? 0,
-      top: screen.availTop ?? 0,
-      width: screen.availWidth,
-      height: screen.availHeight,
-    };
-  });
+  // Authentication redirects can replace the execution context after goto has
+  // reached DOMContentLoaded. Retry only that race, never infer screen bounds.
+  const deadline = Date.now() + 5_000;
+  const screenBounds = await (async () => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await settleBeforeBrowserDeadline(page.evaluate(() => {
+          const screen = window.screen as Screen & { availLeft?: number; availTop?: number };
+          return {
+            left: screen.availLeft ?? 0,
+            top: screen.availTop ?? 0,
+            width: screen.availWidth,
+            height: screen.availHeight,
+          };
+        }), Math.max(1, deadline - Date.now()), 'Timed out reading authentication browser screen bounds');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const transientNavigation = /execution context was destroyed|cannot find context with specified id/i.test(message);
+        if (!transientNavigation || attempt >= 4 || Date.now() >= deadline || page.isClosed()) throw error;
+        await page.waitForLoadState('domcontentloaded', { timeout: Math.max(1, deadline - Date.now()) });
+      }
+    }
+  })();
   if (
     !Number.isFinite(screenBounds.left) ||
     !Number.isFinite(screenBounds.top) ||
@@ -792,7 +810,13 @@ async function launchPlaywrightPage<T>(
             `Timed out preparing the ${options.name} browser page`,
           );
         }
-        await openInstitutionStartPage(page, options.startUrl, hasSavedAuthentication, options.forceStartUrl);
+        const startUrl = await restoredInstitutionStartUrl(
+          authenticationProfilePath,
+          options.startUrl,
+          hasSavedAuthentication,
+          options.forceStartUrl,
+        );
+        await openInstitutionStartPage(page, startUrl, hasSavedAuthentication, options.forceStartUrl);
         if (contextOptions.headless !== true) {
           await deliverHeadedBrowserWindow(page, context, {
             headless: false,
@@ -829,6 +853,39 @@ async function savedSessionStorage(profilePath: string): Promise<SessionStorageB
   } catch {
     return {};
   }
+}
+
+export async function savedAuthenticationResumeUrl(
+  profilePath: string,
+  startUrl: string,
+): Promise<string | null> {
+  try {
+    const value = JSON.parse(
+      await readFile(playwrightAuthenticationResumeUrlPath(profilePath), 'utf8'),
+    ) as unknown;
+    if (!value || typeof value !== 'object' ||
+        !('version' in value) || value.version !== 1 ||
+        !('url' in value) || typeof value.url !== 'string') return null;
+    const start = new URL(startUrl);
+    const resume = new URL(value.url);
+    if (!['http:', 'https:'].includes(start.protocol) || resume.origin !== start.origin ||
+        resume.username || resume.password) return null;
+    resume.search = '';
+    resume.hash = '';
+    return resume.toString();
+  } catch {
+    return null;
+  }
+}
+
+export async function restoredInstitutionStartUrl(
+  profilePath: string,
+  startUrl: string,
+  hasSavedAuthentication: boolean,
+  forceStartUrl = false,
+): Promise<string> {
+  if (!hasSavedAuthentication || forceStartUrl) return startUrl;
+  return await savedAuthenticationResumeUrl(profilePath, startUrl) ?? startUrl;
 }
 
 export async function restoreBrowserAuthentication(
@@ -890,6 +947,7 @@ export async function persistBrowserAuthentication(
   context: Pick<BrowserContext, 'pages' | 'storageState'>,
   authStatePath: string,
   timeoutMs = 5_000,
+  resumeUrl?: string,
 ): Promise<boolean> {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -912,14 +970,29 @@ export async function persistBrowserAuthentication(
 
     await replacePrivateJson(authStatePath, snapshot.authenticationState);
     const sessionStoragePath = playwrightSessionStoragePath(dirname(authStatePath));
+    const resumeUrlPath = playwrightAuthenticationResumeUrlPath(dirname(authStatePath));
     try {
       if (snapshot.sessionStorage) {
         await replacePrivateJson(sessionStoragePath, snapshot.sessionStorage);
       } else {
         await rm(sessionStoragePath, { force: true });
       }
+      if (resumeUrl) {
+        const parsedResumeUrl = new URL(resumeUrl);
+        if (!['http:', 'https:'].includes(parsedResumeUrl.protocol) ||
+            parsedResumeUrl.username || parsedResumeUrl.password) {
+          throw new Error('Authentication resume URL is invalid');
+        }
+        parsedResumeUrl.search = '';
+        parsedResumeUrl.hash = '';
+        await replacePrivateJson(resumeUrlPath, { version: 1, url: parsedResumeUrl.toString() });
+      } else {
+        await rm(resumeUrlPath, { force: true });
+      }
     } catch (error) {
       await rm(authStatePath, { force: true });
+      await rm(sessionStoragePath, { force: true });
+      await rm(resumeUrlPath, { force: true });
       throw error;
     }
     return true;
@@ -1477,6 +1550,7 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     const interactiveAuthenticationEnabled = allowInteractiveAuthentication &&
       (options.allowInteractiveAuthentication ?? true);
     let activePage = page;
+    let authenticationResumeUrl: string | undefined;
     const deadline = Date.now() + (options.authenticationTimeoutMs ?? 10 * 60_000);
     const isAuthenticated = options.isAuthenticated ?? hasDefaultAuthentication;
     const checkpointAuthentication = async (): Promise<void> => {
@@ -1487,12 +1561,16 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
         options.authenticationCheckpointTimeoutMs,
       );
       if (!authenticated) return;
+      authenticationResumeUrl ??= activePage.url();
       const persisted = await persistBrowserAuthentication(
         context,
         playwrightAuthStatePath(canonicalProfilePath),
+        undefined,
+        authenticationResumeUrl,
       );
       if (!persisted) console.warn(`Could not checkpoint authentication for ${session.name}.`);
     };
+    await checkpointAuthentication();
     let result = decodeInstitutionBrowserProgramResult<T>(await program(
       activePage,
       reportProgress,
