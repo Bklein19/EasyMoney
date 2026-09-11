@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 import { marcusStatementParser } from '../../importParsers/marcusStatement.ts';
@@ -8,15 +8,21 @@ import {
   runInstitutionBrowserProgram,
   type InstitutionBrowserProgramResult,
 } from '../browserSession.ts';
+import {
+  browserNativeResponseBody,
+  runBrowserNativeRequest,
+  type BrowserNativeResponse,
+} from '../browserRequest.ts';
 import { reportSyncStep } from '../observability.ts';
 import type { SyncReporter } from '../types.ts';
-import type { BrowserContext, Download, Frame, Locator, Page, Request, Response } from 'playwright';
+import type { BrowserContext, Frame, Page, Request, Response } from 'playwright';
 
 const LOGIN_URL = 'https://www.marcus.com/us/en/login';
 const ACCOUNTS_URL = 'https://www.marcus.com/us/en/accounts';
 const DOCUMENTS_URL = 'https://www.marcus.com/us/en/documents';
 const MARCUS_ORIGIN = 'https://www.marcus.com';
 const MARCUS_DOCUMENT_ORIGIN = 'https://prod.savingsexperienceservice.cft.site.gs.com';
+const MARCUS_DOCUMENT_PROXY_PREFIX = '/api/savings';
 const MARCUS_COS_PATH_PATTERN = /^\/api\/cos\/?$/;
 const MARCUS_COS_QUERY_KEY = 'operations';
 const MARCUS_ACCOUNTS_REQUEST_MARKER = 'savingsAccountsInput';
@@ -119,6 +125,7 @@ export interface MarcusCatalogDocument {
   artifactType: MarcusArtifactType;
   statementDate: string;
   downloadDate: string;
+  remoteKey: string | null;
   request: MarcusApiRequest;
 }
 
@@ -488,7 +495,8 @@ export function buildMarcusRemoteCatalog(
     const request = marcusDocumentRequest(candidate.href);
     const logicalKey = `${identity.sourceAccountKey}:${statementDate}:statement-pdf`;
     const existing = documents.get(logicalKey);
-    if (existing && existing.request.url !== request.url) {
+    const remoteKey = candidate.remoteKey ?? null;
+    if (existing && (existing.request.url !== request.url || existing.remoteKey !== remoteKey)) {
       throw new Error('Marcus exposed multiple documents for one account statement period');
     }
     documents.set(logicalKey, {
@@ -496,6 +504,7 @@ export function buildMarcusRemoteCatalog(
       artifactType: 'statement-pdf',
       statementDate,
       downloadDate,
+      remoteKey,
       request,
     });
   }
@@ -886,63 +895,60 @@ export function validateMarcusPdfSignature(bytes: Uint8Array): void {
   }
 }
 
-function renderedMarcusDocumentDate(value: string): string {
-  if (!DATE_PATTERN.test(value)) throw new Error('Marcus statement download date is invalid');
-  return `${value.slice(5, 7)}/${value.slice(8, 10)}/${value.slice(0, 4)}`;
+export function marcusDocumentProxyRequest(
+  document: Pick<MarcusCatalogDocument, 'remoteKey' | 'request'>,
+): MarcusApiRequest {
+  const directRequest = marcusDocumentRequest(document.request.url);
+  if (document.request.method !== directRequest.method) {
+    throw new Error('Marcus statement request method is invalid');
+  }
+  if (!document.remoteKey || !/^[A-Za-z0-9][A-Za-z0-9._~-]{0,255}$/.test(document.remoteKey)) {
+    throw new Error('Marcus statement account identity is invalid');
+  }
+  const directUrl = new URL(directRequest.url);
+  const proxyUrl = new URL(`${MARCUS_DOCUMENT_PROXY_PREFIX}${directUrl.pathname}`, MARCUS_ORIGIN);
+  proxyUrl.searchParams.set('accountId', document.remoteKey);
+  return { method: 'GET', url: proxyUrl.toString() };
 }
 
-async function marcusStatementDownloadLink(
-  page: Page,
-  document: Pick<MarcusCatalogDocument, 'account' | 'downloadDate'>,
-): Promise<Locator> {
-  const renderedDate = renderedMarcusDocumentDate(document.downloadDate);
-  const candidates = page.getByText(renderedDate, { exact: true });
-  try {
-    await candidates.first().waitFor({ state: 'visible', timeout: 30_000 });
-  } catch {
-    throw new Error('Marcus statement download control did not appear');
-  }
-
-  const matches = await candidates.evaluateAll((elements, target) => {
-    const normalized = (value: string | null | undefined) => value?.replace(/\s+/g, ' ').trim() ?? '';
-    return elements.flatMap((element, index) => {
-      let ancestor: Element | null = element;
-      while (ancestor && ancestor !== globalThis.document.body) {
-        const text = normalized(ancestor.textContent);
-        if (text.includes(target.last4)) {
-          const matchingControls = [...ancestor.querySelectorAll('a[href], button, [role="button"]')]
-            .filter(control => normalized(control.textContent) === target.renderedDate);
-          return matchingControls.length === 1 ? [index] : [];
-        }
-        ancestor = ancestor.parentElement;
-      }
-      return [];
-    });
-  }, { last4: document.account.last4, renderedDate });
-  if (matches.length !== 1) {
-    throw new Error('Marcus statement download control is missing or ambiguous for its account');
-  }
-  return candidates.nth(matches[0]!);
+function marcusRequestFailureCategory(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/session cookies are unavailable/i.test(message)) return 'authenticated session cookies unavailable';
+  if (/cookie header is too large/i.test(message)) return 'authenticated session cookie header too large';
+  if (/compact cookie request was not intercepted/i.test(message)) return 'browser request interception failed';
+  if (/origin/i.test(message)) return 'request origin rejected';
+  if (/abort|timeout/i.test(message)) return 'request timed out';
+  return 'unexpected browser transport failure';
 }
 
 export async function fetchMarcusDocumentBytes(
   page: Page,
-  document: Pick<MarcusCatalogDocument, 'account' | 'downloadDate'>,
+  document: Pick<MarcusCatalogDocument, 'remoteKey' | 'request'>,
+  requestRunner: typeof runBrowserNativeRequest = runBrowserNativeRequest,
 ): Promise<Uint8Array> {
-  const link = await marcusStatementDownloadLink(page, document);
-  let download: Download;
+  const request = marcusDocumentProxyRequest(document);
+  let response: BrowserNativeResponse;
   try {
-    [download] = await Promise.all([
-      page.waitForEvent('download', { timeout: 30_000 }),
-      link.click({ timeout: 30_000 }),
-    ]);
-  } catch {
-    throw new Error('Marcus statement download did not start');
+    response = await requestRunner(page, {
+      url: request.url,
+      method: request.method,
+      headers: { accept: '*/*' },
+      cookiePolicy: 'http-only',
+      timeoutMs: 30_000,
+    });
+  } catch (error) {
+    throw new Error(`Marcus statement request failed: ${marcusRequestFailureCategory(error)}`);
   }
-  if (await download.failure()) throw new Error('Marcus statement download failed');
-  const path = await download.path();
-  if (!path) throw new Error('Marcus statement download failed');
-  const bytes = new Uint8Array(await readFile(path));
+
+  if (response.redirected) throw new Error('Marcus statement request redirected unexpectedly');
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`Marcus statement request returned status ${response.status}`);
+  }
+  const contentType = (response.headers['content-type'] ?? '').split(';', 1)[0]!.trim().toLowerCase();
+  if (!['application/pdf', 'application/octet-stream'].includes(contentType)) {
+    throw new Error('Marcus statement response content type was not accepted');
+  }
+  const bytes = new Uint8Array(browserNativeResponseBody(response));
   validateMarcusPdfSignature(bytes);
   return bytes;
 }
@@ -952,6 +958,19 @@ function parsedAccountNames(parsed: AppImportParseResult): string[] {
     ...parsed.transactions.map(transaction => transaction?.account ?? null),
     ...parsed.balances.map(balance => balance.account ?? null),
   ].filter((value): value is string => Boolean(value)))];
+}
+
+function marcusParserFailureCategory(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/Could not find Marcus account number/i.test(message)) return 'account identity unavailable';
+  if (/Could not find Marcus statement period/i.test(message)) return 'statement period unavailable';
+  if (/Could not find Marcus account activity header/i.test(message)) return 'activity layout not recognized';
+  if (/Could not find Marcus ending balance/i.test(message)) return 'ending balance unavailable';
+  if (/Could not parse Marcus activity row/i.test(message)) return 'activity row layout not recognized';
+  if (/Invalid Marcus statement date/i.test(message)) return 'statement date invalid';
+  if (/password|encrypted|decrypt/i.test(message)) return 'PDF could not be decrypted';
+  if (/pdftotext|PDF.*(?:parse|read|extract)/i.test(message)) return 'PDF text extraction failed';
+  return 'unexpected parser failure';
 }
 
 export async function validateMarcusStatementArtifact(
@@ -966,21 +985,22 @@ export async function validateMarcusStatementArtifact(
 ): Promise<MarcusDownloadedArtifact> {
   validateMarcusPdfSignature(options.bytes);
   const temporaryDir = await mkdtemp(join(resolve(options.outputDir), '.marcus-download-'));
-  const temporaryPath = join(temporaryDir, 'statement.pdf');
+  const parserFileName = `marcus-online-savings-${options.expectedAccount.last4}-${options.expectedStatementDate}-statement.pdf`;
+  const temporaryPath = join(temporaryDir, parserFileName);
   try {
     await writeFile(temporaryPath, options.bytes, { mode: 0o600 });
     let parsed: AppImportParseResult;
     try {
       parsed = await parser.parse({
-        fileName: 'statement.pdf',
+        fileName: parserFileName,
         headers: [],
         rows: [],
         text: '',
         filePath: temporaryPath,
         fileBytes: options.bytes,
       });
-    } catch {
-      throw new Error('Marcus statement parser validation failed');
+    } catch (error) {
+      throw new Error(`Marcus statement parser validation failed: ${marcusParserFailureCategory(error)}`);
     }
 
     const accountNames = parsedAccountNames(parsed);
@@ -1073,7 +1093,7 @@ async function syncAuthenticatedMarcus(
       report({
         type: 'artifact',
         message: 'Marcus statement is ready for review',
-        data: { ...details, parserId: artifact.parserId },
+        data: { ...details, parserId: artifact.parserId, parserValidated: true },
       });
     }
   } catch (error) {

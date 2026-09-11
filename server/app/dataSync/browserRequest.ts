@@ -1,9 +1,10 @@
-import type { Page } from 'playwright';
+import type { CDPSession, Page } from 'playwright';
 
 export type BrowserNativeRequest = {
   url: string;
   method: string;
   headers?: Record<string, string>;
+  cookiePolicy?: 'browser' | 'http-only';
   bodyBase64?: string;
   form?: Record<string, string>;
   multipart?: Record<string, string>;
@@ -29,6 +30,21 @@ type BrowserNativePageRequest = BrowserNativeRequest & {
   destinationOrigin: string;
 };
 
+type BrowserNativeCookie = {
+  name: string;
+  value: string;
+  httpOnly: boolean;
+};
+
+type BrowserRequestPausedEvent = {
+  requestId: string;
+  request: {
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+  };
+};
+
 const browserOwnedRequestHeaders = new Set([
   'accept-encoding',
   'connection',
@@ -44,14 +60,30 @@ const browserOwnedRequestHeaders = new Set([
   'upgrade',
   'user-agent',
 ]);
+const compactCookieRequestMarkerHeader = 'x-easymoney-browser-request';
 
 function isBrowserOwnedRequestHeader(name: string): boolean {
   const normalized = name.toLowerCase();
-  return browserOwnedRequestHeaders.has(normalized) || normalized.startsWith('sec-fetch-');
+  return browserOwnedRequestHeaders.has(normalized) || normalized.startsWith('sec-fetch-') || normalized.startsWith(':');
 }
 
 export function safeBrowserRequestHeaders(headers: Record<string, string>): Record<string, string> {
   return Object.fromEntries(Object.entries(headers).filter(([name]) => !isBrowserOwnedRequestHeader(name)));
+}
+
+export function browserNativeHttpOnlyCookieHeader(cookies: readonly BrowserNativeCookie[]): string {
+  const eligible = cookies.filter(cookie => cookie.httpOnly);
+  if (eligible.length === 0) throw new Error('Browser-native authenticated session cookies are unavailable');
+  for (const cookie of eligible) {
+    if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(cookie.name) || /[;\r\n]/.test(cookie.value)) {
+      throw new Error('Browser-native authenticated session cookie is invalid');
+    }
+  }
+  const header = eligible.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
+  if (Buffer.byteLength(header) > 3_500) {
+    throw new Error('Browser-native authenticated session cookie header is too large');
+  }
+  return header;
 }
 
 function validatedRequestOrigins(
@@ -101,6 +133,91 @@ function validateBrowserNativeRequest(request: BrowserNativeRequest): void {
     (!Number.isSafeInteger(request.timeoutMs) || request.timeoutMs <= 0 || request.timeoutMs > 5 * 60_000)) {
     throw new Error('Browser-native request timeout is invalid');
   }
+  if (request.cookiePolicy !== undefined &&
+    request.cookiePolicy !== 'browser' && request.cookiePolicy !== 'http-only') {
+    throw new Error('Browser-native request cookie policy is invalid');
+  }
+}
+
+async function runWithHttpOnlyBrowserCookies<T>(
+  page: Page,
+  request: BrowserNativeRequest,
+  operation: (request: BrowserNativeRequest) => Promise<T>,
+): Promise<T> {
+  const targetUrl = new URL(request.url).toString();
+  const cookieHeader = browserNativeHttpOnlyCookieHeader(
+    await page.context().cookies(targetUrl),
+  );
+  const requestMarker = crypto.randomUUID();
+  const markedRequest: BrowserNativeRequest = {
+    ...request,
+    headers: {
+      ...request.headers,
+      [compactCookieRequestMarkerHeader]: requestMarker,
+    },
+  };
+  let intercepted = false;
+  let interceptionError: unknown;
+  const pending = new Set<Promise<void>>();
+  const cdp: CDPSession = await page.context().newCDPSession(page);
+
+  const handlePausedRequest = async (event: BrowserRequestPausedEvent): Promise<void> => {
+    const marker = Object.entries(event.request.headers)
+      .find(([name]) => name.toLowerCase() === compactCookieRequestMarkerHeader)?.[1];
+    const isTarget = marker === requestMarker &&
+      new URL(event.request.url).toString() === targetUrl &&
+      event.request.method.toUpperCase() === request.method.trim().toUpperCase();
+    try {
+      if (!isTarget) {
+        await cdp.send('Fetch.continueRequest', { requestId: event.requestId });
+        return;
+      }
+      intercepted = true;
+      const headers = Object.entries(event.request.headers)
+        .filter(([name]) => !['cookie', compactCookieRequestMarkerHeader].includes(name.toLowerCase()))
+        .map(([name, value]) => ({ name, value: String(value) }));
+      headers.push({ name: 'cookie', value: cookieHeader });
+      await cdp.send('Fetch.continueRequest', { requestId: event.requestId, headers });
+    } catch (error) {
+      if (isTarget) interceptionError = error;
+      await cdp.send('Fetch.failRequest', {
+        requestId: event.requestId,
+        errorReason: 'Failed',
+      }).catch(() => {});
+    }
+  };
+  const onPausedRequest = (event: BrowserRequestPausedEvent) => {
+    const task = handlePausedRequest(event);
+    pending.add(task);
+    void task.then(
+      () => pending.delete(task),
+      () => pending.delete(task),
+    );
+  };
+
+  cdp.on('Fetch.requestPaused', onPausedRequest);
+  try {
+    await cdp.send('Fetch.enable', {
+      patterns: [{ urlPattern: '*', requestStage: 'Request' }],
+    });
+    let result: T | undefined;
+    let operationError: unknown;
+    try {
+      result = await operation(markedRequest);
+    } catch (error) {
+      operationError = error;
+    }
+    await Promise.allSettled([...pending]);
+    if (interceptionError) throw interceptionError;
+    if (operationError) throw operationError;
+    if (!intercepted) throw new Error('Browser-native compact cookie request was not intercepted');
+    return result as T;
+  } finally {
+    await cdp.send('Fetch.disable').catch(() => {});
+    cdp.off('Fetch.requestPaused', onPausedRequest);
+    await Promise.allSettled([...pending]);
+    await cdp.detach().catch(() => {});
+  }
 }
 
 async function browserNativeFetchInPage(
@@ -134,7 +251,7 @@ async function browserNativeFetchInPage(
       'transfer-encoding',
       'upgrade',
       'user-agent',
-    ].includes(name) || name.startsWith('sec-fetch-')) continue;
+    ].includes(name) || name.startsWith('sec-fetch-') || name.startsWith(':')) continue;
     headers.set(rawName, value);
   }
 
@@ -197,7 +314,13 @@ export async function runBrowserNativeRequest(
 ): Promise<BrowserNativeResponse> {
   validateBrowserNativeRequest(request);
   const origins = validatedRequestOrigins(request, page.url(), crossOriginPolicy);
-  const response = await page.evaluate(browserNativeFetchInPage, { ...request, ...origins });
+  const performRequest = (effectiveRequest: BrowserNativeRequest) => page.evaluate(
+    browserNativeFetchInPage,
+    { ...effectiveRequest, ...origins },
+  );
+  const response = request.cookiePolicy === 'http-only'
+    ? await runWithHttpOnlyBrowserCookies(page, request, performRequest)
+    : await performRequest(request);
   return {
     ...response,
     url: new URL(response.url, request.url).toString(),

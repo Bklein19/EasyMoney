@@ -2,16 +2,39 @@ import { describe, expect, test } from 'bun:test';
 import { chromium, type Page } from 'playwright';
 
 import {
+  browserNativeHttpOnlyCookieHeader,
   browserNativeResponseBody,
   runBrowserNativeRequest,
   safeBrowserRequestHeaders,
+  type BrowserNativeRequest,
   type BrowserNativeResponse,
 } from './browserRequest.ts';
 
 describe('browser-native authenticated requests', () => {
+  test('builds a bounded header from HttpOnly session cookies only', () => {
+    expect(browserNativeHttpOnlyCookieHeader([
+      { name: 'analytics', value: 'large-client-cookie', httpOnly: false },
+      { name: 'session', value: 'session-token', httpOnly: true },
+      { name: 'csrf', value: 'csrf-token', httpOnly: true },
+    ])).toBe('session=session-token; csrf=csrf-token');
+    expect(() => browserNativeHttpOnlyCookieHeader([
+      { name: 'analytics', value: 'large-client-cookie', httpOnly: false },
+    ])).toThrow('session cookies are unavailable');
+    expect(() => browserNativeHttpOnlyCookieHeader([
+      { name: 'invalid cookie', value: 'value', httpOnly: true },
+    ])).toThrow('session cookie is invalid');
+    expect(() => browserNativeHttpOnlyCookieHeader([
+      { name: 'session', value: 'x'.repeat(3_501), httpOnly: true },
+    ])).toThrow('cookie header is too large');
+  });
+
   test('keeps replayable headers and leaves browser-owned headers to Chromium', () => {
     expect(safeBrowserRequestHeaders({
       accept: 'application/json',
+      ':authority': 'example.test',
+      ':method': 'POST',
+      ':path': '/api',
+      ':scheme': 'https',
       cookie: 'private=value',
       host: 'invalid.example',
       origin: 'https://invalid.example',
@@ -81,6 +104,101 @@ describe('browser-native authenticated requests', () => {
       institutionHostname: 'accounts.example.test',
     })).rejects.toThrow('does not approve this institution request');
     expect(evaluated).toBe(false);
+  });
+
+  test('rewrites only the marked request when another request has the same URL and method', async () => {
+    type PausedEvent = {
+      requestId: string;
+      request: { url: string; method: string; headers: Record<string, string> };
+    };
+    type PausedListener = (event: PausedEvent) => void;
+    const targetUrl = 'https://application.fixture.test/document';
+    const commands: Array<{ method: string; parameters?: Record<string, unknown> }> = [];
+    let pausedListener: PausedListener | undefined;
+    const cdp = {
+      on(method: string, listener: PausedListener) {
+        expect(method).toBe('Fetch.requestPaused');
+        pausedListener = listener;
+      },
+      off(method: string, listener: PausedListener) {
+        expect(method).toBe('Fetch.requestPaused');
+        expect(pausedListener === listener).toBe(true);
+        pausedListener = undefined;
+      },
+      async send(method: string, parameters?: Record<string, unknown>) {
+        commands.push({ method, ...(parameters ? { parameters } : {}) });
+      },
+      async detach() {
+        commands.push({ method: 'detach' });
+      },
+    };
+    const page = {
+      url: () => 'https://application.fixture.test/application',
+      context: () => ({
+        cookies: async () => [
+          { name: 'session', value: 'session-token', httpOnly: true },
+          { name: 'analytics', value: 'large-client-cookie', httpOnly: false },
+        ],
+        newCDPSession: async () => cdp,
+      }),
+      evaluate: async (
+        _callback: unknown,
+        request: BrowserNativeRequest & { applicationOrigin: string; destinationOrigin: string },
+      ): Promise<BrowserNativeResponse> => {
+        const marker = Object.entries(request.headers ?? {})
+          .find(([name]) => name.toLowerCase() === 'x-easymoney-browser-request')?.[1];
+        expect(marker).toBeString();
+        pausedListener?.({
+          requestId: 'background',
+          request: {
+            url: targetUrl,
+            method: 'GET',
+            headers: { cookie: 'session=session-token; analytics=large-client-cookie' },
+          },
+        });
+        pausedListener?.({
+          requestId: 'target',
+          request: {
+            url: targetUrl,
+            method: 'GET',
+            headers: {
+              cookie: 'session=session-token; analytics=large-client-cookie',
+              'X-EasyMoney-Browser-Request': marker!,
+            },
+          },
+        });
+        await Promise.resolve();
+        return {
+          status: 200,
+          url: targetUrl,
+          headers: { 'content-type': 'application/pdf' },
+          bodyBase64: 'AAE=',
+          redirected: false,
+        };
+      },
+    } as unknown as Page;
+
+    await expect(runBrowserNativeRequest(page, {
+      url: targetUrl,
+      method: 'GET',
+      cookiePolicy: 'http-only',
+    })).resolves.toMatchObject({ status: 200, url: targetUrl });
+
+    expect(commands[0]).toEqual({
+      method: 'Fetch.enable',
+      parameters: { patterns: [{ urlPattern: '*', requestStage: 'Request' }] },
+    });
+    expect(commands.filter(command => command.method === 'Fetch.continueRequest')).toEqual([
+      { method: 'Fetch.continueRequest', parameters: { requestId: 'background' } },
+      {
+        method: 'Fetch.continueRequest',
+        parameters: {
+          requestId: 'target',
+          headers: [{ name: 'cookie', value: 'session=session-token' }],
+        },
+      },
+    ]);
+    expect(commands.slice(-2)).toEqual([{ method: 'Fetch.disable' }, { method: 'detach' }]);
   });
 
   test('preserves POST bytes, safe headers, referrer, forms, response bytes, and browser cookies in Chromium', async () => {
@@ -267,6 +385,76 @@ describe('browser-native authenticated requests', () => {
       expect(cookies.some(cookie => cookie.name === 'redirect-session' && cookie.value === 'accepted')).toBe(true);
     } finally {
       await browser.close();
+    }
+  }, 30_000);
+
+  test('uses Chromium networking with only HttpOnly cookies and leaves the browser jar unchanged', async () => {
+    const observations: Array<{
+      accept: string | null;
+      cookie: string | null;
+      marker: string | null;
+    }> = [];
+    const server = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch(request) {
+        const url = new URL(request.url);
+        if (url.pathname === '/document') {
+          observations.push({
+            accept: request.headers.get('accept'),
+            cookie: request.headers.get('cookie'),
+            marker: request.headers.get('x-easymoney-browser-request'),
+          });
+          return new Response('%PDF-1.7\n%%EOF', {
+            headers: {
+              'content-type': 'application/pdf',
+              'set-cookie': 'rotated-session=accepted; Path=/; HttpOnly; SameSite=Lax',
+            },
+          });
+        }
+        return new Response('<!doctype html><title>Application</title>', {
+          headers: { 'content-type': 'text/html' },
+        });
+      },
+    });
+    const origin = `http://127.0.0.1:${server.port}`;
+    const browser = await chromium.launch({ channel: 'chrome', headless: true });
+    try {
+      const context = await browser.newContext();
+      await context.addCookies([
+        { name: 'session', value: 'session-token', url: origin, httpOnly: true },
+        { name: 'analytics', value: 'large-client-cookie', url: origin },
+      ]);
+      const page = await context.newPage();
+      await page.goto(`${origin}/application`, { waitUntil: 'domcontentloaded' });
+
+      const response = await runBrowserNativeRequest(page, {
+        url: `${origin}/document`,
+        method: 'GET',
+        headers: {
+          accept: '*/*',
+          cookie: 'spoofed=blocked',
+        },
+        cookiePolicy: 'http-only',
+      });
+
+      expect(response).toMatchObject({
+        status: 200,
+        url: `${origin}/document`,
+        headers: { 'content-type': 'application/pdf' },
+        redirected: false,
+      });
+      expect(browserNativeResponseBody(response)).toEqual(Buffer.from('%PDF-1.7\n%%EOF'));
+      expect(observations).toEqual([{
+        accept: '*/*',
+        cookie: 'session=session-token',
+        marker: null,
+      }]);
+      expect((await context.cookies(origin)).map(cookie => cookie.name).sort())
+        .toEqual(['analytics', 'rotated-session', 'session']);
+    } finally {
+      await browser.close();
+      await server.stop(true);
     }
   }, 30_000);
 });

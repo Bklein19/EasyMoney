@@ -1,9 +1,10 @@
 import { expect, test } from 'bun:test';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import type { Page } from 'playwright';
+import type { BrowserNativeRequest, BrowserNativeResponse } from '../browserRequest.ts';
 import {
   buildMarcusRemoteCatalogFromApi,
   buildMarcusRemoteCatalog,
@@ -14,6 +15,7 @@ import {
   isMarcusAuthenticatedPath,
   mapMarcusRemoteAccounts,
   marcusAccountIdentityFromText,
+  marcusDocumentProxyRequest,
   marcusDocumentRequest,
   marcusStatementDateFromText,
   marcusStatementPeriodDateFromDownloadDate,
@@ -159,6 +161,7 @@ test('Marcus discovers every savings and deposit account while selecting every s
     artifactType: 'statement-pdf',
     statementDate: '2026-06-01',
     downloadDate: '2026-06-01',
+    remoteKey: 'remote-a',
     request: { method: 'GET', url: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-a' },
   });
   expect(catalog.unsupportedArtifactCount).toBe(2);
@@ -232,6 +235,7 @@ test('Marcus builds a dynamic account and document catalog from the observed API
     artifactType: 'statement-pdf',
     statementDate: '2026-06-30',
     downloadDate: '2026-07-01',
+    remoteKey: 'remote-a',
     request: {
       method: 'GET',
       url: 'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/document-a',
@@ -792,86 +796,109 @@ test('Marcus begins catalog capture without leaving the authentication page', as
   expect(listeners.size).toBe(1);
 });
 
-test('Marcus downloads the account-routed statement control exposed by the authenticated UI', async () => {
-  const outputDir = await mkdtemp(join(tmpdir(), 'marcus-ui-download-test-'));
-  const downloadPath = join(outputDir, 'statement.pdf');
-  await writeFile(downloadPath, validPdf);
-  const calls: Array<{ operation: string; value?: unknown }> = [];
-  const link = {
-    click: async (options: unknown) => { calls.push({ operation: 'click', value: options }); },
-  };
-  const candidates = {
-    first: () => ({
-      waitFor: async (options: unknown) => { calls.push({ operation: 'waitFor', value: options }); },
-    }),
-    evaluateAll: async (_callback: unknown, target: unknown) => {
-      calls.push({ operation: 'route', value: target });
-      return [0];
-    },
-    nth: (index: number) => {
-      calls.push({ operation: 'nth', value: index });
-      return link;
-    },
-  };
-  const page = {
-    getByText: (value: string, options: unknown) => {
-      calls.push({ operation: 'getByText', value: { value, options } });
-      return candidates;
-    },
-    waitForEvent: async (event: string, options: unknown) => {
-      calls.push({ operation: 'waitForEvent', value: { event, options } });
-      return {
-        failure: async () => null,
-        path: async () => downloadPath,
-      };
-    },
-  } as unknown as Page;
-
-  try {
-    expect(await fetchMarcusDocumentBytes(page, {
-      account: savingsAccount(),
-      downloadDate: '2026-07-01',
-    })).toEqual(validPdf);
-    expect(calls).toEqual([
-      {
-        operation: 'getByText',
-        value: { value: '07/01/2026', options: { exact: true } },
-      },
-      {
-        operation: 'waitFor',
-        value: { state: 'visible', timeout: 30_000 },
-      },
-      {
-        operation: 'route',
-        value: { last4: '1111', renderedDate: '07/01/2026' },
-      },
-      { operation: 'nth', value: 0 },
-      {
-        operation: 'waitForEvent',
-        value: { event: 'download', options: { timeout: 30_000 } },
-      },
-      { operation: 'click', value: { timeout: 30_000 } },
-    ]);
-  } finally {
-    await rm(outputDir, { recursive: true, force: true });
-  }
+test('Marcus builds the first-party document proxy from verified catalog identity', () => {
+  expect(marcusDocumentProxyRequest({
+    remoteKey: 'remote-account-a',
+    request: marcusDocumentRequest(
+      'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/opaque-document',
+    ),
+  })).toEqual({
+    method: 'GET',
+    url: 'https://www.marcus.com/api/savings/api/v1/accounts/document/opaque-document?accountId=remote-account-a',
+  });
+  expect(() => marcusDocumentProxyRequest({
+    remoteKey: null,
+    request: marcusDocumentRequest(
+      'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/opaque-document',
+    ),
+  })).toThrow('account identity is invalid');
 });
 
-test('Marcus refuses ambiguous statement controls instead of mixing account downloads', async () => {
-  const candidates = {
-    first: () => ({ waitFor: async () => {} }),
-    evaluateAll: async () => [0, 1],
-    nth: () => { throw new Error('must not select an ambiguous statement'); },
-  };
+test('Marcus downloads through the compact authenticated proxy without navigating the page', async () => {
+  const calls: BrowserNativeRequest[] = [];
   const page = {
-    getByText: () => candidates,
-    waitForEvent: () => { throw new Error('must not wait for an ambiguous download'); },
+    goto: () => { throw new Error('must not navigate the browser page'); },
+    getByText: () => { throw new Error('must not inspect the rendered document list'); },
+    waitForEvent: () => { throw new Error('must not wait for a browser download'); },
   } as unknown as Page;
+  const requestRunner = async (
+    _page: Page,
+    request: BrowserNativeRequest,
+  ): Promise<BrowserNativeResponse> => {
+    calls.push(request);
+    return {
+      status: 200,
+      url: request.url,
+      headers: { 'content-type': 'application/pdf' },
+      bodyBase64: Buffer.from(validPdf).toString('base64'),
+      redirected: false,
+    };
+  };
+
+  expect(await fetchMarcusDocumentBytes(page, {
+    remoteKey: 'remote-account-a',
+    request: marcusDocumentRequest(
+      'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/opaque-document',
+    ),
+  }, requestRunner)).toEqual(validPdf);
+  expect(calls).toEqual([{
+    url: 'https://www.marcus.com/api/savings/api/v1/accounts/document/opaque-document?accountId=remote-account-a',
+    method: 'GET',
+    headers: { accept: '*/*' },
+    cookiePolicy: 'http-only',
+    timeoutMs: 30_000,
+  }]);
+});
+
+test('Marcus rejects a proxy error response immediately', async () => {
+  const page = {} as Page;
+  const requestRunner = async (
+    _page: Page,
+    request: BrowserNativeRequest,
+  ): Promise<BrowserNativeResponse> => ({
+    status: 403,
+    url: request.url,
+    headers: { 'content-type': 'text/html' },
+    bodyBase64: Buffer.from('Forbidden').toString('base64'),
+    redirected: false,
+  });
 
   await expect(fetchMarcusDocumentBytes(page, {
-    account: savingsAccount(),
-    downloadDate: '2026-07-01',
-  })).rejects.toThrow('missing or ambiguous for its account');
+    remoteKey: 'remote-account-a',
+    request: marcusDocumentRequest(
+      'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/opaque-document',
+    ),
+  }, requestRunner)).rejects.toThrow('returned status 403');
+});
+
+test('Marcus reports a safe browser transport failure category', async () => {
+  const page = {} as Page;
+  const requestRunner = async (): Promise<BrowserNativeResponse> => {
+    throw new Error('Browser-native compact cookie request was not intercepted: private details');
+  };
+
+  await expect(fetchMarcusDocumentBytes(page, {
+    remoteKey: 'remote-account-a',
+    request: marcusDocumentRequest(
+      'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/opaque-document',
+    ),
+  }, requestRunner)).rejects.toThrow('Marcus statement request failed: browser request interception failed');
+});
+
+test('Marcus rejects a successful non-PDF response before parser validation', async () => {
+  const requestRunner = async (_page: Page, request: BrowserNativeRequest): Promise<BrowserNativeResponse> => ({
+    status: 200,
+    url: request.url,
+    headers: { 'content-type': 'text/html' },
+    bodyBase64: Buffer.from(validPdf).toString('base64'),
+    redirected: false,
+  });
+  await expect(fetchMarcusDocumentBytes({} as Page, {
+    remoteKey: 'remote-account-a',
+    request: marcusDocumentRequest(
+      'https://prod.savingsexperienceservice.cft.site.gs.com/api/v1/accounts/document/opaque-document',
+    ),
+  }, requestRunner)).rejects.toThrow('response content type was not accepted');
 });
 
 test('Marcus validates PDF magic and EOF before parser validation', () => {
@@ -886,6 +913,13 @@ test('Marcus validates PDF magic and EOF before parser validation', () => {
 
 test('Marcus parser validation emits an account-identifiable review artifact', async () => {
   const outputDir = await mkdtemp(join(tmpdir(), 'marcus-artifact-test-'));
+  const parser = fakeParser();
+  const parse = parser.parse;
+  const parserInputs: Array<{ fileName: string; pathName: string }> = [];
+  parser.parse = async input => {
+    parserInputs.push({ fileName: input.fileName, pathName: basename(input.filePath!) });
+    return parse(input);
+  };
   try {
     const artifact = await validateMarcusStatementArtifact({
       outputDir,
@@ -893,7 +927,7 @@ test('Marcus parser validation emits an account-identifiable review artifact', a
       accountId: 10,
       expectedAccount: savingsAccount(),
       expectedStatementDate: '2026-06-01',
-    }, fakeParser());
+    }, parser);
 
     expect(artifact).toMatchObject({
       fileName: 'marcus-online-savings-1111-2026-06-30-statement.pdf',
@@ -905,8 +939,39 @@ test('Marcus parser validation emits an account-identifiable review artifact', a
       transactionCount: 1,
       balanceCount: 1,
     });
+    expect(parserInputs).toEqual([{
+      fileName: 'marcus-online-savings-1111-2026-06-01-statement.pdf',
+      pathName: 'marcus-online-savings-1111-2026-06-01-statement.pdf',
+    }]);
     expect(new Uint8Array(await readFile(artifact.path))).toEqual(validPdf);
     expect(await readdir(outputDir)).toEqual([artifact.fileName]);
+  } finally {
+    await rm(outputDir, { recursive: true, force: true });
+  }
+});
+
+test('Marcus preserves a safe parser failure category without leaking row contents', async () => {
+  const outputDir = await mkdtemp(join(tmpdir(), 'marcus-parser-error-test-'));
+  const parser = fakeParser();
+  parser.parse = async () => {
+    throw new Error('Could not parse Marcus activity row: sensitive runtime contents');
+  };
+  try {
+    let message = '';
+    try {
+      await validateMarcusStatementArtifact({
+        outputDir,
+        bytes: validPdf,
+        accountId: 10,
+        expectedAccount: savingsAccount(),
+        expectedStatementDate: '2026-06-01',
+      }, parser);
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toBe('Marcus statement parser validation failed: activity row layout not recognized');
+    expect(message).not.toContain('sensitive runtime contents');
+    expect(await readdir(outputDir)).toEqual([]);
   } finally {
     await rm(outputDir, { recursive: true, force: true });
   }
