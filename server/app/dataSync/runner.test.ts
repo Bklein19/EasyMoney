@@ -10,6 +10,31 @@ import {
   type SyncExecutionPlan,
 } from './types.ts';
 
+test.each(['complete', 'review', 'import'] as const)(
+  'development and app runner both reject connector-owned %s transitions',
+  async type => {
+    const root = await mkdtemp(join(tmpdir(), 'easymoney-worker-events-'));
+    const events: unknown[] = [];
+    const connector: SyncConnector<'bank-of-america'> = {
+      id: 'bank-of-america',
+      label: 'Synthetic bank',
+      matchesAccount: () => true,
+      listTargets: () => [],
+      async run(context) {
+        context.report({ type, message: 'Invalid connector transition' });
+        return [];
+      },
+    };
+    try {
+      await expect(runSyncExecutionPlan(plan('invalid-event', root), event => events.push(event), () => connector))
+        .rejects.toThrow('parent-owned job transition');
+      expect(events).toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  },
+);
+
 function plan(runId: string, outputDir: string): SyncExecutionPlan {
   return {
     protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,

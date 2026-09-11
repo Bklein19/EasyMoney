@@ -1043,6 +1043,26 @@ test('Marcus reports missing auth without launching Chrome', async () => {
   }
 });
 
+test('Marcus download success emits progress, never a parent-owned completion event', async () => {
+  const outputDir = await mkdtemp(join(tmpdir(), 'marcus-completion-test-'));
+  const events: Parameters<NonNullable<Parameters<typeof runMarcusSync>[1]>>[0][] = [];
+  try {
+    await runMarcusSync({ outputDir, through: '2026-06-30', accounts: [plannedSavingsAccount()] },
+      event => events.push(event), {
+        hasSavedAuthentication: async () => true,
+        runBrowserProgram: (async () => ({
+          status: 'complete',
+          result: { status: 'complete', accounts: [], artifacts: [], unsupportedArtifactCount: 0, unmappedAccountCount: 0, unavailableAccountCount: 0 },
+        })) as MarcusSyncDependencies['runBrowserProgram'],
+        parser: fakeParser(),
+      });
+    expect(events.at(-1)).toMatchObject({ type: 'phase', message: 'Marcus artifacts are ready for review' });
+    expect(events.every(event => !['complete', 'review', 'import'].includes(event.type))).toBe(true);
+  } finally {
+    await rm(outputDir, { recursive: true, force: true });
+  }
+});
+
 test('Marcus stale cached-auth probes stay headed without enabling interactive authentication', async () => {
   const outputDir = await mkdtemp(join(tmpdir(), 'marcus-headed-test-'));
   let browserSession: {

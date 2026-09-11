@@ -1217,7 +1217,7 @@ export async function runMarcusSync(
   }
   if (result.status !== 'complete') throw new Error(result.message ?? 'Marcus sync failed');
   report({
-    type: 'complete',
+    type: 'phase',
     message: 'Marcus artifacts are ready for review',
     data: {
       accountCount: result.result.accounts.length,

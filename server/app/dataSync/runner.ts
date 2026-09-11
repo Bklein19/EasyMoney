@@ -78,7 +78,14 @@ export async function runSyncExecutionPlan(
     goal: plan.goal,
     connectionId: plan.connectionId,
     outputDir: plan.outputDir,
-    report,
+    report(event) {
+      // Apply the app worker boundary in development runs as well. Download
+      // completion is a manifest; import/job transitions belong to the parent.
+      if (event.type === 'complete' || event.type === 'review' || event.type === 'import') {
+        throw new Error('Sync worker attempted a parent-owned job transition');
+      }
+      report(event);
+    },
   });
   const fileNames = artifacts.map(artifact => artifact.fileName);
   if (new Set(fileNames).size !== fileNames.length) {
