@@ -63,6 +63,25 @@ export function syncAccountGroupAutoDestination(claims: SyncAccountClaim[]): num
   return commonSafeSyncAccountDestination(claims);
 }
 
+// Only connector-verified identities with one safe destination share a control.
+export function syncAccountAggregateSummary(claims: SyncAccountClaim[]): SyncAccountClaimGroup | null {
+  if (new Set(claims.map(claim => claim.remoteAccountId)).size < 2 ||
+      !claims.every(claim => claim.resolution === 'connector')) return null;
+  const destination = commonSafeSyncAccountDestination(claims);
+  if (destination === null) return null;
+  return groupSyncAccountClaims(claims.map(claim => ({
+    ...claim, remoteAccountId: `destination:${destination}`,
+  })))[0] ?? null;
+}
+
+export function applySyncGroupMappingChoice<T>(
+  previous: Record<string, T>,
+  groups: readonly SyncAccountClaimGroup[],
+  choice: T,
+): Record<string, T> {
+  return { ...previous, ...Object.fromEntries(groups.map(group => [group.identityKey, choice])) };
+}
+
 export function syncAccountGroupClaim(claims: SyncAccountClaim[]): SyncAccountClaim {
   const firstClaim = claims[0];
   if (!firstClaim) throw new Error('A sync account group must contain at least one claim.');

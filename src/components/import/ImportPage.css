@@ -339,6 +339,36 @@
   font-size: var(--text-xs);
 }
 
+.sync-review__source-identifiers {
+  border-top: 1px solid var(--hairline);
+  padding-top: 0.5rem;
+}
+
+.sync-review__source-identifiers > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: fit-content;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  list-style: none;
+}
+
+.sync-review__source-identifiers > summary::-webkit-details-marker { display: none; }
+.sync-review__source-identifiers > summary:hover { background: var(--bg-hover); }
+.sync-review__source-identifiers > summary:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.sync-review__source-identifiers > summary svg { transform: rotate(-90deg); }
+.sync-review__source-identifiers[open] > summary svg { transform: rotate(0); }
+.sync-review__source-identifiers p,
+.sync-review__source-identifiers li { font-size: var(--text-xs); color: var(--text-secondary); }
+.sync-review__source-identifiers ul { padding-left: 1.25rem; }
+.sync-review__source-identifiers li { margin-top: 0.4rem; }
+.sync-review__source-identifiers li span { display: block; color: var(--text-muted); }
+
 .sync-review__artifact {
   border-bottom: 1px solid var(--hairline);
 }

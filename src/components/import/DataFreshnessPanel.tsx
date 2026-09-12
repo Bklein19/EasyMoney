@@ -19,7 +19,9 @@ import {
 } from '../../../server/app/dataSync/accountMapping.ts';
 import {
   formatAccountMappingCandidate,
+  applySyncGroupMappingChoice,
   groupSyncAccountClaims,
+  syncAccountAggregateSummary,
   syncAccountGroupAutoDestination,
   syncAccountGroupClaim,
 } from './syncAccountMapping.ts';
@@ -239,11 +241,13 @@ function SyncAccountMappingControl({
   accounts,
   choice,
   onChange,
+  allowCreate = true,
 }: {
   claim: SyncAccountClaim;
   accounts: AccountRow[];
   choice: SyncMappingChoice;
   onChange: (choice: SyncMappingChoice) => void;
+  allowCreate?: boolean;
 }) {
   const activeAccounts = accounts.filter(account => account.status !== 'archived');
   const matchedAccount = accounts.find(account => account.id === claim.resolvedAccountId);
@@ -297,7 +301,7 @@ function SyncAccountMappingControl({
             Unarchive and use {matchedAccount ? formatAccountMappingCandidate(matchedAccount) : 'matched account'}
           </option>
         )}
-        <option value="__create__">Create account from this download</option>
+        {allowCreate && <option value="__create__">Create account from this download</option>}
         {activeAccounts.map(account => (
           <option key={account.id} value={account.id}>
             {formatAccountMappingCandidate(account)}
@@ -553,6 +557,12 @@ function SyncReviewPanel({
     && review.artifacts.every(artifact => artifact.status === 'already-imported');
   const transactionCount = readyArtifacts.reduce((sum, artifact) => sum + artifact.transactionCount, 0);
   const balanceCount = readyArtifacts.reduce((sum, artifact) => sum + artifact.balanceCount, 0);
+  const aggregateSummary = syncAccountAggregateSummary(readyClaims);
+  const aggregateClaim = aggregateSummary ? {
+    ...syncAccountGroupClaim(readyClaims),
+    accountName: readyClaims[0]?.resolvedAccountName || 'Matched account',
+  } : null;
+  const aggregateChoice = readyClaimGroups[0] ? mappingChoices[readyClaimGroups[0].identityKey] : undefined;
   return (
     <section
       className="sync-review"
@@ -598,8 +608,39 @@ function SyncReviewPanel({
               <h4>Account mappings</h4>
               <p>Choose once per account. Each choice applies to every downloaded file for that account.</p>
             </div>
-            <span>{readyClaimGroups.length} account{readyClaimGroups.length === 1 ? '' : 's'}</span>
+            <span>{aggregateSummary ? '1 account' : `${readyClaimGroups.length} account${readyClaimGroups.length === 1 ? '' : 's'}`}</span>
           </div>
+          {aggregateSummary && aggregateClaim && aggregateChoice && (
+            <div className="sync-review__mapping-group">
+              <div>
+                <strong>{aggregateClaim.accountName}</strong>
+                <small>{readyArtifacts.length} files · {aggregateSummary.transactionCount} tx · {aggregateSummary.balanceCount} bal</small>
+                {aggregateSummary.latestBalanceDate && aggregateSummary.latestBalanceCents !== null && (
+                  <small>Latest downloaded balance {formatCurrency(aggregateSummary.latestBalanceCents / 100)} on {formatFreshnessDate(aggregateSummary.latestBalanceDate)}</small>
+                )}
+                <small>One choice applies to all {readyClaimGroups.length} source identifiers below.</small>
+              </div>
+              <SyncAccountMappingControl
+                claim={aggregateClaim}
+                accounts={accounts}
+                choice={aggregateChoice}
+                allowCreate={false}
+                onChange={next => setMappingChoices(previous => applySyncGroupMappingChoice(previous, readyClaimGroups, next))}
+              />
+            </div>
+          )}
+          {aggregateSummary ? (
+            <details className="sync-review__source-identifiers">
+              <summary><ChevronDown size={16} aria-hidden="true" /> Show source identifiers ({readyClaimGroups.length})</summary>
+              <p>These identifiers belong to the group above. Its account choice applies to all of them.</p>
+              <ul>{readyClaimGroups.map(group => (
+                <li key={group.identityKey}>
+                  <strong>{syncAccountGroupClaim(group.claims).accountName || 'Unidentified source'}</strong>
+                  <span>{group.transactionCount} transactions · {group.balanceCount} balances</span>
+                </li>
+              ))}</ul>
+            </details>
+          ) : <>
           {readyClaimGroups.map(group => {
             const representative = syncAccountGroupClaim(group.claims);
             const mappingClaim = explicitMappingIdentityKeys.has(group.identityKey)
@@ -634,6 +675,7 @@ function SyncReviewPanel({
               </div>
             );
           })}
+          </>}
         </section>
       )}
       <div className="sync-review__artifacts">

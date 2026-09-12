@@ -3,7 +3,9 @@ import { expect, test } from 'bun:test';
 import type { SyncAccountClaim } from '../../../../server/app/dataSync/types.ts';
 import {
   formatAccountMappingCandidate,
+  applySyncGroupMappingChoice,
   groupSyncAccountClaims,
+  syncAccountAggregateSummary,
   syncAccountGroupClaim,
 } from '../syncAccountMapping.ts';
 
@@ -27,6 +29,39 @@ function claim(overrides: Partial<SyncAccountClaim> = {}): SyncAccountClaim {
     ...overrides,
   };
 }
+
+test('summarizes only connector-verified identities sharing one safe destination', () => {
+  const common = { resolution: 'connector' as const, resolvedAccountId: 10,
+    resolvedAccountName: '403(b)', resolvedAccountStatus: 'active', requiresExplicitMapping: false };
+  const claims = [
+    claim({ ...common, remoteAccountId: 'contract-a', transactionCount: 4 }),
+    claim({ ...common, sourceAccountId: 2, remoteAccountId: 'contract-b', transactionCount: 10 }),
+    claim({ ...common, sourceAccountId: 3, remoteAccountId: 'statement', transactionCount: 2,
+      balanceCount: 1, latestBalanceDate: '2026-06-30', latestBalanceCents: 12345 }),
+  ];
+  expect(syncAccountAggregateSummary(claims)).toMatchObject({
+    transactionCount: 16, balanceCount: 1, latestBalanceDate: '2026-06-30', latestBalanceCents: 12345,
+  });
+  expect(claims.map(item => item.remoteAccountId)).toEqual(['contract-a', 'contract-b', 'statement']);
+  expect(syncAccountAggregateSummary([claims[0]!, { ...claims[1]!, resolvedAccountId: 11 }])).toBeNull();
+  expect(syncAccountAggregateSummary([claims[0]!, { ...claims[1]!, requiresExplicitMapping: true }])).toBeNull();
+  expect(syncAccountAggregateSummary([claims[0]!, { ...claims[1]!, resolution: 'unresolved' }])).toBeNull();
+});
+
+test('one group selection updates every source identity and preserves unrelated choices', () => {
+  const groups = groupSyncAccountClaims([
+    claim({ sourceAccountId: 1, remoteAccountId: 'contract-a' }),
+    claim({ sourceAccountId: 2, remoteAccountId: 'contract-b' }),
+    claim({ sourceAccountId: 3, remoteAccountId: 'statement' }),
+  ]);
+  const original = { 'contract-a': 'auto', 'contract-b': 'old-account', statement: 'auto', unrelated: 'keep' };
+  const selected = applySyncGroupMappingChoice(original, groups, 'account-20');
+  expect(selected).toEqual({ 'contract-a': 'account-20', 'contract-b': 'account-20', statement: 'account-20', unrelated: 'keep' });
+  expect(original['contract-b']).toBe('old-account');
+  expect(applySyncGroupMappingChoice(selected, groups, 'needs-selection')).toEqual({
+    'contract-a': 'needs-selection', 'contract-b': 'needs-selection', statement: 'needs-selection', unrelated: 'keep',
+  });
+});
 
 test('formats account candidates with last four and imported-balance state', () => {
   expect(formatAccountMappingCandidate({
