@@ -356,6 +356,51 @@ test('source rebuild prefers statement balances over activity running balances i
   ]);
 });
 
+test('parser hash collisions preserve occurrences across overlapping exports, statements and accounts', () => {
+  const accountId = Number(insertRow('accounts', {
+    name: 'Synthetic card', institution: 'Wells Fargo', type: 'credit', currentBalance: 0,
+  }));
+  const otherAccountId = Number(insertRow('accounts', {
+    name: 'Other synthetic card', institution: 'Wells Fargo', type: 'credit', currentBalance: 0,
+  }));
+  const files: number[] = [];
+  for (const [index, count, destination, sourceType] of [
+    [0, 2, accountId, 'activity-export'],
+    [1, 3, accountId, 'activity-export'],
+    [2, 3, accountId, 'statement'],
+    [3, 1, otherAccountId, 'activity-export'],
+  ] as const) {
+    const file = insertCommittedSourceFile({
+      fileName: `synthetic-${index}`, parserName: 'synthetic-parser', sourceType,
+      priority: 90, institution: 'Wells Fargo',
+    });
+    files.push(file.sourceFileId);
+    const sourceAccountId = insertSourceAccount(file.sourceFileId, destination, `account-${index}`);
+    for (let occurrence = 0; occurrence < count; occurrence++) {
+      insertSourceTransaction({
+        sourceFileId: file.sourceFileId, sourceAccountId,
+        stableSourceId: `file-${index}-row-${occurrence}`, date: '2026-06-18',
+        amountCents: -500, description: 'SYNTHETIC COFFEE', priority: 90,
+        raw: { moneyId: 'same-content-hash', reference: `reference-${occurrence}` },
+      });
+    }
+  }
+  const ledger = buildLedgerFromSourceFacts(getDb());
+  expect(ledger.transactions.filter(t => t.accountId === accountId)).toHaveLength(3);
+  expect(ledger.transactions.filter(t => t.accountId === otherAccountId)).toHaveLength(1);
+  expect(ledger.provenance).toHaveLength(9);
+  const ids = ledger.transactions.filter(t => t.accountId === accountId).map(t => t.ledgerTransactionId);
+  materializeLedger(getDb(), ledger);
+  upsertTransactionAnnotation(ids[0]!, { notes: 'Preserve repeated purchase note' });
+  // Removing the larger export leaves three statement occurrences, not one.
+  getDb().prepare("UPDATE sourceFiles SET status = 'unimported' WHERE id IN (?, ?)").run(files[0], files[1]);
+  const rebuilt = buildLedgerFromSourceFacts(getDb());
+  expect(rebuilt.transactions.filter(t => t.accountId === accountId).map(t => t.ledgerTransactionId)).toEqual(ids);
+  materializeLedger(getDb(), rebuilt);
+  expect(getTransactionDetails(ids[0]!).transaction.notes).toBe('Preserve repeated purchase note');
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM sourceAccounts WHERE accountId = ?').get(accountId)?.count).toBe(3);
+});
+
 test('source rebuild de-duplicates overlapping activity exports by source-file multiplicity', () => {
   const accountId = Number(insertRow('accounts', {
     name: 'WF Checking',

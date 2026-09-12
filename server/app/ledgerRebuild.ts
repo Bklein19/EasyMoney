@@ -268,23 +268,41 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
   });
 
   const sourceIdentityKey = (transaction: {
+    accountId: number;
+    sourceType: string | null;
     raw: Record<string, unknown>;
     stableSourceId: string;
-  }) => typeof transaction.raw.moneyId === 'string'
+  }) => `${transaction.accountId}\0${transaction.sourceType}\0${typeof transaction.raw.moneyId === 'string'
     ? `money:${transaction.raw.moneyId}`
-    : `source:${transaction.stableSourceId}`;
-  const uniqueTransactionInputs = new Map<string, (typeof transactionInputs)[number]>();
-  for (const transaction of transactionInputs) {
-    const key = sourceIdentityKey(transaction);
-    const existing = uniqueTransactionInputs.get(key);
-    if (!existing || (transaction.priority ?? 0) > (existing.priority ?? 0)) {
-      if (existing) decisions.set(existing.id, { representative: transaction.id, reason: 'Same parser source identity; higher priority source retained.' });
-      uniqueTransactionInputs.set(key, transaction);
-    } else {
-      decisions.set(transaction.id, { representative: existing.id, reason: 'Same parser source identity already represented.' });
+    : `source:${transaction.stableSourceId}`}`;
+  // Legacy parser moneyIds can be hashes of date/amount/description, not bank
+  // transaction IDs. Match occurrences across files; never collapse repeated
+  // rows within one file merely because their parser hashes are identical.
+  const sourceIdentityGroups = new Map<string, Map<number, typeof transactionInputs>>();
+  for (const transaction of [...transactionInputs].sort((a, b) =>
+    getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b)))) {
+    const identity = sourceIdentityKey(transaction);
+    const files = sourceIdentityGroups.get(identity) ?? new Map<number, typeof transactionInputs>();
+    sourceIdentityGroups.set(identity, files);
+    const rows = files.get(transaction.sourceFileId) ?? [];
+    files.set(transaction.sourceFileId, rows);
+    rows.push(transaction);
+  }
+  const sourceUniqueTransactionInputs: typeof transactionInputs = [];
+  for (const files of sourceIdentityGroups.values()) {
+    const ordered = [...files.values()].sort((a, b) =>
+      b.length - a.length ||
+      (b[0]!.priority ?? 0) - (a[0]!.priority ?? 0) ||
+      a[0]!.sourceFileId - b[0]!.sourceFileId);
+    const representative = ordered[0]!;
+    sourceUniqueTransactionInputs.push(...representative);
+    for (const rows of ordered.slice(1)) {
+      rows.forEach((row, index) => decisions.set(row.id, {
+        representative: representative[index]!.id,
+        reason: 'Same parser source identity matched by file occurrence; largest occurrence count retained.',
+      }));
     }
   }
-  const sourceUniqueTransactionInputs = [...uniqueTransactionInputs.values()];
 
   const exactKey = (transaction: {
     accountId: number;
