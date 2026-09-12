@@ -1,4 +1,4 @@
-import type { CDPSession, Page } from 'playwright';
+import type { CDPSession, Page, Route } from 'playwright';
 
 export type BrowserNativeRequest = {
   url: string;
@@ -325,6 +325,40 @@ export async function runBrowserNativeRequest(
     ...response,
     url: new URL(response.url, request.url).toString(),
   };
+}
+
+export async function runBrowserNativeRouteRequest(
+  page: Page,
+  route: Route,
+  timeoutMs = 60_000,
+): Promise<BrowserNativeResponse> {
+  const intercepted = route.request();
+  const request: BrowserNativeRequest = {
+    url: intercepted.url(),
+    method: intercepted.method(),
+    timeoutMs,
+  };
+  validateBrowserNativeRequest(request);
+  validatedRequestOrigins(request, page.url());
+
+  const response = await route.fetch({ timeout: timeoutMs });
+  try {
+    const responseUrl = new URL(response.url(), request.url).toString();
+    if (new URL(responseUrl).origin !== new URL(request.url).origin) {
+      throw new Error('Browser-native route response changed origin');
+    }
+    const body = await response.body();
+    return {
+      status: response.status(),
+      url: responseUrl,
+      headers: Object.fromEntries(Object.entries(response.headers())
+        .map(([name, value]) => [name.toLowerCase(), value])),
+      bodyBase64: body.toString('base64'),
+      redirected: responseUrl !== new URL(request.url).toString(),
+    };
+  } finally {
+    await response.dispose();
+  }
 }
 
 export function browserNativeResponseBody(response: BrowserNativeResponse): Buffer {

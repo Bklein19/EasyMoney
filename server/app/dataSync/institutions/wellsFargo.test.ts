@@ -10,17 +10,28 @@ import {
   clickWellsFargoAccountControl,
   createWellsFargoProgress,
   ensureWellsFargoAccountSummary,
+  isWellsFargoAuthenticatedPage,
+  isWellsFargoActivityDownloadRequest,
+  isWellsFargoStatementDownloadRequest,
   mapWellsFargoAccounts,
+  openWellsFargoAccount,
   parseWellsFargoAccountCandidates,
+  restoreWellsFargoStatementPage,
   safeWellsFargoDiagnostic,
   setWellsFargoActivityDates,
   selectWellsFargoStatements,
   validateWellsFargoArtifact,
   wellsFargoAccountLast4FromLabel,
+  wellsFargoActivityBodyFromApiResponse,
   wellsFargoActivityRequestFromForm,
+  wellsFargoArtifactResponse,
   wellsFargoArtifactPlanFromFilename,
   wellsFargoDateFromText,
   wellsFargoBrowserWindowProgress,
+  wellsFargoCapturedStatementResponse,
+  wellsFargoStatementBodyFromApiResponse,
+  wellsFargoStatementDateTextVariants,
+  wellsFargoStatementDocumentUrl,
   type WellsFargoProgressEvent,
 } from './wellsFargo.ts';
 
@@ -105,6 +116,74 @@ test('Wells Fargo forwards the shared headed-window proof through safe progress'
   });
 });
 
+test('Wells Fargo authentication probe waits for a delayed account marker', async () => {
+  let disposed = false;
+  let observedTimeout = 0;
+  const page = {
+    url: () => 'https://connect.secure.wellsfargo.com/accounts/start',
+    waitForFunction: async (_predicate: unknown, _argument: unknown, options: { timeout: number }) => {
+      observedTimeout = options.timeout;
+      return {
+        jsonValue: async () => 'authenticated',
+        dispose: async () => { disposed = true; },
+      };
+    },
+  } as unknown as Parameters<typeof isWellsFargoAuthenticatedPage>[0];
+
+  await expect(isWellsFargoAuthenticatedPage(page, 250)).resolves.toBe(true);
+  expect(observedTimeout).toBeGreaterThan(0);
+  expect(observedTimeout).toBeLessThanOrEqual(250);
+  expect(disposed).toBe(true);
+});
+
+test('Wells Fargo authentication probe rejects a rendered login page', async () => {
+  const page = {
+    url: () => 'https://connect.secure.wellsfargo.com/auth/login/present',
+    waitForFunction: async () => ({
+      jsonValue: async () => 'login-required',
+      dispose: async () => {},
+    }),
+  } as unknown as Parameters<typeof isWellsFargoAuthenticatedPage>[0];
+
+  await expect(isWellsFargoAuthenticatedPage(page, 250)).resolves.toBe(false);
+});
+
+test('Wells Fargo authentication probe retries an authentication redirect race', async () => {
+  let attempts = 0;
+  let loadStateWaits = 0;
+  const page = {
+    url: () => 'https://connect.secure.wellsfargo.com/accounts/start',
+    isClosed: () => false,
+    waitForLoadState: async () => { loadStateWaits += 1; },
+    waitForFunction: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('Execution context was destroyed during navigation');
+      return {
+        jsonValue: async () => 'authenticated',
+        dispose: async () => {},
+      };
+    },
+  } as unknown as Parameters<typeof isWellsFargoAuthenticatedPage>[0];
+
+  await expect(isWellsFargoAuthenticatedPage(page, 250)).resolves.toBe(true);
+  expect(attempts).toBe(2);
+  expect(loadStateWaits).toBe(1);
+});
+
+test('Wells Fargo authentication probe rejects an off-origin page without inspecting it', async () => {
+  let inspected = false;
+  const page = {
+    url: () => 'https://example.test/accounts/start',
+    waitForFunction: async () => {
+      inspected = true;
+      throw new Error('unexpected inspection');
+    },
+  } as unknown as Parameters<typeof isWellsFargoAuthenticatedPage>[0];
+
+  await expect(isWellsFargoAuthenticatedPage(page, 250)).resolves.toBe(false);
+  expect(inspected).toBe(false);
+});
+
 test('Wells Fargo discovery covers every supported account without a fixed count or product name', () => {
   const accounts = parseWellsFargoAccountCandidates([
     {
@@ -156,6 +235,7 @@ test('Wells Fargo account navigation waits for detail controls instead of URL ch
   let waitForUrlCount = 0;
   const waitedRoles: string[] = [];
   const page = {
+    url: () => 'https://connect.secure.wellsfargo.com/accounts/inquiry/summary/home/default',
     waitForURL: async () => { waitForUrlCount += 1; },
     getByRole: (role: string) => ({
       first() { return this; },
@@ -163,15 +243,74 @@ test('Wells Fargo account navigation waits for detail controls instead of URL ch
     }),
   } as unknown as Parameters<typeof clickWellsFargoAccountControl>[0];
   const control = {
+    getAttribute: async () => '/accounts/detail',
     click: async () => { clicked = true; },
   } as unknown as Parameters<typeof clickWellsFargoAccountControl>[1];
 
-  await clickWellsFargoAccountControl(page, control);
+  expect(await clickWellsFargoAccountControl(page, control)).toBe(true);
 
   expect(clicked).toBe(true);
   expect(waitForUrlCount).toBe(0);
   expect(waitedRoles).toContain('button');
   expect(waitedRoles).toContain('link');
+});
+
+test('Wells Fargo account navigation accepts authenticated detail controls without a summary marker', async () => {
+  let currentUrl = 'https://connect.secure.wellsfargo.com/accounts/start';
+  const accountControl = {
+    getAttribute: async () => '/accounts/detail',
+    click: async () => { currentUrl = 'https://connect.secure.wellsfargo.com/accounts/detail'; },
+  };
+  const summaryHeading = {
+    first() { return this; },
+    isVisible: async () => true,
+  };
+  const detailControl = {
+    first() { return this; },
+    waitFor: async () => {},
+  };
+  const accountControls = {
+    filter() { return this; },
+    allTextContents: async () => ['Checking Account number ending in 1234'],
+    nth: () => accountControl,
+  };
+  const page = {
+    url: () => currentUrl,
+    getByRole: (role: string, options?: { name?: RegExp }) => {
+      if (role === 'heading' && options?.name) return summaryHeading;
+      if (role === 'heading') return { allTextContents: async () => ['Everyday Checking'] };
+      if (role === 'link' && !options) return accountControls;
+      return detailControl;
+    },
+  } as unknown as Parameters<typeof openWellsFargoAccount>[0];
+
+  await expect(openWellsFargoAccount(page, {
+    kind: 'checking',
+    last4: '1234',
+  })).resolves.toBeUndefined();
+  expect(currentUrl).toBe('https://connect.secure.wellsfargo.com/accounts/detail');
+});
+
+test('Wells Fargo discovery skips rewards SSO links before opening them', async () => {
+  let clicked = false;
+  const page = {
+    url: () => 'https://connect.secure.wellsfargo.com/accounts/inquiry/summary/home/default',
+    getByRole: () => ({
+      first() { return this; },
+      waitFor: async () => {
+        throw new Error('account details unavailable');
+      },
+    }),
+  } as unknown as Parameters<typeof clickWellsFargoAccountControl>[0];
+  const control = {
+    getAttribute: async () => 'https://idp.wellsfargo.com/sso/initiate?synthetic=true',
+    click: async () => { clicked = true; },
+  } as unknown as Parameters<typeof clickWellsFargoAccountControl>[1];
+
+  expect(await clickWellsFargoAccountControl(page, control, {
+    allowUnsupportedDestination: true,
+  })).toBe(false);
+  expect(clicked).toBe(false);
 });
 
 test('Wells Fargo discovery rejects ambiguous routing identities', () => {
@@ -258,7 +397,7 @@ test('Wells Fargo uses a visible account-summary link without walking back into 
   expect(gotoCount).toBe(0);
 });
 
-test('Wells Fargo stops history traversal at a cross-origin page and returns through login', async () => {
+test('Wells Fargo stops history traversal at a cross-origin page and opens account summary directly', async () => {
   let currentUrl = 'https://connect.secure.wellsfargo.com/accounts/detail';
   let summaryVisible = false;
   let goBackCount = 0;
@@ -294,7 +433,44 @@ test('Wells Fargo stops history traversal at a cross-origin page and returns thr
 
   expect(goBackCount).toBe(1);
   expect(gotoCount).toBe(1);
-  expect(currentUrl).toBe('https://connect.secure.wellsfargo.com/auth/login/present');
+  expect(currentUrl).toBe('https://connect.secure.wellsfargo.com/accounts/start');
+});
+
+test('Wells Fargo opens account summary directly after bounded document history is exhausted', async () => {
+  let summaryVisible = false;
+  let goBackCount = 0;
+  let gotoUrl = '';
+  const heading = {
+    first() { return this; },
+    isVisible: async () => summaryVisible,
+    waitFor: async () => {
+      if (!summaryVisible) throw new Error('not visible');
+    },
+  };
+  const link = {
+    first() { return this; },
+    isVisible: async () => false,
+    click: async () => {},
+  };
+  const page = {
+    url: () => gotoUrl || 'https://connect.secure.wellsfargo.com/edocs/documents/retrieve/synthetic',
+    goBack: async () => {
+      goBackCount += 1;
+      return null;
+    },
+    goto: async (url: string) => {
+      gotoUrl = url;
+      summaryVisible = true;
+    },
+    getByRole: (role: string) => role === 'heading' ? heading : link,
+  } as unknown as Parameters<typeof ensureWellsFargoAccountSummary>[0];
+
+  await ensureWellsFargoAccountSummary(page);
+
+  expect(goBackCount).toBe(3);
+  expect(gotoUrl).toBe(
+    'https://connect.secure.wellsfargo.com/accounts/start',
+  );
 });
 
 test('Wells Fargo maps every planned local account while ignoring unrelated remote accounts', () => {
@@ -375,6 +551,280 @@ test('Wells Fargo activity form metadata becomes a same-origin direct HTTP reque
   }, 'https://connect.secure.wellsfargo.com/accounts/activity')).toThrow('invalid API destination');
 });
 
+test('Wells Fargo identifies only its authenticated activity download XHR', () => {
+  const request = (overrides: Partial<{
+    method: string;
+    postData: string | null;
+    resourceType: string;
+    url: string;
+  }> = {}) => ({
+    method: () => overrides.method ?? 'POST',
+    postData: () => overrides.postData ?? '{"query":"mutation downloadAccountData"}',
+    resourceType: () => overrides.resourceType ?? 'xhr',
+    url: () => overrides.url ?? 'https://connect.secure.wellsfargo.com/web/oapi/graphql',
+  });
+
+  expect(isWellsFargoActivityDownloadRequest(request())).toBe(true);
+  expect(isWellsFargoActivityDownloadRequest(request({ method: 'GET' }))).toBe(false);
+  expect(isWellsFargoActivityDownloadRequest(request({ postData: '{"query":"accountSummary"}' }))).toBe(false);
+  expect(isWellsFargoActivityDownloadRequest(request({ url: 'https://example.test/web/oapi/graphql' }))).toBe(false);
+});
+
+test('Wells Fargo identifies only same-origin statement document requests', () => {
+  const pageUrl = 'https://connect.secure.wellsfargo.com/statements';
+  const request = (overrides: Partial<{
+    method: string;
+    resourceType: string;
+    url: string;
+  }> = {}) => ({
+    method: () => overrides.method ?? 'GET',
+    resourceType: () => overrides.resourceType ?? 'document',
+    url: () => overrides.url ??
+      'https://connect.secure.wellsfargo.com/edocs/documents/retrieve/synthetic',
+  });
+
+  expect(isWellsFargoStatementDownloadRequest(request(), pageUrl)).toBe(true);
+  expect(isWellsFargoStatementDownloadRequest(request({ method: 'POST', resourceType: 'xhr' }), pageUrl))
+    .toBe(true);
+  expect(isWellsFargoStatementDownloadRequest(request({ method: 'DELETE' }), pageUrl)).toBe(false);
+  expect(isWellsFargoStatementDownloadRequest(request({ resourceType: 'image' }), pageUrl)).toBe(false);
+  expect(isWellsFargoStatementDownloadRequest(request({
+    url: 'https://connect.secure.wellsfargo.com/edocs/documents/preview/synthetic',
+  }), pageUrl)).toBe(false);
+  expect(isWellsFargoStatementDownloadRequest(request({
+    url: 'https://example.test/edocs/documents/retrieve/synthetic',
+  }), pageUrl)).toBe(false);
+  expect(isWellsFargoStatementDownloadRequest(request({
+    url: 'https://other.wellsfargo.com/edocs/documents/retrieve/synthetic',
+  }), pageUrl)).toBe(false);
+});
+
+test('Wells Fargo accepts only verified same-origin statement document links', () => {
+  const pageUrl = 'https://connect.secure.wellsfargo.com/statements';
+  expect(wellsFargoStatementDocumentUrl(
+    '/edocs/documents/retrieve/synthetic',
+    pageUrl,
+  )).toBe('https://connect.secure.wellsfargo.com/edocs/documents/retrieve/synthetic');
+  expect(wellsFargoStatementDocumentUrl(
+    'https://other.wellsfargo.com/edocs/documents/retrieve/synthetic',
+    pageUrl,
+  )).toBeNull();
+  expect(wellsFargoStatementDocumentUrl(
+    'https://example.test/edocs/documents/retrieve/synthetic',
+    pageUrl,
+  )).toBeNull();
+  expect(wellsFargoStatementDocumentUrl('javascript:void(0)', pageUrl)).toBeNull();
+  expect(wellsFargoStatementDocumentUrl('/contact-us', pageUrl)).toBeNull();
+});
+
+test('Wells Fargo restores its statement list after an intercepted document navigation', async () => {
+  const statementPageUrl = 'https://connect.secure.wellsfargo.com/edocs/statements?synthetic=true';
+  let currentUrl = 'chrome-error://chromewebdata/';
+  let gotoCount = 0;
+  const page = {
+    isClosed: () => false,
+    url: () => currentUrl,
+    goBack: async () => {
+      currentUrl = statementPageUrl;
+      return null;
+    },
+    goto: async () => {
+      gotoCount += 1;
+      return null;
+    },
+  } as unknown as Parameters<typeof restoreWellsFargoStatementPage>[0];
+
+  expect(await restoreWellsFargoStatementPage(page, statementPageUrl)).toBe(true);
+  expect(gotoCount).toBe(0);
+});
+
+test('Wells Fargo reloads its verified statement list when browser history cannot restore it', async () => {
+  const statementPageUrl = 'https://connect.secure.wellsfargo.com/edocs/statements';
+  let currentUrl = 'about:blank';
+  let gotoUrl = '';
+  const page = {
+    isClosed: () => false,
+    url: () => currentUrl,
+    goBack: async () => null,
+    goto: async (url: string) => {
+      gotoUrl = url;
+      currentUrl = url;
+      return null;
+    },
+  } as unknown as Parameters<typeof restoreWellsFargoStatementPage>[0];
+
+  expect(await restoreWellsFargoStatementPage(page, statementPageUrl)).toBe(true);
+  expect(gotoUrl).toBe(statementPageUrl);
+});
+
+test('Wells Fargo decodes the authenticated activity API JSON into CSV bytes', () => {
+  const csv = Buffer.from('Date,Amount,Description\n09/01/2026,-12.34,Synthetic\n');
+  const response = {
+    status: 200,
+    url: 'https://connect.secure.wellsfargo.com/web/oapi/graphql',
+    headers: { 'content-type': 'application/json;charset=UTF-8' },
+    bodyBase64: Buffer.from(JSON.stringify({
+      data: {
+        downloadAccountData: {
+          status: true,
+          fileName: 'activity.csv',
+          activities: csv.toString('base64'),
+        },
+      },
+    })).toString('base64'),
+    redirected: false,
+  };
+
+  expect(wellsFargoActivityBodyFromApiResponse(response)).toEqual(csv);
+  expect(wellsFargoActivityBodyFromApiResponse({
+    ...response,
+    bodyBase64: Buffer.from(JSON.stringify({
+      data: { downloadAccountData: { status: true, activities: csv.toString('utf8') } },
+    })).toString('base64'),
+  })).toEqual(csv);
+  expect(wellsFargoActivityBodyFromApiResponse({
+    ...response,
+    bodyBase64: Buffer.from(JSON.stringify({
+      data: { downloadAccountData: { status: true, activities: encodeURIComponent(csv.toString('utf8')) } },
+    })).toString('base64'),
+  })).toEqual(csv);
+  expect(wellsFargoActivityBodyFromApiResponse({
+    ...response,
+    bodyBase64: Buffer.from(JSON.stringify({
+      data: {
+        downloadAccountData: {
+          status: true,
+          activities: `data:text/csv;charset=utf-8;base64,${csv.toString('base64')}`,
+        },
+      },
+    })).toString('base64'),
+  })).toEqual(csv);
+  expect(wellsFargoActivityBodyFromApiResponse({
+    ...response,
+    bodyBase64: Buffer.from(JSON.stringify({
+      data: {
+        downloadAccountData: {
+          status: true,
+          activities: Buffer.from([251, 255]).toString('base64url').replace(/=+$/, ''),
+        },
+      },
+    })).toString('base64'),
+  })).toEqual(Buffer.from([251, 255]));
+  expect(() => wellsFargoActivityBodyFromApiResponse({
+    ...response,
+    bodyBase64: Buffer.from(JSON.stringify({
+      data: { downloadAccountData: { status: false, activities: csv.toString('base64') } },
+    })).toString('base64'),
+  })).toThrow('omitted a completed download');
+  expect(() => wellsFargoActivityBodyFromApiResponse({
+    ...response,
+    bodyBase64: Buffer.from(JSON.stringify({
+      data: { downloadAccountData: { status: true, activities: 'not base64!' } },
+    })).toString('base64'),
+  })).toThrow('invalid base64');
+});
+
+test('Wells Fargo accepts raw and JSON-embedded statement PDF bytes', () => {
+  const pdf = Buffer.from('%PDF-1.7\nsynthetic statement bytes'.padEnd(128, 'x'));
+  const response = {
+    status: 200,
+    url: 'https://connect.secure.wellsfargo.com/documents/synthetic',
+    headers: { 'content-type': 'application/pdf' },
+    bodyBase64: pdf.toString('base64'),
+    redirected: false,
+  };
+
+  expect(wellsFargoStatementBodyFromApiResponse(response)).toEqual(pdf);
+  expect(wellsFargoStatementBodyFromApiResponse({
+    ...response,
+    headers: { 'content-type': 'application/json' },
+    bodyBase64: Buffer.from(JSON.stringify({
+      data: { document: pdf.toString('base64') },
+    })).toString('base64'),
+  })).toEqual(pdf);
+  expect(wellsFargoStatementBodyFromApiResponse({
+    ...response,
+    headers: { 'content-type': 'application/json' },
+    bodyBase64: Buffer.from(JSON.stringify({
+      data: { document: `data:application/pdf;base64,${pdf.toString('base64')}` },
+    })).toString('base64'),
+  })).toEqual(pdf);
+  expect(() => wellsFargoStatementBodyFromApiResponse({
+    ...response,
+    bodyBase64: Buffer.from('{}').toString('base64'),
+  })).toThrow('did not contain one PDF');
+});
+
+test('Wells Fargo retains only validated same-origin statement response bytes', () => {
+  const pageUrl = 'https://connect.secure.wellsfargo.com/edocs/statements';
+  const pdf = Buffer.from('%PDF-1.7\nsynthetic statement bytes'.padEnd(128, 'x'));
+  const response = {
+    status: 200,
+    url: 'https://connect.secure.wellsfargo.com/edocs/documents/retrieve/synthetic',
+    headers: {
+      'Content-Type': 'application/pdf',
+      'Set-Cookie': 'must-not-be-forwarded',
+    },
+    redirected: false,
+  };
+
+  expect(wellsFargoCapturedStatementResponse(response, pdf, pageUrl)).toEqual({
+    status: 200,
+    url: response.url,
+    headers: { 'content-type': 'application/pdf' },
+    bodyBase64: pdf.toString('base64'),
+    redirected: false,
+  });
+  expect(wellsFargoCapturedStatementResponse(
+    { ...response, url: 'https://example.test/document.pdf' },
+    pdf,
+    pageUrl,
+  )).toBeNull();
+  expect(wellsFargoCapturedStatementResponse(
+    response,
+    Buffer.from('not a PDF'),
+    pageUrl,
+  )).toBeNull();
+  expect(wellsFargoCapturedStatementResponse(
+    { ...response, status: 400 },
+    pdf,
+    pageUrl,
+  )).toBeNull();
+});
+
+test('Wells Fargo reuses a captured statement response without replaying its one-time request', async () => {
+  const request = {
+    url: 'https://connect.secure.wellsfargo.com/web/oapi/graphql',
+    method: 'POST' as const,
+    body: '{"operationName":"SyntheticDocument"}',
+  };
+  const capturedResponse = {
+    status: 200,
+    url: request.url,
+    headers: { 'content-type': 'application/pdf' },
+    bodyBase64: Buffer.from('%PDF-1.7\nsynthetic').toString('base64'),
+    redirected: false,
+  };
+  expect(await wellsFargoArtifactResponse(
+    {} as never,
+    'statement',
+    request,
+    capturedResponse,
+  )).toBe(capturedResponse);
+  await expect(wellsFargoArtifactResponse(
+    {} as never,
+    'activity',
+    request,
+    capturedResponse,
+  )).rejects.toThrow('did not belong to a statement');
+  await expect(wellsFargoArtifactResponse(
+    {} as never,
+    'statement',
+    request,
+    { ...capturedResponse, url: 'https://example.test/document' },
+  )).rejects.toThrow('invalid API destination');
+});
+
 test('Wells Fargo updates controlled activity dates without Playwright fill', async () => {
   const values: string[] = [];
   const fields = {
@@ -410,19 +860,31 @@ test('Wells Fargo statement selection includes the latest opening anchor and eve
   const statements = selectWellsFargoStatements([
     {
       date: '2026-05-31',
-      destination: 'https://connect.secure.wellsfargo.com/edocs/documents/retrieve/opening',
+      request: {
+        url: 'https://connect.secure.wellsfargo.com/edocs/documents/retrieve/opening',
+        method: 'GET',
+      },
     },
     {
       date: '2026-06-30',
-      destination: 'https://connect.secure.wellsfargo.com/edocs/documents/retrieve/june',
+      request: {
+        url: 'https://connect.secure.wellsfargo.com/edocs/documents/retrieve/june',
+        method: 'GET',
+      },
     },
     {
       date: '2026-07-31',
-      destination: 'https://connect.secure.wellsfargo.com/edocs/documents/retrieve/july',
+      request: {
+        url: 'https://connect.secure.wellsfargo.com/edocs/documents/retrieve/july',
+        method: 'GET',
+      },
     },
     {
       date: '2026-08-31',
-      destination: 'https://connect.secure.wellsfargo.com/edocs/documents/retrieve/august',
+      request: {
+        url: 'https://connect.secure.wellsfargo.com/edocs/documents/retrieve/august',
+        method: 'GET',
+      },
     },
   ], '2026-06-15', '2026-08-01');
 
@@ -437,13 +899,41 @@ test('Wells Fargo statement selection rejects ambiguous same-date documents', ()
   expect(() => selectWellsFargoStatements([
     {
       date: '2026-07-31',
-      destination: 'https://connect.secure.wellsfargo.com/edocs/documents/retrieve/first',
+      request: {
+        url: 'https://connect.secure.wellsfargo.com/edocs/documents/retrieve/first',
+        method: 'GET',
+      },
     },
     {
       date: '2026-07-31',
-      destination: 'https://connect.secure.wellsfargo.com/edocs/documents/retrieve/second',
+      request: {
+        url: 'https://connect.secure.wellsfargo.com/edocs/documents/retrieve/second',
+        method: 'GET',
+      },
     },
   ], '2026-07-01', '2026-08-01')).toThrow('multiple statement documents');
+});
+
+test('Wells Fargo accepts a non-legacy request path only after observing a document response', () => {
+  const candidate = {
+    date: '2026-07-31',
+    request: {
+      url: 'https://connect.secure.wellsfargo.com/web/oapi/graphql',
+      method: 'POST' as const,
+      body: '{"operationName":"SyntheticDocument"}',
+    },
+  };
+  expect(() => selectWellsFargoStatements(
+    [candidate],
+    '2026-07-01',
+    '2026-08-01',
+  )).toThrow('did not expose the verified document API');
+
+  expect(selectWellsFargoStatements(
+    [{ ...candidate, verification: 'observed-document-response' }],
+    '2026-07-01',
+    '2026-08-01',
+  )).toEqual([{ ...candidate, verification: 'observed-document-response' }]);
 });
 
 test('Wells Fargo statement dates normalize observed numeric, named, and ISO forms', () => {
@@ -451,6 +941,19 @@ test('Wells Fargo statement dates normalize observed numeric, named, and ISO for
   expect(wellsFargoDateFromText('August 1, 2026 statement')).toBe('2026-08-01');
   expect(wellsFargoDateFromText('/retrieve/2026-08-01')).toBe('2026-08-01');
   expect(wellsFargoDateFromText('Statement available')).toBeNull();
+});
+
+test('Wells Fargo statement date variants survive client-side display-format changes', () => {
+  expect(wellsFargoStatementDateTextVariants('2026-08-05')).toEqual(expect.arrayContaining([
+    '2026-08-05',
+    '08/05/2026',
+    '8/5/2026',
+    'august 5, 2026',
+    'aug 5, 2026',
+  ]));
+  expect(() => wellsFargoStatementDateTextVariants('08/05/2026')).toThrow(
+    'must use YYYY-MM-DD',
+  );
 });
 
 test('Wells Fargo artifact filenames identify account kind, last four, and coverage', () => {
@@ -560,6 +1063,7 @@ test('Wells Fargo browser program uses dependency waits and direct request bindi
   expect(program).toContain('bindings.mapAccounts');
   expect(program).toContain('bindings.prepareActivityRequest');
   expect(program).toContain('bindings.downloadArtifact');
+  expect(program).toContain('statement.capturedResponse');
   expect(program).not.toContain('waitForTimeout');
   expect(program).not.toContain('setTimeout');
   expect(program).not.toContain("waitForEvent('download'");

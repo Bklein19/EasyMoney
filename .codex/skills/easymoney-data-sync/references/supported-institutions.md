@@ -80,6 +80,35 @@ Generic CSV recognition:
 Notes:
 - If the normalized filename is available, use it to improve account inference.
 - Activity exports should overlap safely.
+- The live connector is currently hybrid: account discovery, activity-form metadata,
+  and statement-list metadata still use the authenticated page; artifact bodies are
+  downloaded through the shared authenticated HTTP transport and parser-validated.
+- Account-summary cards can expose rewards SSO links whose accessible text also
+  contains an account ending. Those links are not account-detail destinations and
+  must be skipped during account discovery.
+- On 2026-09-11, a clean production-backed development run reused retained
+  authentication headlessly, discovered all three planned accounts, downloaded
+  three activity CSVs and eighteen statement PDFs, and parser-validated all
+  twenty-one artifacts (530 transactions and 18 balances) with no failed or
+  skipped event. This is live-harness evidence, not final app-button evidence.
+- The retained-auth probe copies the idle canonical Chrome profile into a private,
+  short-lived profile, excluding browser and EasyMoney lease markers, then overlays
+  the explicit cookie, local/IndexedDB, and session-storage snapshot. The copy is
+  removed after the run. The shared browser layer also checkpoints the query-free
+  authenticated Account Summary URL privately and accepts it only on the
+  institution start origin; expired authentication still falls back to the login
+  URL in a headed browser.
+- Wells activity download is a JavaScript-generated `downloadAccountData` XHR, not
+  the surrounding HTML form action. Capture that request in memory, abort the
+  duplicate browser download, replay it through the authenticated HTTP transport,
+  and strictly decode the returned JSON/base64 CSV before parser validation.
+- Wells statement links are one-time requests. Capture the exact intercepted
+  response body through the shared browser transport and consume it once; never
+  replay the statement URL after the original response succeeds.
+- Next HTTP-migration experiment: observe the account-summary and request-metadata
+  endpoints in the production-owned session, then replace the remaining recurring
+  account clicks, date control updates, and statement-link reads once equivalent
+  direct requests are proven.
 
 ## Vanguard
 

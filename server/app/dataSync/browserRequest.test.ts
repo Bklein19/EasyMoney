@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { chromium, type Page } from 'playwright';
+import { chromium, type Page, type Route } from 'playwright';
 
 import {
   browserNativeHttpOnlyCookieHeader,
   browserNativeResponseBody,
   runBrowserNativeRequest,
+  runBrowserNativeRouteRequest,
   safeBrowserRequestHeaders,
   type BrowserNativeRequest,
   type BrowserNativeResponse,
@@ -104,6 +105,80 @@ describe('browser-native authenticated requests', () => {
       institutionHostname: 'accounts.example.test',
     })).rejects.toThrow('does not approve this institution request');
     expect(evaluated).toBe(false);
+  });
+
+  test('captures an intercepted same-origin route through the shared transport', async () => {
+    const calls: Array<{ timeout?: number }> = [];
+    let disposed = false;
+    const page = {
+      url: () => 'https://application.fixture.test/statements',
+    } as unknown as Page;
+    const route = {
+      request: () => ({
+        url: () => 'https://application.fixture.test/documents/one',
+        method: () => 'GET',
+      }),
+      fetch: async (options: { timeout?: number }) => {
+        calls.push(options);
+        return {
+          status: () => 200,
+          url: () => 'https://application.fixture.test/documents/one',
+          headers: () => ({ 'Content-Type': 'application/pdf' }),
+          body: async () => Buffer.from('%PDF-synthetic'),
+          dispose: async () => { disposed = true; },
+        };
+      },
+    } as unknown as Route;
+
+    await expect(runBrowserNativeRouteRequest(page, route, 15_000)).resolves.toEqual({
+      status: 200,
+      url: 'https://application.fixture.test/documents/one',
+      headers: { 'content-type': 'application/pdf' },
+      bodyBase64: Buffer.from('%PDF-synthetic').toString('base64'),
+      redirected: false,
+    });
+    expect(calls).toEqual([{ timeout: 15_000 }]);
+    expect(disposed).toBe(true);
+  });
+
+  test('rejects invalid intercepted routes before replay and cross-origin responses after disposal', async () => {
+    let fetchCount = 0;
+    let disposed = false;
+    const page = {
+      url: () => 'https://application.fixture.test/statements',
+    } as unknown as Page;
+    const crossOriginRequest = {
+      request: () => ({
+        url: () => 'https://outside.fixture.test/document',
+        method: () => 'GET',
+      }),
+      fetch: async () => {
+        fetchCount += 1;
+        throw new Error('must not fetch');
+      },
+    } as unknown as Route;
+    await expect(runBrowserNativeRouteRequest(page, crossOriginRequest)).rejects.toThrow(
+      'must match the open application origin',
+    );
+    expect(fetchCount).toBe(0);
+
+    const crossOriginResponse = {
+      request: () => ({
+        url: () => 'https://application.fixture.test/document',
+        method: () => 'GET',
+      }),
+      fetch: async () => ({
+        status: () => 302,
+        url: () => 'https://outside.fixture.test/document',
+        headers: () => ({}),
+        body: async () => Buffer.alloc(0),
+        dispose: async () => { disposed = true; },
+      }),
+    } as unknown as Route;
+    await expect(runBrowserNativeRouteRequest(page, crossOriginResponse)).rejects.toThrow(
+      'route response changed origin',
+    );
+    expect(disposed).toBe(true);
   });
 
   test('rewrites only the marked request when another request has the same URL and method', async () => {

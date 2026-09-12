@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, open, readFile, readlink, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, mkdtemp, open, readFile, readdir, readlink, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, posix, resolve, win32 } from 'node:path';
 
@@ -101,13 +101,32 @@ export function playwrightAuthenticationResumeUrlPath(profilePath: string): stri
 
 export async function withTransientBrowserProfile<T>(
   operation: (profilePath: string) => Promise<T>,
-  options: { temporaryRoot?: string } = {},
+  options: { temporaryRoot?: string; seedProfilePath?: string } = {},
 ): Promise<T> {
   const temporaryRoot = resolve(options.temporaryRoot ?? tmpdir());
   await mkdir(temporaryRoot, { recursive: true });
   const profilePath = await mkdtemp(join(temporaryRoot, '.easymoney-headless-profile-'));
   if (process.platform !== 'win32') await chmod(profilePath, 0o700);
   try {
+    if (options.seedProfilePath) {
+      const excluded = new Set([
+        '.interactive-browser.lock',
+        'DevToolsActivePort',
+        'SingletonCookie',
+        'SingletonLock',
+        'SingletonSocket',
+        'lockfile',
+      ]);
+      const source = resolve(options.seedProfilePath);
+      if (source === profilePath) throw new Error('Transient browser profile seed must be a separate directory');
+      const entries = await readdir(source, { withFileTypes: true });
+      await Promise.all(entries
+        .filter(entry => !excluded.has(entry.name))
+        .map(entry => cp(join(source, entry.name), join(profilePath, entry.name), {
+          recursive: entry.isDirectory(),
+          force: true,
+        })));
+    }
     return await operation(profilePath);
   } finally {
     await rm(profilePath, { recursive: true, force: true });
@@ -1613,7 +1632,14 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
   }
 
   const initialResult = launchStrategy.allowHeadedAuthenticationFallback
-    ? await runWithTransientBrowserProfile(profilePath => runAttempt(true, false, profilePath))
+    ? await withInteractiveBrowserLease({
+        profilePath: canonicalProfilePath,
+        sessionName: session.name,
+        onWait: reportProgress,
+      }, () => runWithTransientBrowserProfile(
+        profilePath => runAttempt(true, false, profilePath),
+        { seedProfilePath: canonicalProfilePath },
+      ))
     : launchStrategy.initialHeadless
       ? await runAttempt(true, false)
       : await runAttempt(false, true);

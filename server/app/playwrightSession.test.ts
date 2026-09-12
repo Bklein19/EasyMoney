@@ -505,6 +505,7 @@ describe('Playwright session helper', () => {
     }> = [];
     let transientProfilePath = '';
     let transientProfileMode = 0;
+    let transientSeedProfilePath = '';
     const fakeWithPlaywrightPage: typeof withPlaywrightPage = async (sessionOptions, operation) => {
       const headless = sessionOptions.contextOptions?.headless ?? false;
       attempts.push({
@@ -524,12 +525,13 @@ describe('Playwright session helper', () => {
       Object.assign(context, { pages: () => [page] });
       return operation(page, context as unknown as BrowserContext);
     };
-    const fakeWithTransientBrowserProfile: typeof withTransientBrowserProfile = async operation =>
+    const fakeWithTransientBrowserProfile: typeof withTransientBrowserProfile = async (operation, options = {}) =>
       withTransientBrowserProfile(async profilePath => {
         transientProfilePath = profilePath;
         transientProfileMode = (await stat(profilePath)).mode & 0o777;
+        transientSeedProfilePath = options.seedProfilePath ?? '';
         return operation(profilePath);
-      }, { temporaryRoot: transientRoot });
+      }, { ...options, temporaryRoot: transientRoot });
 
     const result = await runInstitutionBrowserProgram(
       {
@@ -551,6 +553,7 @@ describe('Playwright session helper', () => {
     expect(result.status).toBe('complete');
     expect(transientProfilePath).not.toBe(canonicalProfilePath);
     expect(transientProfileMode).toBe(0o700);
+    expect(transientSeedProfilePath).toBe(canonicalProfilePath);
     expect(attempts).toEqual([
       {
         headless: true,
@@ -568,6 +571,55 @@ describe('Playwright session helper', () => {
       },
     ]);
     expect(await stat(transientProfilePath).then(() => true, () => false)).toBe(false);
+  });
+
+  test('seeds a private transient profile with browser-owned state and excludes live locks', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'easymoney-playwright-profile-seed-'));
+    temporaryDirectories.push(root);
+    const canonicalProfilePath = join(root, 'canonical');
+    const transientRoot = join(root, 'transient');
+    await mkdir(join(canonicalProfilePath, 'Default', 'Session Storage'), { recursive: true });
+    await writeFile(
+      join(canonicalProfilePath, 'Default', 'Session Storage', 'browser-owned-state'),
+      'private-test-state',
+    );
+    for (const lockName of [
+      '.interactive-browser.lock',
+      'DevToolsActivePort',
+      'SingletonCookie',
+      'SingletonLock',
+      'SingletonSocket',
+      'lockfile',
+    ]) {
+      await writeFile(join(canonicalProfilePath, lockName), 'stale-lock');
+    }
+
+    let transientProfilePath = '';
+    const copiedState = await withTransientBrowserProfile(async profilePath => {
+      transientProfilePath = profilePath;
+      expect((await stat(profilePath)).mode & 0o777).toBe(0o700);
+      for (const lockName of [
+        '.interactive-browser.lock',
+        'DevToolsActivePort',
+        'SingletonCookie',
+        'SingletonLock',
+        'SingletonSocket',
+        'lockfile',
+      ]) {
+        expect(await stat(join(profilePath, lockName)).then(() => true, () => false)).toBe(false);
+      }
+      return readFile(join(profilePath, 'Default', 'Session Storage', 'browser-owned-state'), 'utf8');
+    }, {
+      temporaryRoot: transientRoot,
+      seedProfilePath: canonicalProfilePath,
+    });
+
+    expect(copiedState).toBe('private-test-state');
+    expect(await stat(transientProfilePath).then(() => true, () => false)).toBe(false);
+    expect(await readFile(
+      join(canonicalProfilePath, 'Default', 'Session Storage', 'browser-owned-state'),
+      'utf8',
+    )).toBe('private-test-state');
   });
 
   test('continues in the authenticated headed attempt and saves a future headless probe', async () => {
