@@ -367,7 +367,10 @@ Beginning balance on December 1, 2023 $1,000.00
 
 Withdrawals and other subtractions
 12/29/23 Online Banking transfer to BRK 8092 Confirmation# 1111111111 -$500.00
+        Transfer reference ABC123
         continued on the next page
+        Take your security to the next level
+        Check your security meter
 Total withdrawals and other subtractions -$500.00
 
 Ending balance on December 31, 2023 $500.00
@@ -377,7 +380,7 @@ Ending balance on December 31, 2023 $500.00
   expect(result.transactions[0]).toMatchObject({
     date: '2023-12-29',
     amount_cents: -50000,
-    description: 'Online Banking transfer to BRK 8092 Confirmation# 1111111111',
+    description: 'Online Banking transfer to BRK 8092 Confirmation# 1111111111 Transfer reference ABC123',
     account: 'Adv Plus Banking - 1234',
     institution: 'Bank of America',
   });

@@ -124,7 +124,7 @@ function depositStatementTransactions(text: string, account: string): ParseResul
       section = trimmed;
       continue;
     }
-    if (/^Total (deposits|withdrawals|other subtractions|checks|service fees)/i.test(trimmed)) {
+    if (/^Total (deposits|withdrawals|other subtractions|checks|service fees)/i.test(trimmed) || isLayoutContinuationLine(trimmed)) {
       flush();
       continue;
     }

@@ -214,7 +214,12 @@ function parseDepositTransactions(
 
     const amount = cents(firstMoney[0]);
     const endingBalance = moneyMatches.length >= 2 ? cents(lastMoney[0]) : null;
-    const description = cleanDescription(rest.slice(0, firstMoney.index).trim());
+    // Amount columns may precede a wrapped description line in PDF reading order.
+    // Remove trailing numeric columns per line instead of truncating the logical
+    // row at its first amount, which silently dropped names and transfer details.
+    const description = cleanDescription(parts.map(part => part.replace(
+      /(?:^|\s+)\$?[\d,]+\.\d{2}(?:\s+\$?[\d,]+\.\d{2})*\s*$/, ""
+    )).join(" "));
     const transaction = {
       date: isoStatementMonthDate(dateMonth, dateDay, coveredTo),
       description,

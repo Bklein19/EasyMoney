@@ -55,7 +55,10 @@ export function parseVanguardAccountHolder(text: string): string | null {
 export default async function parse(filePath: string): Promise<ParseResult> {
   const pdf = await getDocumentProxy(new Uint8Array(await Bun.file(filePath).arrayBuffer()));
   const { text: pageTexts } = await extractText(pdf);
-  const allText = pageTexts.join("\n");
+  return parseVanguardStatementText(pageTexts.join("\n"));
+}
+
+export function parseVanguardStatementText(allText: string): ParseResult {
   const statementDate = parseStatementDate(allText);
   const year = Number(statementDate.slice(0, 4));
 
@@ -93,7 +96,7 @@ export default async function parse(filePath: string): Promise<ParseResult> {
 
   const transactions: ParseResult["transactions"] = [];
   const txSectionMatch = allText.match(
-    /Completed transactions([\s\S]*?)(?:If you had an adjustment|Electronic delivery and mail preferences|\f|$)/
+    /Completed transactions([\s\S]*?)(?:If you had an adjustment|Electronic delivery and mail preferences|$)/
   );
   if (txSectionMatch) {
     const lines = txSectionMatch[1]!.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -102,6 +105,9 @@ export default async function parse(filePath: string): Promise<ParseResult> {
       if (!/^\d{2}\/\d{2}\s+\d{2}\/\d{2}\s+/.test(line)) continue;
       let row = line;
       while (i + 1 < lines.length && !/^\d{2}\/\d{2}\s+\d{2}\/\d{2}\s+/.test(lines[i + 1]!)) {
+        // A page boundary ends description continuation, not transaction scanning.
+        // Preserve wrapped fund names and conversion details before that boundary.
+        if (/^(?:[A-Z][a-z]+ \d{1,2}, \d{4}, .*statement|Page \d+ of \d+|Vanguard Personal Investor|Account activity for Vanguard|Completed transactions|Settlement date\b|Individual brokerage account|Roth IRA brokerage account|Traditional IRA brokerage account)/.test(lines[i + 1]!)) break;
         i++;
         row += " " + lines[i];
       }
