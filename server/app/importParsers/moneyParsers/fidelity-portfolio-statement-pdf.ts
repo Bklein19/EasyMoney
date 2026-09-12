@@ -111,31 +111,36 @@ function parseDistributionRows(text: string, account: string, coveredFrom: strin
 }
 
 function parseSecuritiesTransferredOut(text: string, account: string, coveredFrom: string, coveredTo: string): ParseResult["transactions"] {
-  const summary = text.match(/Securities Transferred Out\s+(-|-?\$?[\d,]+\.\d{2})\s+(-|-?\$?[\d,]+\.\d{2})/i);
-  const amount = summary?.[1];
-  if (!amount || amount === "-") return [];
-
-  const amount_cents = -Math.abs(cents(amount));
-  if (amount_cents === 0) return [];
-
-  const activityDate = text.match(/Securities Transferred Out[\s\S]*?(\d{2})\/(\d{2})\s+[A-Z0-9]/i);
-  const mm = activityDate?.[1] ?? coveredTo.slice(5, 7);
-  const dd = activityDate?.[2] ?? coveredTo.slice(8, 10);
-  const date = `${dateYearFor(mm, coveredFrom, coveredTo)}-${mm}-${dd}`;
-
-  return [makeTx({
-    date,
-    amount_cents,
-    description: "Fidelity transfer out: securities transferred out",
-    account,
-    institution: "Fidelity",
-    raw: {
-      source: "fidelity-portfolio-statement",
-      type: "securities-transferred-out",
-      period: `${coveredFrom}/${coveredTo}`,
-      amount,
-    },
-  })];
+  // Only the dated detail table identifies individual transfers. The account
+  // summary's period/year-to-date totals cannot supply an event amount or date.
+  const section = text.match(/(?:^|\n)\s*Securities Transferred Out\s*\n([\s\S]*?)Total Securities Transferred Out\b/i)?.[1];
+  if (!section) return [];
+  const transactions: ParseResult["transactions"] = [];
+  const rows = section.matchAll(/(?:^|\n)\s*(\d{2})\/(\d{2})\s+([^\n]+)([\s\S]*?)(?=\n\s*\d{2}\/\d{2}\s|$)/g);
+  for (const row of rows) {
+    const detail = `${row[3]}${row[4]}`;
+    const value = detail.match(/VALUE OF TRANSACTION\s+\$?([\d,]+\.\d{2})/i)?.[1];
+    if (!value) continue;
+    const amount_cents = -Math.abs(cents(value));
+    if (!amount_cents) continue;
+    const date = `${dateYearFor(row[1]!, coveredFrom, coveredTo)}-${row[1]}-${row[2]}`;
+    const security = row[3]!.split(/\s+Transfer Of Assets\b/i)[0]!.trim();
+    transactions.push(makeTx({
+      date,
+      amount_cents,
+      description: `Fidelity transfer out: ${security}`,
+      account,
+      institution: "Fidelity",
+      raw: {
+        source: "fidelity-portfolio-statement",
+        type: "security-transfer-detail",
+        period: `${coveredFrom}/${coveredTo}`,
+        security,
+        value,
+      },
+    }));
+  }
+  return transactions;
 }
 
 export function parseFidelityPortfolioStatementText(text: string): ParseResult {

@@ -617,11 +617,11 @@ test('source rebuild reconciles statement posting-date drift without collapsing 
   const rent = ledger.transactions.filter(transaction => transaction.description.includes('RENTAPPLICATION'));
   const coffee = ledger.transactions.filter(transaction => transaction.description === 'EXAMPLE COFFEE');
 
-  expect(pact.map(transaction => transaction.date)).toEqual(['2026-06-04T00:00:00.000Z']);
+  expect(pact.map(transaction => transaction.date)).toEqual(['2026-06-04']);
   expect(rent).toHaveLength(2);
   expect(rent.map(transaction => transaction.occurrenceIndex).sort()).toEqual([0, 1]);
   expect(coffee.map(transaction => transaction.date).sort()).toEqual([
-    '2026-06-15T00:00:00.000Z',
+    '2026-06-15',
     '2026-06-19',
   ]);
 });
@@ -736,7 +736,7 @@ test('source rebuild keeps the larger multiplicity from uneven overlapping activ
   ]);
 });
 
-test('source rebuild applies priority dedup while keeping statement-only transfers', () => {
+test('source priority cannot suppress a different description; uncertain overlap is retained and reported', () => {
   const accountId = Number(insertRow('accounts', {
     name: 'Vanguard',
     institution: 'Vanguard',
@@ -792,11 +792,51 @@ test('source rebuild applies priority dedup while keeping statement-only transfe
   const ledger = buildLedgerFromSourceFacts(getDb());
   expect(ledger.transactions.map(transaction => transaction.description).sort()).toEqual([
     'Buy VTSAX',
+    'Buy VTSAX from statement',
     'In-kind transfer',
   ]);
+  expect(ledger.ambiguities).toHaveLength(2);
+  expect(ledger.ambiguities?.every(item => item.candidateSourceTransactionIds.length === 1)).toBe(true);
+  expect(ledger.provenance?.every(item => item.selected)).toBe(true);
 });
 
-test('source rebuild drops lower-priority statement summaries by activity bucket', () => {
+test('priority matching preserves excess statement occurrences and does not merge blank descriptions', () => {
+  const accountId = Number(insertRow('accounts', { name: 'Example', institution: 'Example', type: 'credit', currentBalance: 0 }));
+  const sources = ['activity-export', 'statement'].map((sourceType, index) => {
+    const file = insertCommittedSourceFile({ fileName: `occurrences-${index}`, parserName: 'example', sourceType, priority: index ? 1 : 100, institution: 'Example' });
+    return { ...file, sourceAccountId: insertSourceAccount(file.sourceFileId, accountId, `account-${index}`) };
+  });
+  for (const [index, source] of sources.entries()) {
+    for (let occurrence = 0; occurrence < index + 1; occurrence++) {
+      insertSourceTransaction({ ...source, stableSourceId: `${index}-${occurrence}`, date: '2026-05-01', amountCents: -500, description: 'COFFEE', priority: index ? 1 : 100 });
+    }
+    insertSourceTransaction({ ...source, stableSourceId: `${index}-blank`, date: '2026-05-01', amountCents: -700, description: '', priority: index ? 1 : 100 });
+  }
+  const ledger = buildLedgerFromSourceFacts(getDb());
+  expect(ledger.transactions.filter(row => row.amount === -5)).toHaveLength(2);
+  expect(ledger.transactions.filter(row => row.amount === -7)).toHaveLength(2);
+  expect(ledger.provenance).toHaveLength(5);
+  expect(ledger.provenance?.filter(row => !row.selected)).toHaveLength(1);
+  expect(ledger.ambiguities).toHaveLength(2);
+});
+
+test('equidistant posting dates are ambiguous instead of arbitrarily selected', () => {
+  const accountId = Number(insertRow('accounts', { name: 'Example', institution: 'Example', type: 'credit', currentBalance: 0 }));
+  for (const [index, sourceType] of ['activity-export', 'statement'].entries()) {
+    const source = insertCommittedSourceFile({ fileName: `drift-${index}`, parserName: 'example', sourceType, priority: 50, institution: 'Example' });
+    const sourceAccountId = insertSourceAccount(source.sourceFileId, accountId, `account-${index}`);
+    for (const date of index ? ['2026-05-02'] : ['2026-05-01', '2026-05-03']) {
+      insertSourceTransaction({ ...source, sourceAccountId, stableSourceId: `${index}-${date}`, date, amountCents: -500, description: 'COFFEE', priority: 50 });
+    }
+  }
+  const ledger = buildLedgerFromSourceFacts(getDb());
+  expect(ledger.transactions).toHaveLength(3);
+  expect(ledger.ambiguities).toHaveLength(3);
+  expect(ledger.provenance?.every(row => row.selected)).toBe(true);
+  expect(buildLedgerFromSourceFacts(getDb())).toEqual(ledger);
+});
+
+test('source rebuild excludes legacy statement summaries even without corresponding detail', () => {
   const accountId = Number(insertRow('accounts', {
     name: 'Merrill Lynch',
     institution: 'Merrill',
@@ -866,8 +906,74 @@ test('source rebuild drops lower-priority statement summaries by activity bucket
   const ledger = buildLedgerFromSourceFacts(getDb());
   expect(ledger.transactions.map(transaction => transaction.description).sort()).toEqual([
     'Funds transferred out',
-    'Statement dividends/interest income',
   ]);
+  expect(ledger.exclusions).toHaveLength(2);
+  expect(ledger.provenance).toHaveLength(1);
+});
+
+test('conflicting equal-rank same-date balances have no arbitrary winner and block materialization', () => {
+  const accountId = Number(insertRow('accounts', { name: 'Example', institution: 'Example', type: 'investment', currentBalance: 0 }));
+  for (const [index, balanceCents] of [10000, 11000].entries()) {
+    const source = insertCommittedSourceFile({ fileName: `balance-${index}`, parserName: 'example', sourceType: 'statement', priority: 50, institution: 'Example' });
+    const sourceAccountId = insertSourceAccount(source.sourceFileId, accountId, `account-${index}`);
+    insertSourceBalance({ ...source, sourceAccountId, date: index ? '2026-05-31T00:00:00.000Z' : '2026-05-31', balanceCents, priority: 50 });
+  }
+  const ledger = buildLedgerFromSourceFacts(getDb());
+  expect(ledger.balanceSnapshots).toHaveLength(0);
+  expect(ledger.balanceConflicts).toHaveLength(1);
+  expect(ledger.balanceConflicts?.[0]?.balanceCents).toEqual([10000, 11000]);
+  expect(() => materializeLedger(getDb(), ledger)).toThrow('conflicting same-date balances');
+  getDb().prepare('UPDATE sourceBalances SET balanceCents = 10000').run();
+  const reconciled = buildLedgerFromSourceFacts(getDb());
+  expect(reconciled.balanceConflicts).toHaveLength(0);
+  expect(reconciled.balanceSnapshots).toHaveLength(1);
+  expect(reconciled.balanceSnapshots[0]?.capturedAt).toBe('2026-05-31T00:00:00.000Z');
+});
+
+test('all legacy aggregate transaction shapes are excluded without deleting source facts', () => {
+  const accountId = Number(insertRow('accounts', { name: 'Example', institution: 'Example', type: 'investment', currentBalance: 0 }));
+  const source = insertCommittedSourceFile({ fileName: 'summary.pdf', parserName: 'example', sourceType: 'statement', priority: 50, institution: 'Example' });
+  const sourceAccountId = insertSourceAccount(source.sourceFileId, accountId, 'account');
+  const rawShapes = [
+    { source: 'tiaa-statement-summary' }, { source: '401k-statement-summary' },
+    { source: 'fidelity-netbenefits-statement-summary' },
+    { source: 'fidelity-portfolio-statement', type: 'securities-transferred-out' },
+  ];
+  rawShapes.forEach((raw, index) => insertSourceTransaction({ ...source, sourceAccountId, stableSourceId: `summary-${index}`, date: '2026-05-31', amountCents: 100, description: 'Aggregate', priority: 50, raw }));
+  const ledger = buildLedgerFromSourceFacts(getDb());
+  expect(ledger.transactions).toHaveLength(0);
+  expect(ledger.exclusions).toHaveLength(4);
+  expect((getDb().prepare('SELECT COUNT(*) AS count FROM sourceTransactions').get() as { count: number }).count).toBe(4);
+});
+
+test('overlapping statement documents keep maximum identical occurrence count, never the sum', () => {
+  const accountId = Number(insertRow('accounts', { name: 'Example', institution: 'Example', type: 'credit', currentBalance: 0 }));
+  for (const [index, count] of [2, 3].entries()) {
+    const source = insertCommittedSourceFile({ fileName: `statement-${index}`, parserName: 'example', sourceType: 'statement', priority: 50, institution: 'Example' });
+    const sourceAccountId = insertSourceAccount(source.sourceFileId, accountId, `account-${index}`);
+    for (let occurrence = 0; occurrence < count; occurrence++) {
+      insertSourceTransaction({ ...source, sourceAccountId, stableSourceId: `${index}-${occurrence}`, date: index ? '2026-05-01T00:00:00.000Z' : '2026-05-01', amountCents: -500, description: 'COFFEE', priority: 50 });
+    }
+  }
+  const ledger = buildLedgerFromSourceFacts(getDb());
+  expect(ledger.transactions).toHaveLength(3);
+  expect(ledger.transactions.every(row => row.date === '2026-05-01')).toBe(true);
+  expect(ledger.provenance).toHaveLength(5);
+});
+
+test('maximum multiplicity uses original document rows before shared parser identities and ignores priority', () => {
+  const accountId = Number(insertRow('accounts', { name: 'Example', institution: 'Example', type: 'credit', currentBalance: 0 }));
+  for (const [index, count] of [2, 5].entries()) {
+    const source = insertCommittedSourceFile({ fileName: `original-${index}`, parserName: 'example', sourceType: 'activity-export', priority: index ? 1 : 100, institution: 'Example' });
+    const sourceAccountId = insertSourceAccount(source.sourceFileId, accountId, `account-${index}`);
+    for (let occurrence = 0; occurrence < count; occurrence++) {
+      insertSourceTransaction({ ...source, sourceAccountId, stableSourceId: `${index}-${occurrence}`, date: '2026-05-01', amountCents: -500, description: 'COFFEE', priority: index ? 1 : 100, raw: { moneyId: `identity-${occurrence}` } });
+    }
+  }
+  const ledger = buildLedgerFromSourceFacts(getDb());
+  expect(ledger.transactions).toHaveLength(5);
+  expect(ledger.provenance).toHaveLength(7);
+  expect(ledger.provenance?.filter(row => !row.selected)).toHaveLength(2);
 });
 
 test('source rebuild de-duplicates parser-stable money ids across duplicate files', () => {

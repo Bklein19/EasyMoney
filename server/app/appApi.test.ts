@@ -28,6 +28,11 @@ const {
 } = await import('./aiCategorization.ts');
 const caller = appRouter.createCaller({});
 
+async function confirmReviewedSync(input: Omit<Parameters<typeof caller.dataSync.confirm>[0], 'outcomeRevision'>) {
+  const outcomes = await caller.dataSync.outcomes(input);
+  return caller.dataSync.confirm({ ...input, outcomeRevision: outcomes.revision });
+}
+
 // Legacy-shaped fixtures explicitly materialize during setup. Reads must never do this work.
 function insertLegacyFixture(table: string, row: Record<string, unknown>) {
   const id = insertRow(table, row);
@@ -3781,7 +3786,14 @@ test('institution catch-up stages reviewable claims before explicit confirmation
       status: 'awaiting-confirmation',
       review: { readyToImport: 1 },
     });
-    const confirmedJob = await caller.dataSync.confirm({ runId: review.runId });
+    const firstOutcomes = await caller.dataSync.outcomes({ runId: review.runId });
+    expect(firstOutcomes.canConfirm).toBe(true);
+    getDb().prepare('UPDATE accounts SET name = ? WHERE id = ?').run('Renamed checking', accountId);
+    await expect(caller.dataSync.confirm({ runId: review.runId, outcomeRevision: firstOutcomes.revision })).rejects.toThrow('stale');
+    expect((await caller.dataSync.status({ runId: review.runId }))?.status).toBe('awaiting-confirmation');
+    expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(artifact.importFileId)).toEqual({ status: 'previewed' });
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
+    const confirmedJob = await confirmReviewedSync({ runId: review.runId });
     expect(confirmedJob).toMatchObject({
       status: 'complete',
       result: {
@@ -3910,11 +3922,11 @@ test('independent sync previews arbitrate identical content once at confirmation
     await saveAwaitingSyncReview(first.review);
     await saveAwaitingSyncReview(second.review);
 
-    expect(await caller.dataSync.confirm({ runId: first.review.runId })).toMatchObject({
+    expect(await confirmReviewedSync({ runId: first.review.runId })).toMatchObject({
       status: 'complete',
       result: { recordedTransactionFacts: 1, skippedArtifacts: 0 },
     });
-    expect(await caller.dataSync.confirm({ runId: second.review.runId })).toMatchObject({
+    expect(await confirmReviewedSync({ runId: second.review.runId })).toMatchObject({
       status: 'complete',
       result: { recordedTransactionFacts: 0, skippedArtifacts: 1 },
     });
@@ -4108,7 +4120,7 @@ test('sync review recognizes byte-distinct repeated balance facts before confirm
       artifacts: [first],
     };
     await saveAwaitingSyncReview(review);
-    await caller.dataSync.confirm({ runId: review.runId });
+    await confirmReviewedSync({ runId: review.runId });
 
     const repeated = await stageSyncArtifact({
       path: path.join(directory, repeatedName),
@@ -4171,11 +4183,11 @@ test('independent byte-distinct semantic previews arbitrate once at confirmation
     await saveAwaitingSyncReview(first.review);
     await saveAwaitingSyncReview(second.review);
 
-    expect(await caller.dataSync.confirm({ runId: first.review.runId })).toMatchObject({
+    expect(await confirmReviewedSync({ runId: first.review.runId })).toMatchObject({
       status: 'complete',
       result: { recordedBalanceFacts: 1, skippedArtifacts: 0 },
     });
-    expect(await caller.dataSync.confirm({ runId: second.review.runId })).toMatchObject({
+    expect(await confirmReviewedSync({ runId: second.review.runId })).toMatchObject({
       status: 'complete',
       result: { recordedBalanceFacts: 0, skippedArtifacts: 1 },
     });
@@ -4264,7 +4276,7 @@ test('TIAA worker staging keeps six repeated activity identities and one stateme
       artifacts,
     };
     await saveAwaitingSyncReview(review);
-    const confirmed = await caller.dataSync.confirm({
+    const confirmed = await confirmReviewedSync({
       runId: review.runId,
       accountMappings: [...claimsByRemoteId.values()].map(claim => ({
         sourceAccountId: claim.sourceAccountId,
@@ -4507,7 +4519,7 @@ test('catch-up commits two consolidated source-account claims to independent loc
     artifacts: [artifact],
   };
   await saveAwaitingSyncReview(review);
-  const confirmed = await caller.dataSync.confirm({
+  const confirmed = await confirmReviewedSync({
     runId: review.runId,
     accountMappings: artifact.accountClaims.map(claim => ({
       sourceAccountId: claim.sourceAccountId,
@@ -4596,11 +4608,11 @@ test('catch-up requires explicit choices for partial and destinationless connect
     artifacts: [artifact],
   };
   await saveAwaitingSyncReview(review);
-  await expect(caller.dataSync.confirm({ runId: review.runId })).rejects.toThrow(
+  await expect(confirmReviewedSync({ runId: review.runId })).rejects.toThrow(
     'Resolve every source account before confirming the catch-up.',
   );
 
-  const confirmed = await caller.dataSync.confirm({
+  const confirmed = await confirmReviewedSync({
     runId: review.runId,
     accountMappings: [
       { sourceAccountId: staged.sourceAccountIds[0]!, mode: 'auto' },
@@ -4636,7 +4648,7 @@ test('catch-up confirmation rejects unvalidated mapping decision variants at the
   };
   await saveAwaitingSyncReview(review);
 
-  await expect(caller.dataSync.confirm({
+  await expect(confirmReviewedSync({
     runId: review.runId,
     accountMappings: [{
       sourceAccountId: staged.sourceAccountIds[0]!,
@@ -4737,7 +4749,7 @@ test('catch-up enriches legacy review claims with current staged last-four evide
     latestBalanceCents: 50_000,
   }));
 
-  const confirmed = await caller.dataSync.confirm({
+  const confirmed = await confirmReviewedSync({
     runId: review.runId,
     accountMappings: [{
       sourceAccountId: staged.sourceAccountIds[0]!,
@@ -4784,7 +4796,7 @@ test('catch-up rejects conflicting last-four evidence for one remote identity', 
   };
   await saveAwaitingSyncReview(review);
 
-  await expect(caller.dataSync.confirm({
+  await expect(confirmReviewedSync({
     runId: review.runId,
     accountMappings: [{
       sourceAccountId: first.sourceAccountIds[0]!,
@@ -4825,7 +4837,7 @@ test('catch-up rejects a submitted last four that conflicts with downloaded evid
   };
   await saveAwaitingSyncReview(review);
 
-  await expect(caller.dataSync.confirm({
+  await expect(confirmReviewedSync({
     runId: review.runId,
     accountMappings: [{
       sourceAccountId: staged.sourceAccountIds[0]!,
@@ -4872,7 +4884,7 @@ test('catch-up creates one local account for the same remote identity across act
   };
   await saveAwaitingSyncReview(review);
 
-  const confirmed = await caller.dataSync.confirm({
+  const confirmed = await confirmReviewedSync({
     runId: review.runId,
     accountMappings: [{
       sourceAccountId: activity.sourceAccountIds[0]!,
@@ -4948,7 +4960,7 @@ test('catch-up rejects conflicting destinations for repeated remote identities',
   };
   await saveAwaitingSyncReview(review);
 
-  await expect(caller.dataSync.confirm({
+  await expect(confirmReviewedSync({
     runId: review.runId,
     accountMappings: [
       { sourceAccountId: first.sourceAccountIds[0]!, mode: 'existing', accountId: firstAccountId },
@@ -5008,7 +5020,7 @@ test('catch-up rejects one auto decision when repeated remote claims resolve to 
   };
   await saveAwaitingSyncReview(review);
 
-  await expect(caller.dataSync.confirm({
+  await expect(confirmReviewedSync({
     runId: review.runId,
     accountMappings: [{
       sourceAccountId: first.sourceAccountIds[0]!,
@@ -5059,7 +5071,7 @@ test('failed catch-up confirmation rolls back earlier account creation, links, a
   };
   await saveAwaitingSyncReview(review);
 
-  await expect(caller.dataSync.confirm({
+  await expect(confirmReviewedSync({
     runId: review.runId,
     accountMappings: [
       {
@@ -5116,13 +5128,13 @@ test('catch-up retains a newly discovered remote account until an explicit creat
     artifacts: [artifact],
   };
   await saveAwaitingSyncReview(review);
-  await expect(caller.dataSync.confirm({ runId: review.runId })).rejects.toThrow(
+  await expect(confirmReviewedSync({ runId: review.runId })).rejects.toThrow(
     'Resolve every source account before confirming the catch-up.',
   );
   expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(staged.importFileId))
     .toEqual({ status: 'previewed' });
 
-  const confirmed = await caller.dataSync.confirm({
+  const confirmed = await confirmReviewedSync({
     runId: review.runId,
     accountMappings: [{
       sourceAccountId: staged.sourceAccountIds[0]!,
@@ -5190,7 +5202,7 @@ test('catch-up rejects ambiguous parser and local account identities', async () 
     artifacts: [artifact],
   };
   await saveAwaitingSyncReview(review);
-  await expect(caller.dataSync.confirm({ runId: review.runId })).rejects.toThrow(
+  await expect(confirmReviewedSync({ runId: review.runId })).rejects.toThrow(
     'Resolve every source account before confirming the catch-up.',
   );
   expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(ambiguousLocal.importFileId))

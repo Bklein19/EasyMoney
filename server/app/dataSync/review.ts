@@ -12,6 +12,7 @@ import {
   rebuildLedgerReadModel,
 } from '../imports.ts';
 import { importParserDisplayName } from '../importParsers/index.ts';
+import { assertSyncReviewConfirmation, previewSyncReviewOutcomes } from './reviewOutcomes.ts';
 import {
   commonSafeSyncAccountDestination,
   syncAccountMappingWarning,
@@ -561,7 +562,7 @@ function commonMappingLast4(
   return known.values().next().value ?? null;
 }
 
-function validatedSyncAccountMappings(
+export function validatedSyncAccountMappings(
   review: SyncRunReview,
   requested?: SyncAccountMappingDecision[] | null,
 ): Map<number, PlannedSyncAccountMapping[]> {
@@ -727,9 +728,12 @@ export async function commitSyncReview(
   review: SyncRunReview,
   report: SyncReporter,
   accountMappings?: SyncAccountMappingDecision[] | null,
+  outcomeRevision?: string,
 ): Promise<SyncRunResult> {
   const pendingReports: Array<Parameters<SyncReporter>[0]> = [];
   const imported = getDb().transaction(() => {
+    if (!outcomeRevision) throw new Error('Calculate and review ledger changes before confirming the import.');
+    assertSyncReviewConfirmation(previewSyncReviewOutcomes(review, accountMappings), outcomeRevision);
     const mappingsByImportFile = validatedSyncAccountMappings(review, accountMappings);
     const accountIdByRemoteId = new Map<string, number>();
     let recordedTransactionFacts = 0;

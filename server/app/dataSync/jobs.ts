@@ -361,6 +361,7 @@ export async function cancelSyncJob(runId: string): Promise<SyncJob> {
 export async function confirmSyncJob(
   runId: string,
   accountMappings?: SyncAccountMappingDecision[] | null,
+  outcomeRevision?: string,
 ): Promise<SyncJob> {
   const job = await managedJob(runId);
   if (!job) throw new Error('Sync job not found');
@@ -378,7 +379,7 @@ export async function confirmSyncJob(
   try {
     await persistJob(job);
     const result = await runSerializedSyncDatabaseWork(() =>
-      commitSyncReview(job.review!, report, accountMappings)
+      commitSyncReview(job.review!, report, accountMappings, outcomeRevision)
     );
     job.reviewAction = null;
     appendEvent(job, {

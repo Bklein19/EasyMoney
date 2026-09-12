@@ -13,6 +13,8 @@ import { parseWellsFargoStatementText } from './moneyParsers/wells-fargo-stateme
 import { parseMerrillCmaStatementText } from './moneyParsers/merrill-cma-statement-pdf.ts';
 import { parseBofaDepositStatementText } from './moneyParsers/bofa-statement-pdf.ts';
 import { parseVanguardAccountHolder } from './moneyParsers/vanguard-statement-pdf.ts';
+import { parseTiaaStatementText } from './moneyParsers/tiaa-statement-pdf.ts';
+import { parseFidelity401kHtml } from './moneyParsers/fidelity-401k-html.ts';
 
 test('Vanguard statement parser extracts the holder immediately before the account heading', () => {
   expect(parseVanguardAccountHolder([
@@ -856,7 +858,7 @@ test('Robinhood statement parser normalizes personal account holder headings to 
   expect(result.transactions[0]?.account_holder).toBe('Alex Example');
 });
 
-test('Fidelity NetBenefits statement parser extracts contributions and balance', () => {
+test('Fidelity NetBenefits statement retains balance without fabricating contribution transactions', () => {
   const result = parseNetBenefitsStatementText([
     'Statement Details',
     'ExampleCo 401(k) Plan Retirement Savings Statement',
@@ -877,31 +879,40 @@ test('Fidelity NetBenefits statement parser extracts contributions and balance',
     institution: 'Fidelity',
     balance_cents: 118040,
   }]);
-  expect(result.transactions.map(transaction => ({
-    date: transaction.date,
-    amountCents: transaction.amount_cents,
-    description: transaction.description,
-    account: transaction.account,
-    institution: transaction.institution,
-    rawType: transaction.raw.type,
-  }))).toEqual([
-    {
-      date: '2024-04-30',
-      amountCents: 98335,
-      description: '401(k) contributions (employee)',
-      account: 'ExampleCo 401(k)',
-      institution: 'Fidelity',
-      rawType: 'employee-contributions',
-    },
-    {
-      date: '2024-04-30',
-      amountCents: 19667,
-      description: '401(k) contributions (employer)',
-      account: 'ExampleCo 401(k)',
-      institution: 'Fidelity',
-      rawType: 'employer-contributions',
-    },
-  ]);
+  expect(result.transactions).toEqual([]);
+});
+
+test('Fidelity 401(k) HTML keeps balances and ignores employee/employer period totals', () => {
+  const result = parseFidelity401kHtml(`<html><body>
+    <p>Statement Period: 04/01/2026 to 04/30/2026</p>
+    <p>Your Contributions $1,200.00</p><p>Employer Contributions $300.00</p>
+    <p>Ending Balance $12,500.00</p>
+  </body></html>`);
+  expect(result.transactions).toEqual([]);
+  expect(result.balances).toEqual([{
+    date: '2026-04-30', account: 'Fidelity 401(k)', institution: 'Fidelity', balance_cents: 1250000,
+  }]);
+  expect(result.covered_from).toBe('2026-04-01');
+  expect(result.covered_to).toBe('2026-04-30');
+});
+
+test('TIAA quarterly statement keeps balances and ignores aggregate and per-fund contribution totals', () => {
+  for (const dollar of ['', '$']) {
+    const result = parseTiaaStatementText([
+      'Quarterly retirement savings portfolio statement',
+      'For April 1, 2026 to June 30, 2026',
+      'Your balance on June 30, 2026: $12,345.67',
+      `Your contributions ${dollar}2,000.00`,
+      `Employer contributions ${dollar}1,000.00`,
+      `Your contributions ${dollar}500.00`,
+    ].join('\n'));
+    expect(result.transactions).toEqual([]);
+    expect(result.balances).toEqual([{
+      date: '2026-06-30', account: 'Retirement Annuity', institution: 'TIAA', balance_cents: 1234567,
+    }]);
+    expect(result.covered_from).toBe('2026-04-01');
+    expect(result.covered_to).toBe('2026-06-30');
+  }
 });
 
 test('Fidelity portfolio statement parser extracts account contributions and balance', () => {
@@ -957,7 +968,7 @@ test('Fidelity portfolio statement parser extracts account contributions and bal
   ]);
 });
 
-test('Fidelity portfolio statement parser extracts transfer-out flows', () => {
+test('Fidelity portfolio statement uses individual transfer values rather than the period total', () => {
   const result = parseFidelityPortfolioStatementText([
     'INVESTMENT REPORT',
     'April 1, 2024 - April 30, 2024',
@@ -1004,11 +1015,43 @@ test('Fidelity portfolio statement parser extracts transfer-out flows', () => {
     rawType: 'distribution',
   }, {
     date: '2024-04-22',
-    amountCents: -3624563,
-    description: 'Fidelity transfer out: securities transferred out',
+    amountCents: -500096,
+    description: 'Fidelity transfer out: ALPHABET INC CAP STK CL A',
     account: 'Roth Ira 444555666',
-    rawType: 'securities-transferred-out',
+    rawType: 'security-transfer-detail',
   }]);
+});
+
+test('Fidelity security-transfer period totals never supply missing dates or individual values', () => {
+  const header = [
+    'INVESTMENT REPORT',
+    'April 1, 2024 - April 30, 2024',
+    'Account Number: 444-555666',
+    'Your Account Value: $500.00',
+    'Securities Transferred Out -9,999.00 -9,999.00',
+  ];
+  for (const detail of [
+    [],
+    ['Securities Transferred Out', '04/22 EXAMPLE FUND Transfer Of Assets -2.00 -', 'Total Securities Transferred Out -'],
+    ['Securities Transferred Out', 'EXAMPLE FUND Transfer Of Assets', 'VALUE OF TRANSACTION $100.00', 'Total Securities Transferred Out -'],
+  ]) {
+    const result = parseFidelityPortfolioStatementText([...header, ...detail].join('\n'));
+    expect(result.transactions).toEqual([]);
+    expect(result.balances[0]?.balance_cents).toBe(50000);
+  }
+  const actualDetails = parseFidelityPortfolioStatementText([
+    ...header,
+    'Securities Transferred Out',
+    '04/21 EXAMPLE FUND A Transfer Of Assets -2.00 -',
+    'ACAT DELIVER VALUE OF TRANSACTION $100.00',
+    '04/22 EXAMPLE FUND B Transfer Of Assets -3.00 -',
+    'ACAT DELIVER VALUE OF TRANSACTION $200.00',
+    'Total Securities Transferred Out -',
+  ].join('\n'));
+  expect(actualDetails.transactions.map(row => ({ date: row.date, amount: row.amount_cents, rawType: row.raw.type }))).toEqual([
+    { date: '2024-04-21', amount: -10000, rawType: 'security-transfer-detail' },
+    { date: '2024-04-22', amount: -20000, rawType: 'security-transfer-detail' },
+  ]);
 });
 
 test('import parser registry resolves Robinhood statement first-page samples', () => {
@@ -1399,7 +1442,7 @@ test('Merrill activity adapter parses investment CSV rows', async () => {
   }
 });
 
-test('Merrill statement parser emits net cash flow as a statement summary transaction', () => {
+test('Merrill statement keeps balance but emits neither cash-flow nor income period totals as transactions', () => {
   const result = parseMerrillCmaStatementText(`
     CMA® ACCOUNT
     Account Number: 11W-22222
@@ -1416,30 +1459,7 @@ test('Merrill statement parser emits net cash flow as a statement summary transa
       balance_cents: 12345678,
     },
   ]);
-  expect(result.transactions).toHaveLength(2);
-  expect(result.transactions[0]).toMatchObject({
-    date: '2024-06-28',
-    amount_cents: 500000,
-    account: 'CMA-Edge - 11W-22222',
-    institution: 'Merrill',
-    description: 'Statement net cash flow',
-    category: 'statement-summary',
-    raw: {
-      type: 'statement-cash-flow-summary',
-      metric: 'netCashFlow',
-    },
-  });
-  expect(result.transactions[1]).toMatchObject({
-    date: '2024-06-28',
-    amount_cents: 1234,
-    account: 'CMA-Edge - 11W-22222',
-    institution: 'Merrill',
-    description: 'Statement dividends/interest income',
-    raw: {
-      type: 'statement-cash-flow-summary',
-      metric: 'dividendsInterestIncome',
-    },
-  });
+  expect(result.transactions).toEqual([]);
 });
 
 test('TIAA activity adapter parses retirement CSV rows', async () => {

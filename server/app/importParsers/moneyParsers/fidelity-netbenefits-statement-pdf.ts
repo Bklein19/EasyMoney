@@ -1,6 +1,6 @@
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { getDocumentProxy, extractText } from "unpdf";
-import { cents, makeTx } from "./_helpers";
+import { cents } from "./_helpers";
 
 export const meta: ParserMeta = {
   id: "fidelity-netbenefits-statement-pdf",
@@ -45,40 +45,8 @@ export function parseNetBenefitsStatementText(text: string): ParseResult {
     balance_cents: cents(endingBalance[1]!),
   }];
 
-  const transactions: ParseResult["transactions"] = [];
-  const contributionRows = [
-    {
-      label: "401(k) contributions (employee)",
-      match: normalized.match(/Your Contributions\s+\$?([\d,]+\.\d{2})/i),
-      rawType: "employee-contributions",
-    },
-    {
-      label: "401(k) contributions (employer)",
-      match: normalized.match(/Employer Contributions\s+\$?([\d,]+\.\d{2})/i),
-      rawType: "employer-contributions",
-    },
-  ];
-
-  for (const row of contributionRows) {
-    if (!row.match) continue;
-    const amount_cents = cents(row.match[1]!);
-    if (amount_cents === 0) continue;
-    transactions.push(makeTx({
-      date: covered_to,
-      amount_cents,
-      description: row.label,
-      account,
-      institution: "Fidelity",
-      raw: {
-        source: "fidelity-netbenefits-statement-summary",
-        type: row.rawType,
-        period: `${covered_from}/${covered_to}`,
-        amount: row.match[1],
-      },
-    }));
-  }
-
-  return { transactions, balances, covered_from, covered_to };
+  // Contribution totals have no individual event dates. Activity exports supply events.
+  return { transactions: [], balances, covered_from, covered_to };
 }
 
 export default async function parse(filePath: string): Promise<ParseResult> {

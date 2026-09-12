@@ -1,5 +1,4 @@
 import type { ParseResult, ParserMeta } from "./types.ts";
-import { makeTx } from "./_helpers";
 
 export const meta: ParserMeta = {
   id: "fidelity-401k-html",
@@ -30,8 +29,8 @@ function cents(s: string): number {
   return (neg ? -1 : 1) * Math.round(parseFloat(s.replace(/[^0-9.]/g, "")) * 100);
 }
 
-export default async function parse(filePath: string): Promise<ParseResult> {
-  const text = stripHtml(await Bun.file(filePath).text());
+export function parseFidelity401kHtml(html: string): ParseResult {
+  const text = stripHtml(html);
 
   // Statement Period: 06/01/2023 to 06/30/2023
   const pm = text.match(/Statement Period:\s*(\d{2}\/\d{2}\/\d{4})\s+to\s+(\d{2}\/\d{2}\/\d{4})/);
@@ -44,24 +43,10 @@ export default async function parse(filePath: string): Promise<ParseResult> {
     ? [{ date: covered_to, account: ACCOUNT, institution: "Fidelity", balance_cents: cents(bm[1]!) }]
     : [];
 
-  // "Your Contributions $1,345.84" — period contributions (employee + employer)
-  const transactions: ParseResult["transactions"] = [];
-  const cm = text.match(/Your Contributions\s+\$([\d,]+\.\d{2})/);
-  if (cm && covered_to) {
-    const amount_cents = cents(cm[1]!);
-    if (amount_cents !== 0) {
-      transactions.push(
-        makeTx({
-          date: covered_to,
-          amount_cents,
-          description: "401(k) contributions (employee + employer)",
-          account: ACCOUNT,
-          institution: "Fidelity",
-          raw: { source: "401k-statement-summary", period: `${covered_from}/${covered_to}`, your_contributions: cm[1] },
-        })
-      );
-    }
-  }
+  // Period contribution totals must not become fabricated month-end transactions.
+  return { transactions: [], balances, covered_from, covered_to };
+}
 
-  return { transactions, balances, covered_from, covered_to };
+export default async function parse(filePath: string): Promise<ParseResult> {
+  return parseFidelity401kHtml(await Bun.file(filePath).text());
 }

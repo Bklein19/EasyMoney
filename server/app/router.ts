@@ -28,6 +28,7 @@ import { createCategory, deleteCategory, listCategories, updateCategory } from '
 import { getDataFreshnessReport } from './dataFreshness.ts';
 import { getDataCompleteness } from './dataCompleteness.ts';
 import { cancelSyncJob, confirmSyncJob, discardSyncJob, getSyncJob, startSyncJob } from './dataSync/jobs.ts';
+import { previewSyncReviewOutcomes } from './dataSync/reviewOutcomes.ts';
 import { isSyncInstitutionId } from './dataSync/registry.ts';
 import { listSyncTargets } from './dataSync/executionPlan.ts';
 import type { SyncInstitutionId } from './dataSync/types.ts';
@@ -345,8 +346,17 @@ export const appRouter = t.router({
       .input(z.object({
         runId: z.string().min(1),
         accountMappings: z.array(accountMappingDecisionSchema).nullish(),
+        outcomeRevision: z.string().min(1),
       }))
-      .mutation(({ input }) => confirmSyncJob(input.runId, input.accountMappings)),
+      .mutation(({ input }) => confirmSyncJob(input.runId, input.accountMappings, input.outcomeRevision)),
+
+    outcomes: t.procedure
+      .input(z.object({ runId: z.string().min(1), accountMappings: z.array(accountMappingDecisionSchema).nullish() }))
+      .query(async ({ input }) => {
+        const job = await getSyncJob(input.runId);
+        if (job?.status !== 'awaiting-confirmation' || !job.review) throw new Error('No pending import review.');
+        return previewSyncReviewOutcomes(job.review, input.accountMappings);
+      }),
 
     discard: t.procedure
       .input(z.object({ runId: z.string().min(1) }))

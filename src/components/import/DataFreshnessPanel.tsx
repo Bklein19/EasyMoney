@@ -491,7 +491,7 @@ function SyncReviewPanel({
   review: SyncRunReview;
   isWorking: boolean;
   error: string;
-  onConfirm: (accountMappings: SyncAccountMappingDecision[]) => void;
+  onConfirm: (accountMappings: SyncAccountMappingDecision[], outcomeRevision: string) => void;
   onDiscard: () => void;
 }) {
   const { accounts } = useAccounts({ includeArchived: true });
@@ -553,10 +553,18 @@ function SyncReviewPanel({
     };
   });
   const readyArtifacts = review.artifacts.filter(artifact => artifact.status === 'ready');
+  const outcomeMappings = mappingsComplete ? buildAccountMappings() : null;
+  const outcomeQuery = useQuery({
+    queryKey: ['sync-review-outcomes', review.runId, outcomeMappings],
+    queryFn: () => trpcClient.dataSync.outcomes.query({ runId: review.runId, accountMappings: outcomeMappings }),
+    enabled: mappingsComplete,
+    staleTime: 0,
+  });
+  const outcomes = mappingsComplete ? outcomeQuery.data : undefined;
   const allAlreadyImported = review.artifacts.length > 0
-    && review.artifacts.every(artifact => artifact.status === 'already-imported');
-  const transactionCount = readyArtifacts.reduce((sum, artifact) => sum + artifact.transactionCount, 0);
-  const balanceCount = readyArtifacts.reduce((sum, artifact) => sum + artifact.balanceCount, 0);
+    && outcomes?.nothingNew === true;
+  const transactionCount = review.artifacts.reduce((sum, artifact) => sum + artifact.transactionCount, 0);
+  const balanceCount = review.artifacts.reduce((sum, artifact) => sum + artifact.balanceCount, 0);
   const aggregateSummary = syncAccountAggregateSummary(readyClaims);
   const aggregateClaim = aggregateSummary ? {
     ...syncAccountGroupClaim(readyClaims),
@@ -574,26 +582,44 @@ function SyncReviewPanel({
           <span className="sync-review__state">{allAlreadyImported ? 'Already imported' : 'Review required'}</span>
           <h3 id="sync-review-title">{allAlreadyImported ? 'Nothing new to import' : 'Review downloaded data'}</h3>
           <p>{allAlreadyImported
-            ? 'These transactions and balances are already in your ledger. Finishing will close this review without importing them again.'
+            ? 'No new ledger transactions or balance changes. Confirmation may record supporting source files and account mappings.'
             : 'Nothing changes in your ledger until you confirm.'}</p>
         </div>
         <div className="sync-review__totals">
-          <span><strong>{readyArtifacts.length}</strong> new file{readyArtifacts.length === 1 ? '' : 's'}</span>
-          <span><strong>{transactionCount}</strong> new transaction{transactionCount === 1 ? '' : 's'}</span>
-          <span><strong>{balanceCount}</strong> new balance{balanceCount === 1 ? '' : 's'}</span>
+          <span><strong>{readyArtifacts.length}</strong> staged file{readyArtifacts.length === 1 ? '' : 's'}</span>
+          <span><strong>{transactionCount}</strong> parsed transaction{transactionCount === 1 ? '' : 's'}</span>
+          <span><strong>{balanceCount}</strong> parsed balance{balanceCount === 1 ? '' : 's'}</span>
         </div>
         <div className="sync-review__actions">
           <button className="btn btn--secondary btn--sm" type="button" disabled={isWorking} onClick={onDiscard}>Discard</button>
           <button
             className="btn btn--primary btn--sm"
             type="button"
-            disabled={isWorking || !mappingsComplete}
-            onClick={() => onConfirm(buildAccountMappings())}
+            disabled={isWorking || !mappingsComplete || !outcomes?.canConfirm || outcomeQuery.isFetching || outcomeQuery.isError}
+            onClick={() => outcomes && onConfirm(buildAccountMappings(), outcomes.revision)}
           >
             {isWorking && <LoaderCircle className="spin" size={14} />}
             {review.readyToImport > 0 ? 'Confirm import' : 'Finish'}
           </button>
         </div>
+      </div>
+      <div className="sync-review__note" aria-live="polite">
+        {!mappingsComplete ? 'Choose account mappings to calculate ledger changes.' : outcomeQuery.isError
+          ? <>Ledger changes could not be calculated. Confirmation is paused. <button type="button" className="btn btn--secondary btn--sm" onClick={() => void outcomeQuery.refetch()}>Retry calculation</button></>
+          : !outcomes || outcomeQuery.isFetching ? 'Calculating ledger changes…'
+          : <>
+            <p>Incoming transactions: <strong>{outcomes.transactions.new} new</strong> · {outcomes.transactions.represented} already represented · <strong>{outcomes.transactions.ambiguous} ambiguous</strong> · {outcomes.transactions.excludedSummaries} summary rows excluded (not individual transactions).</p>
+            <p>Monthly balances: {outcomes.balances.new} new · {outcomes.balances.updated} updated · {outcomes.balances.unchanged} parsed claims make no change · {outcomes.balances.conflicting} conflicting claims.</p>
+            {outcomes.transactions.ambiguous > 0 && <p role="alert">Import paused: these overlaps are not proven duplicates. Compare the activity and statement source files and resolve their identities before importing. They will not be silently removed.</p>}
+            {outcomes.balances.conflicting > 0 && <p role="alert">Import paused: equally authoritative balance claims disagree. Correct or exclude the conflicting source before importing; no balance is chosen arbitrarily.</p>}
+            {Object.values(outcomes.historical).some(count => count > 0) && <section aria-label="Historical ledger impact">
+              <strong>Existing ledger changes — separate from this import</strong>
+              <p>The current rules would add {outcomes.historical.transactionsAdded}, remove {outcomes.historical.transactionsRemoved}, and change {outcomes.historical.transactionsChanged} existing transaction records, and change {outcomes.historical.balancesChanged} monthly balances.</p>
+              <p>{outcomes.historical.ambiguousTransactions} historical transaction ambiguities; {outcomes.historical.conflictingBalances} historical balance conflicts.</p>
+              <p role="alert">Import paused. These differences need a separate source audit and approved ledger reconciliation. Refreshing or confirming this import must not silently apply them. Your current ledger has not changed.</p>
+            </section>}
+            <button type="button" className="btn btn--secondary btn--sm" onClick={() => void outcomeQuery.refetch()}>Refresh ledger calculation</button>
+          </>}
       </div>
       {review.alreadyImported > 0 && (
         <p className="sync-review__note">
@@ -760,12 +786,12 @@ export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPa
     setSyncRunId('');
   };
 
-  const confirmSync = async (accountMappings: SyncAccountMappingDecision[]) => {
+  const confirmSync = async (accountMappings: SyncAccountMappingDecision[], outcomeRevision: string) => {
     if (!syncRunId) return;
     setSyncAction('confirm');
     setSyncActionError('');
     try {
-      await trpcClient.dataSync.confirm.mutate({ runId: syncRunId, accountMappings });
+      await trpcClient.dataSync.confirm.mutate({ runId: syncRunId, accountMappings, outcomeRevision });
       await onImportComplete?.();
       await syncQuery.refetch();
     } catch (actionError) {
@@ -858,7 +884,7 @@ export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPa
           review={syncJob.review}
           isWorking={Boolean(syncAction)}
           error={syncActionError || syncJob.error || ''}
-          onConfirm={accountMappings => void confirmSync(accountMappings)}
+          onConfirm={(accountMappings, revision) => void confirmSync(accountMappings, revision)}
           onDiscard={() => void discardSync()}
         />
       )}
