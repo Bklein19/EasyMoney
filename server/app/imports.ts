@@ -6,6 +6,7 @@ import { getDb, insertRow, updateRow } from '../database.ts';
 import { hashContent } from '../hash.ts';
 import { normalizeAccountLast4, sourceAccountLast4 } from './accountLast4.ts';
 import { hashImportContent } from './importContentHash.ts';
+import { assertRetainedOriginal } from './originalRetention';
 import {
   discardImportArtifactPreview,
   findCommittedImportArtifactDuplicate,
@@ -302,6 +303,7 @@ export function reimportFile(importFileId: number | string) {
     | undefined;
   if (!importFile) throw new Error(`Import file not found: ${id}`);
   if (importFile.status !== 'unimported') throw new Error(`Import file is not unimported: ${id}`);
+  assertRetainedOriginal(id, db);
 
   const facts = db.prepare(`
     SELECT
@@ -429,6 +431,7 @@ export function reimportFiles(importFileIds: Array<number | string> | undefined 
     const importFile = importFileStatement.get(id) as { id: number; status?: string | null } | undefined;
     if (!importFile) throw new Error(`Import file not found: ${id}`);
     if (importFile.status !== 'unimported') throw new Error(`Import file is not unimported: ${id}`);
+    assertRetainedOriginal(id, db);
 
     const facts = factStatement.get(id) as {
       sourceFileCount: number;
@@ -1319,6 +1322,7 @@ export function retainImportOriginal(importFileId: number, bytes: Uint8Array) {
   if (metadata?.contentHash !== contentHash) throw new Error('Original file integrity mismatch.');
   getDb().prepare('INSERT OR IGNORE INTO importOriginals (importFileId, contentHash, bytesHash, bytes) VALUES (?, ?, ?, ?)')
     .run(importFileId, contentHash, contentHash, bytes);
+  assertRetainedOriginal(importFileId);
 }
 
 async function previewImportUnsafe({ fileName, text, fileBytes, customProfile = null }: PreviewImportOptions) {
@@ -1817,7 +1821,9 @@ function commitImportUnsafe({
   rebuildLedger = true,
 }: CommitImportOptions) {
   const stagedImportFileId = Number(importFileId || importMeta?.importFileId || 0);
+  if (!stagedImportFileId) throw new Error('Preview and retain the original file before committing this import.');
   if (stagedImportFileId) {
+    assertRetainedOriginal(stagedImportFileId);
     const metadata = getDb().prepare('SELECT status FROM importFiles WHERE id = ?')
       .get(stagedImportFileId) as { status: string | null } | undefined;
     if (metadata?.status === 'previewed') {

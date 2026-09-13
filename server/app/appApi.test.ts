@@ -1,8 +1,10 @@
 import { beforeEach, expect, test } from 'bun:test';
 import { Buffer } from 'node:buffer';
+import { Database } from 'bun:sqlite';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { writeSnapshot } from '../databaseSnapshots';
 
 import type { SyncInstitutionId } from './dataSync/types.ts';
 
@@ -10,8 +12,8 @@ process.env.EASYMONEY_DB_PATH = path.join(os.tmpdir(), `easymoney-app-api-${proc
 process.env.EASYMONEY_SYNC_ROOT = path.join(os.tmpdir(), `easymoney-sync-runs-${process.pid}`);
 
 const { appRouter } = await import('./router.ts');
-const { getDb, initDatabase, insertRow, syncLedgerReadModelFromLegacyTables } = await import('../database.ts');
-const { hashImportContent } = await import('./imports.ts');
+const { getDb, initDatabase, insertRow, syncLedgerReadModelFromLegacyTables, databaseBackupStatus } = await import('../database.ts');
+const { hashImportContent, retainImportOriginal } = await import('./imports.ts');
 const {
   findCommittedImportArtifactFactDuplicate,
   importArtifactFactFingerprint,
@@ -114,6 +116,19 @@ function csvFromRows(rows: string[]) {
   ].join('\n');
 }
 
+test('import commit refuses absent or corrupt original bytes without changing the ledger', async () => {
+  await expect(caller.imports.commit({ accountId: null, transactions: [] })).rejects.toThrow('original');
+  const preview = await postImportPreview('retention.csv', csvFromRows(['01/05/2026,01/05/2026,COFFEE,Food,Sale,-5.00']));
+  const original = getDb().prepare('SELECT * FROM importOriginals WHERE importFileId=?').get(preview.importFileId)!;
+  getDb().prepare('DELETE FROM importOriginals WHERE importFileId=?').run(preview.importFileId);
+  await expect(caller.imports.commit({ accountId: null, importFileId: preview.importFileId })).rejects.toThrow('not retained');
+  getDb().prepare('INSERT INTO importOriginals(importFileId,contentHash,bytesHash,bytes) VALUES(?,?,?,?)')
+    .run(preview.importFileId, original.contentHash, 'corrupt', original.bytes);
+  await expect(caller.imports.commit({ accountId: null, importFileId: preview.importFileId })).rejects.toThrow('integrity');
+  expect(getDb().prepare('SELECT status FROM importFiles WHERE id=?').get(preview.importFileId)).toEqual({ status: 'previewed' });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
+});
+
 async function saveAwaitingSyncReview(review: {
   runId: string;
   institutionId: SyncInstitutionId;
@@ -173,21 +188,24 @@ function stageConsolidatedSyncFacts(claims: Array<{
   description?: string;
 }>, requestedFileName?: string, sourceType = 'activity-export') {
   const fileName = requestedFileName || `consolidated-${++consolidatedSyncFixtureSequence}.csv`;
+  const originalBytes = new TextEncoder().encode(JSON.stringify({ fileName, claims }));
+  const originalHash = new Bun.CryptoHasher('sha256').update(originalBytes).digest('hex');
   const sourceRole = sourceType === 'statement' ? 'statement-only' : 'activity';
   const createdAt = '2026-08-20T00:00:00.000Z';
   const importFileId = Number(insertRow('importFiles', {
     fileName,
-    contentHash: `hash-${fileName}`,
+    contentHash: originalHash,
     parserName: 'test-consolidated-parser',
     sourceType,
     institution: 'Example Institution',
     status: 'previewed',
     createdAt,
   }));
+  getDb().prepare('INSERT INTO importOriginals VALUES (?,?,?,?)').run(importFileId, originalHash, originalHash, originalBytes);
   const sourceFileId = Number(insertRow('sourceFiles', {
     importFileId,
     fileName,
-    contentHash: `hash-${fileName}`,
+    contentHash: originalHash,
     parserName: 'test-consolidated-parser',
     sourceType,
     institution: 'Example Institution',
@@ -3777,6 +3795,24 @@ test('institution catch-up stages reviewable claims before explicit confirmation
     });
     expect(getDb().prepare('SELECT COUNT(*) AS count FROM importFiles').get()).toEqual({ count: 1 });
 
+    // Production connector review/confirmation must survive loss of its download
+    // staging file and a database backup round-trip.
+    const downloadedBytes = await fs.promises.readFile(filePath);
+    const retained = getDb().prepare('SELECT bytes FROM importOriginals WHERE importFileId=?').get(artifact.importFileId);
+    expect(Buffer.from(retained!.bytes)).toEqual(downloadedBytes);
+    const snapshotSource = new Database(databaseBackupStatus().databasePath, { readonly: true });
+    const backupDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'retention-backup-'));
+    const snapshot = writeSnapshot(snapshotSource, backupDirectory, 'retention-test');
+    const restored = new Database(snapshot.path, { readonly: true });
+    try {
+      const restoredOriginal = restored.query('SELECT bytes FROM importOriginals WHERE importFileId=?').get(artifact.importFileId) as { bytes: Uint8Array };
+      expect(Buffer.from(restoredOriginal.bytes)).toEqual(downloadedBytes);
+    } finally {
+      restored.close(); snapshotSource.close();
+      await fs.promises.rm(backupDirectory, { recursive: true, force: true });
+    }
+    await fs.promises.unlink(filePath);
+
     const review = {
       runId: 'sync-test-review',
       institutionId: 'bank-of-america' as const,
@@ -3814,6 +3850,7 @@ test('institution catch-up stages reviewable claims before explicit confirmation
     expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 2 });
     expect((await listImportHistoryForTest()).imports).toHaveLength(1);
 
+    await fs.promises.writeFile(filePath, downloadedBytes);
     const duplicate = await stageSyncArtifact({ path: filePath, accountId });
     expect(duplicate.status).toBe('already-imported');
     const duplicateWithChangedConnectorIdentities = await stageSyncArtifact({
@@ -5305,7 +5342,7 @@ test('app imports commit resolves parser-emitted accounts without selected accou
   const now = '2026-06-16T00:00:00.000Z';
   const importFileId = Number(insertRow('importFiles', {
     fileName: 'multi-account.csv',
-    contentHash: 'multi-account-hash',
+    contentHash: hashImportContent('multi-account-hash'),
     parserName: 'test-parser',
     headerSignature: 'date|description|amount',
     rowCount: 2,
@@ -5315,10 +5352,11 @@ test('app imports commit resolves parser-emitted accounts without selected accou
     status: 'previewed',
     createdAt: now,
   }));
+  retainImportOriginal(importFileId, new TextEncoder().encode('multi-account-hash'));
   const sourceFileId = Number(insertRow('sourceFiles', {
     importFileId,
     fileName: 'multi-account.csv',
-    contentHash: 'multi-account-hash',
+    contentHash: hashImportContent('multi-account-hash'),
     parserName: 'test-parser',
     sourceType: 'activity-export',
     parserPriority: 10,
@@ -5469,7 +5507,7 @@ test('app imports commit materializes staged statement balances', async () => {
   const now = new Date().toISOString();
   const importFileId = Number(insertRow('importFiles', {
     fileName: 'fixture-statement.pdf',
-    contentHash: 'fixture-hash',
+    contentHash: hashImportContent('fixture-hash'),
     parserName: 'fixture-statement-parser',
     sourceType: 'statement',
     parserPriority: 50,
@@ -5478,6 +5516,7 @@ test('app imports commit materializes staged statement balances', async () => {
     status: 'previewed',
     createdAt: now,
   }));
+  retainImportOriginal(importFileId, new TextEncoder().encode('fixture-hash'));
   const transactionRowId = Number(insertRow('importRows', {
     importFileId,
     rowIndex: 0,
