@@ -42,7 +42,7 @@ function apiDate(value: unknown): string {
       || value < 946_684_800 || value > 4_102_444_800) {
     throw new Error('Fidelity activity API transaction date is invalid');
   }
-  return new Date(value * 1_000).toISOString();
+  return new Date(value * 1_000).toISOString().slice(0, 10);
 }
 
 function sourceAccountName(rawAccountId: string, remoteAccountId: string): string {

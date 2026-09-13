@@ -8,12 +8,16 @@ const { getDb, initDatabase, insertRow } = await import('../database.ts');
 const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
 const { upsertTransactionAnnotation } = await import('./transactionAnnotations.ts');
 const { getTransactionDetails } = await import('./transactionDetails.ts');
+const { overlapOccurrenceKey, recordDistinctOverlap } = await import('./reviewedOverlap');
 
 function resetAppTables() {
   const db = getDb();
   initDatabase();
   db.transaction(() => {
     for (const table of [
+      'reviewedDistinctOverlaps',
+      'parserAnnotationHistory',
+      'parserRefreshAccountChoices',
       'sourceBalances',
       'sourceTransactions',
       'sourceAccounts',
@@ -900,6 +904,15 @@ test('four airline bag fees remain four purchases while the statement/export cop
   expect(ledger.transactions).toHaveLength(4);
   expect(ledger.transactions.filter(t=>t.date.startsWith('2026-03-19'))).toHaveLength(2);
   expect(ledger.transactions.filter(t=>t.date.startsWith('2026-03-20'))).toHaveLength(2);
+  expect(ledger.ambiguities!.length).toBeGreaterThan(0);
+  for(const warning of ledger.ambiguities!) for(const candidateId of warning.candidateSourceTransactionIds) {
+    recordDistinctOverlap(getDb(),overlapOccurrenceKey(getDb(),warning.sourceTransactionId),overlapOccurrenceKey(getDb(),candidateId),'Source review confirmed four distinct bag charges.');
+  }
+  const reviewed=buildLedgerFromSourceFacts(getDb());
+  expect(reviewed.ambiguities).toHaveLength(0);
+  expect(ledgerFingerprint(reviewed)).toBe(ledgerFingerprint(ledger));
+  getDb().prepare('UPDATE sourceTransactions SET description=? WHERE id=?').run('Changed source evidence',ledger.ambiguities![0]!.sourceTransactionId);
+  expect(buildLedgerFromSourceFacts(getDb()).ambiguities!.length).toBeGreaterThan(0);
 });
 
 test('source rebuild excludes legacy statement summaries even without corresponding detail', () => {

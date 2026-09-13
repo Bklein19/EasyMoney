@@ -1,10 +1,13 @@
 import type { getDb } from '../database';
 import type { RebuiltLedger } from './ledgerRebuild';
+import type { AnnotationDisposition } from './parserRefreshAnnotations';
+import { overlapOccurrenceKey } from './reviewedOverlap';
 
 type Db = ReturnType<typeof getDb>;
 export interface ConflictMember {
   sourceFileId: number; fileName: string; accountId: number; accountName: string;
   date: string; amountCents: number; description: string;
+  occurrenceKey?: string;
 }
 export interface RefreshConflict {
   kind: 'transaction' | 'balance'; key: string; members: ConflictMember[];
@@ -13,6 +16,18 @@ export interface RefreshDiagnostics {
   inputRevision: string; generatedAt: string;
   conflicts: Array<RefreshConflict & { origin: 'existing' | 'new' }>;
   resolved: RefreshConflict[];
+  preview?: {
+    candidateFiles: number; transactionCountBefore: number; transactionCountAfter: number;
+    added: Array<{ ledgerTransactionId: string; accountId: number; date: string; amount: number; description: string }>;
+    removed: Array<{ ledgerTransactionId: string; accountId: number; date: string; amount: number; description: string }>;
+    updated: Array<{ ledgerTransactionId: string; before: { date: string; description: string }; after: { date: string; description: string } }>;
+    annotations: AnnotationDisposition[];
+    annotationCounts: Record<AnnotationDisposition['disposition'], number>;
+    mappings: Array<{ sourceFileId: number; sourceAccountKey: string; accountId: number; evidence: string }>;
+    balancesBefore: Record<string, unknown>[];
+    balancesAfter: RebuiltLedger['balanceSnapshots'];
+    balanceChanges: Array<{ accountId: number; month: string; beforeCents: number | null; afterCents: number | null; beforeDate: string | null; afterDate: string | null }>;
+  };
 }
 
 // Snapshot evidence while candidate rows still exist: their database IDs are
@@ -28,9 +43,10 @@ export function captureRefreshConflicts(db: Db, ledger: RebuiltLedger): RefreshC
       FROM ${table} f JOIN sourceFiles sf ON sf.id=f.sourceFileId
       JOIN sourceAccounts sa ON sa.id=f.sourceAccountId JOIN accounts a ON a.id=sa.accountId
       WHERE f.id=?`).get(id) as ConflictMember);
+    if(kind==='transaction') for(const [index,id] of ids.entries()) members[index]!.occurrenceKey=overlapOccurrenceKey(db,id);
     // Preserve occurrence multiplicity, but ignore regenerated IDs and prose.
     const key = JSON.stringify([kind, members.map(m =>
-      [m.sourceFileId, m.accountId, m.date, m.amountCents]).sort()]);
+      [m.sourceFileId, m.accountId, m.date.slice(0,10), m.amountCents]).sort()]);
     conflicts.push({ kind, key, members });
   };
   // Ambiguity records are directed edges. Report connected groups once, rather

@@ -937,6 +937,29 @@ export function initDatabase() {
     db.prepare("UPDATE parserDerivations SET attemptedRevision=NULL WHERE status='review-required'").run();
   });
 
+  runSchemaMigration('2026-09-13-parser-refresh-account-choices', () => {
+    db.exec(`CREATE TABLE parserRefreshAccountChoices (
+      sourceFileId INTEGER NOT NULL REFERENCES sourceFiles(id),
+      contentHash TEXT NOT NULL, institution TEXT NOT NULL, sourceAccountKey TEXT NOT NULL,
+      accountId INTEGER NOT NULL REFERENCES accounts(id), approvalNote TEXT NOT NULL, approvedAt TEXT NOT NULL,
+      PRIMARY KEY(sourceFileId, sourceAccountKey)
+    )`);
+  });
+
+  runSchemaMigration('2026-09-13-parser-annotation-history', () => {
+    db.exec(`CREATE TABLE parserAnnotationHistory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, inputRevision TEXT NOT NULL, ledgerTransactionId TEXT NOT NULL,
+      targetId TEXT, disposition TEXT NOT NULL, evidenceJson TEXT NOT NULL, createdAt TEXT NOT NULL
+    )`);
+  });
+
+  runSchemaMigration('2026-09-13-reviewed-distinct-overlaps', () => {
+    db.exec(`CREATE TABLE reviewedDistinctOverlaps (
+      leftKey TEXT NOT NULL, rightKey TEXT NOT NULL, reason TEXT NOT NULL, createdAt TEXT NOT NULL,
+      PRIMARY KEY(leftKey,rightKey)
+    )`);
+  });
+
   runSchemaMigration('2026-08-27-account-last4', () => {
     if (!tableColumnNames('accounts').includes('last4')) {
       db.prepare('ALTER TABLE accounts ADD COLUMN last4 TEXT').run();

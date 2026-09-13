@@ -4,7 +4,8 @@ import type {
   AppImportParser,
   ParsedImportTransaction,
 } from '../importTypes.ts';
-import { parseAmount, parseDate } from './csvMapping.ts';
+import { parseAmount } from './csvMapping.ts';
+import { calendarDate } from './calendarDate.ts';
 import { normalizedHeader, parseCsvRows, rowRecord } from './csvRows.ts';
 import {
   isSequoiaFundActivityFileName,
@@ -65,7 +66,7 @@ function parseTransaction(
   headers: HeaderMap,
   sourceRowIndex: number,
 ): ParsedImportTransaction | null {
-  const date = parseDate(row[headers.date]?.trim(), ['MM/dd/yyyy', 'M/d/yyyy', 'MM/dd/yy', 'M/d/yy', 'yyyy-MM-dd']);
+  const date = calendarDate(row[headers.date], true);
   const rawAmount = row[headers.amount]?.trim() ?? '';
   const amount = parseAmount(rawAmount);
   const type = headers.type ? row[headers.type]?.replace(/\s+/g, ' ').trim() : '';
@@ -75,7 +76,7 @@ function parseTransaction(
 
   return {
     sourceRowIndex,
-    date: date.toISOString(),
+    date,
     amountCents: Math.round(signedAmount(amount, rawAmount, description) * 100),
     description,
     institution: 'Sequoia Fund',

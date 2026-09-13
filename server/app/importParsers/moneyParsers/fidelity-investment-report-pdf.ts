@@ -17,6 +17,13 @@ function parseMoneyToCents(s: string): number {
   return Math.round(parseFloat(s.replace(/[$,]/g, "").trim()) * 100);
 }
 
+export function parseFidelityTaxJournalLine(line: string) {
+  const match=line.match(/^\s*(\d{2})\/(\d{2})\s+(\S.*?)\s+Journaled\b.*?(-?)\$?([\d,]+\.\d{2})(?:\s+S)?\s*$/);
+  if(!match || /purchase credit/i.test(match[3]!)) return null;
+  return {month:match[1]!,day:match[2]!,label:match[3]!.trim(),amount:`${match[4]}${match[5]}`,
+    amountCents:(match[4]==='-'?-1:1)*parseMoneyToCents(match[5]!)};
+}
+
 export default async function parse(filePath: string): Promise<ParseResult> {
   const buf = await Bun.file(filePath).arrayBuffer();
   const pdf = await getDocumentProxy(new Uint8Array(buf));
@@ -80,13 +87,11 @@ export default async function parse(filePath: string): Promise<ParseResult> {
       continue;
     }
     // Tax withholding journaled out of the account
-    m = line.match(/^\s*(\d{2})\/(\d{2})\s+(\S.*?)\s+Journaled\b.*?(-?)\$?([\d,]+\.\d{2})\s*$/);
-    if (m) {
-      if (/purchase credit/i.test(m[3]!)) continue; // ESPP credit already captured by the buy
-      const date = isoDate(m[1]!, m[2]!);
-      const sign = m[4] === "-" ? -1 : 1;
-      push(date, sign * Math.round(num(m[5]!) * 100), `Tax journaled: ${m[3]!.trim()}`,
-        { type: "journaled", date, label: m[3]!.trim(), amount: `${m[4]}${m[5]}` });
+    const journal = parseFidelityTaxJournalLine(line);
+    if (journal) {
+      const date = isoDate(journal.month, journal.day);
+      push(date, journal.amountCents, `Tax journaled: ${journal.label}`,
+        { type: "journaled", date, label: journal.label, amount: journal.amount });
       continue;
     }
     // Cash to/from bank

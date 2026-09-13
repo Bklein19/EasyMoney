@@ -200,13 +200,17 @@ function parseDepositTransactions(
   };
 
   const parseLogicalRow = (dateMonth: string, dateDay: string, parts: string[]) => {
-    const rest = cleanDescription(parts.join(" "));
-    const moneyMatches = [...rest.matchAll(/\$?[\d,]+\.\d{2}/g)];
+    // Only the trailing amount columns are financial values. A description can
+    // contain its own amount (for example cash back) before the actual debit.
+    const moneyMatches = parts.flatMap(part => {
+      const columns = part.match(/(?:^|\s+)(\$?[\d,]+\.\d{2}(?:\s+\$?[\d,]+\.\d{2})*)\s*$/);
+      return columns ? [...columns[1]!.matchAll(/\$?[\d,]+\.\d{2}/g)] : [];
+    });
     if (moneyMatches.length === 0) return;
 
     const firstMoney = moneyMatches[0]!;
     const lastMoney = moneyMatches[moneyMatches.length - 1]!;
-    const firstMoneyCol = firstMoney.index ?? 0;
+    const firstMoneyCol = parts[0]?.indexOf(firstMoney[0]) ?? 0;
     const isEndingBalanceOnly =
       firstMoneyCol >= endingCol - 4 &&
       moneyMatches.length === 1;
@@ -250,15 +254,19 @@ function parseDepositTransactions(
   for (const rawLine of lines) {
     const line = rawLine.replace(/\s+$/g, "");
     const trimmed = line.trim();
-    if (/^Transaction history$/i.test(trimmed)) {
+    if (/^Transaction history(?: \(continued\))?$/i.test(trimmed)) {
       inHistory = true;
       continue;
     }
     if (!inHistory) continue;
-    if (/^Totals\b/i.test(trimmed) || /^Monthly service fee summary$/i.test(trimmed)) {
+    if (/^Totals\b/i.test(trimmed) || /^Monthly service fee summary$/i.test(trimmed) || /^Ending balance on\b/i.test(trimmed)) {
       flushPending();
       break;
     }
+    // Repeated page furniture is not a continuation of the preceding purchase.
+    if (/\bPage \d+ of \d+\s*$/i.test(trimmed) ||
+      /^(?:Check\s+)?Date\s+(?:Number\s+)?Description\b/i.test(trimmed) ||
+      /^(?:Deposits\/|Withdrawals\/|Ending daily|Number\s+Description|Check)\s*$/i.test(trimmed)) continue;
 
     const row = line.match(/^\s*(\d{1,2})\/(\d{1,2})\s+(.*)$/);
     if (row) {

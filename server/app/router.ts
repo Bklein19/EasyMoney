@@ -275,6 +275,9 @@ export const appRouter = t.router({
   imports: t.router({
     parserRefreshStatus: t.procedure.query(() => parserMaintenanceStatus()),
     refreshParsers: t.procedure.mutation(() => refreshChangedParsers(true)),
+    previewParserRefresh: t.procedure.mutation(() => refreshChangedParsers(true, { validateOnly: true })),
+    applyParserRefresh: t.procedure.input(z.object({ inputRevision: z.string().min(1) }))
+      .mutation(({ input }) => refreshChangedParsers(true, { expectedRevision: input.inputRevision })),
     preview: t.procedure
       .input(z.object({
         fileName: z.string().min(1),

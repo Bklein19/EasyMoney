@@ -85,7 +85,7 @@ describe('Fidelity activity API parser', () => {
       balances: [],
       transactions: [{
         sourceRowIndex: 0,
-        date: '2026-08-20T00:00:00.000Z',
+        date: '2026-08-20',
         amountCents: 1235,
         description: 'DIVIDEND RECEIVED',
         institution: 'Fidelity',
@@ -114,7 +114,7 @@ describe('Fidelity activity API parser', () => {
       coveredTo: '2026-08-21',
       transactions: [{
         sourceRowIndex: 0,
-        date: '2026-08-21T00:00:00.000Z',
+        date: '2026-08-21',
         amountCents: 120045,
         description: 'Employee contribution: Contribution: Example Index Fund: Example Bond Fund',
         account: 'Fidelity retirement plan 12345',
@@ -147,7 +147,7 @@ describe('Fidelity activity API parser', () => {
       expect.objectContaining({
         sourceRowIndex: 1,
         amountCents: -350,
-        date: '2026-08-22T00:00:00.000Z',
+        date: '2026-08-22',
       }),
     ]);
     expect(result.coveredFrom).toBe('2026-08-19');

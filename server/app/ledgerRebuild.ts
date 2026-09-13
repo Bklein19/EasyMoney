@@ -1,6 +1,7 @@
 import { getDb } from '../database.ts';
 import { hashContent } from '../hash.ts';
 import { readSecurityTrade, securityTradeKey } from './securityTrade';
+import { overlapOccurrenceKey, reviewedDistinctOverlap } from './reviewedOverlap';
 import {
   assignLedgerTransactionIdentities,
   getLedgerTransactionBaseKey,
@@ -491,7 +492,8 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
         if (row.securityTrade && candidate.securityTrade && securityTradeKey(row.securityTrade) !== securityTradeKey(candidate.securityTrade)) return false;
         // Same-day leftovers are excess real occurrences under the document
         // policy above, not additional unresolved pairs.
-        return normalizeDate(row.date) !== normalizeDate(candidate.date) || Boolean(row.securityTrade) !== Boolean(candidate.securityTrade);
+        const warning = normalizeDate(row.date) !== normalizeDate(candidate.date) || Boolean(row.securityTrade) !== Boolean(candidate.securityTrade);
+        return warning && !reviewedDistinctOverlap(db,overlapOccurrenceKey(db,row.id),overlapOccurrenceKey(db,candidate.id));
       });
       if (candidates.length) ambiguities.push({
         sourceTransactionId: row.id,

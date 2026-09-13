@@ -47,6 +47,9 @@ function resetAppTables() {
   initDatabase();
   db.transaction(() => {
     for (const table of [
+      'reviewedDistinctOverlaps',
+      'parserAnnotationHistory',
+      'parserRefreshAccountChoices',
       'parserDerivationHistory',
       'parserRefreshDiagnostics',
       'importReplacementVersions',

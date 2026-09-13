@@ -1,5 +1,6 @@
 import type { AppImportParseInput, AppImportParseResult, AppImportParser, ParsedImportTransaction } from '../importTypes.ts';
-import { parseAmount, parseDate } from './csvMapping.ts';
+import { parseAmount } from './csvMapping.ts';
+import { calendarDate } from './calendarDate.ts';
 import { normalizedHeader } from './csvRows.ts';
 
 const EXPECTED_HEADERS = ['posted date', 'reference number', 'payee', 'address', 'amount'];
@@ -19,14 +20,14 @@ function parseRow(
   sourceRowIndex: number,
   account: string | null,
 ): ParsedImportTransaction | null {
-  const date = parseDate(row['Posted Date']?.trim(), ['MM/dd/yyyy', 'M/d/yyyy']);
+  const date = calendarDate(row['Posted Date']);
   const amount = parseAmount(row.Amount);
   const description = row.Payee?.replace(/\s+/g, ' ').trim();
   if (!date || amount === null || !description) return null;
 
   return {
     sourceRowIndex,
-    date: date.toISOString(),
+    date,
     amountCents: Math.round(amount * 100),
     description,
     institution: 'Bank of America',

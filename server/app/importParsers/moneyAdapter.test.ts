@@ -15,6 +15,13 @@ import { parseBofaDepositStatementText } from './moneyParsers/bofa-statement-pdf
 import { parseVanguardAccountHolder } from './moneyParsers/vanguard-statement-pdf.ts';
 import { parseTiaaStatementText } from './moneyParsers/tiaa-statement-pdf.ts';
 import { parseFidelity401kHtml } from './moneyParsers/fidelity-401k-html.ts';
+import { parseFidelityTaxJournalLine } from './moneyParsers/fidelity-investment-report-pdf.ts';
+
+test('Fidelity tax journals accept the statement footnote marker without losing withholding', () => {
+  expect(parseFidelityTaxJournalLine('03/05 RSU CA Journaled y - - - -$434.34 S')).toMatchObject({month:'03',day:'05',label:'RSU CA',amountCents:-43434});
+  expect(parseFidelityTaxJournalLine('01/20 RSU US MEDICARE Journaled y - - - -15.25 S')?.amountCents).toBe(-1525);
+  expect(parseFidelityTaxJournalLine('03/05 ESPP Purchase Credit Journaled y 25.00')).toBeNull();
+});
 
 test('Vanguard statement parser extracts the holder immediately before the account heading', () => {
   expect(parseVanguardAccountHolder([
@@ -433,6 +440,28 @@ test('import parser registry resolves Wells Fargo statements imported from folde
   });
 
   expect(parser?.id).toBe('wells-fargo-statement-pdf');
+});
+
+test('Wells Fargo page headers and ending-balance summaries do not enter descriptions', () => {
+  const result=parseWellsFargoStatementText([
+    'Wells Fargo Everyday Checking','Account number: 1234','Beginning balance on 1/1 $100.00',
+    'Transaction history','1/2 Purchase Coffee 5.00 95.00',
+    'January 31, 2026 ■ Page 3 of 4','Transaction history (continued)','Check Date Number Description',
+    '1/3 Payroll 25.00 120.00','Ending balance on 1/31 $120.00','Totals',
+  ].join('\n'),'wells-fargo-checking-1234-2026-01-31.pdf');
+  expect(result.transactions.map(row=>row.description)).toEqual(['Purchase Coffee','Payroll']);
+  expect(result.transactions.map(row=>row.amount_cents)).toEqual([-500,2500]);
+});
+
+test('Wells Fargo cash-back prose is not the statement debit amount', () => {
+  const result=parseWellsFargoStatementText([
+    'Wells Fargo Everyday Checking','Account number: 1234','Beginning balance on 1/1 $500.00',
+    'Transaction history','1/2 Purchase with Cash Back $ 141.20 authorized on 01/01 STORE       191.20',
+    'Synthetic location P00300000000000000 Card 1234','Ending balance on 1/31 $308.80','Totals',
+  ].join('\n'),'wells-fargo-checking-1234-2026-01-31.pdf');
+  expect(result.transactions).toHaveLength(1);
+  expect(result.transactions[0]?.amount_cents).toBe(-19120);
+  expect(result.transactions[0]?.description).toContain('Cash Back $ 141.20');
 });
 
 test('Wells Fargo checking statement parser infers signs from running balances', () => {

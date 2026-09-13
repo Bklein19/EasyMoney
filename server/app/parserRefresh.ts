@@ -11,15 +11,19 @@ import { getStableSourceTransactionId, parsedSourceAccountIdentity } from './imp
 import { buildLedgerFromSourceFacts, materializeLedger, LEDGER_REBUILD_POLICY_VERSION } from './ledgerRebuild';
 import { captureRefreshConflicts, compareRefreshConflicts, readRefreshDiagnostics, type RefreshDiagnostics } from './parserRefreshDiagnostics';
 import type { AppImportParseResult, AppImportParser, ParsedImportTransaction, ParsedImportBalance } from './importTypes';
+import { resolveRefreshAccount, type RefreshAccount } from './parserRefreshAccounts';
+import { calendarDate } from './importParsers/calendarDate';
+import { captureAnnotations, planAnnotationRefresh, applyAnnotationRefresh, readAnnotationHistory } from './parserRefreshAnnotations';
 
 type Db = ReturnType<typeof getDb>;
 interface SourceFile { id: number; importFileId: number; fileName: string; contentHash: string; parserName: string; version: string | null; derivationStatus: string | null; attemptedVersion: string | null; attemptedRevision: string | null }
 interface Candidate { file: SourceFile; version: string; parser: AppImportParser; parsed: AppImportParseResult }
 class ReviewRequired extends Error {}
-const trackedTables = ['sourceFiles', 'sourceAccounts', 'sourceTransactions', 'sourceBalances', 'importRows', 'transactionAnnotations', 'ledgerTransactions', 'ledgerBalances', 'accounts'] as const;
+const trackedTables = ['sourceFiles', 'sourceAccounts', 'sourceTransactions', 'sourceBalances', 'importRows', 'transactionAnnotations', 'ledgerTransactions', 'ledgerBalances', 'accounts', 'parserRefreshAccountChoices', 'reviewedDistinctOverlaps'] as const;
 
 function revision(db: Db) {
   return hashContent(JSON.stringify([
+    'original-bound-account-and-annotation-refresh-v1', versions,
     LEDGER_REBUILD_POLICY_VERSION,
     ...trackedTables.map(table => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()),
     db.prepare('SELECT importFileId, contentHash, bytesHash FROM importOriginals ORDER BY importFileId').all(),
@@ -46,19 +50,16 @@ function validateCandidate(db: Db, candidate: Candidate) {
   const { file, parsed, parser } = candidate;
   const transactions = parsed.transactions.filter((row): row is ParsedImportTransaction => row !== null);
   if (!transactions.length && !parsed.balances.length) throw new ReviewRequired('Parser produced no facts. Review the original file.');
-  const accounts = db.prepare('SELECT * FROM sourceAccounts WHERE sourceFileId=?').all(file.id);
+  const accounts = db.prepare('SELECT * FROM sourceAccounts WHERE sourceFileId=?').all(file.id) as unknown as RefreshAccount[];
   const accountFor = (fact: ParsedImportTransaction | ParsedImportBalance) => {
     const identity = parsedSourceAccountIdentity(fact, parser.institution);
-    const matches = accounts.filter(account => account.institution === identity.institution &&
-      (!account.accountHolder || !identity.accountHolder || account.accountHolder === identity.accountHolder) &&
-      (account.sourceAccountKey === identity.remoteAccountId || (!fact.remoteAccountId && identity.accountName !== 'Selected account' && account.sourceAccountName === identity.accountName)));
-    if (matches.length !== 1 || !matches[0]!.accountId) throw new ReviewRequired('Parser account identity changed or has no confirmed mapping.');
-    return Number(matches[0]!.id);
+    try { return { ...resolveRefreshAccount(db, file, identity, accounts, !fact.remoteAccountId), identity }; }
+    catch { throw new ReviewRequired('Parser account identity changed or has no confirmed mapping.'); }
   };
   for (const fact of [...transactions, ...parsed.balances]) {
     accountFor(fact);
     const amount = 'amountCents' in fact ? fact.amountCents : fact.balanceCents;
-    if (!Number.isSafeInteger(amount) || !/^\d{4}-\d{2}-\d{2}$/.test(fact.date) || !Number.isFinite(Date.parse(fact.date))) {
+    if (!Number.isSafeInteger(amount) || calendarDate(fact.date) !== fact.date) {
       throw new ReviewRequired('Parser produced an invalid date or amount.');
     }
   }
@@ -85,7 +86,18 @@ function replaceFacts(db: Db, candidate: Candidate) {
   const now = new Date().toISOString();
   let index = 0;
   let balanceIndex = parsed.transactions.length;
+  const resolvedAccounts = new Map<string, number>();
   for (const fact of [...transactions, ...parsed.balances]) {
+    const mapping = accountFor(fact);
+    let sourceAccountId = mapping.sourceAccountId ?? resolvedAccounts.get(mapping.identity.remoteAccountId);
+    if (!sourceAccountId) {
+      const identity = mapping.identity;
+      sourceAccountId = Number(db.prepare(`INSERT INTO sourceAccounts
+        (sourceFileId,sourceAccountKey,sourceAccountName,institution,accountHolder,accountId,rawJson,createdAt)
+        VALUES(?,?,?,?,?,?,?,?)`).run(file.id,identity.remoteAccountId,identity.accountName,identity.institution,
+        identity.accountHolder,mapping.accountId,JSON.stringify({ refreshMappingEvidence: mapping.evidence }),now).lastInsertRowid);
+      resolvedAccounts.set(identity.remoteAccountId,sourceAccountId);
+    }
     const transaction = 'amountCents' in fact;
     const row = db.prepare(`INSERT INTO importRows (importFileId, rowIndex, rowType, rawJson, normalizedJson, createdAt)
       VALUES (?, ?, ?, ?, ?, ?)`)
@@ -94,12 +106,12 @@ function replaceFacts(db: Db, candidate: Candidate) {
     if (transaction) {
       db.prepare(`INSERT INTO sourceTransactions (sourceFileId, sourceAccountId, importRowId, stableSourceId,
         date, amountCents, description, sourceRole, priority, rawJson, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(file.id, accountFor(fact), row.lastInsertRowid, getStableSourceTransactionId(file.importFileId, fact), fact.date,
+        .run(file.id, sourceAccountId, row.lastInsertRowid, getStableSourceTransactionId(file.importFileId, fact), fact.date,
           fact.amountCents, fact.description, fact.sourceRole, parser.priority, JSON.stringify(fact.raw || {}), now);
     } else {
       db.prepare(`INSERT INTO sourceBalances (sourceFileId, sourceAccountId, importRowId, date, balanceCents, priority, rawJson, createdAt)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(file.id, accountFor(fact), row.lastInsertRowid, fact.date, fact.balanceCents, parser.priority, JSON.stringify(fact.raw || {}), now);
+        .run(file.id, sourceAccountId, row.lastInsertRowid, fact.date, fact.balanceCents, parser.priority, JSON.stringify(fact.raw || {}), now);
     }
   }
   const dates = [...transactions, ...parsed.balances].map(fact => fact.date).sort();
@@ -109,14 +121,16 @@ function replaceFacts(db: Db, candidate: Candidate) {
 }
 
 export async function refreshParserDerivations(options: {
-  db?: Db; parsers?: AppImportParser[]; versions?: Record<string, string>; backup?: () => unknown; retry?: boolean; validateOnly?: boolean;
+  db?: Db; parsers?: AppImportParser[]; versions?: Record<string, string>; backup?: () => unknown; retry?: boolean; validateOnly?: boolean; expectedRevision?: string;
 } = {}) {
   const db = options.db ?? getDb();
   const parsers = options.parsers ?? IMPORT_PARSERS;
   const currentVersions: Record<string, string> = options.versions ?? versions;
   const files = db.prepare(`SELECT sf.*, d.version, d.status AS derivationStatus, d.attemptedVersion, d.attemptedRevision FROM sourceFiles sf LEFT JOIN parserDerivations d ON d.sourceFileId=sf.id
     WHERE sf.status='committed' ORDER BY sf.id`).all() as unknown as SourceFile[];
-  const before = revision(db);
+  const inputRevision = () => hashContent(JSON.stringify([revision(db), currentVersions]));
+  const before = inputRevision();
+  if (options.expectedRevision && options.expectedRevision !== before) throw new ReviewRequired('Refresh preview is stale. Preview again before applying.');
   const candidates: Candidate[] = [];
   for (const file of files) {
     const version = currentVersions[file.parserName];
@@ -161,23 +175,48 @@ export async function refreshParserDerivations(options: {
   if (!candidates.length) return { refreshed: 0, issues: parserRefreshStatus(db) };
   let diagnostics: RefreshDiagnostics | undefined;
   try {
-    if (revision(db) !== before) throw new ReviewRequired('Data changed during refresh. Retry using the latest imports and choices.');
-    const baseline = captureRefreshConflicts(db, buildLedgerFromSourceFacts(db));
-    (options.backup ?? (() => createDatabaseBackup('before-parser-refresh')))();
+    if (inputRevision() !== before) throw new ReviewRequired('Data changed during refresh. Retry using the latest imports and choices.');
+    const baselineLedger = buildLedgerFromSourceFacts(db);
+    const baseline = captureRefreshConflicts(db, baselineLedger);
+    const annotations = captureAnnotations(db, baselineLedger);
+    const savedTransactions = db.prepare('SELECT ledgerTransactionId,accountId,date,amountCents / 100.0 AS amount,description FROM ledgerTransactions').all() as NonNullable<RefreshDiagnostics['preview']>['removed'];
+    const savedBalances = db.prepare('SELECT * FROM ledgerBalances').all();
+    const mappings = candidates.flatMap(candidate => {
+      const validated=validateCandidate(db,candidate);
+      return [...new Map([...validated.transactions,...candidate.parsed.balances].map(fact=>{
+        const mapping=validated.accountFor(fact);
+        return [mapping.identity.remoteAccountId,{sourceFileId:candidate.file.id,sourceAccountKey:mapping.identity.remoteAccountId,accountId:mapping.accountId,evidence:mapping.evidence}];
+      })).values()];
+    });
+    if (!options.validateOnly) (options.backup ?? (() => createDatabaseBackup('before-parser-refresh')))();
     db.transaction(() => {
-      if (revision(db) !== before) throw new ReviewRequired('Data changed during refresh. Retry.');
+      if (inputRevision() !== before) throw new ReviewRequired('Data changed during refresh. Retry.');
       for (const candidate of candidates) replaceFacts(db, candidate);
       const ledger = buildLedgerFromSourceFacts(db);
       diagnostics = compareRefreshConflicts(baseline, captureRefreshConflicts(db, ledger), before);
-      if (ledger.balanceConflicts?.length || diagnostics.conflicts.some(conflict => conflict.origin === 'new')) throw new ReviewRequired('Parser refresh introduces transaction ambiguity or contains conflicting balances. Review is required.');
       const ids = new Set(ledger.transactions.map(row => row.ledgerTransactionId));
-      // Never attach annotations by amount or ordinal alone. Exact stable identity
-      // transfers automatically; changed annotated identities require human review.
-      const stranded = db.prepare(`SELECT a.ledgerTransactionId FROM transactionAnnotations a
-        JOIN ledgerTransactions t ON t.ledgerTransactionId=a.ledgerTransactionId`).all()
-        .some(row => !ids.has(row.ledgerTransactionId));
-      if (stranded) throw new ReviewRequired('An annotated transaction changed identity. Review its category or notes before applying the refresh.');
+      const oldIds = new Set(savedTransactions.map(row=>row.ledgerTransactionId));
+      const savedById = new Map(savedTransactions.map(row=>[row.ledgerTransactionId,row]));
+      const oldBalances = new Map(savedBalances.map(row=>[`${row.accountId}:${row.month}`,row]));
+      const nextBalances = new Map(ledger.balanceSnapshots.map(row=>[`${row.accountId}:${row.month}`,row]));
+      const balanceChanges = [...new Set([...oldBalances.keys(),...nextBalances.keys()])].flatMap(key=>{
+        const old=oldBalances.get(key),next=nextBalances.get(key);
+        const beforeCents=old?Number(old.balanceCents):null,afterCents=next?Math.round(next.balance*100):null;
+        const beforeDate=old?.capturedAt?String(old.capturedAt):null,afterDate=next?.capturedAt ?? null;
+        return beforeCents===afterCents && beforeDate===afterDate ? [] : [{accountId:Number(old?.accountId ?? next!.accountId),month:String(old?.month ?? next!.month),beforeCents,afterCents,beforeDate,afterDate}];
+      });
+      const dispositions = planAnnotationRefresh(db,annotations,ledger);
+      diagnostics.preview = { candidateFiles:candidates.length,transactionCountBefore:savedTransactions.length,transactionCountAfter:ledger.transactions.length,
+        added:ledger.transactions.filter(row=>!oldIds.has(row.ledgerTransactionId)).map(({ledgerTransactionId,accountId,date,amount,description})=>({ledgerTransactionId,accountId,date,amount,description})),
+        removed:savedTransactions.filter(row=>!ids.has(row.ledgerTransactionId)),
+        updated:ledger.transactions.flatMap(row=>{const old=savedById.get(row.ledgerTransactionId);return old && (old.date!==row.date || old.description!==row.description) ? [{ledgerTransactionId:row.ledgerTransactionId,before:{date:old.date,description:old.description},after:{date:row.date,description:row.description}}] : [];}),
+        annotations:dispositions.filter(row=>row.disposition!=='unchanged'),
+        annotationCounts:Object.fromEntries(['unchanged','transferred','retained-history','review-required'].map(kind=>[kind,dispositions.filter(row=>row.disposition===kind).length])) as NonNullable<RefreshDiagnostics['preview']>['annotationCounts'],mappings,
+        balancesBefore:savedBalances,balancesAfter:ledger.balanceSnapshots,balanceChanges };
+      if (ledger.balanceConflicts?.length || diagnostics.conflicts.some(conflict => conflict.origin === 'new')) throw new ReviewRequired('Parser refresh introduces transaction ambiguity or contains conflicting balances. Review is required.');
+      if (dispositions.some(row=>row.disposition==='review-required')) throw new ReviewRequired('An annotated transaction changed identity. Review its category or notes before applying the refresh.');
       if (options.validateOnly) throw new ReviewRequired('Diagnostic run only; validated changes were not applied.');
+      applyAnnotationRefresh(db,dispositions,before);
       materializeLedger(db, ledger);
       for (const { file, version } of candidates) {
         report(db, file, version, 'current', null, before);
@@ -206,13 +245,14 @@ export async function refreshParserDerivations(options: {
 let activeRefresh: Promise<Awaited<ReturnType<typeof refreshParserDerivations>>> | undefined;
 let refreshError: string | null = null;
 export function parserMaintenanceStatus() {
-  return { running: Boolean(activeRefresh), error: refreshError, issues: parserRefreshStatus(), diagnostics: readRefreshDiagnostics(getDb()) };
+  return { running: Boolean(activeRefresh), error: refreshError, issues: parserRefreshStatus(), diagnostics: readRefreshDiagnostics(getDb()), annotationHistory:readAnnotationHistory(getDb()) };
 }
-export function refreshChangedParsers(retry = false) {
+export function refreshChangedParsers(retry = false, options: { validateOnly?: boolean; expectedRevision?: string } = {}) {
+  if (activeRefresh && (options.validateOnly || options.expectedRevision)) throw new ReviewRequired('Parser maintenance is already running. Wait for it to finish.');
   if (!activeRefresh) {
     refreshError = null;
-    activeRefresh = recoverImportOriginals().then(() => refreshParserDerivations({ retry })).catch(() => {
-      refreshError = 'Automatic parser maintenance failed. Your previous ledger remains available; retry from Import.';
+    activeRefresh = recoverImportOriginals().then(() => refreshParserDerivations({ retry, ...options })).catch((error) => {
+      refreshError = error instanceof ReviewRequired ? error.message : 'Automatic parser maintenance failed. Your previous ledger remains available; retry from Import.';
       return { refreshed: 0, issues: parserRefreshStatus() };
     }).finally(() => { activeRefresh = undefined; });
   }

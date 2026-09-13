@@ -9,6 +9,8 @@ const { buildLedgerFromSourceFacts, materializeLedger } = await import('./ledger
 const { hashContent } = await import('../hash');
 const { recoverImportOriginals } = await import('./originalRecovery');
 const { registerApprovedReplacement } = await import('./importReplacements');
+const { approveRefreshAccountChoice } = await import('./parserRefreshAccounts');
+const { captureAnnotations, planAnnotationRefresh, readAnnotationHistory } = await import('./parserRefreshAnnotations');
 const { captureRefreshConflicts, compareRefreshConflicts, readRefreshDiagnostics } = await import('./parserRefreshDiagnostics');
 import type { AppImportParser } from './importTypes';
 initDatabase();
@@ -75,6 +77,34 @@ test.each(['mapping', 'empty', 'parse-error', 'annotation', 'integrity', 'missin
     expect(f.db.prepare('SELECT description FROM ledgerTransactions').get()?.description).toBe('Original description');
     expect(f.db.prepare('SELECT version FROM parserDerivations').get()?.version).toBe('v1');
     if (reason === 'annotation') expect(f.db.prepare('SELECT notes FROM transactionAnnotations').get()?.notes).toBe('Keep my note');
+  } finally { f.memory.close(); }
+});
+
+test.each(['confirmed','approved','other-account','wrong-owner','ambiguous'] as const)('refresh account aliases remain scoped to confirmed destinations: %s', async mode => {
+  const f = fixture();
+  try {
+    f.db.exec("INSERT INTO accounts(id,name,type,accountHolder) VALUES(2,'Other','checking','Other owner')");
+    if (mode === 'approved') approveRefreshAccountChoice(f.db, {
+      sourceFileId:1,contentHash:f.db.prepare('SELECT contentHash FROM sourceFiles WHERE id=1').get()!.contentHash,
+      institution:'Synthetic',sourceAccountKey:'new-identity',accountId:1,approvalNote:'User confirmed historical number.',
+    });
+    else {
+      f.db.exec("INSERT INTO sourceFiles(id,fileName,contentHash,status) VALUES(2,'other.txt','other','committed')");
+      f.db.prepare("INSERT INTO sourceAccounts(sourceFileId,institution,sourceAccountKey,accountId) VALUES(2,'Synthetic','new-identity',?)")
+        .run(mode === 'other-account' ? 2 : 1);
+      if (mode === 'ambiguous') f.db.exec("INSERT INTO sourceFiles(id,fileName,contentHash,status) VALUES(3,'third.txt','third','committed'); INSERT INTO sourceAccounts(sourceFileId,institution,sourceAccountKey,accountId) VALUES(3,'Synthetic','new-identity',2)");
+    }
+    const parse=f.parser.parse;
+    f.parser.parse=async input=>{const result=await parse(input);result.transactions[0]!.remoteAccountId='new-identity';
+      if(mode==='wrong-owner'){f.db.exec("UPDATE accounts SET accountHolder='Confirmed owner' WHERE id=1");result.transactions[0]!.accountHolder='Wrong owner';}
+      return result;};
+    const result=await f.run();
+    const expected=['approved','confirmed'].includes(mode);
+    expect(result.refreshed).toBe(expected?1:0);
+    if(expected){
+      expect(f.db.prepare("SELECT accountId FROM sourceAccounts WHERE sourceFileId=1 AND sourceAccountKey='new-identity'").get()?.accountId).toBe(1);
+      expect(f.db.prepare("SELECT accountId FROM sourceAccounts WHERE sourceFileId=1 AND sourceAccountKey='remote'").get()?.accountId).toBe(1);
+    }
   } finally { f.memory.close(); }
 });
 
@@ -169,6 +199,81 @@ test.each([false,true])('refresh tolerates unchanged overlap warnings but blocks
     expect(f.db.prepare('SELECT amountCents FROM sourceTransactions WHERE sourceFileId=1').get()?.amountCents).toBe(-1000);
     if(introduced) expect(readRefreshDiagnostics(f.db)?.conflicts[0]?.origin).toBe('new');
     else expect(f.db.prepare('SELECT description FROM sourceTransactions WHERE sourceFileId=1').get()?.description).toBe('Clean description');
+  }finally{f.memory.close();}
+});
+
+test('excluded summary annotations remain in accessible history without becoming purchases', async () => {
+  const f=fixture();
+  try {
+    f.db.exec("INSERT INTO transactionAnnotations(ledgerTransactionId,notes) SELECT ledgerTransactionId,'Summary note' FROM ledgerTransactions");
+    f.db.exec("UPDATE sourceTransactions SET sourceRole='statement-summary'");
+    f.parser.parse=()=>({transactions:[],balances:[{sourceRowIndex:null,date:'2026-01-31',balanceCents:5000,institution:'Synthetic',remoteAccountId:'remote'}]});
+    expect((await f.run()).refreshed).toBe(1);
+    expect(f.db.prepare('SELECT count(*) AS n FROM ledgerTransactions').get()?.n).toBe(0);
+    expect(f.db.prepare('SELECT notes FROM transactionAnnotations').get()?.notes).toBe('Summary note');
+    expect(readAnnotationHistory(f.db)[0]).toMatchObject({disposition:'retained-history',targetId:null,evidence:{annotation:{notes:'Summary note'}}});
+    expect((await f.run()).refreshed).toBe(0);
+    expect(readAnnotationHistory(f.db)).toHaveLength(1);
+  } finally {f.memory.close();}
+});
+
+test('changed description transfers annotations only with matching original occurrence evidence', async () => {
+  const f=fixture();
+  try {
+    const raw={referenceNumber:'synthetic-reference'};
+    f.db.prepare('UPDATE sourceTransactions SET rawJson=?').run(JSON.stringify(raw));
+    f.db.exec("INSERT INTO transactionAnnotations(ledgerTransactionId,notes) SELECT ledgerTransactionId,'Keep my note' FROM ledgerTransactions");
+    const parse=f.parser.parse;f.parser.parse=async input=>{const result=await parse(input);result.transactions[0]!.raw=raw;return result;};
+    expect((await f.run()).refreshed).toBe(1);
+    expect(f.db.prepare('SELECT notes FROM transactionAnnotations JOIN ledgerTransactions USING(ledgerTransactionId)').get()?.notes).toBe('Keep my note');
+    expect(readAnnotationHistory(f.db)[0]?.disposition).toBe('transferred');
+  }finally{f.memory.close();}
+});
+
+test('merging different nonempty annotation notes requires review', () => {
+  const f=fixture();
+  try {
+    f.db.exec("UPDATE sourceTransactions SET rawJson='{\"referenceNumber\":\"synthetic\"}'; INSERT INTO transactionAnnotations(ledgerTransactionId,notes) SELECT ledgerTransactionId,'First note' FROM ledgerTransactions");
+    const before=captureAnnotations(f.db,buildLedgerFromSourceFacts(f.db));
+    before.push({...before[0]!,annotation:{...before[0]!.annotation,ledgerTransactionId:'other-old-identity',notes:'Different note'}});
+    f.db.exec("UPDATE sourceTransactions SET description='Corrected description'");
+    const planned=planAnnotationRefresh(f.db,before,buildLedgerFromSourceFacts(f.db));
+    expect(planned.map(row=>row.disposition)).toEqual(['review-required','review-required']);
+    expect(readAnnotationHistory(f.db)).toHaveLength(0);
+  }finally{f.memory.close();}
+});
+
+test.each(['footer','reference','different-reference'] as const)('annotation lineage needs matching source evidence: %s', async mode => {
+  const f=fixture();
+  try {
+    const old=mode==='footer'?'Synthetic payment continued on the next page':'Purchase Store P00300000000000001 Card 1234';
+    f.db.prepare('UPDATE sourceTransactions SET description=?,rawJson=?').run(old,JSON.stringify({source:'wells-fargo-statement'}));
+    materializeLedger(f.db,buildLedgerFromSourceFacts(f.db));
+    f.db.exec("INSERT INTO transactionAnnotations(ledgerTransactionId,notes) SELECT ledgerTransactionId,'Preserve this note' FROM ledgerTransactions");
+    const parse=f.parser.parse;
+    f.parser.parse=async input=>{const result=await parse(input);const row=result.transactions[0]!;
+      row.description=mode==='footer'?'Synthetic payment':`Purchase with Cash Back Store ${mode==='reference'?'P00300000000000001':'P00300000000000002'} Card 1234`;
+      row.raw={source:'wells-fargo-statement'};
+      row.sourceRowIndex=7;
+      if(mode!=='footer') row.amountCents=-2000;
+      return result;};
+    expect((await f.run()).refreshed).toBe(mode==='different-reference'?0:1);
+    expect(f.db.prepare('SELECT notes FROM transactionAnnotations JOIN ledgerTransactions USING(ledgerTransactionId)').get()?.notes).toBe('Preserve this note');
+  }finally{f.memory.close();}
+});
+
+test('refresh preview is revision bound and exposes real ledger and annotation deltas', async () => {
+  const f=fixture();
+  try {
+    const options={db:f.db,parsers:[f.parser],versions:{synthetic:'v2'},backup:()=>{},retry:true};
+    await refreshParserDerivations({...options,validateOnly:true});
+    const preview=readRefreshDiagnostics(f.db)!;
+    expect(preview.preview).toMatchObject({transactionCountBefore:1,transactionCountAfter:1});
+    expect(preview.preview?.added).toHaveLength(1);
+    expect(preview.preview?.removed).toHaveLength(1);
+    f.db.exec("UPDATE accounts SET name='Edited after preview'");
+    await expect(refreshParserDerivations({...options,expectedRevision:preview.inputRevision})).rejects.toThrow('stale');
+    expect(f.db.prepare('SELECT description FROM ledgerTransactions').get()?.description).toBe('Original description');
   }finally{f.memory.close();}
 });
 
