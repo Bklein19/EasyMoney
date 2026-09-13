@@ -157,7 +157,7 @@ function normalizeSql(sql: string) {
 }
 
 function normalizeParams(params: DatabaseParams) {
-  if (!params || typeof params !== 'object' || Array.isArray(params)) return params;
+  if (!params || typeof params !== 'object' || Array.isArray(params) || ArrayBuffer.isView(params)) return params;
   return Object.fromEntries(
     Object.entries(params).flatMap(([key, value]) => (
       key.startsWith('$') ? [[key, value]] : [[key, value], [`$${key}`, value]]
@@ -898,6 +898,24 @@ export function initDatabase() {
   });
   runSchemaMigration('2026-09-07-source-coverage-basis', () => {
     if (!tableColumnNames('sourceFiles').includes('coverageBasis')) db.exec('ALTER TABLE sourceFiles ADD COLUMN coverageBasis TEXT');
+  });
+  runSchemaMigration('2026-09-12-parser-derivations', () => {
+    db.exec(`
+      CREATE TABLE importOriginals (
+        importFileId INTEGER PRIMARY KEY REFERENCES importFiles(id),
+        contentHash TEXT NOT NULL, bytesHash TEXT NOT NULL, bytes BLOB NOT NULL
+      );
+      CREATE TABLE parserDerivations (
+        sourceFileId INTEGER PRIMARY KEY REFERENCES sourceFiles(id),
+        version TEXT, attemptedVersion TEXT, attemptedRevision TEXT, status TEXT NOT NULL, reason TEXT,
+        updatedAt TEXT NOT NULL
+      );
+      CREATE TABLE parserDerivationHistory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sourceFileId INTEGER NOT NULL, version TEXT, factsJson TEXT NOT NULL,
+        createdAt TEXT NOT NULL
+      );
+    `);
   });
 
   runSchemaMigration('2026-08-27-account-last4', () => {

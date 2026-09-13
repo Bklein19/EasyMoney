@@ -10,6 +10,7 @@ import ColumnMapper, { type CsvColumnMapping } from './ColumnMapper';
 import ImportPreview from './ImportPreview';
 import BankDetector from './BankDetector';
 import DataFreshnessPanel from './DataFreshnessPanel';
+import ParserRefreshStatus from './ParserRefreshStatus';
 import {
   filterImportHistory,
   groupImportHistory,
@@ -547,6 +548,7 @@ export default function ImportPage() {
 
       {stage === 'upload' && (
         <div className="upload-container">
+          <ParserRefreshStatus />
           <DataFreshnessPanel onImportComplete={refreshAfterCatchUpImport} />
           <ImportHistory
             imports={importHistory}

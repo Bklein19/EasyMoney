@@ -14,6 +14,7 @@ import type { CommitImportTransaction, ImportAccountMapping, ImportAccountMappin
 import { CUSTOM_CSV_PARSER_ID, parseCustomCsv } from './importParsers/customCsv.ts';
 import { mappingFromProfile } from './importParsers/csvMapping.ts';
 import { resolveImportParser } from './importParsers/index.ts';
+import parserVersions from './importParsers/versions.json';
 import { buildLedgerFromSourceFacts, materializeLedger } from './ledgerRebuild.ts';
 import { assignLedgerTransactionIdentities, getLedgerTransactionBaseKey } from './transactionIdentity.ts';
 
@@ -477,7 +478,7 @@ export function reimportFiles(importFileIds: Array<number | string> | undefined 
   return { ok: true, importFileIds: ids, count: ids.length, ...materialized };
 }
 
-function getStableSourceTransactionId(importFileId: number, transaction: ParsedImportTransaction) {
+export function getStableSourceTransactionId(importFileId: number, transaction: ParsedImportTransaction) {
   return `src_txn_${hashContent([
     importFileId,
     transaction.sourceRowIndex,
@@ -1050,7 +1051,7 @@ type ParsedSourceAccountFact = Pick<
   'institution' | 'account' | 'remoteAccountId' | 'accountHolder' | 'raw'
 >;
 
-function parsedSourceAccountIdentity(item: ParsedSourceAccountFact, fallbackInstitution?: string | null) {
+export function parsedSourceAccountIdentity(item: ParsedSourceAccountFact, fallbackInstitution?: string | null) {
   const institution = item.institution || fallbackInstitution || null;
   const accountName = item.account || 'Selected account';
   const accountHolder = item.accountHolder?.trim() || null;
@@ -1303,7 +1304,24 @@ function readStagedBalances(importFileId: number, balanceRowIds: number[] | null
     }));
 }
 
-export async function previewImport({ fileName, text, fileBytes, customProfile = null }: PreviewImportOptions) {
+export async function previewImport(options: PreviewImportOptions) {
+  const result = await previewImportUnsafe(options);
+  if (result.importFileId) {
+    const bytes = options.fileBytes ?? new TextEncoder().encode(options.text);
+    retainImportOriginal(result.importFileId, bytes);
+  }
+  return result;
+}
+
+export function retainImportOriginal(importFileId: number, bytes: Uint8Array) {
+  const contentHash = hashContent(bytes);
+  const metadata = getDb().prepare('SELECT contentHash FROM importFiles WHERE id=?').get(importFileId);
+  if (metadata?.contentHash !== contentHash) throw new Error('Original file integrity mismatch.');
+  getDb().prepare('INSERT OR IGNORE INTO importOriginals (importFileId, contentHash, bytesHash, bytes) VALUES (?, ?, ?, ?)')
+    .run(importFileId, contentHash, contentHash, bytes);
+}
+
+async function previewImportUnsafe({ fileName, text, fileBytes, customProfile = null }: PreviewImportOptions) {
   const contentHash = hashImportContent(text, fileBytes);
   let parsed: ReturnType<typeof parseCsv> | null = null;
   let csvParseError: Error | null = null;
@@ -1365,6 +1383,9 @@ export async function previewImport({ fileName, text, fileBytes, customProfile =
       parsedTransactions: parsedResult.transactions,
       parsedBalances: parsedResult.balances,
     });
+    getDb().prepare(`INSERT INTO parserDerivations (sourceFileId, version, status, updatedAt)
+      SELECT id, ?, 'current', ? FROM sourceFiles WHERE importFileId = ?`)
+      .run((parserVersions as Record<string, string>)[appParser.id] ?? null, new Date().toISOString(), preview.importFileId);
     const previewTransactions = readStagedTransactions(
       preview.importFileId,
       transactions.map(transaction => preview.rowIds[transaction.sourceRowIndex])

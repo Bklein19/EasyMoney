@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router';
 import { Menu } from 'lucide-react';
@@ -13,7 +13,7 @@ import BudgetingPage from './components/budgeting/BudgetingPage.jsx';
 import { NetWorthPage } from './components/investments/NetWorthPage';
 import { RetirementPage } from './components/investments/RetirementPage';
 import { SavingsRatePage } from './components/investments/SavingsRatePage';
-import { trpc } from './api/trpc';
+import { trpc, queryClient } from './api/trpc';
 import './App.css';
 import BackupsPage from './components/settings/BackupsPage';
 
@@ -38,6 +38,14 @@ const getInitialSidebarCollapsed = () => {
 };
 
 function App() {
+  const maintenance = useQuery({ ...trpc.imports.parserRefreshStatus.queryOptions(), refetchInterval: 3000 });
+  const wasRefreshing = useRef(false);
+  useEffect(() => {
+    const running = maintenance.data?.running;
+    if (running === undefined) return;
+    if (wasRefreshing.current && !running) void queryClient.invalidateQueries();
+    wasRefreshing.current = running;
+  }, [maintenance.data?.running]);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(getInitialSidebarCollapsed);
   const [isSidebarPeekOpen, setIsSidebarPeekOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);

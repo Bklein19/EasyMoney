@@ -7,8 +7,8 @@
   "scripts": {
     "dev": "bun scripts/electrobun.ts dev",
     "dev:watch": "bun scripts/electrobun.ts dev --watch",
-    "dev:web": "bun --hot server/index.ts --open",
-    "api": "bun server/index.ts",
+    "dev:web": "bun scripts/parser-versions.ts && bun --hot server/index.ts --open",
+    "api": "bun scripts/parser-versions.ts && bun server/index.ts",
     "data:freshness": "bun scripts/data-freshness.ts",
     "connector:develop": "bun scripts/develop-connector.ts",
     "sync": "bun scripts/sync.ts",

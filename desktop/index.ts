@@ -47,6 +47,7 @@ const [databaseModule, seedModule, envModule, routerModule] = await Promise.all(
 envModule.loadLocalEnv();
 databaseModule.initDatabase();
 seedModule.seedDatabase();
+void (await import('../server/app/parserRefresh')).refreshChangedParsers();
 
 const { appRouter } = routerModule;
 

@@ -33,6 +33,7 @@ import { isSyncInstitutionId } from './dataSync/registry.ts';
 import { listSyncTargets } from './dataSync/executionPlan.ts';
 import type { SyncInstitutionId } from './dataSync/types.ts';
 import { commitImport, listImportHistory, previewImport, reimportFile, reimportFiles, unimportFile, unimportFiles } from './imports.ts';
+import { parserMaintenanceStatus, refreshChangedParsers } from './parserRefresh';
 import { listImportProfiles, upsertImportProfile } from './importProfiles.ts';
 import { getInvestmentNetWorthReport, getSavingsRateReport } from './investmentReports.ts';
 import { saveLocalEnvValue } from './localEnv.ts';
@@ -272,6 +273,8 @@ export const appRouter = t.router({
   }),
 
   imports: t.router({
+    parserRefreshStatus: t.procedure.query(() => parserMaintenanceStatus()),
+    refreshParsers: t.procedure.mutation(() => refreshChangedParsers(true)),
     preview: t.procedure
       .input(z.object({
         fileName: z.string().min(1),

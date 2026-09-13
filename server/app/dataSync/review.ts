@@ -414,6 +414,8 @@ export async function stageSyncArtifactWithProvenance(
     | { id: number; status: 'committed' | 'previewed' }
     | undefined;
   if (existing) {
+    const { retainImportOriginal } = await import('../imports');
+    retainImportOriginal(existing.id, fileBytes);
     const routes = existing.status === 'committed'
       ? {}
       : { accountId: input.accountId, accountRoutes: input.accountRoutes };

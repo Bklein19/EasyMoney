@@ -45,6 +45,9 @@ function resetAppTables() {
   initDatabase();
   db.transaction(() => {
     for (const table of [
+      'parserDerivationHistory',
+      'parserDerivations',
+      'importOriginals',
       'sourceBalances',
       'sourceTransactions',
       'sourceAccounts',
