@@ -1,6 +1,7 @@
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { makeTx } from "./_helpers";
 import { getDocumentProxy, extractText } from "unpdf";
+import { readSecurityTrade } from '../../securityTrade';
 
 export const meta: ParserMeta = {
   id: "vanguard-statement-pdf",
@@ -122,15 +123,24 @@ export function parseVanguardStatementText(allText: string): ParseResult {
         if (!m) continue;
         description = (m[3]!.trim() + " " + row.slice(line.length).trim()).trim();
       }
+      // A December trade can settle in January; use the explicit dates, not a
+      // fixed settlement-day offset (weekends and holidays vary).
+      const settlementDate = parseMd(m[1]!, Number(m[1]!.slice(0, 2)) > Number(statementDate.slice(5, 7)) ? year - 1 : year);
+      const tradeYear = Number(settlementDate.slice(0, 4)) - (Number(m[2]!.slice(0, 2)) > Number(m[1]!.slice(0, 2)) ? 1 : 0);
+      const tradeDate = parseMd(m[2]!, tradeYear);
+      const tradeFields = description.match(/^([A-Z0-9.-]+)\s+.*?\b(Buy|Sell)\s+(?:Cash|Margin)\s+(-?[\d,]+(?:\.\d+)?)/i);
+      const securityTrade = tradeFields ? readSecurityTrade({
+        tradeDate, settlementDate, symbol: tradeFields[1], action: tradeFields[2]!.toLowerCase(), quantity: tradeFields[3]!.replace(/^-/, ''),
+      }) : null;
       transactions.push(
         makeTx({
-          date: parseMd(m[1]!, year),
+          date: securityTrade ? tradeDate : settlementDate,
           amount_cents: parseAmountToCents(m[4]!),
           description,
           account,
           institution,
           ...(accountHolder ? { account_holder: accountHolder } : {}),
-          raw: { settlement: m[1], trade: m[2], row },
+          raw: { settlement: m[1], trade: m[2], row, ...(securityTrade ? { securityTrade } : {}) },
         })
       );
     }

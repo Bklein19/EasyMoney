@@ -1,6 +1,7 @@
 import type { AppImportParseInput, AppImportParseResult, AppImportParser, ParsedImportTransaction } from '../importTypes.ts';
 import { parseAmount, parseDate } from './csvMapping.ts';
 import { normalizedHeader, parseCsvRows, rowRecord } from './csvRows.ts';
+import { readSecurityTrade } from '../securityTrade';
 
 const TRANSACTION_HEADERS = [
   'account number',
@@ -28,9 +29,14 @@ function transaction(input: AppImportParseInput, row: Record<string, string>, so
   if (!date || amount === null || (!transactionType && !transactionDescription)) return null;
 
   const description = [transactionType, transactionDescription].filter(Boolean).join(': ');
+  const settlement = parseDate(row['Settlement Date']?.trim(), ['yyyy-MM-dd', 'MM/dd/yyyy', 'M/d/yyyy']);
+  const securityTrade = readSecurityTrade({
+    tradeDate: date.toISOString().slice(0, 10), settlementDate: settlement?.toISOString().slice(0, 10),
+    action: transactionType?.toLowerCase(), symbol: row.Symbol?.trim(), quantity: row.Shares?.trim().replace(/^-/, ''),
+  });
   return {
     sourceRowIndex,
-    date: date.toISOString(),
+    date: date.toISOString().slice(0, 10),
     amountCents: Math.round(amount * 100),
     description,
     institution: 'Vanguard',
@@ -38,6 +44,7 @@ function transaction(input: AppImportParseInput, row: Record<string, string>, so
     sourceRole: 'activity',
     raw: {
       source: 'vanguard-activity-csv',
+      ...(securityTrade ? { securityTrade } : {}),
       settlementDate: row['Settlement Date']?.trim() || undefined,
       investmentName: row['Investment Name']?.trim() || undefined,
       symbol: row.Symbol?.trim() || undefined,

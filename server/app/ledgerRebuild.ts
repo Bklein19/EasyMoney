@@ -1,12 +1,13 @@
 import { getDb } from '../database.ts';
 import { hashContent } from '../hash.ts';
+import { readSecurityTrade, securityTradeKey } from './securityTrade';
 import {
   assignLedgerTransactionIdentities,
   getLedgerTransactionBaseKey,
   getTransactionOccurrenceSortKey,
 } from './transactionIdentity.ts';
 
-export const LEDGER_REBUILD_POLICY_VERSION = 'cross-format-document-occurrences-v2';
+export const LEDGER_REBUILD_POLICY_VERSION = 'structured-security-trades-v3';
 
 interface SourceTransactionRow {
   id: number;
@@ -206,6 +207,8 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
 
   const transactionInputs = sourceTransactions.map(row => {
     const raw = parseRaw(row.rawJson);
+    const securityTrade = readSecurityTrade(raw.securityTrade);
+    const date = securityTrade?.tradeDate ?? row.date;
     const amount = dollarsFromCents(row.amountCents);
     const description = row.description || '';
     const merchant = typeof raw.merchant === 'string' ? raw.merchant : description;
@@ -221,7 +224,7 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
       : rawKind;
     const fingerprint = getTransactionFingerprint({
       accountId: row.accountId,
-      date: row.date,
+      date,
       amount,
       originalDescription,
       description,
@@ -230,6 +233,8 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
 
     return {
       ...row,
+      date,
+      securityTrade,
       accountId: row.accountId,
       amount,
       description,
@@ -264,13 +269,16 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
 
   const activityExportGroups = new Map<string, typeof dedupedTransactionInputs>();
   const retainedTransactionInputs = new Set(dedupedTransactionInputs);
-  const economicKey = (row: typeof dedupedTransactionInputs[number]) => JSON.stringify([row.accountId, normalizeDate(row.date), row.amountCents]);
+  const economicKey = (row: typeof dedupedTransactionInputs[number]) => JSON.stringify([
+    row.accountId, normalizeDate(row.date), row.amountCents,
+    row.securityTrade ? securityTradeKey(row.securityTrade) : null,
+  ]);
   const reconciledEconomicKeys = new Set<string>();
   reconcileEconomicDocuments();
   for (const transaction of retainedTransactionInputs) {
     if (!['activity-export', 'statement'].includes(transaction.sourceType || '')) continue;
     if (reconciledEconomicKeys.has(economicKey(transaction))) continue;
-    const key = `${transaction.sourceType}\0${getLedgerTransactionBaseKey(transaction)}`;
+    const key = `${transaction.sourceType}\0${transaction.securityTrade ? economicKey(transaction) : getLedgerTransactionBaseKey(transaction)}`;
     const group = activityExportGroups.get(key);
     if (group) {
       group.push(transaction);
@@ -368,7 +376,9 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
           const match = available.find(candidate => normalizeText(candidate.originalDescription || candidate.description) === normalizeText(row.originalDescription || row.description)) ?? available[0];
           if (match) {
             used.add(match.id);
-            decisions.set(row.id, { representative: match.id, reason: 'Same account, date and amount across statement/export documents; matched one-to-one by document occurrence, with higher-priority source wording retained.' });
+          decisions.set(row.id, { representative: match.id, reason: row.securityTrade
+            ? 'Same account, amount, security, quantity, action, trade date and settlement date; matched one-to-one by document occurrence.'
+            : 'Same account, date and amount across statement/export documents; matched one-to-one by document occurrence, with higher-priority source wording retained.' });
             retainedTransactionInputs.delete(row);
           } else {
             canonical.push(row);
@@ -388,6 +398,9 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
     // These rows already used their same-day document occurrence budget.
     // A second fuzzy-date pass must not consume an excess real occurrence.
     if (reconciledEconomicKeys.has(economicKey(transaction))) continue;
+    // Explicit trade evidence must not fall back to generic description/date
+    // matching and accidentally reconcile a different security or quantity.
+    if (transaction.securityTrade) continue;
     const crossSourceIdentity = typeof transaction.raw.crossSourceIdentity === 'string'
       ? transaction.raw.crossSourceIdentity.trim()
       : '';
@@ -475,9 +488,10 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
     for (const row of group) {
       const candidates = group.filter(candidate => {
         if (candidate.sourceType === row.sourceType || dateDistanceInDays(candidate.date, row.date) > 3) return false;
+        if (row.securityTrade && candidate.securityTrade && securityTradeKey(row.securityTrade) !== securityTradeKey(candidate.securityTrade)) return false;
         // Same-day leftovers are excess real occurrences under the document
         // policy above, not additional unresolved pairs.
-        return normalizeDate(row.date) !== normalizeDate(candidate.date);
+        return normalizeDate(row.date) !== normalizeDate(candidate.date) || Boolean(row.securityTrade) !== Boolean(candidate.securityTrade);
       });
       if (candidates.length) ambiguities.push({
         sourceTransactionId: row.id,

@@ -1,3 +1,5 @@
+import type { SecurityTrade } from './securityTrade';
+
 export interface ImportProfile {
   name: string;
   statementType?: string;
@@ -22,7 +24,7 @@ export interface ParsedImportTransaction {
   remoteAccountId?: string | null;
   accountHolder?: string | null;
   sourceRole: ParsedImportSourceRole;
-  raw?: Record<string, unknown>;
+  raw?: Record<string, unknown> & { securityTrade?: SecurityTrade };
 }
 
 export interface ParsedImportBalance {

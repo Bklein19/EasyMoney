@@ -862,6 +862,46 @@ test('same-day excess occurrences cannot be consumed again by posting-date drift
   expect(ledger.transactions.filter(row=>row.date.startsWith('2026-05-01'))).toHaveLength(2);
 });
 
+test.each(['same','security','quantity','action','settlement','missing'] as const)('structured trade matching uses both dates and full identity: %s', difference => {
+  const accountId = Number(insertRow('accounts', {name:'Trade test',institution:'Example',type:'investment'}));
+  for (const [index,sourceType] of ['activity-export','statement'].entries()) {
+    const file=insertCommittedSourceFile({fileName:`trade-${index}`,parserName:'example',sourceType,priority:100,institution:'Example'});
+    const sourceAccountId=insertSourceAccount(file.sourceFileId,accountId,`account-${index}`);
+    const trade={tradeDate:'2026-05-01',settlementDate:'2026-05-04',symbol:'TEST',quantity:'2.50',action:'buy'};
+    if(index) {
+      if(difference==='security')trade.symbol='OTHER';
+      if(difference==='quantity')trade.quantity='3';
+      if(difference==='action')trade.action='sell';
+      if(difference==='settlement')trade.settlementDate='2026-05-05';
+    }
+    for(let occurrence=0;occurrence<(index?1:2);occurrence++) insertSourceTransaction({...file,sourceAccountId,stableSourceId:`trade-${index}-${occurrence}`,date:index?'2026-05-04':'2026-05-01',amountCents:-10000,description:index?'Statement wording':'Activity wording',priority:100,raw:index&&difference==='missing'?{}:{securityTrade:trade}});
+  }
+  const ledger=buildLedgerFromSourceFacts(getDb());
+  expect(ledger.transactions).toHaveLength(difference==='same'?2:3);
+  expect(ledger.provenance?.filter(p=>!p.selected)).toHaveLength(difference==='same'?1:0);
+  if(difference==='same') {
+    expect(ledger.transactions.every(t=>t.date==='2026-05-01')).toBe(true);
+    expect(ledger.ambiguities).toHaveLength(0);
+  }
+});
+
+test('four airline bag fees remain four purchases while the statement/export copies reconcile', () => {
+  const accountId=Number(insertRow('accounts',{name:'Card',institution:'Example',type:'credit'}));
+  for(const [index,sourceType,date,description] of [
+    [0,'statement','2026-03-19','Airline A bags'],
+    [1,'activity-export','2026-03-20','Airline B bags'],
+    [2,'statement','2026-03-20','Airline B bags itinerary detail'],
+  ] as const){
+    const file=insertCommittedSourceFile({fileName:`bags-${index}`,parserName:'example',sourceType,priority:100,institution:'Example'});
+    const sourceAccountId=insertSourceAccount(file.sourceFileId,accountId,`account-${index}`);
+    for(let occurrence=0;occurrence<2;occurrence++)insertSourceTransaction({...file,sourceAccountId,stableSourceId:`${index}-${occurrence}`,date,amountCents:-3500,description,priority:100});
+  }
+  const ledger=buildLedgerFromSourceFacts(getDb());
+  expect(ledger.transactions).toHaveLength(4);
+  expect(ledger.transactions.filter(t=>t.date.startsWith('2026-03-19'))).toHaveLength(2);
+  expect(ledger.transactions.filter(t=>t.date.startsWith('2026-03-20'))).toHaveLength(2);
+});
+
 test('source rebuild excludes legacy statement summaries even without corresponding detail', () => {
   const accountId = Number(insertRow('accounts', {
     name: 'Merrill Lynch',
