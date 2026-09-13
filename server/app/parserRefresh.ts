@@ -9,6 +9,7 @@ import versions from './importParsers/versions.json';
 import { recoverImportOriginals } from './originalRecovery';
 import { getStableSourceTransactionId, parsedSourceAccountIdentity } from './imports';
 import { buildLedgerFromSourceFacts, materializeLedger } from './ledgerRebuild';
+import { captureRefreshConflicts, compareRefreshConflicts, readRefreshDiagnostics, type RefreshDiagnostics } from './parserRefreshDiagnostics';
 import type { AppImportParseResult, AppImportParser, ParsedImportTransaction, ParsedImportBalance } from './importTypes';
 
 type Db = ReturnType<typeof getDb>;
@@ -35,7 +36,7 @@ function report(db: Db, file: SourceFile, version: string | null, status: string
 export function parserRefreshStatus(db = getDb()) {
   return db.prepare(`SELECT d.sourceFileId, sf.fileName, d.status, d.reason, d.updatedAt
     FROM parserDerivations d JOIN sourceFiles sf ON sf.id=d.sourceFileId
-    WHERE sf.status='committed' AND d.status='review-required' ORDER BY d.sourceFileId`).all() as Array<{
+    WHERE sf.status='committed' AND d.status IN ('review-required','conflict-involved','held') ORDER BY d.sourceFileId`).all() as Array<{
       sourceFileId: number; fileName: string; status: string; reason: string; updatedAt: string;
     }>;
 }
@@ -107,7 +108,7 @@ function replaceFacts(db: Db, candidate: Candidate) {
 }
 
 export async function refreshParserDerivations(options: {
-  db?: Db; parsers?: AppImportParser[]; versions?: Record<string, string>; backup?: () => unknown; retry?: boolean;
+  db?: Db; parsers?: AppImportParser[]; versions?: Record<string, string>; backup?: () => unknown; retry?: boolean; validateOnly?: boolean;
 } = {}) {
   const db = options.db ?? getDb();
   const parsers = options.parsers ?? IMPORT_PARSERS;
@@ -157,13 +158,16 @@ export async function refreshParserDerivations(options: {
     }
   }
   if (!candidates.length) return { refreshed: 0, issues: parserRefreshStatus(db) };
+  let diagnostics: RefreshDiagnostics | undefined;
   try {
     if (revision(db) !== before) throw new ReviewRequired('Data changed during refresh. Retry using the latest imports and choices.');
+    const baseline = captureRefreshConflicts(db, buildLedgerFromSourceFacts(db));
     (options.backup ?? (() => createDatabaseBackup('before-parser-refresh')))();
     db.transaction(() => {
       if (revision(db) !== before) throw new ReviewRequired('Data changed during refresh. Retry.');
       for (const candidate of candidates) replaceFacts(db, candidate);
       const ledger = buildLedgerFromSourceFacts(db);
+      diagnostics = compareRefreshConflicts(baseline, captureRefreshConflicts(db, ledger), before);
       if (ledger.ambiguities?.length || ledger.balanceConflicts?.length) throw new ReviewRequired('Candidate ledger has ambiguous transactions or conflicting balances. Review is required.');
       const ids = new Set(ledger.transactions.map(row => row.ledgerTransactionId));
       // Never attach annotations by amount or ordinal alone. Exact stable identity
@@ -172,16 +176,28 @@ export async function refreshParserDerivations(options: {
         JOIN ledgerTransactions t ON t.ledgerTransactionId=a.ledgerTransactionId`).all()
         .some(row => !ids.has(row.ledgerTransactionId));
       if (stranded) throw new ReviewRequired('An annotated transaction changed identity. Review its category or notes before applying the refresh.');
+      if (options.validateOnly) throw new ReviewRequired('Diagnostic run only; validated changes were not applied.');
       materializeLedger(db, ledger);
       for (const { file, version } of candidates) {
         report(db, file, version, 'current', null, before);
         db.prepare('UPDATE parserDerivations SET version=? WHERE sourceFileId=?').run(version, file.id);
       }
     })();
+    db.prepare('DELETE FROM parserRefreshDiagnostics').run();
     return { refreshed: candidates.length, issues: parserRefreshStatus(db) };
   } catch (error) {
     const reason = error instanceof ReviewRequired ? error.message : 'Refresh validation failed. Previous facts and ledger were retained.';
-    for (const { file, version } of candidates) report(db, file, version, 'review-required', reason, before);
+    // Candidate evidence is saved only after rollback; no temporary fact IDs are
+    // exposed as live references and no financial changes escape the transaction.
+    db.prepare('DELETE FROM parserRefreshDiagnostics').run();
+    if (diagnostics) db.prepare('INSERT INTO parserRefreshDiagnostics VALUES (1, ?)').run(JSON.stringify(diagnostics));
+    const involved = new Set(diagnostics?.conflicts.flatMap(c => c.members.map(m => m.sourceFileId)) ?? []);
+    for (const { file, version } of candidates) {
+      const participant = involved.has(file.id);
+      report(db, file, version, participant ? 'conflict-involved' : 'held', participant
+        ? 'This file participates in a candidate-ledger conflict; see the conflict evidence.'
+        : `Parsed successfully; held because the atomic batch was not applied. ${reason}`, before);
+    }
     return { refreshed: 0, issues: parserRefreshStatus(db) };
   }
 }
@@ -189,7 +205,7 @@ export async function refreshParserDerivations(options: {
 let activeRefresh: Promise<Awaited<ReturnType<typeof refreshParserDerivations>>> | undefined;
 let refreshError: string | null = null;
 export function parserMaintenanceStatus() {
-  return { running: Boolean(activeRefresh), error: refreshError, issues: parserRefreshStatus() };
+  return { running: Boolean(activeRefresh), error: refreshError, issues: parserRefreshStatus(), diagnostics: readRefreshDiagnostics(getDb()) };
 }
 export function refreshChangedParsers(retry = false) {
   if (!activeRefresh) {

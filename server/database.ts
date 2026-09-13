@@ -931,6 +931,12 @@ export function initDatabase() {
     )`);
   });
 
+  runSchemaMigration('2026-09-13-parser-refresh-diagnostics', () => {
+    db.exec(`CREATE TABLE parserRefreshDiagnostics (id INTEGER PRIMARY KEY CHECK (id=1), payloadJson TEXT NOT NULL)`);
+    // Retry old blanket reports once to replace them with attributable evidence.
+    db.prepare("UPDATE parserDerivations SET attemptedRevision=NULL WHERE status='review-required'").run();
+  });
+
   runSchemaMigration('2026-08-27-account-last4', () => {
     if (!tableColumnNames('accounts').includes('last4')) {
       db.prepare('ALTER TABLE accounts ADD COLUMN last4 TEXT').run();

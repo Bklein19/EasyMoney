@@ -46,6 +46,7 @@ function resetAppTables() {
   db.transaction(() => {
     for (const table of [
       'parserDerivationHistory',
+      'parserRefreshDiagnostics',
       'importReplacementVersions',
       'parserDerivations',
       'importOriginals',

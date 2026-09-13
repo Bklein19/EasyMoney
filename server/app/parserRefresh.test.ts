@@ -9,6 +9,7 @@ const { buildLedgerFromSourceFacts, materializeLedger } = await import('./ledger
 const { hashContent } = await import('../hash');
 const { recoverImportOriginals } = await import('./originalRecovery');
 const { registerApprovedReplacement } = await import('./importReplacements');
+const { captureRefreshConflicts, compareRefreshConflicts, readRefreshDiagnostics } = await import('./parserRefreshDiagnostics');
 import type { AppImportParser } from './importTypes';
 initDatabase();
 
@@ -102,6 +103,56 @@ test('conflicting new balances roll back both parsed facts and ledger', async ()
     expect(f.db.prepare('SELECT description FROM ledgerTransactions').get()?.description).toBe('Original description');
     expect(f.db.prepare('SELECT count(*) AS count FROM sourceBalances').get()?.count).toBe(0);
     expect(f.db.prepare('SELECT count(*) AS count FROM parserDerivationHistory').get()?.count).toBe(0);
+    const diagnostics = readRefreshDiagnostics(f.db)!;
+    expect(diagnostics.conflicts).toHaveLength(1);
+    expect(diagnostics.conflicts[0]!.origin).toBe('new');
+    expect(diagnostics.conflicts[0]!.members.map(m => m.amountCents)).toEqual([100, 200]);
+    expect(f.db.prepare('SELECT status FROM parserDerivations').get()?.status).toBe('conflict-involved');
+  } finally { f.memory.close(); }
+});
+
+test('pre-existing conflicts are attributed to participants, not unrelated refreshed files', async () => {
+  const f = fixture();
+  try {
+    for (const id of [2, 3]) {
+      f.db.prepare("INSERT INTO sourceFiles (id,fileName,contentHash,parserName,sourceType,status) VALUES (?,? ,?,'other','statement','committed')")
+        .run(id, `statement-${id}.txt`, `hash-${id}`);
+      f.db.prepare("INSERT INTO sourceAccounts (id,sourceFileId,accountId,institution,sourceAccountKey) VALUES (?,?,1,'Synthetic','remote')").run(id,id);
+      f.db.prepare("INSERT INTO sourceBalances (sourceFileId,sourceAccountId,date,balanceCents,priority) VALUES (?,?,'2026-01-31',?,100)").run(id,id,id*100);
+    }
+    const priorFacts = JSON.stringify(f.db.prepare('SELECT * FROM sourceTransactions').all());
+    const result = await f.run();
+    expect(result.refreshed).toBe(0);
+    expect(result.issues.find(i => i.sourceFileId === 1)?.status).toBe('held');
+    const diagnostics = readRefreshDiagnostics(f.db)!;
+    expect(diagnostics.conflicts).toHaveLength(1);
+    expect(diagnostics.conflicts[0]!.origin).toBe('existing');
+    expect(diagnostics.conflicts[0]!.members.map(m => m.sourceFileId)).toEqual([2,3]);
+    expect(JSON.stringify(f.db.prepare('SELECT * FROM sourceTransactions').all())).toBe(priorFacts);
+    expect(f.db.prepare('SELECT count(*) AS n FROM parserDerivationHistory').get()?.n).toBe(0);
+  } finally { f.memory.close(); }
+});
+
+test('conflict comparison ignores regenerated IDs and reports resolved groups', () => {
+  const f = fixture();
+  try {
+    for (const [id, amount] of [[1,100],[2,200]]) f.db.prepare("INSERT INTO sourceBalances (id,sourceFileId,sourceAccountId,date,balanceCents) VALUES (?,1,1,'2026-01-31',?)").run(id!,amount!);
+    const before = captureRefreshConflicts(f.db, buildLedgerFromSourceFacts(f.db));
+    f.db.exec('UPDATE sourceBalances SET id=id+100');
+    const after = captureRefreshConflicts(f.db, buildLedgerFromSourceFacts(f.db));
+    expect(compareRefreshConflicts(before,after,'revision').conflicts[0]!.origin).toBe('existing');
+    expect(compareRefreshConflicts(before,[],'revision').resolved).toHaveLength(1);
+  } finally { f.memory.close(); }
+});
+
+test('diagnostic-only refresh cannot apply otherwise valid changes', async () => {
+  const f = fixture();
+  try {
+    const result = await refreshParserDerivations({ db:f.db, parsers:[f.parser], versions:{synthetic:'v2'}, backup:()=>{}, validateOnly:true });
+    expect(result.refreshed).toBe(0);
+    expect(result.issues[0]!.status).toBe('held');
+    expect(f.db.prepare('SELECT description FROM sourceTransactions').get()?.description).toBe('Original description');
+    expect(f.db.prepare('SELECT count(*) AS n FROM parserDerivationHistory').get()?.n).toBe(0);
   } finally { f.memory.close(); }
 });
 
