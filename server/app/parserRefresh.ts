@@ -8,7 +8,7 @@ import { IMPORT_PARSERS } from './importParsers';
 import versions from './importParsers/versions.json';
 import { recoverImportOriginals } from './originalRecovery';
 import { getStableSourceTransactionId, parsedSourceAccountIdentity } from './imports';
-import { buildLedgerFromSourceFacts, materializeLedger } from './ledgerRebuild';
+import { buildLedgerFromSourceFacts, materializeLedger, LEDGER_REBUILD_POLICY_VERSION } from './ledgerRebuild';
 import { captureRefreshConflicts, compareRefreshConflicts, readRefreshDiagnostics, type RefreshDiagnostics } from './parserRefreshDiagnostics';
 import type { AppImportParseResult, AppImportParser, ParsedImportTransaction, ParsedImportBalance } from './importTypes';
 
@@ -20,6 +20,7 @@ const trackedTables = ['sourceFiles', 'sourceAccounts', 'sourceTransactions', 's
 
 function revision(db: Db) {
   return hashContent(JSON.stringify([
+    LEDGER_REBUILD_POLICY_VERSION,
     ...trackedTables.map(table => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()),
     db.prepare('SELECT importFileId, contentHash, bytesHash FROM importOriginals ORDER BY importFileId').all(),
     db.prepare('SELECT id, sourceFileId, priorContentHash, bytesHash, approvedAt FROM importReplacementVersions ORDER BY id').all(),
@@ -168,7 +169,7 @@ export async function refreshParserDerivations(options: {
       for (const candidate of candidates) replaceFacts(db, candidate);
       const ledger = buildLedgerFromSourceFacts(db);
       diagnostics = compareRefreshConflicts(baseline, captureRefreshConflicts(db, ledger), before);
-      if (ledger.ambiguities?.length || ledger.balanceConflicts?.length) throw new ReviewRequired('Candidate ledger has ambiguous transactions or conflicting balances. Review is required.');
+      if (ledger.balanceConflicts?.length || diagnostics.conflicts.some(conflict => conflict.origin === 'new')) throw new ReviewRequired('Parser refresh introduces transaction ambiguity or contains conflicting balances. Review is required.');
       const ids = new Set(ledger.transactions.map(row => row.ledgerTransactionId));
       // Never attach annotations by amount or ordinal alone. Exact stable identity
       // transfers automatically; changed annotated identities require human review.

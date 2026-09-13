@@ -6,6 +6,8 @@ import {
   getTransactionOccurrenceSortKey,
 } from './transactionIdentity.ts';
 
+export const LEDGER_REBUILD_POLICY_VERSION = 'cross-format-document-occurrences-v2';
+
 interface SourceTransactionRow {
   id: number;
   sourceFileId: number;
@@ -262,8 +264,12 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
 
   const activityExportGroups = new Map<string, typeof dedupedTransactionInputs>();
   const retainedTransactionInputs = new Set(dedupedTransactionInputs);
-  for (const transaction of dedupedTransactionInputs) {
+  const economicKey = (row: typeof dedupedTransactionInputs[number]) => JSON.stringify([row.accountId, normalizeDate(row.date), row.amountCents]);
+  const reconciledEconomicKeys = new Set<string>();
+  reconcileEconomicDocuments();
+  for (const transaction of retainedTransactionInputs) {
     if (!['activity-export', 'statement'].includes(transaction.sourceType || '')) continue;
+    if (reconciledEconomicKeys.has(economicKey(transaction))) continue;
     const key = `${transaction.sourceType}\0${getLedgerTransactionBaseKey(transaction)}`;
     const group = activityExportGroups.get(key);
     if (group) {
@@ -332,12 +338,56 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
     }
   }
 
+  // Same-account/date/amount is the cross-format fallback policy. Descriptions
+  // often differ between an export and a statement. Match document occurrences
+  // one-to-one, never collapse two rows from the same original document.
+  function reconcileEconomicDocuments() {
+    const economicGroups = new Map<string, typeof dedupedTransactionInputs>();
+    for (const row of retainedTransactionInputs) {
+      if (row.sourceRole !== 'activity' || !['activity-export', 'statement'].includes(row.sourceType || '')) continue;
+      const key = economicKey(row);
+      const group = economicGroups.get(key) ?? [];
+      group.push(row); economicGroups.set(key, group);
+    }
+    for (const group of economicGroups.values()) {
+      if (new Set(group.map(row => row.sourceType)).size < 2) continue;
+      reconciledEconomicKeys.add(economicKey(group[0]!));
+      const files = new Map<number, typeof group>();
+      for (const row of group) {
+        const rows = files.get(row.sourceFileId) ?? [];
+        rows.push(row); files.set(row.sourceFileId, rows);
+      }
+      const ordered = [...files.values()].sort((a, b) =>
+        Math.max(...b.map(getTransactionSourceScore)) - Math.max(...a.map(getTransactionSourceScore)) ||
+        b.length - a.length || a[0]!.sourceFileId - b[0]!.sourceFileId);
+      const canonical: typeof group = [];
+      for (const rows of ordered) {
+        const used = new Set<number>();
+        for (const row of [...rows].sort((a,b) => getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b)))) {
+          const available = canonical.filter(candidate => !used.has(candidate.id));
+          const match = available.find(candidate => normalizeText(candidate.originalDescription || candidate.description) === normalizeText(row.originalDescription || row.description)) ?? available[0];
+          if (match) {
+            used.add(match.id);
+            decisions.set(row.id, { representative: match.id, reason: 'Same account, date and amount across statement/export documents; matched one-to-one by document occurrence, with higher-priority source wording retained.' });
+            retainedTransactionInputs.delete(row);
+          } else {
+            canonical.push(row);
+            used.add(row.id);
+          }
+        }
+      }
+    }
+  }
+
   const crossSourceGroups = new Map<string, typeof dedupedTransactionInputs>();
   for (const transaction of retainedTransactionInputs) {
     if (
       transaction.sourceRole !== 'activity' ||
       !['activity-export', 'statement'].includes(transaction.sourceType || '')
     ) continue;
+    // These rows already used their same-day document occurrence budget.
+    // A second fuzzy-date pass must not consume an excess real occurrence.
+    if (reconciledEconomicKeys.has(economicKey(transaction))) continue;
     const crossSourceIdentity = typeof transaction.raw.crossSourceIdentity === 'string'
       ? transaction.raw.crossSourceIdentity.trim()
       : '';
@@ -388,6 +438,7 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
           .filter(({ candidate, index, distance }) =>
             candidate.sourceType !== transaction.sourceType &&
             !matchedCanonical.has(index) &&
+            distance > 0 &&
             distance <= 3
           )
           .sort((a, b) =>
@@ -424,14 +475,9 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
     for (const row of group) {
       const candidates = group.filter(candidate => {
         if (candidate.sourceType === row.sourceType || dateDistanceInDays(candidate.date, row.date) > 3) return false;
-        const identity = (item: typeof row) => {
-          const explicit = typeof item.raw.crossSourceIdentity === 'string' ? item.raw.crossSourceIdentity.trim() : '';
-          const description = normalizeText(item.originalDescription || item.description || item.merchant);
-          return explicit ? `parser:${explicit}` : description ? `description:${description}` : '';
-        };
-        // Same-date, same-identity leftovers are proven excess occurrences,
-        // not unresolved overlap: one-to-one matching already consumed peers.
-        return !(normalizeDate(row.date) === normalizeDate(candidate.date) && identity(row) && identity(row) === identity(candidate));
+        // Same-day leftovers are excess real occurrences under the document
+        // policy above, not additional unresolved pairs.
+        return normalizeDate(row.date) !== normalizeDate(candidate.date);
       });
       if (candidates.length) ambiguities.push({
         sourceTransactionId: row.id,

@@ -156,6 +156,22 @@ test('diagnostic-only refresh cannot apply otherwise valid changes', async () =>
   } finally { f.memory.close(); }
 });
 
+test.each([false,true])('refresh tolerates unchanged overlap warnings but blocks introduced ones: introduced=%s', async introduced => {
+  const f=fixture();
+  try {
+    f.db.exec("INSERT INTO sourceFiles (id,fileName,contentHash,parserName,sourceType,status) VALUES (2,'statement.txt','other','other','statement','committed')");
+    f.db.exec("INSERT INTO sourceAccounts (id,sourceFileId,accountId,institution,sourceAccountKey) VALUES (2,2,1,'Synthetic','remote')");
+    f.db.prepare("INSERT INTO sourceTransactions (sourceFileId,sourceAccountId,stableSourceId,date,amountCents,description,sourceRole) VALUES (2,2,'other','2026-01-02',?,'Different wording','activity')").run(introduced?-2000:-1000);
+    const parse=f.parser.parse;
+    if(introduced) f.parser.parse=async input=>{const result=await parse(input);result.transactions[0]!.amountCents=-2000;return result;};
+    const result=await f.run();
+    expect(result.refreshed).toBe(introduced?0:1);
+    expect(f.db.prepare('SELECT amountCents FROM sourceTransactions WHERE sourceFileId=1').get()?.amountCents).toBe(-1000);
+    if(introduced) expect(readRefreshDiagnostics(f.db)?.conflicts[0]?.origin).toBe('new');
+    else expect(f.db.prepare('SELECT description FROM sourceTransactions WHERE sourceFileId=1').get()?.description).toBe('Clean description');
+  }finally{f.memory.close();}
+});
+
 test('inactive imports are not reactivated by parser refresh', async () => {
   const f = fixture();
   try {

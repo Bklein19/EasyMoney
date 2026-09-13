@@ -87,13 +87,14 @@ test('balance-only files separately identify new, updated and unchanged monthly 
   } finally { f.db.close(); }
 });
 
-test('uncertain cross-source same amount/date overlaps are ambiguous, not proven represented', () => {
+test('same account/date/amount statement overlap is represented despite different wording', () => {
   const f = fixture();
   try {
     f.file(1,'committed'); f.transaction(1,'2026-01-01','First shop',-1000,100);
     f.file(2,'previewed','statement'); f.transaction(2,'2026-01-01','Different shop',-1000,50);
-    expect(f.outcome([2]).transactions).toEqual({parsed:1,new:0,represented:0,ambiguous:1,excludedSummaries:0});
-    expect(f.outcome([2]).nothingNew).toBe(false);
+    f.persistBaseline();
+    expect(f.outcome([2]).transactions).toEqual({parsed:1,new:0,represented:1,ambiguous:0,excludedSummaries:0});
+    expect(f.outcome([2]).nothingNew).toBe(true);
   } finally { f.db.close(); }
 });
 

@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { getDb } from '../../database.ts';
-import { buildLedgerFromSourceFacts, isStatementSummary } from '../ledgerRebuild.ts';
+import { buildLedgerFromSourceFacts, isStatementSummary, LEDGER_REBUILD_POLICY_VERSION } from '../ledgerRebuild.ts';
 import { findCommittedImportArtifactDuplicate, importArtifactFactFingerprint } from '../importArtifactIdentity.ts';
 import { validatedSyncAccountMappings } from './review.ts';
 import type { SyncAccountMappingDecision, SyncRunReview } from './types.ts';
@@ -32,7 +32,7 @@ export function simulateMappedImportOutcomes(
 ): SyncReviewOutcomes {
   const snapshot = new Database(':memory:');
   try {
-    const revisionParts: unknown[] = [importFileIds, [...mappings], newAccounts];
+    const revisionParts: unknown[] = [LEDGER_REBUILD_POLICY_VERSION, importFileIds, [...mappings], newAccounts];
     db.transaction(() => {
       for (const table of ['accounts', 'sourceFiles', 'sourceAccounts', 'sourceTransactions', 'sourceBalances', 'importRows', 'ledgerTransactions', 'ledgerBalances']) {
         const schema = db.prepare('SELECT sql FROM sqlite_master WHERE type = \'table\' AND name = ?').get(table);
