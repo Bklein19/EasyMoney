@@ -38,7 +38,7 @@ export default function ParserRefreshStatus() {
       </li>)}</ul></details>
       <details><summary>Account mapping evidence</summary><ul>{preview.mappings.map(row=><li key={`${row.sourceFileId}:${row.sourceAccountKey}`}>File {row.sourceFileId} · {row.sourceAccountKey} → Account {row.accountId} · {row.evidence}</li>)}</ul></details>
       {preview.annotations.map(row=><details key={row.ledgerTransactionId}><summary>{row.disposition} · {String(row.evidence.transaction.description)} · {String(row.evidence.transaction.date)}</summary>
-        <p>{row.reason}</p><p>Category {row.evidence.annotation.categoryId ?? 'none'} · Notes: {row.evidence.annotation.notes || 'none'}</p>
+        <p>{row.reason}</p><p>Category: {row.evidence.categoryName ?? row.evidence.annotation.categoryId ?? 'none'} · Notes: {row.evidence.annotation.notes || 'none'}</p>
       </details>)}
       <button disabled={apply.isPending || retry.isPending || preview.annotationCounts['review-required'] > 0 || diagnostics.conflicts.some(c=>c.kind==='balance'||c.origin==='new')}
         onClick={()=>apply.mutate({inputRevision:diagnostics.inputRevision})}>{apply.isPending?'Applying…':'Apply this validated preview'}</button>
@@ -46,7 +46,7 @@ export default function ParserRefreshStatus() {
     </section>}
     {!!history.length && <details><summary>Preserved annotation history ({history.length})</summary>
       {history.map(row=><details key={row.id}><summary>{String(row.evidence.transaction.date)} · {String(row.evidence.transaction.description)} · {row.disposition}</summary>
-        <p>{row.reason}</p><p>Category {row.evidence.annotation.categoryId ?? 'none'} · Notes: {row.evidence.annotation.notes || 'none'}</p>
+        <p>{row.reason}</p><p>Category: {row.evidence.categoryName ?? row.evidence.annotation.categoryId ?? 'none'} · Notes: {row.evidence.annotation.notes || 'none'}</p>
         <p>Original ledger identity: {row.ledgerTransactionId}. Source files: {Array.from(new Set(row.evidence.sources.map(source=>source.sourceFileId))).join(', ')}.</p>
       </details>)}
     </details>}

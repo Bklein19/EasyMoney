@@ -7,7 +7,7 @@ interface Evidence {
   date: string; amountCents: number; description: string; rawJson: string | null;
 }
 interface Annotation { ledgerTransactionId: string; categoryId: number | null; notes: string | null; createdAt: string | null; updatedAt: string | null }
-export interface AnnotationSnapshot { annotation: Annotation; transaction: Record<string, unknown>; sources: Evidence[]; excluded: boolean }
+export interface AnnotationSnapshot { annotation: Annotation; categoryName: string | null; transaction: Record<string, unknown>; sources: Evidence[]; excluded: boolean }
 export interface AnnotationDisposition {
   ledgerTransactionId: string; disposition: 'unchanged' | 'transferred' | 'retained-history' | 'review-required';
   targetId: string | null; reason: string; evidence: AnnotationSnapshot;
@@ -25,11 +25,12 @@ export function captureAnnotations(db: Db, baseline: RebuiltLedger): AnnotationS
   }
   const transactions = new Map(db.prepare('SELECT * FROM ledgerTransactions').all().map(row => [String(row.ledgerTransactionId),row]));
   const excluded = new Set(baseline.exclusions?.map(row => row.sourceTransactionId));
+  const categories = new Map(db.prepare('SELECT id,name FROM categories').all().map(row=>[Number(row.id),String(row.name)]));
   return (db.prepare('SELECT * FROM transactionAnnotations').all() as unknown as Annotation[])
     .filter(annotation => transactions.has(annotation.ledgerTransactionId))
     .map(annotation => {
       const evidence = provenance.get(annotation.ledgerTransactionId) ?? [];
-      return { annotation, transaction:transactions.get(annotation.ledgerTransactionId)!, sources:evidence,
+      return { annotation, categoryName:annotation.categoryId===null?null:categories.get(annotation.categoryId)??null, transaction:transactions.get(annotation.ledgerTransactionId)!, sources:evidence,
         excluded:evidence.length > 0 && evidence.every(row => excluded.has(row.id)) };
     });
 }

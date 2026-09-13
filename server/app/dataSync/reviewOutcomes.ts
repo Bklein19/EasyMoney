@@ -34,7 +34,7 @@ export function simulateMappedImportOutcomes(
   try {
     const revisionParts: unknown[] = [LEDGER_REBUILD_POLICY_VERSION, importFileIds, [...mappings], newAccounts];
     db.transaction(() => {
-      for (const table of ['accounts', 'sourceFiles', 'sourceAccounts', 'sourceTransactions', 'sourceBalances', 'importRows', 'ledgerTransactions', 'ledgerBalances']) {
+      for (const table of ['accounts', 'sourceFiles', 'sourceAccounts', 'sourceTransactions', 'sourceBalances', 'importRows', 'ledgerTransactions', 'ledgerBalances', 'reviewedDistinctOverlaps']) {
         const schema = db.prepare('SELECT sql FROM sqlite_master WHERE type = \'table\' AND name = ?').get(table);
         if (!schema?.sql) throw new Error('Import outcome source schema is unavailable.');
         snapshot.exec(String(schema.sql));

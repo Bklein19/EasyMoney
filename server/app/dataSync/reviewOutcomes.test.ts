@@ -5,6 +5,7 @@ process.env.EASYMONEY_DB_PATH ||= `/private/tmp/easymoney-review-outcomes-${proc
 const { simulateMappedImportOutcomes } = await import('./reviewOutcomes.ts');
 const { buildLedgerFromSourceFacts } = await import('../ledgerRebuild.ts');
 const { assertSyncReviewConfirmation } = await import('./reviewOutcomes.ts');
+const { overlapOccurrenceKey, recordDistinctOverlap } = await import('../reviewedOverlap');
 
 function fixture() {
   const db = new Database(':memory:');
@@ -12,7 +13,8 @@ function fixture() {
     CREATE TABLE accounts (id INTEGER PRIMARY KEY, name TEXT, type TEXT);
     CREATE TABLE ledgerTransactions (ledgerTransactionId TEXT, accountId INTEGER, date TEXT, amountCents INTEGER, description TEXT);
     CREATE TABLE ledgerBalances (accountId INTEGER, month TEXT, balanceCents INTEGER, capturedAt TEXT);
-    CREATE TABLE sourceFiles (id INTEGER PRIMARY KEY, importFileId INTEGER, sourceType TEXT, status TEXT);
+    CREATE TABLE sourceFiles (id INTEGER PRIMARY KEY, importFileId INTEGER, sourceType TEXT, status TEXT, contentHash TEXT DEFAULT 'synthetic');
+    CREATE TABLE reviewedDistinctOverlaps (leftKey TEXT, rightKey TEXT, reason TEXT, createdAt TEXT, PRIMARY KEY(leftKey,rightKey));
     CREATE TABLE sourceAccounts (id INTEGER PRIMARY KEY, sourceFileId INTEGER, accountId INTEGER);
     CREATE TABLE importRows (id INTEGER PRIMARY KEY, rowIndex INTEGER);
     CREATE TABLE sourceTransactions (id INTEGER PRIMARY KEY, sourceFileId INTEGER, sourceAccountId INTEGER, importRowId INTEGER, stableSourceId TEXT, date TEXT, amountCents INTEGER, description TEXT, sourceRole TEXT, priority INTEGER, rawJson TEXT);
@@ -21,7 +23,7 @@ function fixture() {
   `);
   let transactionId = 0;
   const file = (id:number, status = 'previewed', sourceType = 'activity-export') => {
-    db.prepare('INSERT INTO sourceFiles VALUES (?, ?, ?, ?)').run(id,id,sourceType,status);
+    db.prepare('INSERT INTO sourceFiles(id,importFileId,sourceType,status) VALUES (?, ?, ?, ?)').run(id,id,sourceType,status);
     db.prepare('INSERT INTO sourceAccounts VALUES (?, ?, ?)').run(id,id,status === 'committed' ? 1 : null);
   };
   const transaction = (fileId:number, date:string, description = 'Synthetic shop', amount = -1000, priority = 100) => {
@@ -59,6 +61,23 @@ test('within-batch overlap is occurrence-aware and order independent', () => {
     expect(result.transactions).toEqual({parsed:3,new:2,represented:1,ambiguous:0,excludedSummaries:0});
     expect(f.outcome([2,1]).transactions).toEqual(result.transactions);
   } finally { f.db.close(); }
+});
+
+test('review simulation carries original-bound distinctness decisions and revisions', () => {
+  const f=fixture();
+  try {
+    f.file(1,'committed','activity-export');f.transaction(1,'2026-01-01','First airline');
+    f.file(2,'committed','statement');f.transaction(2,'2026-01-02','Second airline');
+    f.persistBaseline();
+    const before=f.outcome([]);
+    expect(before.historical.ambiguousTransactions).toBeGreaterThan(0);
+    const db=f.db as unknown as ReturnType<typeof getDb>;
+    recordDistinctOverlap(db,overlapOccurrenceKey(db,1),overlapOccurrenceKey(db,2),'Reviewed as separate charges.');
+    const after=f.outcome([]);
+    expect(after.historical.ambiguousTransactions).toBe(0);
+    expect(after.revision).not.toBe(before.revision);
+    expect(after.nothingNew).toBe(true);
+  }finally{f.db.close();}
 });
 
 test('repeat import with no ledger changes reports nothing new', () => {
