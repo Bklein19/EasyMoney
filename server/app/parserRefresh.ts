@@ -12,7 +12,7 @@ import { buildLedgerFromSourceFacts, materializeLedger } from './ledgerRebuild';
 import type { AppImportParseResult, AppImportParser, ParsedImportTransaction, ParsedImportBalance } from './importTypes';
 
 type Db = ReturnType<typeof getDb>;
-interface SourceFile { id: number; importFileId: number; fileName: string; contentHash: string; parserName: string; version: string | null; attemptedVersion: string | null; attemptedRevision: string | null }
+interface SourceFile { id: number; importFileId: number; fileName: string; contentHash: string; parserName: string; version: string | null; derivationStatus: string | null; attemptedVersion: string | null; attemptedRevision: string | null }
 interface Candidate { file: SourceFile; version: string; parser: AppImportParser; parsed: AppImportParseResult }
 class ReviewRequired extends Error {}
 const trackedTables = ['sourceFiles', 'sourceAccounts', 'sourceTransactions', 'sourceBalances', 'importRows', 'transactionAnnotations', 'ledgerTransactions', 'ledgerBalances', 'accounts'] as const;
@@ -21,6 +21,7 @@ function revision(db: Db) {
   return hashContent(JSON.stringify([
     ...trackedTables.map(table => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()),
     db.prepare('SELECT importFileId, contentHash, bytesHash FROM importOriginals ORDER BY importFileId').all(),
+    db.prepare('SELECT id, sourceFileId, priorContentHash, bytesHash, approvedAt FROM importReplacementVersions ORDER BY id').all(),
   ]));
 }
 
@@ -111,31 +112,35 @@ export async function refreshParserDerivations(options: {
   const db = options.db ?? getDb();
   const parsers = options.parsers ?? IMPORT_PARSERS;
   const currentVersions: Record<string, string> = options.versions ?? versions;
-  const files = db.prepare(`SELECT sf.*, d.version, d.attemptedVersion, d.attemptedRevision FROM sourceFiles sf LEFT JOIN parserDerivations d ON d.sourceFileId=sf.id
+  const files = db.prepare(`SELECT sf.*, d.version, d.status AS derivationStatus, d.attemptedVersion, d.attemptedRevision FROM sourceFiles sf LEFT JOIN parserDerivations d ON d.sourceFileId=sf.id
     WHERE sf.status='committed' ORDER BY sf.id`).all() as unknown as SourceFile[];
   const before = revision(db);
   const candidates: Candidate[] = [];
   for (const file of files) {
     const version = currentVersions[file.parserName];
-    if (version && file.version === version) continue;
+    if (version && file.version === version && file.derivationStatus === 'current') continue;
     if (!options.retry && (version ?? null) === file.attemptedVersion && file.attemptedRevision === before) continue;
     const parser = parsers.find(parser => parser.id === file.parserName);
     if (!parser || !version) {
       report(db, file, null, 'review-required', 'This parser requires a supported versioned implementation before automatic refresh.', before);
       continue;
     }
-    const original = db.prepare('SELECT bytes, bytesHash FROM importOriginals WHERE importFileId=?').get(file.importFileId) as { bytes: Uint8Array; bytesHash: string } | undefined;
+    const retained = db.prepare('SELECT bytes, bytesHash FROM importOriginals WHERE importFileId=?').get(file.importFileId) as { bytes: Uint8Array; bytesHash: string } | undefined;
+    const replacement = retained ? undefined : db.prepare(`SELECT bytes, bytesHash, fileName FROM importReplacementVersions
+      WHERE sourceFileId=? AND importFileId=? AND priorContentHash=? ORDER BY id DESC LIMIT 1`)
+      .get(file.id, file.importFileId, file.contentHash) as { bytes: Uint8Array; bytesHash: string; fileName: string } | undefined;
+    const original = retained ?? replacement;
     if (!original) {
       report(db, file, version, 'review-required', 'Original file is not retained. Upload the original again to enable refresh.', before);
       continue;
     }
-    if (hashContent(original.bytes) !== original.bytesHash || (original.bytesHash !== file.contentHash && hashContent(new TextDecoder().decode(original.bytes)) !== file.contentHash)) {
+    if (hashContent(original.bytes) !== original.bytesHash || (!replacement && original.bytesHash !== file.contentHash && hashContent(new TextDecoder().decode(original.bytes)) !== file.contentHash)) {
       report(db, file, version, 'review-required', 'Original file integrity check failed.', before);
       continue;
     }
     const directory = await mkdtemp(join(tmpdir(), 'easymoney-parser-'));
     try {
-      const fileName = basename(file.fileName).replace(/^[a-f0-9]{64}-/, '');
+      const fileName = basename(replacement?.fileName ?? file.fileName).replace(/^[a-f0-9]{64}-/, '');
       const filePath = join(directory, fileName);
       await writeFile(filePath, original.bytes, { mode: 0o600 });
       const text = new TextDecoder().decode(original.bytes);

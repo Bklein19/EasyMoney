@@ -8,6 +8,7 @@ const { refreshParserDerivations } = await import('./parserRefresh');
 const { buildLedgerFromSourceFacts, materializeLedger } = await import('./ledgerRebuild');
 const { hashContent } = await import('../hash');
 const { recoverImportOriginals } = await import('./originalRecovery');
+const { registerApprovedReplacement } = await import('./importReplacements');
 import type { AppImportParser } from './importTypes';
 initDatabase();
 
@@ -155,5 +156,46 @@ test('legacy lossy-hash collisions are not automatically recovered', async () =>
     await writeFile(join(root, `${hashContent(first)}-synthetic.txt`), first);
     await writeFile(join(root, `${hashContent(second)}-synthetic.txt`), second);
     expect(await recoverImportOriginals([root], f.db)).toEqual({ recovered: 0, missing: 1 });
+  } finally { f.memory.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('approved replacement preserves old hashes and facts, is idempotent, and is usable by refresh', async () => {
+  const f = fixture();
+  const root = await mkdtemp('/private/tmp/easymoney-replacement-test-');
+  try {
+    f.db.exec('DELETE FROM importOriginals');
+    const oldHash = f.db.prepare('SELECT contentHash FROM sourceFiles').get()!.contentHash;
+    const ledgerBefore = JSON.stringify(f.db.prepare('SELECT * FROM ledgerTransactions').all());
+    const parse = f.parser.parse;
+    f.parser.parse = async input => { const parsed = await parse(input); parsed.transactions[0]!.description = 'Original description'; return parsed; };
+    const filePath = join(root, 'replacement.txt');
+    await writeFile(filePath, 'replacement bytes');
+    const input = { sourceFileId: 1, expectedAccountId: 1, filePath, approved: true as const, approvalNote: 'User approved same-facts replacement.' };
+    const options = { db: f.db, parsers: [f.parser], backup: () => {} };
+    expect((await registerApprovedReplacement(input, options)).registered).toBe(true);
+    expect((await registerApprovedReplacement(input, options)).registered).toBe(false);
+    expect(f.db.prepare('SELECT contentHash FROM sourceFiles').get()!.contentHash).toBe(oldHash);
+    expect(JSON.stringify(f.db.prepare('SELECT * FROM ledgerTransactions').all())).toBe(ledgerBefore);
+    expect(f.db.prepare('SELECT count(*) AS count FROM importOriginals').get()!.count).toBe(0);
+    const replacement = f.db.prepare('SELECT * FROM importReplacementVersions').get()!;
+    expect(replacement.priorContentHash).toBe(oldHash);
+    expect(replacement.bytesHash).not.toBe(oldHash);
+    expect(replacement.priorFactsJson).toContain('Original description');
+    expect((await f.run()).refreshed).toBe(1);
+  } finally { f.memory.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test('replacement rejects changed financial facts and unverified mapping', async () => {
+  const f = fixture();
+  const root = await mkdtemp('/private/tmp/easymoney-replacement-test-');
+  try {
+    f.db.exec('DELETE FROM importOriginals');
+    const filePath = join(root, 'replacement.txt');
+    await writeFile(filePath, 'replacement bytes');
+    const input = { sourceFileId: 1, expectedAccountId: 1, filePath, approved: true as const, approvalNote: 'User approved same-facts replacement.' };
+    const options = { db: f.db, parsers: [f.parser], backup: () => {} };
+    await expect(registerApprovedReplacement(input, options)).rejects.toThrow('financial facts differ');
+    await expect(registerApprovedReplacement({ ...input, expectedAccountId: 2 }, options)).rejects.toThrow('mapping is not verified');
+    expect(f.db.prepare('SELECT count(*) AS count FROM importReplacementVersions').get()!.count).toBe(0);
   } finally { f.memory.close(); await rm(root, { recursive: true, force: true }); }
 });

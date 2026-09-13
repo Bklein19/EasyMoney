@@ -918,6 +918,19 @@ export function initDatabase() {
     `);
   });
 
+  runSchemaMigration('2026-09-13-approved-original-replacements', () => {
+    db.exec(`CREATE TABLE importReplacementVersions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sourceFileId INTEGER NOT NULL REFERENCES sourceFiles(id),
+      importFileId INTEGER NOT NULL REFERENCES importFiles(id),
+      priorContentHash TEXT NOT NULL, bytesHash TEXT NOT NULL, bytes BLOB NOT NULL,
+      fileName TEXT NOT NULL, parserName TEXT NOT NULL,
+      approvedAt TEXT NOT NULL, approvalNote TEXT NOT NULL,
+      priorFactsJson TEXT NOT NULL, candidateFactsJson TEXT NOT NULL,
+      UNIQUE(sourceFileId, bytesHash)
+    )`);
+  });
+
   runSchemaMigration('2026-08-27-account-last4', () => {
     if (!tableColumnNames('accounts').includes('last4')) {
       db.prepare('ALTER TABLE accounts ADD COLUMN last4 TEXT').run();

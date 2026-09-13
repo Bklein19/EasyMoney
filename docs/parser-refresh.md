@@ -40,3 +40,14 @@ choices should be backed up before restoring an older snapshot. Archived per-fil
 derivations remain available for diagnostics, including versions that were replaced.
 
 No bank session or re-download is required when the original is available.
+
+## Approved replacement versions
+
+A re-downloaded PDF with different bytes is not relabeled as an exact original.
+`registerApprovedReplacement` requires explicit user approval, a verified single
+account mapping, and matching transaction occurrence and balance facts. It stores
+the replacement bytes/checksum, approval, previous facts/hash, and new parsed
+coverage in the append-only `importReplacementVersions` table. The original
+`sourceFiles`/`importFiles` hashes and ledger remain unchanged. Refresh can use
+the latest approved replacement for that exact old hash when no original is
+retained, subject to the same mapping and ledger validation gates.
