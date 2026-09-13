@@ -8,6 +8,7 @@ import { syncApplicationDataRoot } from './dataSync/paths';
 // Only established EasyMoney stores, never a recursive scan of the user's home.
 export async function recoverImportOriginals(roots = [
   join(homedir(), 'src', 'money', 'imports', 'raw'),
+  join(homedir(), 'Downloads', 'easymoney-imports'),
   syncApplicationDataRoot(),
 ], db = getDb()) {
   const missing = db.prepare(`SELECT f.id, f.fileName, f.contentHash FROM importFiles f

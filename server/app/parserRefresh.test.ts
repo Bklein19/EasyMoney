@@ -354,6 +354,13 @@ test('approved replacement preserves old hashes and facts, is idempotent, and is
     expect(replacement.bytesHash).not.toBe(oldHash);
     expect(replacement.priorFactsJson).toContain('Original description');
     expect((await f.run()).refreshed).toBe(1);
+    // Recovering the actual original must refresh again even when parser code
+    // has not changed: its current facts were derived from replacement bytes.
+    const originalBytes=new TextEncoder().encode('synthetic original');
+    f.db.prepare('INSERT INTO importOriginals VALUES(1,?,?,?)').run(oldHash,hashContent(originalBytes),originalBytes);
+    expect((await f.run()).refreshed).toBe(1);
+    expect(f.db.prepare('SELECT inputBytesHash FROM parserDerivations WHERE sourceFileId=1').get()?.inputBytesHash).toBe(hashContent(originalBytes));
+    expect((await f.run()).refreshed).toBe(0);
   } finally { f.memory.close(); await rm(root, { recursive: true, force: true }); }
 });
 

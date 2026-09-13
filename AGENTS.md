@@ -20,7 +20,8 @@ EasyMoney is moving from legacy table CRUD toward a source-fact ledger model.
 - Do not write new application code in JavaScript. New code should be TypeScript.
 - When working in an existing JavaScript file, convert the touched code to TypeScript when practical instead of expanding the JavaScript surface area.
 - The old `money/` reference app was removed from the working tree. Use git history if you need to inspect it.
-- Raw imports and parsed facts are the durable source of truth.
+- Original import bytes and confirmed user choices are the durable source of truth. Parsed facts are versioned derivations, not immutable truth.
+- Retain integrity-checked originals before commit on every path, including automatic Playwright/HTTP downloads. Unimport, temporary-download cleanup, and parser refresh must not remove committed originals.
 - Ledger/materialized tables are read models rebuilt from committed source facts.
 - New product behavior should go through the typed application layer, not direct table-shaped CRUD.
 - Do not add fallbacks to legacy transaction/account tables for new ledger-backed behavior. Make the new path work.
@@ -41,6 +42,8 @@ EasyMoney is moving from legacy table CRUD toward a source-fact ledger model.
 - Materialized transaction IDs must be stable enough that user data such as categorization and notes can survive rebuilds.
 - Transaction categorization and notes belong in user annotation tables keyed by stable ledger transaction identity, not in raw import rows.
 - Rebuilding should replace materialized read models from source facts. It should not delete user annotations.
+- Changed parsers should refresh retained originals transactionally, archive prior derivations, and preserve confirmed account mappings. A stale preview, invalid facts, new ambiguity, balance conflict, or unsafe annotation transfer must not silently change the ledger.
+- Transfer annotations only with stable identity or unambiguous original-occurrence evidence. Conflicting categories or nonempty notes require review. Annotations on intentionally excluded summaries remain accessible in history; never copy them onto purchases.
 - The rebuild script is mainly for tests, migrations, and repair operations. The app should not need to rebuild on every categorization edit.
 
 ## Unimport Invariants

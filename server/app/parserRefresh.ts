@@ -16,8 +16,8 @@ import { calendarDate } from './importParsers/calendarDate';
 import { captureAnnotations, planAnnotationRefresh, applyAnnotationRefresh, readAnnotationHistory } from './parserRefreshAnnotations';
 
 type Db = ReturnType<typeof getDb>;
-interface SourceFile { id: number; importFileId: number; fileName: string; contentHash: string; parserName: string; version: string | null; derivationStatus: string | null; attemptedVersion: string | null; attemptedRevision: string | null }
-interface Candidate { file: SourceFile; version: string; parser: AppImportParser; parsed: AppImportParseResult }
+interface SourceFile { id: number; importFileId: number; fileName: string; contentHash: string; parserName: string; version: string | null; derivationStatus: string | null; attemptedVersion: string | null; attemptedRevision: string | null; inputBytesHash: string | null }
+interface Candidate { file: SourceFile; version: string; parser: AppImportParser; parsed: AppImportParseResult; inputBytesHash: string }
 class ReviewRequired extends Error {}
 const trackedTables = ['sourceFiles', 'sourceAccounts', 'sourceTransactions', 'sourceBalances', 'importRows', 'transactionAnnotations', 'ledgerTransactions', 'ledgerBalances', 'accounts', 'parserRefreshAccountChoices', 'reviewedDistinctOverlaps'] as const;
 
@@ -70,6 +70,7 @@ function replaceFacts(db: Db, candidate: Candidate) {
   const { file, parsed, parser } = candidate;
   const { transactions, accounts, accountFor } = validateCandidate(db, candidate);
   const previous = {
+    inputBytesHash:file.inputBytesHash,
     file: db.prepare('SELECT * FROM sourceFiles WHERE id=?').get(file.id),
     accounts,
     transactions: db.prepare('SELECT * FROM sourceTransactions WHERE sourceFileId=?').all(file.id),
@@ -126,7 +127,7 @@ export async function refreshParserDerivations(options: {
   const db = options.db ?? getDb();
   const parsers = options.parsers ?? IMPORT_PARSERS;
   const currentVersions: Record<string, string> = options.versions ?? versions;
-  const files = db.prepare(`SELECT sf.*, d.version, d.status AS derivationStatus, d.attemptedVersion, d.attemptedRevision FROM sourceFiles sf LEFT JOIN parserDerivations d ON d.sourceFileId=sf.id
+  const files = db.prepare(`SELECT sf.*, d.version, d.status AS derivationStatus, d.attemptedVersion, d.attemptedRevision, d.inputBytesHash FROM sourceFiles sf LEFT JOIN parserDerivations d ON d.sourceFileId=sf.id
     WHERE sf.status='committed' ORDER BY sf.id`).all() as unknown as SourceFile[];
   const inputRevision = () => hashContent(JSON.stringify([revision(db), currentVersions]));
   const before = inputRevision();
@@ -134,7 +135,6 @@ export async function refreshParserDerivations(options: {
   const candidates: Candidate[] = [];
   for (const file of files) {
     const version = currentVersions[file.parserName];
-    if (version && file.version === version && file.derivationStatus === 'current') continue;
     if (!options.retry && (version ?? null) === file.attemptedVersion && file.attemptedRevision === before) continue;
     const parser = parsers.find(parser => parser.id === file.parserName);
     if (!parser || !version) {
@@ -154,6 +154,7 @@ export async function refreshParserDerivations(options: {
       report(db, file, version, 'review-required', 'Original file integrity check failed.', before);
       continue;
     }
+    if (file.version === version && file.derivationStatus === 'current' && file.inputBytesHash === original.bytesHash) continue;
     const directory = await mkdtemp(join(tmpdir(), 'easymoney-parser-'));
     try {
       const fileName = basename(replacement?.fileName ?? file.fileName).replace(/^[a-f0-9]{64}-/, '');
@@ -162,7 +163,7 @@ export async function refreshParserDerivations(options: {
       const text = new TextDecoder().decode(original.bytes);
       const csv = /\.csv$/i.test(fileName) ? Papa.parse<Record<string, string>>(text, { header: true, skipEmptyLines: true }) : null;
       const parsed = await parser.parse({ fileName, filePath, fileBytes: original.bytes, text, headers: csv?.meta.fields ?? [], rows: csv?.data ?? [] });
-      const candidate = { file, version, parser, parsed };
+      const candidate = { file, version, parser, parsed, inputBytesHash:original.bytesHash };
       validateCandidate(db, candidate);
       candidates.push(candidate);
     } catch (error) {
@@ -218,9 +219,9 @@ export async function refreshParserDerivations(options: {
       if (options.validateOnly) throw new ReviewRequired('Diagnostic run only; validated changes were not applied.');
       applyAnnotationRefresh(db,dispositions,before);
       materializeLedger(db, ledger);
-      for (const { file, version } of candidates) {
+      for (const { file, version, inputBytesHash } of candidates) {
         report(db, file, version, 'current', null, before);
-        db.prepare('UPDATE parserDerivations SET version=? WHERE sourceFileId=?').run(version, file.id);
+        db.prepare('UPDATE parserDerivations SET version=?,inputBytesHash=? WHERE sourceFileId=?').run(version,inputBytesHash,file.id);
       }
     })();
     db.prepare('DELETE FROM parserRefreshDiagnostics').run();

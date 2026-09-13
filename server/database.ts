@@ -960,6 +960,17 @@ export function initDatabase() {
     )`);
   });
 
+  runSchemaMigration('2026-09-13-derivation-input-checksum', () => {
+    db.exec('ALTER TABLE parserDerivations ADD COLUMN inputBytesHash TEXT');
+    // Existing successful refreshes used the retained original, or an approved
+    // replacement. Prefer replacement evidence conservatively when one exists:
+    // a subsequently recovered original must be reparsed, never silently adopted.
+    db.exec(`UPDATE parserDerivations SET inputBytesHash=COALESCE(
+      (SELECT r.bytesHash FROM importReplacementVersions r WHERE r.sourceFileId=parserDerivations.sourceFileId ORDER BY r.id DESC LIMIT 1),
+      (SELECT o.bytesHash FROM importOriginals o JOIN sourceFiles sf ON sf.importFileId=o.importFileId WHERE sf.id=parserDerivations.sourceFileId)
+    ) WHERE status='current' AND version IS NOT NULL`);
+  });
+
   runSchemaMigration('2026-08-27-account-last4', () => {
     if (!tableColumnNames('accounts').includes('last4')) {
       db.prepare('ALTER TABLE accounts ADD COLUMN last4 TEXT').run();

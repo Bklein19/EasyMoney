@@ -44,3 +44,38 @@ not live completion.
   to satisfy the explicitly required retention acceptance check.
 - If a required user decision remains, present its exact evidence and pause that
   application; do not claim completion by bypassing the guard.
+
+## Execution status
+
+- Implemented and pushed the commit/reimport original-integrity guard, production
+  staging/backup tests, revision-bound refresh previews, mapping preservation,
+  annotation transfer/history, source-bound overlap review, and parser repairs.
+- Applied all 998 active derivations to the live dev database after a verified
+  backup and private apply/reapply test. The ledger has 12,449 transactions;
+  balances did not change. Existing mappings and annotation values survived.
+- Transferred 54 annotations using source evidence; retained 99 excluded-summary
+  annotations in accessible history. No annotation review blockers remain.
+- Verified no-op refreshes, a fresh-process private restart, and one retained-file
+  repeat-import check for each of the seven current connections. All seven said
+  nothing new; this is not a fresh user-driven bank-button run.
+- Additional retention audit recovered 22 originals from the documented Downloads
+  staging folder and reconstructed three inactive CSVs to their exact stored
+  checksums. All 998 active source files now have originals; the two approved
+  replacements remain historical evidence but are no longer required inputs.
+- Implemented and regression-tested recovery-root coverage and derivation input
+  checksum tracking. Reparsed the two recovered originals on private and live
+  databases: ledger unchanged, subsequent refresh a no-op.
+- Verified the missing inactive Vanguard export was fully represented by retained
+  activity and monthly statements. At the user's explicit request, backed up and
+  removed that inactive import and its parsed rows; ledger and annotations unchanged.
+- Recovery follow-up acceptance passed: 713 backend tests, 18 frontend tests,
+  typecheck, lint, and stable/dev desktop builds. Both bundles verified Bun 1.4.0
+  with no Hutch or Cottontail runtime files. Launched the rebuilt dev app against
+  the existing database. Account reconciliation is not in scope per user direction.
+
+Remaining gates:
+
+1. Finish the visual history check when the Mac is unlocked. The rebuilt app was
+   launched, but Computer Use reported the Mac locked at the visual-check step.
+2. The user starts a fresh app-button download/import to complete the final
+   original-retention acceptance check; do not substitute a backend invocation.

@@ -1387,9 +1387,9 @@ async function previewImportUnsafe({ fileName, text, fileBytes, customProfile = 
       parsedTransactions: parsedResult.transactions,
       parsedBalances: parsedResult.balances,
     });
-    getDb().prepare(`INSERT INTO parserDerivations (sourceFileId, version, status, updatedAt)
-      SELECT id, ?, 'current', ? FROM sourceFiles WHERE importFileId = ?`)
-      .run((parserVersions as Record<string, string>)[appParser.id] ?? null, new Date().toISOString(), preview.importFileId);
+    getDb().prepare(`INSERT INTO parserDerivations (sourceFileId, version, status, updatedAt, inputBytesHash)
+      SELECT id, ?, 'current', ?, ? FROM sourceFiles WHERE importFileId = ?`)
+      .run((parserVersions as Record<string, string>)[appParser.id] ?? null, new Date().toISOString(), hashContent(fileBytes ?? new TextEncoder().encode(text)), preview.importFileId);
     const previewTransactions = readStagedTransactions(
       preview.importFileId,
       transactions.map(transaction => preview.rowIds[transaction.sourceRowIndex])
