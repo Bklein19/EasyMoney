@@ -13,6 +13,7 @@ export interface ParsedTransaction {
 }
 
 export interface ParsedBalance {
+  raw?: Record<string, unknown>;
   date: string;
   account: string;
   institution: string;

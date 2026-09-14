@@ -79,6 +79,7 @@ export interface WellsFargoApiRequest {
 }
 
 export interface WellsFargoValidatedArtifact {
+  statementTotalsValidation?: 'passed' | 'unavailable';
   fileName: string;
   path: string;
   kind: WellsFargoArtifactKind;
@@ -142,6 +143,7 @@ export interface WellsFargoProgressEvent {
   transactionCount?: number;
   balanceCount?: number;
   parserValidated?: boolean;
+  statementTotalsValidation?: 'passed' | 'unavailable';
   diagnostic?: string;
   unavailableArtifactCount?: number;
 }
@@ -644,8 +646,13 @@ export async function validateWellsFargoArtifact(path: string): Promise<WellsFar
   const records = [...transactions, ...parsed.balances];
   assertParsedAccount(plan.account, records);
   if (parsed.balances.length === 0) throw new Error('Wells Fargo statement parser returned no balance anchor');
+  const totalsPassed = parsed.balances.every(balance => {
+    const evidence = balance.raw?.statementValidation;
+    return typeof evidence === 'object' && evidence !== null && 'status' in evidence && evidence.status === 'passed';
+  });
   return {
     ...plan,
+    statementTotalsValidation: totalsPassed ? 'passed' : 'unavailable',
     byteLength: metadata.size,
     transactionCount: transactions.length,
     balanceCount: parsed.balances.length,
@@ -2318,6 +2325,7 @@ export function buildWellsFargoBrowserProgram(config: Pick<WellsFargoSyncConfig,
               transactionCount: validated.transactionCount,
               balanceCount: validated.balanceCount,
               parserValidated: true,
+              statementTotalsValidation: validated.statementTotalsValidation ?? 'unavailable',
               ...artifactDetails,
             });
           }

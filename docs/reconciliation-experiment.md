@@ -32,4 +32,16 @@ An initial local trial found both many exactly balanced windows and genuine pars
 5. Improve account-scoped coverage and lifecycle metadata; distinguish missing statements from unverified period metadata and a period not yet issued.
 6. Reconcile investment statements with explicit contributions, withdrawals, income, fees and market movement. Do not infer missing transactions from valuation change.
 
-This branch is an experiment only. No live corrections or product UI changes are included.
+## First production validation gate
+
+The reusable `validateStatementTotals` helper checks integer-cent printed arithmetic and separately compares parsed credits and debits. The Wells credit-card parser now supplies these totals. Touching post-date/reference columns and card-prefixed refund rows are supported. A recognized but incomplete summary fails closed; absent/unsupported summaries do not claim validation success.
+
+Passing evidence is retained as balance metadata, never synthesized into transaction rows. The production adapter preserves it. Manual import preview parses before saving facts; connector artifact validation invokes the same adapter; automatic parser refresh catches parse failures and retains prior facts. Safe failure codes contain no account IDs, totals or document contents. No user approval can bypass this parser failure.
+
+Wells statement-validation progress distinguishes `statementTotalsValidation: passed` from `unavailable`; `parserValidated` alone does not mean statement totals reconciled. The existing error UI is used, with no new dashboard or user decision for a parser defect.
+
+This first gate covers supported Wells credit-card statements, not every parser. Deposit statements, other institutions, and investment roll-forward checks require their own explicit printed evidence extraction. Cross-file ledger reconciliation remains diagnostic-only, and is not an import blocker.
+
+No live corrections or product UI changes are included. The retained-source replay is local-file validation, not a fresh connector login or user app-button test. Do not launch against a live database simply to demonstrate this change: changed parser fingerprints can start automatic refresh; review the candidate ledger first.
+
+Validation gate acceptance: focused regression tests, the full 730-test suite, TypeScript compiler, lint and client build pass. The normal Electrobun prepare/build attempts stalled and were stopped; desktop packaging acceptance remains outstanding. This is local-branch implementation evidence, not a production rollout claim.
