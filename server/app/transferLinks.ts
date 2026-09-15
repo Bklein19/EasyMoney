@@ -1,10 +1,12 @@
 import { classifyFlow } from './flowClassification.ts';
+import type { ConfirmedTransferRecord } from './transferRecords.ts';
 
 export interface AccountTransferSeed {
   account_id: number;
   firstMonth: string | null;
   startingAmount: number;
   contributionAdjustments: Map<string, number>;
+  gainsByMonth?: Map<string, number>;
 }
 
 export interface TransferTransaction {
@@ -18,7 +20,7 @@ export interface TransferTransaction {
 
 export interface TransferAdjustment {
   link_id: string;
-  reason: 'starting-balance-transfer' | 'cash-transfer';
+  reason: 'starting-balance-transfer' | 'cash-transfer' | 'reporting-closure';
   account_id: number;
   month: string;
   contributions_cents: number;
@@ -28,11 +30,14 @@ export interface TransferAdjustment {
 export interface TransferLink {
   id: string;
   reason: TransferAdjustment['reason'];
+  confirmation: 'inferred' | 'confirmed';
+  evidence_status: 'inferred' | 'awaiting-bank-records' | 'matched' | 'conflict';
+  effective_date: string;
   source_account_id: number;
-  destination_account_id: number;
+  destination_account_id: number | null;
   source_transaction_ids: string[];
   destination_transaction_ids: string[];
-  amount_cents: number;
+  amount_cents: number | null;
   basis_cents: number;
   gains_cents: number;
 }
@@ -55,6 +60,7 @@ export function deriveTransferLinks(input: {
   balances: Map<string, number>;
   seeds: Map<number, AccountTransferSeed>;
   transactions: TransferTransaction[];
+  confirmedTransfers?: ConfirmedTransferRecord[];
 }): TransferDerivation {
   const flowKey = (month: string, accountId: number) => `${month}|${accountId}`;
   const monthBefore = (month: string) => input.sortedMonths[input.sortedMonths.indexOf(month) - 1] ?? null;
@@ -134,6 +140,7 @@ export function deriveTransferLinks(input: {
     links.push({
       id: linkId,
       reason: 'starting-balance-transfer',
+      confirmation: 'inferred', evidence_status: 'inferred', effective_date: `${source.outflowMonth}-01`,
       source_account_id: source.id,
       destination_account_id: account.id,
       source_transaction_ids: [],
@@ -217,13 +224,13 @@ export function deriveTransferLinks(input: {
     const basisRatio = canCarryMarketGains(outflow.account_id) ? Math.max(0, Math.min(1, sourceBasis / sourceBalance)) : 1;
     const basisCarried = Math.round(match.amount * basisRatio);
     const gainsCarried = match.amount - basisCarried;
-    if (gainsCarried === 0) continue;
 
     const matchedInflows = match.indexes.map((index) => inflows[index]!);
     const linkId = `cash:${outflow.id}->${matchedInflows.map((transaction) => transaction.id).join('+')}`;
     links.push({
       id: linkId,
       reason: 'cash-transfer',
+      confirmation: 'inferred', evidence_status: 'inferred', effective_date: outflow.date,
       source_account_id: outflow.account_id,
       destination_account_id: matchedInflows[0]!.account_id,
       source_transaction_ids: [outflow.id],
@@ -264,5 +271,49 @@ export function deriveTransferLinks(input: {
     }
   }
 
-  return { links, adjustments };
+  // Confirmed and inferred records resolve here, before reporting consumes any
+  // adjustments. A matching bank record enriches the stable confirmed record;
+  // it does not create another economic transfer or another adjustment.
+  for (const record of [...(input.confirmedTransfers ?? [])].sort((a,b) => a.effectiveDate.localeCompare(b.effectiveDate) || a.id.localeCompare(b.id))) {
+    const month = record.effectiveDate.slice(0,7);
+    const matches = links.filter(link => link.source_account_id === record.sourceAccountId &&
+      link.destination_account_id === record.destinationAccountId &&
+      (link.reason === 'starting-balance-transfer'
+        ? link.effective_date.slice(0,7) === month
+        : Math.abs(daysBetween(link.effective_date, record.effectiveDate)) <= 7));
+    if (matches.length === 1) {
+      const matched = matches[0]!;
+      const previousId = matched.id;
+      matched.id = record.id;
+      matched.confirmation = 'confirmed';
+      matched.evidence_status = 'matched';
+      matched.effective_date = record.effectiveDate;
+      for (const adjustment of adjustments) if (adjustment.link_id === previousId) adjustment.link_id = record.id;
+      continue;
+    }
+    const conflict = matches.length > 1 || input.balances.get(flowKey(month,record.sourceAccountId)) !== 0;
+    const link: TransferLink = {
+      id: record.id, reason: record.reason, confirmation: 'confirmed',
+      evidence_status: conflict ? 'conflict' : 'awaiting-bank-records', effective_date: record.effectiveDate,
+      source_account_id: record.sourceAccountId, destination_account_id: record.destinationAccountId,
+      source_transaction_ids: [], destination_transaction_ids: [], amount_cents: null, basis_cents: 0, gains_cents: 0,
+    };
+    links.push(link);
+    if (conflict || !canCarryMarketGains(record.sourceAccountId)) continue;
+    let basis = 0, gains = 0;
+    for (const m of input.sortedMonths) {
+      if (m > month) break;
+      const flow = input.flows.get(flowKey(m,record.sourceAccountId));
+      basis = Math.max(0,basis + (flow?.contributions ?? 0) + (contributionAdjustments.get(record.sourceAccountId)?.get(m) ?? 0));
+      gains += (flow?.dividends ?? 0) + (flow?.interest ?? 0) + (input.seeds.get(record.sourceAccountId)?.gainsByMonth?.get(m) ?? 0) + (gainsAdjustments.get(record.sourceAccountId)?.get(m) ?? 0);
+    }
+    link.basis_cents = basis;
+    link.gains_cents = gains;
+    addAdjustment({link_id:record.id,reason:record.reason,account_id:record.sourceAccountId,month,contributions_cents:-basis,gains_cents:-gains});
+    if (record.destinationAccountId !== null) {
+      addAdjustment({link_id:record.id,reason:record.reason,account_id:record.destinationAccountId,month,contributions_cents:basis,gains_cents:-basis});
+    }
+  }
+
+  return { links: links.sort((a,b) => a.effective_date.localeCompare(b.effective_date) || a.id.localeCompare(b.id)), adjustments };
 }

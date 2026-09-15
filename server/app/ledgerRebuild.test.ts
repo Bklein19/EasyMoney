@@ -183,6 +183,7 @@ test('dated reporting closure survives rebuilds, preserves evidence, and yields 
   expect(() => closeAccount(accountId, '2026-02-30')).toThrow();
   expect(() => closeAccount(accountId, '2099-01-01')).toThrow();
   closeAccount(accountId, '2026-08-19');
+  expect(getDb().prepare('SELECT id,status FROM transferRecords').get()).toEqual({id:`closure:${accountId}`,status:'confirmed'});
   const closed = buildLedgerFromSourceFacts();
   expect(closed.transactions).toEqual(original.transactions);
   expect(closed.balanceSnapshots).toEqual([
@@ -202,6 +203,7 @@ test('dated reporting closure survives rebuilds, preserves evidence, and yields 
   expect(listAccounts().accounts[0]).toMatchObject({ balance: 0, closureBalanceConflict: false });
   getDb().prepare("DELETE FROM sourceBalances WHERE date='2026-08-31'").run();
   unarchiveAccount(accountId);
+  expect(getDb().prepare('SELECT status FROM transferRecords').get()?.status).toBe('revoked');
   expect(buildLedgerFromSourceFacts()).toEqual(original);
   expect(listAccounts().accounts[0]).toMatchObject({ balance: 100, status: 'active', reportingClosedOn: null });
 });

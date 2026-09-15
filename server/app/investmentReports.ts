@@ -2,6 +2,7 @@ import { getDb } from '../database.ts';
 import { classifyFlow } from './flowClassification.ts';
 import { summarizeReturns, type ReturnSummary } from './returns.ts';
 import { deriveTransferLinks, type TransferLink } from './transferLinks.ts';
+import { readConfirmedTransfers } from './transferRecords.ts';
 
 export interface InvestmentAccountSummary {
   id: number;
@@ -12,7 +13,6 @@ export interface InvestmentAccountSummary {
   flow_treatment: string;
   account_holder: string | null;
   reporting_closed_on: string | null;
-  reporting_closure_destination_id: number | null;
 }
 
 export interface InvestmentMonthlyRow {
@@ -183,8 +183,7 @@ function getAccounts(): InvestmentAccountSummary[] {
         ELSE 'investment'
       END AS flow_treatment,
       accountHolder AS account_holder,
-      reportingClosedOn AS reporting_closed_on,
-      reportingClosureDestinationId AS reporting_closure_destination_id
+      reportingClosedOn AS reporting_closed_on
     FROM accounts
     ORDER BY institution, name
   `).all() as InvestmentAccountSummary[];
@@ -361,10 +360,12 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
           firstMonth: state.firstMonth,
           startingAmount: state.startingAmount,
           contributionAdjustments: state.contribAdjust,
+          gainsByMonth: state.gainsByMonth,
         },
       ])
     ),
     transactions: txs,
+    confirmedTransfers: readConfirmedTransfers(),
   });
   for (const adjustment of transferFacts.adjustments) {
     const accountState = perAccount.get(adjustment.account_id);
@@ -377,35 +378,6 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
       adjustment.month,
       (accountState.gainsAdjust.get(adjustment.month) ?? 0) + adjustment.gains_cents
     );
-  }
-
-  // Use the same contribution/gain adjustment layer as priced transfers. Only
-  // retire the basis still left after real flows and existing transfer links;
-  // this makes later statement imports replace, rather than duplicate, the fix.
-  for (const account of accounts) {
-    if (!account.reporting_closed_on || isCashLikeAccount(account)) continue;
-    const month = account.reporting_closed_on.slice(0, 7);
-    if (latestBalanceByMonthAccount.get(flowKey(month, account.id)) !== 0) continue;
-    const state = perAccount.get(account.id)!;
-    let basis = 0;
-    let accumulatedGains = 0;
-    for (const m of sortedMonths) {
-      if (m > month) break;
-      basis = Math.max(0, basis + (flows.get(flowKey(m, account.id))?.contributions ?? 0) + (state.contribAdjust.get(m) ?? 0));
-      const flow = flows.get(flowKey(m, account.id));
-      accumulatedGains += (flow?.dividends ?? 0) + (flow?.interest ?? 0) + (state.gainsByMonth.get(m) ?? 0) + (state.gainsAdjust.get(m) ?? 0);
-    }
-    if (!basis) continue;
-    const applyClosureAdjustment = (id: number, contribution: number, gains: number) => {
-      const target = perAccount.get(id);
-      if (!target) return;
-      target.contribAdjust.set(month, (target.contribAdjust.get(month) ?? 0) + contribution);
-      target.gainsAdjust.set(month, (target.gainsAdjust.get(month) ?? 0) + gains);
-    };
-    applyClosureAdjustment(account.id, -basis, -accumulatedGains);
-    const destination = account.reporting_closure_destination_id;
-    const alreadyLinked = transferFacts.links.some(link => link.source_account_id === account.id && link.destination_account_id === destination);
-    if (destination && !alreadyLinked) applyClosureAdjustment(destination, basis, -basis);
   }
 
   const returns: ReturnSummary[] = [];

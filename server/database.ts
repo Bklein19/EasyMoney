@@ -543,7 +543,8 @@ function repairCreditCardCashflowSigns() {
 }
 
 const TABLES = {
-  accounts: ['id', 'name', 'institution', 'type', 'currentBalance', 'currency', 'accountHolder', 'last4', 'status', 'archivedAt', 'reportingClosedOn', 'reportingClosureDestinationId', 'createdAt', 'updatedAt'],
+  accounts: ['id', 'name', 'institution', 'type', 'currentBalance', 'currency', 'accountHolder', 'last4', 'status', 'archivedAt', 'reportingClosedOn', 'createdAt', 'updatedAt'],
+  transferRecords: ['id', 'sourceAccountId', 'destinationAccountId', 'effectiveDate', 'reason', 'status', 'createdAt', 'updatedAt'],
   accountAliases: ['id', 'institution', 'alias', 'accountId', 'createdAt', 'updatedAt'],
   transactions: [
     'id', 'accountId', 'categoryId', 'date', 'amount', 'importBatchId', 'description', 'merchant',
@@ -966,6 +967,24 @@ export function initDatabase() {
 
   runSchemaMigration('2026-09-14-reporting-closure', () => {
     db.exec('ALTER TABLE accounts ADD COLUMN reportingClosedOn TEXT');
+  });
+
+  runSchemaMigration('2026-09-14-unified-transfer-records', () => {
+    db.exec(`CREATE TABLE transferRecords (
+      id TEXT PRIMARY KEY,
+      sourceAccountId INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      destinationAccountId INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+      effectiveDate TEXT NOT NULL,
+      reason TEXT NOT NULL CHECK(reason='reporting-closure'),
+      status TEXT NOT NULL CHECK(status IN ('confirmed','revoked')),
+      createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL,
+      CHECK(destinationAccountId IS NULL OR destinationAccountId != sourceAccountId)
+    );
+    INSERT INTO transferRecords
+      SELECT 'closure:' || id, id, reportingClosureDestinationId, reportingClosedOn,
+        'reporting-closure', 'confirmed', COALESCE(updatedAt,datetime('now')), COALESCE(updatedAt,datetime('now'))
+      FROM accounts WHERE reportingClosedOn IS NOT NULL;
+    ALTER TABLE accounts DROP COLUMN reportingClosureDestinationId;`);
   });
 
   runSchemaMigration('2026-09-13-derivation-input-checksum', () => {

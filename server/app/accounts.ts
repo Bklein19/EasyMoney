@@ -2,6 +2,7 @@ import { getDb } from '../database.ts';
 import { normalizeAccountLast4 } from './accountLast4.ts';
 import { materializeLedger } from './ledgerRebuild.ts';
 import { localCalendarDate } from './calendarDate.ts';
+import { confirmClosureTransfer, revokeClosureTransfer } from './transferRecords.ts';
 import type { AccountAliasSummary, AccountListResponse, AccountSummary } from './types';
 
 interface AccountRow {
@@ -219,11 +220,11 @@ export function closeAccount(id: number | string, closedOn?: string, destination
     UPDATE accounts
     SET status = 'closed',
         reportingClosedOn = COALESCE(@closedOn, reportingClosedOn),
-        reportingClosureDestinationId = @destinationAccountId,
         archivedAt = NULL,
         updatedAt = @now
     WHERE id = @id
-  `).run({ id: accountId, closedOn: closedOn ?? null, destinationAccountId: destinationAccountId ?? null, now: new Date().toISOString() });
+  `).run({ id: accountId, closedOn: closedOn ?? null, now: new Date().toISOString() });
+  if (closedOn) confirmClosureTransfer(accountId, closedOn, destinationAccountId ?? null);
   if (closedOn) materializeLedger();
   })();
   return { ok: true, accountId };
@@ -239,11 +240,11 @@ export function unarchiveAccount(id: number | string) {
     UPDATE accounts
     SET status = 'active',
         reportingClosedOn = NULL,
-        reportingClosureDestinationId = NULL,
         archivedAt = NULL,
         updatedAt = @now
     WHERE id = @id
   `).run({ id: accountId, now: new Date().toISOString() });
+  revokeClosureTransfer(accountId);
   if (hadClosure) materializeLedger();
   })();
   return { ok: true, accountId };

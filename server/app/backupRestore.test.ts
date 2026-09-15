@@ -28,9 +28,11 @@ test('restore switches databases after restart, preserves annotations and plans,
       const sourceFileId = insertRow('sourceFiles', { fileName: 'source.csv', contentHash: 'source', status: 'committed' });
       insertRow('sourceAccounts', { sourceFileId, accountId, sourceAccountKey: 'checking' });
       insertRow('transactionAnnotations', { ledgerTransactionId: 'txn_preserved', notes: 'Keep this note' });
+      await caller.accounts.markClosed({ id: accountId, closedOn: '2026-01-31' });
       await caller.budgets.migratePlans({ globalBudgets: { 'year:2026': 1200 }, dreamBudget: { globalBudget: 100, categoryPercents: {} }, savedBudgets: [] });
       const backup = await caller.backups.create();
       getDb().prepare('UPDATE accounts SET name = ? WHERE id = ?').run('After backup', accountId);
+      getDb().prepare("UPDATE transferRecords SET status='revoked'").run();
       const restored = await caller.backups.restore({ id: backup.id });
       let blocked = false;
       try { await caller.accounts.updateMetadata({ id: accountId, changes: { name: 'Should be blocked' } }); } catch { blocked = true; }
@@ -51,6 +53,7 @@ test('restore switches databases after restart, preserves annotations and plans,
     const reopened = run(`
       console.log(JSON.stringify({ status: databaseBackupStatus(), plans: await caller.budgets.plans(),
         account: getDb().prepare('SELECT name FROM accounts').get(),
+        transfer: getDb().prepare('SELECT id,status,effectiveDate FROM transferRecords').get(),
         note: getDb().prepare('SELECT notes FROM transactionAnnotations').get(),
         mapping: getDb().prepare('SELECT accountId FROM sourceAccounts').get() }));
       closeDatabase();
@@ -58,6 +61,7 @@ test('restore switches databases after restart, preserves annotations and plans,
     expect(reopened.status.restorePending).toBe(false);
     expect(reopened.status.databasePath).not.toBe(databasePath);
     expect(reopened.account.name).toBe('Before backup');
+    expect(reopened.transfer).toEqual({id:'closure:1',status:'confirmed',effectiveDate:'2026-01-31'});
     expect(reopened.note.notes).toBe('Keep this note');
     expect(reopened.mapping.accountId).toBe(1);
     expect(reopened.plans.plans.globalBudgets['year:2026']).toBe(1200);
