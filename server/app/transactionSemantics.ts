@@ -14,7 +14,7 @@ export type TransactionFlow =
   | 'neutral';
 
 export function isCreditAccount(account: Pick<AccountLike, 'type'> | null | undefined) {
-  return account?.type === 'credit' || account?.type === 'credit_card' || account?.type === 'credit-card';
+  return account?.type === 'credit';
 }
 
 export function isInvestmentAccount(account: Pick<AccountLike, 'type'> | null | undefined) {
@@ -190,4 +190,3 @@ export function isExcludedFromCashFlow(transaction: TransactionListItem, account
   const flow = getTransactionFlow(transaction, accountMap, categoryMap);
   return flow === 'transfer' || flow === 'card_payment' || flow === 'internal_transfer' || flow === 'investment';
 }
-

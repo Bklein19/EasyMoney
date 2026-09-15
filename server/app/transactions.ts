@@ -245,6 +245,8 @@ function buildTransactionFilter(options: ListTransactionsOptions = {}) {
   };
 }
 
+import { normalizeAccountType } from '../../src/domain/accountType';
+
 function toTransactionListItem(row: LedgerTransactionRow): TransactionListItem {
   return {
     id: row.id,
@@ -253,7 +255,7 @@ function toTransactionListItem(row: LedgerTransactionRow): TransactionListItem {
       id: row.accountId,
       name: row.accountName ?? 'Unknown account',
       institution: row.accountInstitution,
-      type: row.accountType ?? 'other',
+      type: normalizeAccountType(row.accountType ?? 'other'),
     },
     category: row.categoryId === null ? null : {
       id: row.categoryId,

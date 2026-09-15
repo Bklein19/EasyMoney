@@ -8,6 +8,21 @@ const { getNetWorthReport } = await import('./netWorth');
 const { getInvestmentNetWorthReport, getSavingsRateReport } = await import('./investmentReports');
 const { getAnalyticsReport } = await import('./analytics');
 
+test('all card spellings report debt and no investment gains', () => {
+  initDatabase();
+  for (const type of ['credit', 'credit-card', 'credit_card']) {
+    const accountId = insertRow('accounts', { name: `Card ${crypto.randomUUID()}`, type });
+    insertRow('ledgerBalances', { accountId, month: '2026-07', balanceCents: -3100 });
+    insertRow('ledgerBalances', { accountId, month: '2026-08', balanceCents: 0 });
+    const report = getInvestmentNetWorthReport();
+    expect(report.accounts.find(account => account.id === accountId)?.type).toBe('credit');
+    const rows = report.rows.filter(row => row.account_id === accountId);
+    expect(rows.map(row => row.contributions_cents)).toEqual([-3100, 3100]);
+    expect(rows.every(row => row.gains_cents === 0)).toBe(true);
+    expect(rows.reduce((sum, row) => sum + row.contributions_cents, 0)).toBe(0);
+  }
+});
+
 test('reads never overwrite the ledger or resurrect legacy rows; annotations use only ledger identities', () => {
   initDatabase();
   const db = getDb();

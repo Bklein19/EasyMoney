@@ -1,4 +1,5 @@
 import { getDb } from '../database.ts';
+import { normalizeAccountType } from '../../src/domain/accountType';
 import { normalizeAccountLast4 } from './accountLast4.ts';
 import { materializeLedger } from './ledgerRebuild.ts';
 import { localCalendarDate } from './calendarDate.ts';
@@ -39,7 +40,7 @@ function toAccountSummary(row: AccountRow, aliases: AccountAliasSummary[]): Acco
     id: row.id,
     name: row.name,
     institution: row.institution,
-    type: row.type,
+    type: normalizeAccountType(row.type),
     balance: row.balanceCents === null ? 0 : row.balanceCents / 100,
     latestBalanceMonth: row.latestBalanceMonth,
     isClosed: status === 'closed' || (status !== 'archived' && row.balanceCents === 0 && row.latestBalanceMonth !== null),
@@ -77,7 +78,7 @@ function normalizeAccountMetadata(changes: Record<string, unknown>) {
   if ('type' in changes) {
     const type = String(changes.type || '').trim();
     if (!type) throw new Error('Account type is required.');
-    normalized.type = type;
+    normalized.type = normalizeAccountType(type);
   }
   if ('currency' in changes) {
     const currency = String(changes.currency || '').trim().toUpperCase();

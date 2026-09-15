@@ -15,12 +15,13 @@ import {
 } from "recharts";
 import "./ReportPages.css";
 import { trpc } from "../../api/trpc";
+import type { AccountType } from '../../domain/accountType';
 
 interface AccountSummary {
   id: number;
   name: string;
   institution: string;
-  type: string;
+  type: AccountType;
   classification: string;
 }
 
@@ -90,9 +91,6 @@ const fmtPct = (v: number | null) =>
   v === null
     ? "—"
     : v.toLocaleString("en-US", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 });
-
-const isCashLikeAccount = (account: AccountSummary) =>
-  ["checking", "savings", "credit-card", "loan"].includes(account.type);
 
 const fmtUsdAxis = (v: number) =>
   Math.abs(v) >= 999_500_000
@@ -175,24 +173,12 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
     let started = false;
     const lastBalance = new Map<number, number>(); // account → most recent balance
     const points: ChartPoint[] = [];
-    const accountById = new Map(report.accounts.map((account) => [account.id, account]));
-    const cashOnlySelection = [...selectedIds].every((id) => {
-      const account = accountById.get(id);
-      return account ? isCashLikeAccount(account) : false;
-    });
 
     for (const month of months) {
       const contribDelta = monthlyContribs.get(month) ?? 0;
       const gainsDelta = monthlyGains.get(month) ?? 0;
       cumulativeContribs += contribDelta;
       cumulativeGains += gainsDelta;
-
-      // Return of capital: outflows draw down contributions first; anything
-      // beyond that comes out of gains. Keeps a fully-emptied account at 0/0.
-      if (!cashOnlySelection && cumulativeContribs < 0) {
-        cumulativeGains += cumulativeContribs;
-        cumulativeContribs = 0;
-      }
 
       // Update any account that has a fresh snapshot this month.
       const snaps = balanceByMonthAccount.get(month);
@@ -203,14 +189,6 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
       if (snaps && accountsEverSnapped.size > 0) {
         running = [...lastBalance.values()].reduce((a, b) => a + b, 0);
         hasBalance = true;
-        if (cashOnlySelection) {
-          // Cash accounts have statement snapshots mid-month; transactions later
-          // in the same month are timing residuals, not market gains.
-          cumulativeContribs = running - cumulativeGains;
-        } else {
-          // Reconcile: keep contributions as-is, let gains absorb any residual.
-          cumulativeGains = running - cumulativeContribs;
-        }
       } else {
         running += contribDelta + gainsDelta;
       }

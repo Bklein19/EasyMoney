@@ -1,4 +1,5 @@
-export type AccountType = 'checking' | 'savings' | 'credit-card' | 'investment' | 'cash' | 'other' | string;
+import type { AccountType } from '../../src/domain/accountType';
+export type { AccountType } from '../../src/domain/accountType';
 export type CategoryType = 'income' | 'expense' | 'transfer' | 'internal_transfer' | 'investment' | string;
 export type CategoryGroup = 'income' | 'transfer' | 'fixed' | 'variable' | 'discretionary' | 'savings_investment' | 'other' | string;
 export type TransactionType = 'income' | 'expense' | 'transfer' | 'investment' | string;

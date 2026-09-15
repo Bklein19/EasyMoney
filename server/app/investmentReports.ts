@@ -1,4 +1,5 @@
 import { getDb } from '../database.ts';
+import { normalizeAccountType, isBalanceAccount, type AccountType } from '../../src/domain/accountType';
 import { classifyFlow } from './flowClassification.ts';
 import { summarizeReturns, type ReturnSummary } from './returns.ts';
 import { deriveTransferLinks, type TransferLink } from './transferLinks.ts';
@@ -9,7 +10,7 @@ export interface InvestmentAccountSummary {
   id: number;
   name: string;
   institution: string;
-  type: string;
+  type: AccountType;
   classification: string;
   flow_treatment: string;
   account_holder: string | null;
@@ -89,8 +90,8 @@ interface LedgerBalanceReportRow {
 const CASH_TYPES = new Set(['checking', 'savings', 'cash']);
 const INVESTMENT_TYPES = new Set(['investment', 'brokerage', 'retirement']);
 
-function isCashLikeAccount(account: { type: string }) {
-  return ['checking', 'savings', 'credit', 'credit_card', 'credit-card', 'loan', 'cash'].includes(account.type);
+function isCashLikeAccount(account: { type: AccountType }) {
+  return isBalanceAccount(account.type);
 }
 
 function isCreditType(type: string) {
@@ -188,7 +189,10 @@ function getAccounts(): InvestmentAccountSummary[] {
       reportingClosedOn AS reporting_closed_on
     FROM accounts
     ORDER BY institution, name
-  `).all() as InvestmentAccountSummary[];
+  `).all().map(row => {
+    const account = row as Omit<InvestmentAccountSummary, 'type'> & { type: string };
+    return { ...account, type: normalizeAccountType(account.type) };
+  });
 }
 
 function getLedgerTransactions(): LedgerTransactionReportRow[] {
