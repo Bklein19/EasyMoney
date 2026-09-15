@@ -1,6 +1,8 @@
 import { basename } from "node:path";
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { cents, makeTx, pdfToText } from "./_helpers";
+import { StatementValidationError, validateStatementTotals } from '../statementValidation';
+import { checkCashStatement } from '../printedStatementChecks';
 
 export const meta: ParserMeta = {
   id: "wells-fargo-statement-pdf",
@@ -312,8 +314,10 @@ function parseCardTransactions(text: string, account: string, coveredTo: string)
     }
     if (!section || /^TOTAL\b/i.test(trimmed) || /^202\d Totals Year-to-Date$/i.test(trimmed)) continue;
 
-    const payment = line.match(/^\s*(\d{2})\/(\d{2})\s+(\d{2})\/(\d{2})\s+([A-Z0-9]+)\s+(.+?)\s+([\d,]+\.\d{2})\s*$/);
-    const charge = line.match(/^\s*\d{4}\s+(\d{2})\/(\d{2})\s+(\d{2})\/(\d{2})\s+([A-Z0-9]+)\s+(.+?)\s+([\d,]+\.\d{2})\s*$/);
+    // PDF columns can touch: the reference may immediately follow the post date.
+    // Credits can carry the same four-digit card prefix as purchases.
+    const payment = line.match(/^\s*(?:\d{4}\s+)?(\d{2})\/(\d{2})\s+(\d{2})\/(\d{2})\s*([A-Z0-9]+)\s+(.+?)\s+([\d,]+\.\d{2})\s*$/);
+    const charge = line.match(/^\s*\d{4}\s+(\d{2})\/(\d{2})\s+(\d{2})\/(\d{2})\s*([A-Z0-9]+)\s+(.+?)\s+([\d,]+\.\d{2})\s*$/);
     const interest = line.match(/^\s*(INTEREST CHARGE .+?)\s+([\d,]+\.\d{2})\s*$/);
 
     if (payment && /Payments|Other Credits/i.test(section)) {
@@ -373,14 +377,17 @@ function parseDeposit(text: string, filePath: string): ParseResult {
   const balance = text.match(/Ending balance on\s+\d{1,2}\/\d{1,2}\s+\$?([\d,]+\.\d{2})/);
   if (!balance) throw new Error("Could not find Wells Fargo deposit ending balance");
 
+  const transactions = parseDepositTransactions(text, account, covered_to);
+  const validation = checkCashStatement('wells-deposit', text, transactions.map(t => t.amount_cents));
   return {
-    transactions: parseDepositTransactions(text, account, covered_to),
+    transactions,
     balances: [
       {
         date: covered_to,
         account,
         institution: "Wells Fargo",
         balance_cents: cents(balance[1]!),
+        raw: { statementValidation: validation },
       },
     ],
     covered_from,
@@ -394,14 +401,33 @@ function parseCreditCard(text: string, filePath: string): ParseResult {
   const balance = text.match(/New Balance\s+\$?([\d,]+\.\d{2})/);
   if (!balance) throw new Error("Could not find Wells Fargo credit card new balance");
 
+  const transactions = parseCardTransactions(text, account, covered_to);
+  // Only recognized complete summaries can assert confidence. Old fixtures and
+  // unsupported layouts without a summary are not represented as validated.
+  let validation;
+  if (/Account Summary/i.test(text)) {
+    const summary = text.slice(text.search(/Account Summary/i)).split(/Wells Fargo Rewards Summary|\bTransactions\b|Interest Charge Calculation/i)[0]!;
+    const amount = (label: string) => {
+      const match = summary.match(new RegExp(label + '\\s+\\$?([\\d,]+\\.\\d{2})'));
+      if (!match) throw new StatementValidationError('invalid-evidence');
+      return cents(match[1]!);
+    };
+    validation = validateStatementTotals({
+      openingBalanceCents: -amount('Previous Balance'),
+      closingBalanceCents: -amount('New Balance'),
+      creditsCents: amount('Payments') + amount('Other Credits'),
+      debitsCents: amount('Cash Advances') + amount('Purchases, Balance Transfers &(?:\\s+Other Charges)?') + amount('Fees Charged') + amount('Interest Charged'),
+    }, transactions.map(transaction => -transaction.amount_cents));
+  }
   return {
-    transactions: parseCardTransactions(text, account, covered_to),
+    transactions,
     balances: [
       {
         date: covered_to,
         account,
         institution: "Wells Fargo",
         balance_cents: -Math.abs(cents(balance[1]!)),
+        raw: { statementValidation: validation ?? { status: 'unavailable', reason: 'summary-not-found' } },
       },
     ],
     covered_from,

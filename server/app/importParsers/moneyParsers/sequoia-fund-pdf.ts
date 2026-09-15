@@ -1,5 +1,6 @@
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { pdfToText, cents, makeTx } from "./_helpers";
+import { checkSequoiaShares } from '../printedStatementChecks';
 import {
   isSequoiaFundStatementFileName,
   sequoiaFundFileAccountIdentity,
@@ -69,5 +70,6 @@ export default async function parse(filePath: string): Promise<ParseResult> {
     ? [{ date: covered_to, account, institution: "Sequoia Fund", balance_cents: cents(balMatch[1]!) }]
     : [];
 
+  for (const balance of balances) Object.assign(balance, { raw: { statementValidation: checkSequoiaShares(layoutText, balance.balance_cents, transactions.length) } });
   return { transactions, balances, covered_from, covered_to };
 }

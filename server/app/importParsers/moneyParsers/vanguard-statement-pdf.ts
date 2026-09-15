@@ -2,6 +2,8 @@ import type { ParseResult, ParserMeta } from "./types.ts";
 import { makeTx } from "./_helpers";
 import { getDocumentProxy, extractText } from "unpdf";
 import { readSecurityTrade } from '../../securityTrade';
+import { validateRecognizedRows } from '../statementValidation';
+import { checkVanguardEmptyActivity } from '../printedStatementChecks';
 
 export const meta: ParserMeta = {
   id: "vanguard-statement-pdf",
@@ -148,5 +150,8 @@ export function parseVanguardStatementText(allText: string): ParseResult {
 
   const covered_from = transactions.length ? transactions.map((t) => t.date).sort()[0]! : statementDate;
   const covered_to = statementDate;
+  const expectedRows = [...(txSectionMatch?.[1] ?? '').matchAll(/^\s*\d{2}\/\d{2}\s+\d{2}\/\d{2}\s+/gm)].length;
+  const validation = expectedRows ? validateRecognizedRows(expectedRows, transactions.length) : checkVanguardEmptyActivity(allText, transactions.length);
+  for (const balance of balances) balance.raw = { statementValidation: validation };
   return { transactions, balances, covered_from, covered_to };
 }

@@ -1,6 +1,7 @@
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { cents, makeTx } from "./_helpers";
 import { getDocumentProxy, extractText } from "unpdf";
+import { validateRecognizedRows } from '../statementValidation';
 
 export const meta: ParserMeta = {
   id: "robinhood-statement-pdf",
@@ -219,6 +220,11 @@ export function parseRobinhoodStatementText(text: string): ParseResult {
     }
   }
 
+  const candidate = new RegExp('\\b(?:Cash|Margin|Sweep)\\s+(?:' + [...ACTIVITY_ACTIONS].join('|') + ')\\s+\\d{1,2}/\\d{1,2}/\\d{4}\\b', 'i');
+  // Share-only ACAT rows carry no cash amount and are intentionally not cash
+  // transactions. Do not infer a market value from their share quantity.
+  const recognized = lines.filter(line => candidate.test(line) && !(/\bACATI\b/.test(line) && !/\$[\d,]+\.\d{2}/.test(line)));
+  const validation = { ...validateRecognizedRows(recognized.length, transactions.length), scope: 'document' };
   return {
     transactions,
     balances: balancesByAccount.size
@@ -227,12 +233,14 @@ export function parseRobinhoodStatementText(text: string): ParseResult {
           account,
           institution: "Robinhood",
           balance_cents: balance.balance_cents,
+          raw: { statementValidation: validation },
           ...(balance.account_holder ? { account_holder: balance.account_holder } : {}),
         }))
       : [{
           date: covered_to,
           account: fallbackAccount.account,
           institution: "Robinhood",
+          raw: { statementValidation: validation },
           balance_cents: closingPortfolioValue(text),
           ...(fallbackAccount.account_holder ? { account_holder: fallbackAccount.account_holder } : {}),
         }],

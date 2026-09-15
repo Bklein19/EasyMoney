@@ -2,6 +2,7 @@ import type { ParseResult, ParserMeta } from "./types.ts";
 import { getDocumentProxy, extractText } from "unpdf";
 import { cents, makeTx } from "./_helpers";
 import { fidelityInvestmentReportStructure } from "./fidelity-report-structure.ts";
+import { checkFidelityPortfolioSections } from '../printedStatementChecks';
 
 export const meta: ParserMeta = {
   id: "fidelity-portfolio-statement-pdf",
@@ -167,7 +168,7 @@ export function parseFidelityPortfolioStatementText(text: string): ParseResult {
     covered_from,
     covered_to,
     transactions,
-    balances: [{ date: covered_to, account, institution: "Fidelity", balance_cents }],
+    balances: [{ date: covered_to, account, institution: "Fidelity", balance_cents, raw: { statementValidation: checkFidelityPortfolioSections(fullText, transactions) } }],
   };
 }
 

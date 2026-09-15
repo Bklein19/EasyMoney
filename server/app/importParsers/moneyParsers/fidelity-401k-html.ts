@@ -1,4 +1,5 @@
 import type { ParseResult, ParserMeta } from "./types.ts";
+import { checkInvestmentRollForward } from '../printedStatementChecks';
 
 export const meta: ParserMeta = {
   id: "fidelity-401k-html",
@@ -49,6 +50,7 @@ export function parseFidelity401kHtml(html: string): ParseResult {
   if (balances[0] && covered_from && contributions) {
     balances[0].raw = { statementCashFlow: { from: covered_from, to: covered_to, netContributionsCents: cents(contributions[1]!) + (employer ? cents(employer[1]!) : 0) } };
   }
+  for (const balance of balances) balance.raw = { ...balance.raw, statementValidation: checkInvestmentRollForward('netbenefits', text, balance.balance_cents) };
   return { transactions: [], balances, covered_from, covered_to };
 }
 
