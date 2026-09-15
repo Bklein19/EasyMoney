@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { checkCashStatement, checkInvestmentRollForward, checkTiaaRollForward } from './printedStatementChecks';
+import { checkCashStatement, checkInvestmentRollForward, checkTiaaRollForward, checkSequoiaShares, checkFidelityAccountRollForward, checkVanguardEmptyActivity } from './printedStatementChecks';
 import { parseBofaDepositStatementText } from './moneyParsers/bofa-statement-pdf';
 import { validateRecognizedRows } from './statementValidation';
 test('Marcus interest is included in deposits, not added twice', () => {
@@ -28,7 +28,43 @@ test('Morgan Stanley roll-forward uses net flows once', () => {
   expect(checkInvestmentRollForward('morgan-stanley', 'TOTAL BEGINNING VALUE $100.00\nNet Credits/Debits/Transfers $20.00\nChange in Value (5.00)\nTOTAL ENDING VALUE $115.00', 11500).status).toBe('passed');
 });
 test('NetBenefits cannot certify unhandled movement categories', () => {
-  expect(checkInvestmentRollForward('netbenefits', 'Beginning Balance $0.00\nWithdrawals $2.00', 0).status).toBe('unavailable');
+  expect(checkInvestmentRollForward('netbenefits', 'Beginning Balance $2.00\nWithdrawals -$2.00\nEnding Balance $0.00', 0).status).toBe('unavailable');
+});
+
+test('NetBenefits bounds summary, supports omitted zero rows and fees, rejects incomplete evidence', () => {
+  const text = 'Loans Withdrawals Transfers Beginning Balance $100.00 Your Contributions $10.00 Fees -$1.00 Change in Market Value -$2.00 Ending Balance $107.00 Withdrawals $900.00';
+  expect(checkInvestmentRollForward('netbenefits', text, 10700).status).toBe('passed');
+  expect(checkInvestmentRollForward('netbenefits', 'Beginning Balance $0.00 Ending Balance $0.00', 0).status).toBe('passed');
+  expect(() => checkInvestmentRollForward('netbenefits', text, 10800)).toThrow('statement-arithmetic');
+  expect(() => checkInvestmentRollForward('netbenefits', 'Beginning Balance $0.00 Fees -$1.00', 0)).toThrow('invalid-evidence');
+  expect(checkInvestmentRollForward('netbenefits', 'Beginning Balance $0.00 Unknown credit $1.00 Unknown debit -$1.00 Ending Balance $0.00', 0).status).toBe('unavailable');
+});
+
+test('Fidelity summary separates current period and excludes nested costs from subtraction total', () => {
+  const text = 'Beginning Account Value $100.00 $900.00\nAdditions 20.00 500.00\nSubtractions -11.00 -400.00\n Transaction Costs, Fees & Charges -1.00 -20.00\nChange in Investment Value * -2.00 700.00\nEnding Account Value ** $107.00 $1700.00';
+  expect(checkFidelityAccountRollForward(text,10700).status).toBe('passed');
+  expect(() => checkFidelityAccountRollForward(text.replace('-11.00','-10.00'),10700)).toThrow('statement-arithmetic');
+  expect(checkFidelityAccountRollForward('Beginning Account Value as of Jan 1, 2026 -\nEnding Account Value as of Dec 31, 2026 ** -',0).status).toBe('passed');
+});
+
+test('Sequoia validates every share movement without manufacturing reinvestment transactions', () => {
+  const text = 'Beginning Balance as of 01/01/26 $100.00 $10.00 10.000\n02/01/26 Shares Purchased -ACH 20.00 10.00 2.000 12.000\n03/01/26 Income Reinvest 0.10 1.20 12.00 0.100 12.100\nEnding Balance as of 03/31/26 $145.20 $12.00 12.100';
+  expect(checkSequoiaShares(text,14520,1)).toMatchObject({status:'passed',activityRows:2});
+  expect(checkSequoiaShares(text.replace('Shares Purchased -ACH','Fund Purchase 12345').replace('Income Reinvest','ST CG Rein'),14520,1).status).toBe('passed');
+  expect(() => checkSequoiaShares(text,14520,0)).toThrow('unparsed-rows');
+  expect(() => checkSequoiaShares(text.replace('0.100 12.100','0.200 12.100'),14520,1)).toThrow('statement-arithmetic');
+  expect(() => checkSequoiaShares(text.replace('Income Reinvest','Unknown Movement'),14520,1)).toThrow('unparsed-rows');
+  const empty = 'Beginning Balance as of 01/01/26 $100.00 $10.00 10.000\nNo transactions this period.\nEnding Balance as of 03/31/26 $120.00 $12.00 10.000';
+  expect(checkSequoiaShares(empty,12000,0).status).toBe('passed');
+  expect(() => checkSequoiaShares(empty.replace('No transactions this period.',''),12000,0)).toThrow('invalid-evidence');
+});
+
+test('Vanguard certifies only a bounded entirely empty activity table', () => {
+  const empty='Completed transactions\n\nIf you had an adjustment';
+  expect(checkVanguardEmptyActivity(empty,0).status).toBe('passed');
+  expect(checkVanguardEmptyActivity('No recognized dates',0).status).toBe('unavailable');
+  expect(checkVanguardEmptyActivity(empty.replace('\n\n','\nMalformed row\n'),0).status).toBe('unavailable');
+  expect(() => checkVanguardEmptyActivity(empty,1)).toThrow('unparsed-rows');
 });
 test('BofA side-by-side check columns preserve both checks and reconcile', () => {
   const text = ['Your Adv Plus Banking', 'Account number: 1234', 'for January 1, 2026 to January 31, 2026', 'Account summary',

@@ -62,11 +62,18 @@ export function checkInvestmentRollForward(kind: 'merrill' | 'morgan-stanley' | 
     movements = [read(text, 'Net Credits/Debits/Transfers'), read(text, 'Change in Value')];
   } else {
     if (!/Beginning Balance/.test(text)) return { status: 'unavailable', reason: 'roll-forward-not-found' };
-    // This recipe is deliberately limited to the explicit three-line summary.
-    // Additional movement categories need a format-specific implementation.
-    if (/Withdrawals|Distributions|Fees|Other Credits|Transfer/i.test(text)) return { status: 'unavailable', reason: 'additional-movement-categories' };
-    opening = read(text, 'Beginning Balance'); closing = read(text, 'Ending Balance');
-    movements = [read(text, 'Your Contributions'), read(text, 'Employer Contributions'), read(text, 'Change in Market Value')];
+    // Bound the actual summary: navigation and later investment tables are not
+    // movement rows. Zero categories are omitted by NetBenefits.
+    const summary = text.match(new RegExp('Beginning Balance\\s+' + money + '([\\s\\S]*?)Ending Balance\\s+' + money));
+    if (!summary) throw new StatementValidationError('invalid-evidence');
+    opening = read(summary[0], 'Beginning Balance'); closing = read(summary[0], 'Ending Balance');
+    let remaining = summary[2]!;
+    movements = [];
+    for (const label of ['Your Contributions', 'Employer Contributions', 'Change in Market Value', 'Fees']) {
+      const row = new RegExp(label + '\\s+' + money, 'i');
+      if (row.test(remaining)) { movements.push(read(remaining, label)); remaining = remaining.replace(row, ''); }
+    }
+    if (remaining.trim()) return { status: 'unavailable', reason: 'additional-movement-categories' };
   }
   if (opening + movements.reduce((a, b) => a + b, 0) !== closing || closing !== closingBalanceCents) throw new StatementValidationError('statement-arithmetic');
   return { status: 'passed', checks: ['investment-roll-forward', 'closing-balance'], transactionCompleteness: 'unavailable', openingBalanceCents: opening, closingBalanceCents: closing };
@@ -85,4 +92,49 @@ export function checkFidelityPortfolioSections(text: string, rows: Array<{ amoun
   }
   return checked.length ? { status: 'passed', checks: ['printed-section-totals'], sections: checked, transactionCompleteness: 'unavailable' }
     : { status: 'unavailable', reason: 'section-totals-not-found' };
+}
+
+export function checkFidelityAccountRollForward(text: string, closingBalanceCents: number) {
+  const summary = text.match(/Beginning Account Value[\s\S]*?Ending Account Value[^\n]*/)?.[0];
+  if (!summary) return { status: 'unavailable', reason: 'roll-forward-not-found' };
+  const date = '(?: as of [A-Za-z]+ \\d{1,2}, \\d{4})?\\s*\\**';
+  const opening = read(summary, 'Beginning Account Value' + date);
+  const closing = read(summary, 'Ending Account Value' + date);
+  // Costs are a breakdown of Subtractions, not an additional subtraction.
+  const movements = ['Additions', 'Subtractions', 'Change in Investment Value \\*?'].map(label =>
+    new RegExp(label).test(summary) ? read(summary, label) : 0);
+  if (opening + movements.reduce((a,b) => a+b,0) !== closing || closing !== closingBalanceCents) throw new StatementValidationError('statement-arithmetic');
+  return { status: 'passed', checks: ['investment-roll-forward', 'closing-balance'], transactionCompleteness: 'unavailable', openingBalanceCents: opening, closingBalanceCents: closing };
+}
+
+export function checkSequoiaShares(text: string, closingBalanceCents: number, purchaseCount: number) {
+  const section = text.match(/Beginning Balance as of[\s\S]*?Ending Balance as of[^\n]*/)?.[0];
+  if (!section) return { status: 'unavailable', reason: 'share-summary-not-found' };
+  const anchor = /(?:Beginning|Ending) Balance as of \d{2}\/\d{2}\/\d{2}\s+\$([\d,]+\.\d{2})\s+\$[\d,]+\.\d{2}\s+([\d,]+\.\d{3})/g;
+  const anchors = [...section.matchAll(anchor)];
+  if (anchors.length !== 2) throw new StatementValidationError('invalid-evidence');
+  const shares = (value: string) => Math.round(Number(value.replace(/,/g,''))*1000);
+  let running = shares(anchors[0]![2]!);
+  let purchases = 0, rows = 0;
+  for (const line of section.split('\n').filter(line => /^\s*\d{2}\/\d{2}\/\d{2}\s/.test(line))) {
+    const row = line.match(/^\s*\d{2}\/\d{2}\/\d{2}\s+(Shares Purchased[^\d]*|Fund Purchase[^\d]*\d*|(?:Income Reinvest|Cap Gain Rein|ST CG Rein)\s+[\d.]+)\s+([\d,]+\.\d{2})\s+[\d,]+\.\d{2}\s+([\d,]+\.\d{3})\s+([\d,]+\.\d{3})/);
+    if (!row) throw new StatementValidationError('unparsed-rows');
+    running += shares(row[3]!);
+    if (running !== shares(row[4]!)) throw new StatementValidationError('statement-arithmetic');
+    if (/^(Shares Purchased|Fund Purchase)/.test(row[1]!)) purchases++;
+    rows++;
+  }
+  if (!rows && !/No transactions this period\./.test(section)) throw new StatementValidationError('invalid-evidence');
+  if (purchases !== purchaseCount) throw new StatementValidationError('unparsed-rows');
+  if (running !== shares(anchors[1]![2]!) || Math.round(Number(anchors[1]![1]!.replace(/,/g,''))*100) !== closingBalanceCents) throw new StatementValidationError('statement-arithmetic');
+  return { status: 'passed', checks: ['share-roll-forward', 'closing-balance', 'purchase-row-coverage'], transactionCompleteness: 'purchase-scope-only', activityRows: rows };
+}
+
+export function checkVanguardEmptyActivity(text: string, parsedCount: number) {
+  // An explicitly bounded, entirely empty table is evidence. Absence of a
+  // recognized date pattern in a nonempty table is not.
+  const section = text.match(/Completed transactions([\s\S]*?)If you had an adjustment/);
+  if (!section || section[1]!.trim()) return { status: 'unavailable', reason: 'no-recognized-activity-rows' };
+  if (parsedCount) throw new StatementValidationError('unparsed-rows');
+  return { status: 'passed', checks: ['explicit-empty-activity-table'], transactionCompleteness: 'completed-transactions-only' };
 }

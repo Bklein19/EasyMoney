@@ -3,6 +3,7 @@ import { makeTx, pdfToText } from "./_helpers";
 import { getDocumentProxy, extractText } from "unpdf";
 import { fidelityInvestmentReportStructure } from "./fidelity-report-structure.ts";
 import { validateRecognizedRows } from '../statementValidation';
+import { checkFidelityAccountRollForward } from '../printedStatementChecks';
 
 export const meta: ParserMeta = {
   id: "fidelity-investment-report-pdf",
@@ -111,6 +112,7 @@ export default async function parse(filePath: string): Promise<ParseResult> {
     (/\bJournaled\b/.test(line) && !/purchase credit/i.test(line)) || /Money Line (?:Paid|Received)/.test(line)
   ) && !/\s-?\$?0\.00(?:\s+S)?\s*$/.test(line));
   const validation = validateRecognizedRows(candidates.length, transactions.length);
-  for (const balance of balances) Object.assign(balance, { raw: { statementValidation: validation } });
+  const summary = checkFidelityAccountRollForward(layoutText, balance_cents);
+  for (const balance of balances) Object.assign(balance, { raw: { statementValidation: summary.status === 'passed' ? { ...summary, activityValidation: validation } : validation } });
   return { transactions, balances, covered_from, covered_to };
 }

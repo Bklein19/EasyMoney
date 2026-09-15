@@ -7,7 +7,8 @@ import { IMPORT_PARSERS } from '../server/app/importParsers';
 import { StatementValidationError } from '../server/app/importParsers/statementValidation';
 
 const databasePath = process.argv[2];
-if (!databasePath) throw new Error('Usage: bun scripts/validate-retained-statements.ts DATABASE');
+if (!databasePath) throw new Error('Usage: bun scripts/validate-retained-statements.ts DATABASE [--require-coverage]');
+const requireCoverage = process.argv.includes('--require-coverage');
 const db = new Database(databasePath, { readonly: true });
 db.exec('PRAGMA query_only=ON; BEGIN');
 const directory = await mkdtemp(join(tmpdir(), 'easymoney-statement-check-'));
@@ -33,7 +34,10 @@ try {
           if (evidence.length && evidence.every(item => item?.status === 'passed')) {
             status = evidence.every(item => item?.checks?.includes('parsed-credits') && item.checks.includes('parsed-debits')) ? 'transaction-totals-passed'
               : evidence.every(item => item?.checks?.includes('investment-roll-forward')) ? 'balance-summary-passed'
-              : evidence.every(item => item?.checks?.includes('printed-section-totals')) ? 'section-totals-passed' : 'recognized-rows-passed';
+              : evidence.every(item => item?.checks?.includes('printed-section-totals')) ? 'section-totals-passed'
+              : evidence.every(item => item?.checks?.includes('share-roll-forward')) ? 'share-roll-forward-passed'
+              : evidence.every(item => item?.checks?.includes('explicit-empty-activity-table')) ? 'empty-activity-passed'
+              : evidence.every(item => item?.checks?.includes('recognized-row-coverage')) ? 'recognized-rows-passed' : 'unavailable';
           }
         }
       }
@@ -43,5 +47,5 @@ try {
   }
   // Only parser IDs and aggregate counts are emitted; no financial contents.
   console.log(JSON.stringify(counts, null, 2));
-  if (Object.values(counts).some(group => Object.keys(group).some(key => key.startsWith('failed:') || key === 'original-missing-or-corrupt'))) process.exitCode = 1;
+  if (Object.values(counts).some(group => Object.keys(group).some(key => key.startsWith('failed:') || key === 'original-missing-or-corrupt' || key === 'parser-unavailable' || (requireCoverage && key === 'unavailable')))) process.exitCode = 1;
 } finally { db.exec('ROLLBACK'); db.close(); await rm(directory, { recursive: true, force: true }); }
