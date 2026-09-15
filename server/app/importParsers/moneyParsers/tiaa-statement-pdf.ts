@@ -1,5 +1,6 @@
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { cents, pdfToText } from "./_helpers";
+import { checkTiaaRollForward } from '../printedStatementChecks';
 
 export const meta: ParserMeta = {
   id: "tiaa-statement-pdf",
@@ -52,12 +53,12 @@ export function parseTiaaStatementText(text: string): ParseResult {
   return {
     // Quarterly employee/employer totals are aggregates, not dated transactions.
     transactions: [],
-    balances: [{ date: statementDate, account: ACCOUNT, institution: "TIAA", balance_cents }],
+    balances: [{ date: statementDate, account: ACCOUNT, institution: "TIAA", balance_cents, raw: { statementValidation: checkTiaaRollForward(text, balance_cents) } }],
     covered_from,
     covered_to,
   };
 }
 
 export default async function parse(filePath: string): Promise<ParseResult> {
-  return parseTiaaStatementText(await pdfToText(filePath));
+  return parseTiaaStatementText(await pdfToText(filePath, true));
 }

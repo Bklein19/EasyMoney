@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { cents, pdfToText } from "./_helpers";
+import { checkInvestmentRollForward } from '../printedStatementChecks';
 
 export const meta: ParserMeta = {
   id: "merrill-cma-statement-pdf",
@@ -41,6 +42,7 @@ export function parseMerrillCmaStatementText(text: string, date: string): ParseR
         account,
         institution: "Merrill",
         balance_cents: parseBalance(balanceMatch[1]!),
+        raw: { statementValidation: checkInvestmentRollForward('merrill', text, parseBalance(balanceMatch[1]!)) },
       },
     ],
     covered_from: date,

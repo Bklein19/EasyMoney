@@ -2,6 +2,7 @@ import { basename } from "node:path";
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { cents, makeTx, pdfToText } from "./_helpers";
 import { StatementValidationError, validateStatementTotals } from '../statementValidation';
+import { checkCashStatement } from '../printedStatementChecks';
 
 export const meta: ParserMeta = {
   id: "wells-fargo-statement-pdf",
@@ -376,14 +377,17 @@ function parseDeposit(text: string, filePath: string): ParseResult {
   const balance = text.match(/Ending balance on\s+\d{1,2}\/\d{1,2}\s+\$?([\d,]+\.\d{2})/);
   if (!balance) throw new Error("Could not find Wells Fargo deposit ending balance");
 
+  const transactions = parseDepositTransactions(text, account, covered_to);
+  const validation = checkCashStatement('wells-deposit', text, transactions.map(t => t.amount_cents));
   return {
-    transactions: parseDepositTransactions(text, account, covered_to),
+    transactions,
     balances: [
       {
         date: covered_to,
         account,
         institution: "Wells Fargo",
         balance_cents: cents(balance[1]!),
+        raw: { statementValidation: validation },
       },
     ],
     covered_from,

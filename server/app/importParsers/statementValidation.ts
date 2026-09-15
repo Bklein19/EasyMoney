@@ -6,11 +6,16 @@ export interface StatementValidationEvidence {
   debitsCents: number;
 }
 export class StatementValidationError extends Error {
-  constructor(public readonly code: 'invalid-evidence' | 'statement-arithmetic' | 'parsed-credits' | 'parsed-debits') {
+  constructor(public readonly code: 'invalid-evidence' | 'statement-arithmetic' | 'parsed-credits' | 'parsed-debits' | 'unparsed-rows') {
     // Safe for connector logs: no balances, account identifiers or document contents.
     super(`Statement validation failed (${code}). Existing ledger data has not been changed by this validation.`);
     this.name = 'StatementValidationError';
   }
+}
+export function validateRecognizedRows(expectedCount: number, actualCount: number) {
+  if (!Number.isSafeInteger(expectedCount) || expectedCount < 0 || expectedCount !== actualCount) throw new StatementValidationError('unparsed-rows');
+  if (expectedCount === 0) return { status: 'unavailable', reason: 'no-recognized-activity-rows' };
+  return { status: 'passed', checks: ['recognized-row-coverage'], expectedCount, actualCount, transactionCompleteness: 'unavailable' };
 }
 export function validateStatementTotals(evidence: StatementValidationEvidence, signedAmounts: number[]) {
   if (![...Object.values(evidence), ...signedAmounts].every(Number.isSafeInteger) || evidence.creditsCents < 0 || evidence.debitsCents < 0) throw new StatementValidationError('invalid-evidence');

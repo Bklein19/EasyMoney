@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { cents, makeTx, pdfToText } from "./_helpers";
+import { checkCashStatement } from '../printedStatementChecks';
 
 export const meta: ParserMeta = {
   id: "marcus-statement-pdf",
@@ -128,14 +129,17 @@ export default async function parse(filePath: string): Promise<ParseResult> {
   const balance = text.match(/Ending Balance\s+\$?([\d,]+\.\d{2})/);
   if (!balance) throw new Error("Could not find Marcus ending balance");
 
+  const transactions = parseActivity(text, account);
+  const validation = checkCashStatement('marcus', text, transactions.map(t => t.amount_cents));
   return {
-    transactions: parseActivity(text, account),
+    transactions,
     balances: [
       {
         date: covered_to,
         account,
         institution: "Marcus",
         balance_cents: cents(balance[1]!),
+        raw: { statementValidation: validation },
       },
     ],
     covered_from,

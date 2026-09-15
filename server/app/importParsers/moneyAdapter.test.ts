@@ -504,7 +504,7 @@ test('Wells Fargo checking statement parser infers signs from running balances',
     amount_cents: -862,
     description: 'National Grid NE Utilitypay Nov 21 04424212798 Alex Example',
   }]);
-  expect(result.balances).toEqual([{
+  expect(result.balances).toMatchObject([{
     date: '2021-11-24',
     account: 'Checking - 1234',
     institution: 'Wells Fargo',
@@ -644,7 +644,7 @@ test('Robinhood statement parser extracts account activity and closing portfolio
 
   expect(result.covered_from).toBe('2026-05-01');
   expect(result.covered_to).toBe('2026-05-31');
-  expect(result.balances).toEqual([{
+  expect(result.balances).toMatchObject([{
     date: '2026-05-31',
     account: 'Robinhood Individual - 2222',
     institution: 'Robinhood',
@@ -733,7 +733,7 @@ test('Robinhood Banking statement parser extracts multiline activity and the end
     amount_cents: 1026,
     description: 'Interest Payment',
   }]);
-  expect(result.balances).toEqual([{
+  expect(result.balances).toMatchObject([{
     date: '2026-06-30',
     account: 'Robinhood Joint Checking - 4429',
     institution: 'Robinhood',
@@ -782,7 +782,7 @@ test('Robinhood credit card statement parser extracts charges, payments, and a l
     amount_cents: 1835,
     description: 'EXAMPLE DELIVERY SHERIDAN WY',
   }]);
-  expect(result.balances).toEqual([{
+  expect(result.balances).toMatchObject([{
     date: '2026-06-19',
     account: 'Robinhood Gold Card - 8904',
     institution: 'Robinhood',
@@ -834,7 +834,7 @@ test('Robinhood statement parser preserves separate retirement accounts in conso
     'SPY Margin Buy 05/04/2026 12 $718.00800 $8,616.10',
   ].join('\n'));
 
-  expect(result.balances).toEqual([{
+  expect(result.balances).toMatchObject([{
     date: '2026-05-31',
     account: 'Robinhood Traditional IRA - 4444',
     institution: 'Robinhood',
@@ -905,7 +905,7 @@ test('Fidelity NetBenefits statement retains balance without fabricating contrib
 
   expect(result.covered_from).toBe('2024-04-01');
   expect(result.covered_to).toBe('2024-04-30');
-  expect(result.balances).toEqual([{
+  expect(result.balances).toMatchObject([{
     date: '2024-04-30',
     account: 'ExampleCo 401(k)',
     institution: 'Fidelity',
@@ -921,7 +921,7 @@ test('Fidelity 401(k) HTML keeps balances and ignores employee/employer period t
     <p>Ending Balance $12,500.00</p>
   </body></html>`);
   expect(result.transactions).toEqual([]);
-  expect(result.balances).toEqual([{
+  expect(result.balances).toMatchObject([{
     date: '2026-04-30', account: 'Fidelity 401(k)', institution: 'Fidelity', balance_cents: 1250000,
   }]);
   expect(result.covered_from).toBe('2026-04-01');
@@ -939,7 +939,7 @@ test('TIAA quarterly statement keeps balances and ignores aggregate and per-fund
       `Your contributions ${dollar}500.00`,
     ].join('\n'));
     expect(result.transactions).toEqual([]);
-    expect(result.balances).toEqual([{
+    expect(result.balances).toMatchObject([{
       date: '2026-06-30', account: 'Retirement Annuity', institution: 'TIAA', balance_cents: 1234567,
     }]);
     expect(result.covered_from).toBe('2026-04-01');
@@ -967,7 +967,7 @@ test('Fidelity portfolio statement parser extracts account contributions and bal
 
   expect(result.covered_from).toBe('2023-01-01');
   expect(result.covered_to).toBe('2023-01-31');
-  expect(result.balances).toEqual([{
+  expect(result.balances).toMatchObject([{
     date: '2023-01-31',
     account: 'Health Savings Account 111222333',
     institution: 'Fidelity',
@@ -1027,7 +1027,7 @@ test('Fidelity portfolio statement uses individual transfer values rather than t
 
   expect(result.covered_from).toBe('2024-04-01');
   expect(result.covered_to).toBe('2024-04-30');
-  expect(result.balances).toEqual([{
+  expect(result.balances).toMatchObject([{
     date: '2024-04-30',
     account: 'Roth Ira 444555666',
     institution: 'Fidelity',
@@ -1126,7 +1126,7 @@ test('Robinhood statement parser handles older Roth IRA statement layouts', () =
 
   expect(result.covered_from).toBe('2024-04-01');
   expect(result.covered_to).toBe('2024-04-30');
-  expect(result.balances).toEqual([{
+  expect(result.balances).toMatchObject([{
     date: '2024-04-30',
     account: 'Robinhood Roth IRA - 6666',
     institution: 'Robinhood',
@@ -1483,7 +1483,7 @@ test('Merrill statement keeps balance but emits neither cash-flow nor income per
     Closing Value (06/28) $123,456.78
   `, '2024-06-28');
 
-  expect(result.balances).toEqual([
+  expect(result.balances).toMatchObject([
     {
       date: '2024-06-28',
       account: 'CMA-Edge - 11W-22222',

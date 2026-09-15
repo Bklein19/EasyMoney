@@ -1,5 +1,6 @@
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { pdfToText, makeTx } from "./_helpers";
+import { checkInvestmentRollForward } from '../printedStatementChecks';
 
 export const meta: ParserMeta = {
   id: "morgan-stanley-pdf",
@@ -101,5 +102,9 @@ export default async function parse(filePath: string): Promise<ParseResult> {
     }
   }
 
+  if (balances.length) {
+    const layout = await pdfToText(filePath, true);
+    for (const balance of balances) Object.assign(balance, { raw: { statementValidation: checkInvestmentRollForward('morgan-stanley', layout, balance.balance_cents) } });
+  }
   return { transactions, balances, covered_from, covered_to };
 }

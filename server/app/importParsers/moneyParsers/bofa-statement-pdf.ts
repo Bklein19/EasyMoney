@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { cents, makeTx, pdfToText } from "./_helpers";
+import { checkCashStatement } from '../printedStatementChecks';
 
 export const meta: ParserMeta = {
   id: "bofa-statement-pdf",
@@ -129,6 +130,14 @@ function depositStatementTransactions(text: string, account: string): ParseResul
       continue;
     }
 
+    if (section === 'Checks' && /^\d{2}\/\d{2}\/\d{2}\s/.test(trimmed)) {
+      flush();
+      // Printed checks can be two independent tables side by side. A whole-line
+      // match consumes the first check as description and loses its amount.
+      const checks = [...line.matchAll(/(\d{2})\/(\d{2})\/(\d{2})\s+(?:(\d+\*?)\s+)?(-?\$?[\d,]+\.\d{2})/g)];
+      for (const check of checks) transactions.push(makeTx({ date: isoNumericDate(check[1]!, check[2]!, check[3]!), amount_cents: cents(check[5]!), description: check[4] ? `Check ${check[4]}` : 'Check', account, institution: 'Bank of America', raw: { source: 'bofa-statement', type: 'deposit-activity', section } }));
+      continue;
+    }
     const row = line.match(/^(\d{2})\/(\d{2})\/(\d{2})\s+(.+?)\s+(-?\$?[\d,]+\.\d{2})\s*$/);
     if (row && section) {
       flush();
@@ -173,14 +182,17 @@ function parseDeposit(text: string, filePath: string): ParseResult {
   const balance = text.match(/Ending balance on [A-Za-z]+ \d{1,2}, \d{4}\s+\$?([\d,]+\.\d{2})/);
   if (!balance) throw new Error("Could not find BofA deposit ending balance");
 
+  const transactions = depositStatementTransactions(text, account);
+  const validation = checkCashStatement('bofa-deposit', text, transactions.map(t => t.amount_cents));
   return {
-    transactions: depositStatementTransactions(text, account),
+    transactions,
     balances: [
       {
         date: covered_to,
         account,
         institution: "Bank of America",
         balance_cents: cents(balance[1]!),
+        raw: { statementValidation: validation },
       },
     ],
     covered_from,
@@ -289,14 +301,17 @@ function parseCreditCard(text: string, filePath: string): ParseResult {
     text.match(/New Balance Total\s+Current Payment Due[\s\S]{0,120}?\$?([\d,]+\.\d{2})/);
   if (!balance) throw new Error("Could not find BofA credit card new balance");
 
+  const transactions = cardStatementTransactions(text, account, covered_to);
+  const validation = checkCashStatement('bofa-card', text, transactions.map(t => -t.amount_cents));
   return {
-    transactions: cardStatementTransactions(text, account, covered_to),
+    transactions,
     balances: [
       {
         date: covered_to,
         account,
         institution: "Bank of America",
         balance_cents: -Math.abs(cents(balance[1]!)),
+        raw: { statementValidation: validation },
       },
     ],
     covered_from,

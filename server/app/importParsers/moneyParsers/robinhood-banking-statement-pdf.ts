@@ -2,6 +2,7 @@ import { getDocumentProxy, extractText } from "unpdf";
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { cents, makeTx } from "./_helpers";
 import { robinhoodBankingCrossSourceIdentity } from "../robinhoodCrossSourceIdentity.ts";
+import { validateRecognizedRows } from '../statementValidation';
 
 export const meta: ParserMeta = {
   id: "robinhood-banking-statement-pdf",
@@ -123,6 +124,8 @@ export function parseRobinhoodBankingStatementText(text: string): ParseResult {
   const balance = statementBalance(text);
   const transactions = parseActivity(text, account);
   const covered_from = transactions.map(transaction => transaction.date).sort()[0] || balance.date;
+  const expectedRows = text.split(/\r?\n/).filter(line => /^\s*\d{1,2}\/\d{1,2}\/\d{2,4}\s+(?!(?:Beginning|Ending) Balance\b)/.test(line)).length;
+  const validation = validateRecognizedRows(expectedRows, transactions.length);
 
   return {
     transactions,
@@ -131,6 +134,7 @@ export function parseRobinhoodBankingStatementText(text: string): ParseResult {
       account,
       institution: "Robinhood",
       balance_cents: balance.balance_cents,
+      raw: { statementValidation: validation },
     }],
     covered_from,
     covered_to: balance.date,

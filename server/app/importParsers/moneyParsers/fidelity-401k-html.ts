@@ -1,4 +1,5 @@
 import type { ParseResult, ParserMeta } from "./types.ts";
+import { checkInvestmentRollForward } from '../printedStatementChecks';
 
 export const meta: ParserMeta = {
   id: "fidelity-401k-html",
@@ -44,6 +45,7 @@ export function parseFidelity401kHtml(html: string): ParseResult {
     : [];
 
   // Period contribution totals must not become fabricated month-end transactions.
+  for (const balance of balances) Object.assign(balance, { raw: { statementValidation: checkInvestmentRollForward('netbenefits', text, balance.balance_cents) } });
   return { transactions: [], balances, covered_from, covered_to };
 }
 

@@ -2,6 +2,7 @@ import { getDocumentProxy, extractText } from "unpdf";
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { cents, makeTx } from "./_helpers";
 import { robinhoodCreditCrossSourceIdentity } from "../robinhoodCrossSourceIdentity.ts";
+import { validateRecognizedRows } from '../statementValidation';
 
 export const meta: ParserMeta = {
   id: "robinhood-credit-card-statement-pdf",
@@ -89,6 +90,8 @@ export function parseRobinhoodCreditCardStatementText(text: string): ParseResult
   if (!balance) throw new Error("Could not find Robinhood credit card new balance");
   const transactions = parseActivity(text, account, covered_to);
   const covered_from = transactions.map(transaction => transaction.date).sort()[0] || covered_to;
+  const expectedRows = text.split(/\r?\n/).filter(line => /^\s*\d{2}\/\d{2}\s+\d{2}\/\d{2}\s+(?!INTEREST CHARGE\b)/.test(line) && !/\s0\.00-?\s*$/.test(line)).length;
+  const validation = validateRecognizedRows(expectedRows, transactions.length);
 
   return {
     transactions,
@@ -97,6 +100,7 @@ export function parseRobinhoodCreditCardStatementText(text: string): ParseResult
       account,
       institution: "Robinhood",
       balance_cents: -Math.abs(cents(balance[1]!)),
+      raw: { statementValidation: validation },
     }],
     covered_from,
     covered_to,

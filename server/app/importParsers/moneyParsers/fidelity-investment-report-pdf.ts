@@ -2,6 +2,7 @@ import type { ParseResult, ParserMeta } from "./types.ts";
 import { makeTx, pdfToText } from "./_helpers";
 import { getDocumentProxy, extractText } from "unpdf";
 import { fidelityInvestmentReportStructure } from "./fidelity-report-structure.ts";
+import { validateRecognizedRows } from '../statementValidation';
 
 export const meta: ParserMeta = {
   id: "fidelity-investment-report-pdf",
@@ -105,5 +106,11 @@ export default async function parse(filePath: string): Promise<ParseResult> {
     }
   }
 
+  const candidates = layoutText.split('\n').filter(line => /^\s*\S?\s*\d{2}\/\d{2}\s/.test(line) && (
+    (/\b(?:RSU|ESPP)#*\S*/.test(line) && /You Bought/.test(line)) ||
+    (/\bJournaled\b/.test(line) && !/purchase credit/i.test(line)) || /Money Line (?:Paid|Received)/.test(line)
+  ) && !/\s-?\$?0\.00(?:\s+S)?\s*$/.test(line));
+  const validation = validateRecognizedRows(candidates.length, transactions.length);
+  for (const balance of balances) Object.assign(balance, { raw: { statementValidation: validation } });
   return { transactions, balances, covered_from, covered_to };
 }

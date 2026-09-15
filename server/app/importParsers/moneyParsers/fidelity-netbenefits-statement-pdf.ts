@@ -1,6 +1,7 @@
 import type { ParseResult, ParserMeta } from "./types.ts";
 import { getDocumentProxy, extractText } from "unpdf";
 import { cents } from "./_helpers";
+import { checkInvestmentRollForward } from '../printedStatementChecks';
 
 export const meta: ParserMeta = {
   id: "fidelity-netbenefits-statement-pdf",
@@ -43,6 +44,7 @@ export function parseNetBenefitsStatementText(text: string): ParseResult {
     account,
     institution: "Fidelity",
     balance_cents: cents(endingBalance[1]!),
+    raw: { statementValidation: checkInvestmentRollForward('netbenefits', normalized, cents(endingBalance[1]!)) },
   }];
 
   // Contribution totals have no individual event dates. Activity exports supply events.
