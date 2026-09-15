@@ -190,6 +190,15 @@ body.sidebar-resizing {
   flex-shrink: 0;
 }
 
+.sidebar-import-indicator {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  margin-left: auto;
+  border-radius: 50%;
+  background: var(--accent-amber, #c99742);
+}
+
 .sidebar-category-groups {
   display: flex;
   flex-direction: column;

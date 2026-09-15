@@ -154,7 +154,6 @@ function isDateRange(value: string): value is DateRange {
   return Object.values(DATE_RANGES).includes(value as DateRange);
 }
 
-import DataCompleteness from '../shared/DataCompleteness';
 
 export default function AnalyticsPage() {
   const [dateRange, setDateRange] = useState<DateRange>(DATE_RANGES.ALL_TIME);
@@ -804,7 +803,6 @@ export default function AnalyticsPage() {
       </div>
 
       <div className="analytics-grid">
-        <div style={{ gridColumn: '1 / -1' }}><DataCompleteness startDate={startDate} endDate={endDate} accountIds={accountId ? [Number(accountId)] : undefined} /></div>
         <div className="analytics-card glass-card">
           <div className="analytics-chart-header">
             <h3 className="analytics-card__title">Income vs Expense</h3>

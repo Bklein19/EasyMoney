@@ -12,7 +12,6 @@ import { useCategories } from '../../hooks/useCategories';
 import { trpc } from '../../api/trpc';
 import { formatCurrency } from '../../utils/formatters';
 import Modal from '../shared/Modal';
-import DataCompleteness from '../shared/DataCompleteness';
 import './BudgetingPage.css';
 
 const PERIOD_MODES = {
@@ -407,7 +406,6 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
   return (
     <>
       <div className="page budgeting-page stagger-in">
-      <DataCompleteness startDate={period.startDate} endDate={period.endDate} />
       {planSave.error ? <p role="alert">Budget changes have not been saved. {planSave.error} <button onClick={planSave.retry}>Retry save</button> Copy your changes before reloading.</p>
         : <p role="status">{planSave.pending ? 'Saving budget plans…' : 'Budget plans saved on this computer.'}</p>}
       <div className="page__header budgeting-page__header">

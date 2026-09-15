@@ -11,7 +11,6 @@ import {
 } from "recharts";
 import "./ReportPages.css";
 import { trpc } from "../../api/trpc";
-import DataCompleteness from '../shared/DataCompleteness';
 
 type Period = "month" | "quarter" | "year";
 
@@ -234,7 +233,6 @@ export function SavingsRatePage({ selectedIds: selectedIdsProp }: { selectedIds?
       </div>
 
       <div className="report-toolbar">
-        <DataCompleteness accountIds={[...selectedIds]} />
         <div className="segmented-control" role="group" aria-label="Savings rate period">
           {(["month", "quarter", "year"] as const).map((p) => (
             <button key={p} type="button" className={period === p ? "active" : ""} onClick={() => setPeriod(p)}>
