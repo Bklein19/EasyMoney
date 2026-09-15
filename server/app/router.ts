@@ -168,8 +168,8 @@ export const appRouter = t.router({
       .mutation(({ input }) => archiveAccount(input.id)),
 
     markClosed: t.procedure
-      .input(z.object({ id: z.union([z.string(), z.number()]) }))
-      .mutation(({ input }) => closeAccount(input.id)),
+      .input(z.object({ id: z.union([z.string(), z.number()]), closedOn: z.string().optional() }))
+      .mutation(({ input }) => closeAccount(input.id, input.closedOn)),
 
     unarchive: t.procedure
       .input(z.object({ id: z.union([z.string(), z.number()]) }))

@@ -673,6 +673,8 @@ test('app accounts endpoint returns domain-shaped accounts', async () => {
         status: 'active',
         archivedAt: null,
         updatedAt: '2026-06-14T12:00:00.000Z',
+        reportingClosedOn: null,
+        closureBalanceConflict: false,
         aliases: [
           {
             id: 1,

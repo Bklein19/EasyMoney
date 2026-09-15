@@ -19,6 +19,8 @@ export interface AccountSummary {
   archivedAt: string | null;
   updatedAt: string | null;
   aliases: AccountAliasSummary[];
+  reportingClosedOn?: string | null;
+  closureBalanceConflict?: boolean;
 }
 
 export interface AccountAliasSummary {

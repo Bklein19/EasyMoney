@@ -10,7 +10,7 @@ const { overlapOccurrenceKey, recordDistinctOverlap } = await import('../reviewe
 function fixture() {
   const db = new Database(':memory:');
   db.exec(`
-    CREATE TABLE accounts (id INTEGER PRIMARY KEY, name TEXT, type TEXT);
+    CREATE TABLE accounts (id INTEGER PRIMARY KEY, name TEXT, type TEXT, reportingClosedOn TEXT);
     CREATE TABLE ledgerTransactions (ledgerTransactionId TEXT, accountId INTEGER, date TEXT, amountCents INTEGER, description TEXT);
     CREATE TABLE ledgerBalances (accountId INTEGER, month TEXT, balanceCents INTEGER, capturedAt TEXT);
     CREATE TABLE sourceFiles (id INTEGER PRIMARY KEY, importFileId INTEGER, sourceType TEXT, status TEXT, contentHash TEXT DEFAULT 'synthetic');
@@ -19,7 +19,7 @@ function fixture() {
     CREATE TABLE importRows (id INTEGER PRIMARY KEY, rowIndex INTEGER);
     CREATE TABLE sourceTransactions (id INTEGER PRIMARY KEY, sourceFileId INTEGER, sourceAccountId INTEGER, importRowId INTEGER, stableSourceId TEXT, date TEXT, amountCents INTEGER, description TEXT, sourceRole TEXT, priority INTEGER, rawJson TEXT);
     CREATE TABLE sourceBalances (id INTEGER PRIMARY KEY, sourceFileId INTEGER, sourceAccountId INTEGER, importRowId INTEGER, date TEXT, balanceCents INTEGER, priority INTEGER, rawJson TEXT);
-    INSERT INTO accounts VALUES (1, 'Synthetic checking', 'checking'), (2, 'Other checking', 'checking');
+    INSERT INTO accounts (id,name,type) VALUES (1, 'Synthetic checking', 'checking'), (2, 'Other checking', 'checking');
   `);
   let transactionId = 0;
   const file = (id:number, status = 'previewed', sourceType = 'activity-export') => {

@@ -61,6 +61,7 @@ Unimport means: mark the import/source file inactive, then rebuild from the rema
 - Manual transaction entry should not be reintroduced.
 - Transaction deletion should not be exposed as ordinary product behavior. Correct source data by unimporting/reimporting or by future source-level repair tools.
 - Account current balance should not be manually updated. Balances should come from imported/source balances or ledger-derived read models.
+- Reporting closure is an explicit exception for a confirmed zero balance: preserve its effective date as a durable user choice, derive a zero balance without creating a transaction, and remove the assertion on reopening. Newer imported balances remain authoritative; flag nonzero balances dated on or after closure rather than hiding them.
 - Account metadata edits are acceptable: name, institution, type, currency.
 - Account hard delete is not acceptable while source facts, annotations, and migration safety depend on stable account identity. Add archive semantics later if needed.
 - Category CRUD is acceptable for now. Categories are user-facing metadata; they are not raw import facts.

@@ -170,6 +170,42 @@ beforeEach(() => {
   resetAppTables();
 });
 
+test('dated reporting closure survives rebuilds, preserves evidence, and yields to later statements', async () => {
+  const { closeAccount, unarchiveAccount, listAccounts } = await import('./accounts');
+  const accountId = Number(insertRow('accounts', { name: 'Closure fixture', type: 'investment' }));
+  const source = insertCommittedSourceFile({ fileName: 'closure-fixture.pdf', parserName: 'fixture', sourceType: 'statement', priority: 50, institution: 'Fixture' });
+  const sourceAccountId = insertSourceAccount(source.sourceFileId, accountId, 'closure-fixture');
+  insertSourceBalance({ ...source, sourceAccountId, date: '2026-06-30', balanceCents: 10000, priority: 50 });
+  insertSourceTransaction({ ...source, sourceAccountId, stableSourceId: 'original', date: '2026-06-01', amountCents: 10000, description: 'Original', priority: 50 });
+  materializeLedger();
+  const original = buildLedgerFromSourceFacts();
+  getDb().prepare('INSERT INTO transactionAnnotations (ledgerTransactionId,notes) VALUES (?,?)').run(original.transactions[0]!.ledgerTransactionId, 'Keep this note');
+  expect(() => closeAccount(accountId, '2026-02-30')).toThrow();
+  expect(() => closeAccount(accountId, '2099-01-01')).toThrow();
+  closeAccount(accountId, '2026-08-19');
+  const closed = buildLedgerFromSourceFacts();
+  expect(closed.transactions).toEqual(original.transactions);
+  expect(closed.balanceSnapshots).toEqual([
+    original.balanceSnapshots[0]!,
+    { accountId, month: '2026-08', balance: 0, capturedAt: '2026-08-19T00:00:00.000Z', sourceBalanceId: null },
+  ]);
+  materializeLedger();
+  expect(buildLedgerFromSourceFacts()).toEqual(closed);
+  expect(listAccounts().accounts[0]).toMatchObject({ balance: 0, reportingClosedOn: '2026-08-19', closureBalanceConflict: false });
+  expect(getDb().prepare('SELECT notes FROM transactionAnnotations').get()?.notes).toBe('Keep this note');
+  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id=?').get(sourceAccountId)?.accountId).toBe(accountId);
+  insertSourceBalance({ ...source, sourceAccountId, date: '2026-08-31', balanceCents: 500, priority: 50 });
+  materializeLedger();
+  expect(listAccounts().accounts[0]).toMatchObject({ balance: 5, closureBalanceConflict: true });
+  getDb().prepare("UPDATE sourceBalances SET balanceCents=0 WHERE date='2026-08-31'").run();
+  materializeLedger();
+  expect(listAccounts().accounts[0]).toMatchObject({ balance: 0, closureBalanceConflict: false });
+  getDb().prepare("DELETE FROM sourceBalances WHERE date='2026-08-31'").run();
+  unarchiveAccount(accountId);
+  expect(buildLedgerFromSourceFacts()).toEqual(original);
+  expect(listAccounts().accounts[0]).toMatchObject({ balance: 100, status: 'active', reportingClosedOn: null });
+});
+
 test('sanitized Vanguard source facts rebuild investment activity and statement balances', () => {
   const accountId = Number(insertRow('accounts', {
     name: 'A Roth IRA',

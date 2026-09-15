@@ -1,5 +1,7 @@
 import { getDb } from '../database.ts';
 import { normalizeAccountLast4 } from './accountLast4.ts';
+import { materializeLedger } from './ledgerRebuild.ts';
+import { localCalendarDate } from './calendarDate.ts';
 import type { AccountAliasSummary, AccountListResponse, AccountSummary } from './types';
 
 interface AccountRow {
@@ -15,6 +17,8 @@ interface AccountRow {
   status: string | null;
   archivedAt: string | null;
   updatedAt: string | null;
+  reportingClosedOn: string | null;
+  closureBalanceConflict: number;
 }
 
 interface AccountAliasRow {
@@ -44,6 +48,8 @@ function toAccountSummary(row: AccountRow, aliases: AccountAliasSummary[]): Acco
     status,
     archivedAt: row.archivedAt,
     updatedAt: row.updatedAt,
+    reportingClosedOn: row.reportingClosedOn,
+    closureBalanceConflict: Boolean(row.closureBalanceConflict),
     aliases,
   };
 }
@@ -123,6 +129,12 @@ export function listAccounts(options: ListAccountsOptions = {}): AccountListResp
          a.currency,
          COALESCE(a.status, 'active') AS status,
          a.archivedAt,
+         a.reportingClosedOn,
+         EXISTS(SELECT 1 FROM sourceBalances sb
+           JOIN sourceAccounts sa ON sa.id=sb.sourceAccountId
+           JOIN sourceFiles sf ON sf.id=sb.sourceFileId
+           WHERE sa.accountId=a.id AND sf.status='committed'
+             AND substr(sb.date,1,10)>=a.reportingClosedOn AND sb.balanceCents!=0) AS closureBalanceConflict,
          a.updatedAt
        FROM accounts a
        ${where}
@@ -189,17 +201,26 @@ export function archiveAccount(id: number | string) {
   return { ok: true, accountId };
 }
 
-export function closeAccount(id: number | string) {
+export function closeAccount(id: number | string, closedOn?: string) {
   const accountId = Number(id);
   if (!Number.isFinite(accountId)) throw new Error('Invalid account id');
   assertAccountExists(accountId);
+  if (closedOn !== undefined && (!/^\d{4}-\d{2}-\d{2}$/.test(closedOn) ||
+    Number.isNaN(Date.parse(`${closedOn}T00:00:00Z`)) ||
+    new Date(`${closedOn}T00:00:00Z`).toISOString().slice(0,10) !== closedOn || closedOn > localCalendarDate())) {
+    throw new Error('Closure date must be a valid date on or before today.');
+  }
+  getDb().transaction(() => {
   getDb().prepare(`
     UPDATE accounts
     SET status = 'closed',
+        reportingClosedOn = COALESCE(@closedOn, reportingClosedOn),
         archivedAt = NULL,
         updatedAt = @now
     WHERE id = @id
-  `).run({ id: accountId, now: new Date().toISOString() });
+  `).run({ id: accountId, closedOn: closedOn ?? null, now: new Date().toISOString() });
+  if (closedOn) materializeLedger();
+  })();
   return { ok: true, accountId };
 }
 
@@ -207,12 +228,17 @@ export function unarchiveAccount(id: number | string) {
   const accountId = Number(id);
   if (!Number.isFinite(accountId)) throw new Error('Invalid account id');
   assertAccountExists(accountId);
+  getDb().transaction(() => {
+  const hadClosure = getDb().prepare('SELECT reportingClosedOn FROM accounts WHERE id=?').get(accountId)?.reportingClosedOn;
   getDb().prepare(`
     UPDATE accounts
     SET status = 'active',
+        reportingClosedOn = NULL,
         archivedAt = NULL,
         updatedAt = @now
     WHERE id = @id
   `).run({ id: accountId, now: new Date().toISOString() });
+  if (hadClosure) materializeLedger();
+  })();
   return { ok: true, accountId };
 }

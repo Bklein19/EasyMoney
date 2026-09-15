@@ -66,7 +66,7 @@ export interface RebuiltBalanceSnapshot {
   month: string;
   balance: number;
   capturedAt: string;
-  sourceBalanceId: number;
+  sourceBalanceId: number | null;
 }
 
 export interface RebuiltLedger {
@@ -588,6 +588,22 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
       capturedAt: `${normalizeDate(balance.date)}T00:00:00.000Z`,
       sourceBalanceId: balance.id,
     });
+  }
+
+  // A confirmed closure is a dated balance assertion, never a transaction.
+  // Newer imported balances remain authoritative (and disagreements are surfaced
+  // by the account read model). Earlier months and all source facts stay intact.
+  const closures = db.prepare('SELECT id, reportingClosedOn FROM accounts WHERE reportingClosedOn IS NOT NULL').all() as Array<{ id: number; reportingClosedOn: string }>;
+  for (const closure of closures) {
+    const month = closure.reportingClosedOn.slice(0, 7);
+    const key = `${closure.id}|${month}`;
+    const existing = balancesByAccountMonth.get(key);
+    if (!existing || existing.capturedAt.slice(0, 10) < closure.reportingClosedOn) {
+      balancesByAccountMonth.set(key, {
+        accountId: closure.id, month, balance: 0,
+        capturedAt: `${closure.reportingClosedOn}T00:00:00.000Z`, sourceBalanceId: null,
+      });
+    }
   }
 
   return {

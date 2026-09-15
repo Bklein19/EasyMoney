@@ -321,6 +321,8 @@ export default function AccountsPage() {
                         <span className={`account-status-chip ${isArchived ? 'is-archived' : ''}`}>
                           {isArchived ? 'Archived' : account.isClosed ? 'Closed' : 'Active'}
                         </span>
+                        {account.reportingClosedOn && <small>Zero balance confirmed {account.reportingClosedOn}</small>}
+                        {account.closureBalanceConflict && <p role="alert">A statement reports a nonzero balance after closure. Review the account or reopen it.</p>}
                       </td>
                       <td className={`account-row__balance ${account.currentBalance < 0 ? 'is-negative' : ''}`}>
                         {formatCurrency(account.currentBalance || 0)}

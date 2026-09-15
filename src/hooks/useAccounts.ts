@@ -39,7 +39,7 @@ export function useAccounts(options: { includeArchived?: boolean } = {}) {
 
   async function unarchiveAccount(id: number | string) {
     const result = await trpcClient.accounts.unarchive.mutate({ id });
-    await queryClient.invalidateQueries({ queryKey: trpc.accounts.list.queryKey() });
+    await queryClient.invalidateQueries();
     return result;
   }
 
@@ -63,6 +63,8 @@ function fromAppAccount(account: AccountSummary) {
     currentBalance: account.balance,
     latestBalanceMonth: account.latestBalanceMonth,
     isClosed: account.isClosed,
+    reportingClosedOn: account.reportingClosedOn,
+    closureBalanceConflict: account.closureBalanceConflict,
     currency: account.currency,
     accountHolder: account.accountHolder,
     last4: account.last4,

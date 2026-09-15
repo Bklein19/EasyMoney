@@ -729,6 +729,14 @@ export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPa
   const [syncRunId, setSyncRunId] = useState(() => localStorage.getItem('easymoney-active-sync-run') || '');
   const [syncAction, setSyncAction] = useState<'confirm' | 'discard' | ''>('');
   const [syncActionError, setSyncActionError] = useState('');
+  const [closingAccount, setClosingAccount] = useState<FreshnessAccount | null>(null);
+  const [closureDate, setClosureDate] = useState('');
+  const [closureBusy, setClosureBusy] = useState(false);
+  const [closureError, setClosureError] = useState('');
+  const closureFormRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (closingAccount) closureFormRef.current?.scrollIntoView({ block: 'center' });
+  }, [closingAccount]);
   const freshnessQuery = useQuery(trpc.dataFreshness.report.queryOptions());
   const syncTargetsQuery = useQuery(trpc.dataSync.targets.queryOptions());
   const syncQuery = useQuery({
@@ -820,16 +828,35 @@ export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPa
     if (account.status === 'closed') {
       await trpcClient.accounts.unarchive.mutate({ id: account.accountId });
     } else {
-      await trpcClient.accounts.markClosed.mutate({ id: account.accountId });
+      setClosureError('');
+      setClosureDate('');
+      setClosingAccount(account);
+      return;
     }
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: trpc.dataFreshness.report.queryKey() }),
-      queryClient.invalidateQueries({ queryKey: trpc.accounts.list.queryKey() }),
-    ]);
+    await queryClient.invalidateQueries();
   };
 
   return (
     <section className="data-freshness" aria-label="Data freshness">
+      {closingAccount && <form ref={closureFormRef} className="sync-review" aria-label="Close account for reporting" onSubmit={async event => {
+        event.preventDefault();
+        setClosureBusy(true);
+        setClosureError('');
+        try {
+          await trpcClient.accounts.markClosed.mutate({ id: closingAccount.accountId, closedOn: closureDate });
+          await queryClient.invalidateQueries();
+          setClosingAccount(null);
+        } catch (error) {
+          setClosureError(error instanceof Error ? error.message : 'Could not close account');
+        } finally { setClosureBusy(false); }
+      }}>
+        <h3>Close {closingAccount.accountName} for reporting</h3>
+        <p>Confirm its balance is zero as of this date. Earlier history is preserved; no expense or transfer is created. Newer statements remain authoritative. Reopening removes this assertion.</p>
+        <label>Zero balance as of <input type="date" required value={closureDate} onChange={event => setClosureDate(event.target.value)} /></label>
+        {closureError && <p role="alert">{closureError}</p>}
+        <button type="submit" disabled={closureBusy}>{closureBusy ? 'Closing…' : 'Confirm zero balance and close'}</button>
+        <button type="button" disabled={closureBusy} onClick={() => setClosingAccount(null)}>Cancel</button>
+      </form>}
       <div className="data-freshness__header">
         <div>
           <h2>Data Freshness</h2>
