@@ -5,6 +5,7 @@ import { deriveTransferLinks, type TransferLink } from './transferLinks.ts';
 import { readConfirmedTransfers } from './transferRecords.ts';
 
 export interface InvestmentAccountSummary {
+  status?: string;
   id: number;
   name: string;
   institution: string;
@@ -175,6 +176,7 @@ function getAccounts(): InvestmentAccountSummary[] {
     SELECT
       id,
       name,
+      status,
       COALESCE(institution, '') AS institution,
       type,
       type AS classification,

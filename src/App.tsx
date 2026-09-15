@@ -17,7 +17,10 @@ import { trpc, queryClient } from './api/trpc';
 import './App.css';
 import BackupsPage from './components/settings/BackupsPage';
 
+import { expandReportSelection, visibleReportAccounts } from './components/investments/reportAccountSelection';
+
 interface ReportAccount {
+  status?: string;
   id: number;
   name: string;
   institution: string;
@@ -52,6 +55,7 @@ function App() {
   const [selectedReportAccountIds, setSelectedReportAccountIds] = useState<Set<number> | null>(null);
   const reportAccountsQuery = useQuery(trpc.reports.netWorth.queryOptions());
   const reportAccounts: ReportAccount[] = reportAccountsQuery.data?.accounts || [];
+  const pickerAccounts = visibleReportAccounts(reportAccounts);
 
   const handleSidebarCollapsedChange = (nextValue: boolean) => {
     setIsSidebarCollapsed(nextValue);
@@ -102,9 +106,9 @@ function App() {
           isCollapsed={isSidebarCollapsed}
           isPeekOpen={isSidebarPeekOpen}
           onCollapsedChange={handleSidebarCollapsedChange}
-          reportAccounts={reportAccounts}
-          selectedReportAccountIds={reportSelectedIds}
-          onReportAccountSelectionChange={setSelectedReportAccountIds}
+          reportAccounts={pickerAccounts}
+          selectedReportAccountIds={new Set(pickerAccounts.filter(account => reportSelectedIds.has(account.id)).map(account => account.id))}
+          onReportAccountSelectionChange={ids => setSelectedReportAccountIds(expandReportSelection(reportAccounts, ids))}
         />
         {isSidebarCollapsed && (
           <div
