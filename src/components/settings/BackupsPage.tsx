@@ -2,8 +2,12 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { trpc, trpcClient } from '../../api/trpc';
 import Modal from '../shared/Modal';
+import { useSearchParams } from 'react-router';
+import ParserRefreshStatus from '../import/ParserRefreshStatus';
 
 export default function BackupsPage() {
+  const [searchParams] = useSearchParams();
+  const [historyOpen, setHistoryOpen] = useState(searchParams.get('history') === 'open');
   const query = useQuery(trpc.backups.list.queryOptions());
   const [selected, setSelected] = useState('');
   const [busy, setBusy] = useState(false);
@@ -30,6 +34,11 @@ export default function BackupsPage() {
       <div>{backup.id}</div>
       <button className="btn btn--ghost btn--sm" disabled={busy || query.data?.restorePending} onClick={() => setSelected(backup.id)}>Review restore</button>
     </li>)}</ul>
+    <details id="advanced-history" open={historyOpen} onToggle={event => setHistoryOpen(event.currentTarget.open)}>
+      <summary>Advanced history</summary>
+      <p>Technical details of automatic import updates, including saved categories and notes from earlier versions.</p>
+      {historyOpen && <ParserRefreshStatus advanced />}
+    </details>
     <Modal isOpen={Boolean(selected)} onClose={() => { if (!busy) setSelected(''); }} title="Review backup restore">
       {preview.isPending && <p>Validating backup…</p>}
       {preview.error && <p role="alert">{preview.error.message}</p>}

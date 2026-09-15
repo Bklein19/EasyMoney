@@ -1,26 +1,45 @@
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import { trpc, queryClient } from '../../api/trpc';
+import { needsImportUpdateReview } from './parserRefreshNotice';
 
-export default function ParserRefreshStatus() {
+export default function ParserRefreshStatus({ advanced = false }: { advanced?: boolean }) {
   const status = useQuery({ ...trpc.imports.parserRefreshStatus.queryOptions(), refetchInterval: 3000 });
   const retry = useMutation(trpc.imports.previewParserRefresh.mutationOptions({
     onSuccess: () => { void queryClient.invalidateQueries(); },
   }));
   const apply = useMutation(trpc.imports.applyParserRefresh.mutationOptions({ onSuccess: () => { void queryClient.invalidateQueries(); } }));
-  if (status.error) return <p role="alert">Unable to check parser refresh status.</p>;
-  if (status.data?.running) return <p role="status">Refreshing changed parsers from retained originals. Your current ledger remains available.</p>;
-  if (status.data?.error) return <p role="alert">{status.data.error} <button disabled={retry.isPending} onClick={() => retry.mutate()}>Retry</button></p>;
+  if (status.error) return <p role="alert">Unable to check for import updates. <button onClick={() => void status.refetch()}>Try again</button></p>;
   const history = status.data?.annotationHistory ?? [];
-  if (!status.data?.issues.length && !history.length) return null;
+  if (!advanced && !needsImportUpdateReview(status.data)) return null;
   const issues = status.data?.issues ?? [];
   const direct = issues.filter(item => item.status === 'review-required');
   const involved = issues.filter(item => item.status === 'conflict-involved');
   const held = issues.filter(item => item.status === 'held');
   const diagnostics = status.data?.diagnostics;
   const preview = diagnostics?.preview;
+  if (!advanced) return <section className="card" aria-label="Import updates need review">
+    <h3>Some import updates need review</h3>
+    <p>Your current data has not changed. We paused these updates to protect your saved categories, notes, and balances.</p>
+    {preview?.annotations.filter(row => row.disposition === 'review-required').map(row => <div key={row.ledgerTransactionId}>
+      <h4>A saved category or note needs review</h4>
+      <p>{String(row.evidence.transaction.date)} · {String(row.evidence.transaction.description)}</p>
+      <p>Category: {row.evidence.categoryName ?? 'Uncategorized'} · Note: {row.evidence.annotation.notes || 'None'}</p>
+      <p>We could not safely carry this information to the updated transaction.</p>
+    </div>)}
+    {diagnostics?.conflicts.filter(row => row.kind === 'balance' || row.origin === 'new').map(row => <div key={row.key}>
+      <h4>{row.kind === 'balance' ? 'Two files report different balances' : 'Transactions may overlap'}</h4>
+      <ul>{row.members.map((member, index) => <li key={index}>{member.accountName} · {member.date} · {(member.amountCents / 100).toFixed(2)} · {member.description} ({member.fileName})</li>)}</ul>
+    </div>)}
+    {direct.map(row => <p key={row.sourceFileId}>We couldn’t safely update <strong>{row.fileName}</strong>. Review the file details before trying again.</p>)}
+    <Link className="btn btn--secondary" to="/backups?history=open#advanced-history">Review update details</Link>{' '}
+    <button disabled={retry.isPending} onClick={() => retry.mutate()}>{retry.isPending ? 'Checking…' : 'Check updates again'}</button>
+    {retry.error && <p role="alert">The update still needs attention. Your current data is unchanged. Review the update details for more information.</p>}
+  </section>;
   return <details style={{ marginBlock: 16 }}>
     <summary>{issues.length ? `Parser updates paused: ${direct.length} file issues, ${involved.length} conflict-involved files, ${held.length} otherwise-valid files held` : `Parser refresh history · ${history.length} preserved annotation records`}</summary>
+    {status.data?.running && <p role="status">Updating imported files. Your current data remains available.</p>}
+    {status.data?.error && <p role="alert">{status.data.error} <button disabled={retry.isPending} onClick={() => retry.mutate()}>Retry</button></p>}
     <p>{issues.length ? 'The previous facts remain in use for these imports. ' : ''}Automatic updates preserve confirmed mappings and annotations. Pre-update snapshots are available in <Link to="/backups">Backups</Link>.</p>
     {!!issues.length && <button disabled={retry.isPending || apply.isPending} onClick={() => retry.mutate()}>{retry.isPending ? 'Previewing…' : 'Preview parser updates'}</button>}
     {preview && <section>

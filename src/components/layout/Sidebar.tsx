@@ -63,7 +63,7 @@ const Sidebar = ({
   onReportAccountSelectionChange,
 }: SidebarProps) => {
   const location = useLocation();
-  const coverage = useQuery({ ...trpc.dataFreshness.completeness.queryOptions({}), staleTime: 60_000 });
+  const coverage = useQuery({ ...trpc.dataFreshness.report.queryOptions(), staleTime: 60_000 });
   const importAttention = importAttentionMessage(coverage.data?.accounts, coverage.isError);
   const sidebarRef = useRef<HTMLDivElement | null>(null);
   const { categories } = useCategories();
