@@ -18,9 +18,10 @@
   z-index: 70;
   top: 0;
   right: 0;
-  left: var(--active-sidebar-width);
+  left: 0;
   display: block;
-  height: 12px;
+  height: 24px;
+  user-select: none;
 }
 
 .app-content {
