@@ -65,7 +65,7 @@ export function createMoneyParserAdapter({
           institution: balance.institution,
           account: balance.account,
           ...(balance.account_holder ? { accountHolder: balance.account_holder } : {}),
-          raw: {},
+          raw: balance.raw ?? {},
         })),
       };
     },

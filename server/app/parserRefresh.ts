@@ -13,6 +13,7 @@ import { captureRefreshConflicts, compareRefreshConflicts, readRefreshDiagnostic
 import type { AppImportParseResult, AppImportParser, ParsedImportTransaction, ParsedImportBalance } from './importTypes';
 import { resolveRefreshAccount, type RefreshAccount } from './parserRefreshAccounts';
 import { calendarDate } from './importParsers/calendarDate';
+import { getStatementCashFlows } from './statementCashFlows';
 import { captureAnnotations, planAnnotationRefresh, applyAnnotationRefresh, readAnnotationHistory } from './parserRefreshAnnotations';
 
 type Db = ReturnType<typeof getDb>;
@@ -193,6 +194,8 @@ export async function refreshParserDerivations(options: {
     db.transaction(() => {
       if (inputRevision() !== before) throw new ReviewRequired('Data changed during refresh. Retry.');
       for (const candidate of candidates) replaceFacts(db, candidate);
+      // Contradictory period totals must roll back with the other candidate facts.
+      getStatementCashFlows(db);
       const ledger = buildLedgerFromSourceFacts(db);
       diagnostics = compareRefreshConflicts(baseline, captureRefreshConflicts(db, ledger), before);
       const ids = new Set(ledger.transactions.map(row => row.ledgerTransactionId));

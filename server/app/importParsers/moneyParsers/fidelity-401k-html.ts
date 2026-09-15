@@ -44,6 +44,11 @@ export function parseFidelity401kHtml(html: string): ParseResult {
     : [];
 
   // Period contribution totals must not become fabricated month-end transactions.
+  const contributions = text.match(/Your Contributions\s+\$([\d,]+\.\d{2})/);
+  const employer = text.match(/Employer Contributions\s+\$([\d,]+\.\d{2})/);
+  if (balances[0] && covered_from && contributions) {
+    balances[0].raw = { statementCashFlow: { from: covered_from, to: covered_to, netContributionsCents: cents(contributions[1]!) + (employer ? cents(employer[1]!) : 0) } };
+  }
   return { transactions: [], balances, covered_from, covered_to };
 }
 

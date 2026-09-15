@@ -4,6 +4,7 @@ import { classifyFlow } from './flowClassification.ts';
 import { summarizeReturns, type ReturnSummary } from './returns.ts';
 import { deriveTransferLinks, type TransferLink } from './transferLinks.ts';
 import { readConfirmedTransfers } from './transferRecords.ts';
+import { getStatementCashFlows } from './statementCashFlows';
 
 export interface InvestmentAccountSummary {
   status?: string;
@@ -273,6 +274,20 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
   }
 
   const sortedMonths = [...months].sort();
+  const statementFlows = getStatementCashFlows(getDb());
+  for (const account of accounts) {
+    const periods = statementFlows.get(account.id) ?? [];
+    for (const period of periods) {
+      // The statement is authoritative for this period's total. Subtract known
+      // events so overlapping activity is never added a second time.
+      const represented = txs.filter(tx => tx.account_id === account.id && tx.date.slice(0,10) >= period.from && tx.date.slice(0,10) <= period.to && classifyFlow(tx.description) === 'contribution')
+        .reduce((sum, tx) => sum + tx.amount_cents, 0);
+      const key = flowKey(period.to.slice(0,7), account.id);
+      const flow = flows.get(key) ?? { contributions: 0, dividends: 0, interest: 0 };
+      flow.contributions += period.netContributionsCents - represented;
+      flows.set(key, flow);
+    }
+  }
   const rows: InvestmentMonthlyRow[] = [];
   const perAccount = new Map<number, {
     gainsByMonth: Map<string, number>;

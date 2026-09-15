@@ -8,6 +8,25 @@ const { getNetWorthReport } = await import('./netWorth');
 const { getInvestmentNetWorthReport, getSavingsRateReport } = await import('./investmentReports');
 const { getAnalyticsReport } = await import('./analytics');
 
+test('statement contribution evidence replaces overlapping activity totals without adding transactions', () => {
+  initDatabase();
+  const accountId = insertRow('accounts', {name:`Retirement ${crypto.randomUUID()}`,type:'investment'});
+  const fileId = insertRow('sourceFiles', {fileName:'synthetic.html',contentHash:crypto.randomUUID(),status:'committed'});
+  const sourceAccountId = insertRow('sourceAccounts', {sourceFileId:fileId,sourceAccountKey:'retirement',accountId});
+  const rawJson=JSON.stringify({statementCashFlow:{from:'2026-02-01',to:'2026-02-28',netContributionsCents:20000}});
+  for(let i=0;i<2;i++) insertRow('sourceBalances',{sourceFileId:fileId,sourceAccountId,date:'2026-02-28',balanceCents:100000,rawJson});
+  insertRow('ledgerBalances',{accountId,month:'2026-01',balanceCents:0});
+  insertRow('ledgerBalances',{accountId,month:'2026-02',balanceCents:100000});
+  insertRow('ledgerTransactions',{accountId,ledgerTransactionId:crypto.randomUUID(),date:'2026-02-12',amountCents:10000,description:'Employee contribution'});
+  const rows=getInvestmentNetWorthReport().rows.filter(row=>row.account_id===accountId);
+  expect(rows.reduce((s,r)=>s+r.contributions_cents,0)).toBe(20000);
+  expect(rows.reduce((s,r)=>s+(r.gains_cents??0),0)).toBe(80000);
+  expect(getDb().prepare('SELECT COUNT(*) AS n FROM ledgerTransactions WHERE accountId=?').get(accountId)?.n).toBe(1);
+  getDb().prepare('DELETE FROM ledgerTransactions WHERE accountId=?').run(accountId);
+  getDb().prepare('DELETE FROM sourceFiles WHERE id=?').run(fileId);
+  getDb().prepare('DELETE FROM accounts WHERE id=?').run(accountId);
+});
+
 test('all card spellings report debt and no investment gains', () => {
   initDatabase();
   for (const type of ['credit', 'credit-card', 'credit_card']) {

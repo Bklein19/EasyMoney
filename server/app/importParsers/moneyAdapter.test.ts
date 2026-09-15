@@ -914,7 +914,7 @@ test('Fidelity NetBenefits statement retains balance without fabricating contrib
   expect(result.transactions).toEqual([]);
 });
 
-test('Fidelity 401(k) HTML keeps balances and ignores employee/employer period totals', () => {
+test('Fidelity 401(k) HTML retains period totals separately from transactions', () => {
   const result = parseFidelity401kHtml(`<html><body>
     <p>Statement Period: 04/01/2026 to 04/30/2026</p>
     <p>Your Contributions $1,200.00</p><p>Employer Contributions $300.00</p>
@@ -923,12 +923,13 @@ test('Fidelity 401(k) HTML keeps balances and ignores employee/employer period t
   expect(result.transactions).toEqual([]);
   expect(result.balances).toEqual([{
     date: '2026-04-30', account: 'Fidelity 401(k)', institution: 'Fidelity', balance_cents: 1250000,
+    raw: { statementCashFlow: { from: '2026-04-01', to: '2026-04-30', netContributionsCents: 150000 } },
   }]);
   expect(result.covered_from).toBe('2026-04-01');
   expect(result.covered_to).toBe('2026-04-30');
 });
 
-test('TIAA quarterly statement keeps balances and ignores aggregate and per-fund contribution totals', () => {
+test('TIAA quarterly statement retains aggregate evidence without per-fund double counting', () => {
   for (const dollar of ['', '$']) {
     const result = parseTiaaStatementText([
       'Quarterly retirement savings portfolio statement',
@@ -941,6 +942,7 @@ test('TIAA quarterly statement keeps balances and ignores aggregate and per-fund
     expect(result.transactions).toEqual([]);
     expect(result.balances).toEqual([{
       date: '2026-06-30', account: 'Retirement Annuity', institution: 'TIAA', balance_cents: 1234567,
+      raw: { statementCashFlow: { from: '2026-04-01', to: '2026-06-30', netContributionsCents: 300000 } },
     }]);
     expect(result.covered_from).toBe('2026-04-01');
     expect(result.covered_to).toBe('2026-06-30');

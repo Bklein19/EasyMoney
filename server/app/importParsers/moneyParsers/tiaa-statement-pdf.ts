@@ -34,7 +34,7 @@ function isoLongDate(value: string): string {
   return `${m[3]}-${MONTHS[m[1]!]}-${String(Number(m[2])).padStart(2, "0")}`;
 }
 
-export function parseTiaaStatementText(text: string): ParseResult {
+export function parseTiaaStatementText(text: string, layout = text): ParseResult {
   const balanceMatch = text.match(
     /Your balance on\s+([A-Za-z]+\s+\d{1,2},\s+\d{4}):[\s\S]*?\$([\d,]+\.\d{2})/
   );
@@ -48,16 +48,27 @@ export function parseTiaaStatementText(text: string): ParseResult {
   );
   const covered_from = periodMatch ? isoLongDate(periodMatch[1]!) : statementDate;
   const covered_to = periodMatch ? isoLongDate(periodMatch[2]!) : statementDate;
+  // First column is this quarter; later columns and fund breakdowns are not additive.
+  const amountFor = (label: string) => {
+    const match = layout.match(new RegExp(`^\\s*${label}\\s+(-\\s*)?\\$?([\\d,]+\\.\\d{2})`, 'mi'));
+    return match ? (match[1] ? -1 : 1) * cents(match[2]!) : null;
+  };
+  const employee = amountFor('Your contributions');
+  const employer = amountFor('Employer contributions');
+  const raw = periodMatch && employee !== null && employer !== null ? {
+    statementCashFlow: { from: covered_from, to: covered_to,
+      netContributionsCents: employee + employer + (amountFor('Other Credits') ?? 0) + (amountFor('Distributions/Other Debits') ?? 0) },
+  } : undefined;
 
   return {
     // Quarterly employee/employer totals are aggregates, not dated transactions.
     transactions: [],
-    balances: [{ date: statementDate, account: ACCOUNT, institution: "TIAA", balance_cents }],
+    balances: [{ date: statementDate, account: ACCOUNT, institution: "TIAA", balance_cents, ...(raw ? { raw } : {}) }],
     covered_from,
     covered_to,
   };
 }
 
 export default async function parse(filePath: string): Promise<ParseResult> {
-  return parseTiaaStatementText(await pdfToText(filePath));
+  return parseTiaaStatementText(await pdfToText(filePath), await pdfToText(filePath, true));
 }
