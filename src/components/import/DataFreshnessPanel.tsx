@@ -731,6 +731,8 @@ export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPa
   const [syncActionError, setSyncActionError] = useState('');
   const [closingAccount, setClosingAccount] = useState<FreshnessAccount | null>(null);
   const [closureDate, setClosureDate] = useState('');
+  const [closureDestination, setClosureDestination] = useState('');
+  const { accounts: closureAccounts } = useAccounts();
   const [closureBusy, setClosureBusy] = useState(false);
   const [closureError, setClosureError] = useState('');
   const closureFormRef = useRef<HTMLFormElement>(null);
@@ -830,6 +832,7 @@ export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPa
     } else {
       setClosureError('');
       setClosureDate('');
+      setClosureDestination('');
       setClosingAccount(account);
       return;
     }
@@ -843,7 +846,7 @@ export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPa
         setClosureBusy(true);
         setClosureError('');
         try {
-          await trpcClient.accounts.markClosed.mutate({ id: closingAccount.accountId, closedOn: closureDate });
+          await trpcClient.accounts.markClosed.mutate({ id: closingAccount.accountId, closedOn: closureDate, destinationAccountId: closureDestination ? Number(closureDestination) : undefined });
           await queryClient.invalidateQueries();
           setClosingAccount(null);
         } catch (error) {
@@ -853,6 +856,10 @@ export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPa
         <h3>Close {closingAccount.accountName} for reporting</h3>
         <p>Confirm its balance is zero as of this date. Earlier history is preserved; no expense or transfer is created. Newer statements remain authoritative. Reopening removes this assertion.</p>
         <label>Zero balance as of <input type="date" required value={closureDate} onChange={event => setClosureDate(event.target.value)} /></label>
+        <label>Transferred to <select value={closureDestination} onChange={event => setClosureDestination(event.target.value)}>
+          <option value="">Not specified</option>
+          {closureAccounts.filter(account => account.id !== closingAccount.accountId).map(account => <option key={account.id} value={account.id}>{account.name} · {account.institution} {account.last4 ? `••${account.last4}` : ''}</option>)}
+        </select></label>
         {closureError && <p role="alert">{closureError}</p>}
         <button type="submit" disabled={closureBusy}>{closureBusy ? 'Closing…' : 'Confirm zero balance and close'}</button>
         <button type="button" disabled={closureBusy} onClick={() => setClosingAccount(null)}>Cancel</button>

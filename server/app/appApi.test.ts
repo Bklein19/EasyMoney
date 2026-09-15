@@ -2769,6 +2769,29 @@ test('investment report endpoints expose money-style ledger reports', async () =
   }));
 });
 
+test('reporting closure carries basis into an existing destination without a fictitious loss or double-counting later transfers', async () => {
+  const source = Number(insertRow('accounts', {name:'Source fund',type:'investment',reportingClosedOn:'2026-08-19'}));
+  const destination = Number(insertRow('accounts', {name:'Existing brokerage',type:'investment'}));
+  getDb().prepare('UPDATE accounts SET reportingClosureDestinationId=? WHERE id=?').run(destination, source);
+  for (const [accountId, month, balanceCents, capturedAt] of [
+    [source,'2026-01',1000000,'2026-01-31'],[source,'2026-06',1500000,'2026-06-30'],[source,'2026-08',0,'2026-08-19'],
+    [destination,'2026-01',2000000,'2026-01-31'],[destination,'2026-08',3500000,'2026-08-31'],
+  ] as const) insertRow('ledgerBalances',{accountId,month,balanceCents,capturedAt});
+  const sum = (rows: Array<{contributions_cents:number;gains_cents:number|null}>) => rows.reduce((a,r)=>[a[0]!+r.contributions_cents,a[1]!+(r.gains_cents??0)],[0,0]);
+  const before = await caller.reports.netWorth();
+  expect(sum(before.rows.filter(r=>r.account_id===source))).toEqual([0,0]);
+  expect(sum(before.rows.filter(r=>r.account_id===destination))).toEqual([3000000,500000]);
+  expect(before.rows.filter(r=>r.account_id===source && r.month<'2026-08').every(r=>(r.gains_cents??0)>=0)).toBe(true);
+  expect(before.returns.find(r=>r.account_id===source)?.end_date).toBe('2026-06-30');
+  for (const [accountId,amountCents,id] of [[source,-1500000,'out'],[destination,1500000,'in']] as const) {
+    insertRow('ledgerTransactions',{accountId,date:'2026-08-19',amountCents,description:`Transfer ${id}`,ledgerTransactionId:id});
+  }
+  const after = await caller.reports.netWorth();
+  expect(sum(after.rows.filter(r=>r.account_id===source))).toEqual([0,0]);
+  expect(sum(after.rows.filter(r=>r.account_id===destination))).toEqual([3000000,500000]);
+  expect(after.transfer_links).toHaveLength(1);
+});
+
 test('investment report carries basis and gains across Roth IRA transfers', async () => {
   const fidelityRothId = Number(insertRow('accounts', {
     name: 'Roth Individual',

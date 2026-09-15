@@ -543,7 +543,7 @@ function repairCreditCardCashflowSigns() {
 }
 
 const TABLES = {
-  accounts: ['id', 'name', 'institution', 'type', 'currentBalance', 'currency', 'accountHolder', 'last4', 'status', 'archivedAt', 'reportingClosedOn', 'createdAt', 'updatedAt'],
+  accounts: ['id', 'name', 'institution', 'type', 'currentBalance', 'currency', 'accountHolder', 'last4', 'status', 'archivedAt', 'reportingClosedOn', 'reportingClosureDestinationId', 'createdAt', 'updatedAt'],
   accountAliases: ['id', 'institution', 'alias', 'accountId', 'createdAt', 'updatedAt'],
   transactions: [
     'id', 'accountId', 'categoryId', 'date', 'amount', 'importBatchId', 'description', 'merchant',
@@ -958,6 +958,10 @@ export function initDatabase() {
       leftKey TEXT NOT NULL, rightKey TEXT NOT NULL, reason TEXT NOT NULL, createdAt TEXT NOT NULL,
       PRIMARY KEY(leftKey,rightKey)
     )`);
+  });
+
+  runSchemaMigration('2026-09-14-reporting-closure-destination', () => {
+    db.exec('ALTER TABLE accounts ADD COLUMN reportingClosureDestinationId INTEGER REFERENCES accounts(id)');
   });
 
   runSchemaMigration('2026-09-14-reporting-closure', () => {

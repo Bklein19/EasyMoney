@@ -201,10 +201,14 @@ export function archiveAccount(id: number | string) {
   return { ok: true, accountId };
 }
 
-export function closeAccount(id: number | string, closedOn?: string) {
+export function closeAccount(id: number | string, closedOn?: string, destinationAccountId?: number) {
   const accountId = Number(id);
   if (!Number.isFinite(accountId)) throw new Error('Invalid account id');
   assertAccountExists(accountId);
+  if (destinationAccountId !== undefined) {
+    if (!closedOn || destinationAccountId === accountId) throw new Error('Choose a different destination and a closure date.');
+    assertAccountExists(destinationAccountId);
+  }
   if (closedOn !== undefined && (!/^\d{4}-\d{2}-\d{2}$/.test(closedOn) ||
     Number.isNaN(Date.parse(`${closedOn}T00:00:00Z`)) ||
     new Date(`${closedOn}T00:00:00Z`).toISOString().slice(0,10) !== closedOn || closedOn > localCalendarDate())) {
@@ -215,10 +219,11 @@ export function closeAccount(id: number | string, closedOn?: string) {
     UPDATE accounts
     SET status = 'closed',
         reportingClosedOn = COALESCE(@closedOn, reportingClosedOn),
+        reportingClosureDestinationId = @destinationAccountId,
         archivedAt = NULL,
         updatedAt = @now
     WHERE id = @id
-  `).run({ id: accountId, closedOn: closedOn ?? null, now: new Date().toISOString() });
+  `).run({ id: accountId, closedOn: closedOn ?? null, destinationAccountId: destinationAccountId ?? null, now: new Date().toISOString() });
   if (closedOn) materializeLedger();
   })();
   return { ok: true, accountId };
@@ -234,6 +239,7 @@ export function unarchiveAccount(id: number | string) {
     UPDATE accounts
     SET status = 'active',
         reportingClosedOn = NULL,
+        reportingClosureDestinationId = NULL,
         archivedAt = NULL,
         updatedAt = @now
     WHERE id = @id
