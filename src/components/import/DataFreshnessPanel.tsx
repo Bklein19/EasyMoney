@@ -287,7 +287,7 @@ function SyncAccountMappingControl({
           }
         }}
       >
-        <option value="">Choose account action</option>
+        <option value="">Choose destination account…</option>
         {claim.resolvedAccountId &&
           claim.resolution !== 'archived-match' &&
           claim.resolution !== 'ambiguous' &&
@@ -553,6 +553,7 @@ function SyncReviewPanel({
     };
   });
   const readyArtifacts = review.artifacts.filter(artifact => artifact.status === 'ready');
+  const skippedArtifacts = review.artifacts.filter(artifact => artifact.status !== 'ready');
   const outcomeMappings = mappingsComplete ? buildAccountMappings() : null;
   const outcomeQuery = useQuery({
     queryKey: ['sync-review-outcomes', review.runId, outcomeMappings],
@@ -563,8 +564,6 @@ function SyncReviewPanel({
   const outcomes = mappingsComplete ? outcomeQuery.data : undefined;
   const allAlreadyImported = review.artifacts.length > 0
     && outcomes?.nothingNew === true;
-  const transactionCount = review.artifacts.reduce((sum, artifact) => sum + artifact.transactionCount, 0);
-  const balanceCount = review.artifacts.reduce((sum, artifact) => sum + artifact.balanceCount, 0);
   const aggregateSummary = syncAccountAggregateSummary(readyClaims);
   const aggregateClaim = aggregateSummary ? {
     ...syncAccountGroupClaim(readyClaims),
@@ -579,16 +578,12 @@ function SyncReviewPanel({
     >
       <div className="sync-review__header">
         <div>
-          <span className="sync-review__state">{allAlreadyImported ? 'Already imported' : 'Review required'}</span>
-          <h3 id="sync-review-title">{allAlreadyImported ? 'Nothing new to import' : 'Review downloaded data'}</h3>
+          <span className="sync-review__state">Import review</span>
+          <h3 id="sync-review-title">{!mappingsComplete ? 'Choose where to import' : allAlreadyImported ? 'Nothing new to import' : 'Review your import'}</h3>
           <p>{allAlreadyImported
             ? 'No new ledger transactions or balance changes. Confirmation may record supporting source files and account mappings.'
-            : 'Nothing changes in your ledger until you confirm.'}</p>
-        </div>
-        <div className="sync-review__totals">
-          <span><strong>{readyArtifacts.length}</strong> staged file{readyArtifacts.length === 1 ? '' : 's'}</span>
-          <span><strong>{transactionCount}</strong> parsed transaction{transactionCount === 1 ? '' : 's'}</span>
-          <span><strong>{balanceCount}</strong> parsed balance{balanceCount === 1 ? '' : 's'}</span>
+            : !mappingsComplete ? 'Choose the destination below. Then we’ll show what this import will change.'
+            : 'Check the changes below. Your data stays unchanged until you confirm.'}</p>
         </div>
         <div className="sync-review__actions">
           <button className="btn btn--secondary btn--sm" type="button" disabled={isWorking} onClick={onDiscard}>Discard</button>
@@ -603,13 +598,15 @@ function SyncReviewPanel({
           </button>
         </div>
       </div>
-      <div className="sync-review__note" aria-live="polite">
+      {mappingsComplete && <div className="sync-review__note" aria-live="polite">
         {!mappingsComplete ? 'Choose account mappings to calculate ledger changes.' : outcomeQuery.isError
           ? <>Ledger changes could not be calculated. Confirmation is paused. <button type="button" className="btn btn--secondary btn--sm" onClick={() => void outcomeQuery.refetch()}>Retry calculation</button></>
           : !outcomes || outcomeQuery.isFetching ? 'Calculating ledger changes…'
           : <>
-            <p>Incoming transactions: <strong>{outcomes.transactions.new} new</strong> · {outcomes.transactions.represented} already represented · <strong>{outcomes.transactions.ambiguous} ambiguous</strong> · {outcomes.transactions.excludedSummaries} summary rows excluded (not individual transactions).</p>
-            <p>Monthly balances: {outcomes.balances.new} new · {outcomes.balances.updated} updated · {outcomes.balances.unchanged} parsed claims make no change · {outcomes.balances.conflicting} conflicting claims.</p>
+            <h4>What will change</h4>
+            <p className="sync-review__impact"><strong>{outcomes.transactions.new} new transactions</strong><span>{outcomes.transactions.represented} already in your ledger</span><span>{outcomes.transactions.ambiguous} need review</span></p>
+            <p>{outcomes.balances.new + outcomes.balances.updated} balance updates · {outcomes.balances.unchanged} unchanged</p>
+            {outcomes.transactions.excludedSummaries > 0 && <p>{outcomes.transactions.excludedSummaries} statement totals excluded from transactions.</p>}
             {outcomes.transactions.ambiguous > 0 && <p role="alert">Import paused: these overlaps are not proven duplicates. Compare the activity and statement source files and resolve their identities before importing. They will not be silently removed.</p>}
             {outcomes.balances.conflicting > 0 && <p role="alert">Import paused: equally authoritative balance claims disagree. Correct or exclude the conflicting source before importing; no balance is chosen arbitrarily.</p>}
             {Object.values(outcomes.historical).some(count => count > 0) && <section aria-label="Historical ledger impact">
@@ -620,21 +617,15 @@ function SyncReviewPanel({
             </section>}
             <button type="button" className="btn btn--secondary btn--sm" onClick={() => void outcomeQuery.refetch()}>Refresh ledger calculation</button>
           </>}
-      </div>
-      {review.alreadyImported > 0 && (
-        <p className="sync-review__note">
-          {review.alreadyImported} downloaded file{review.alreadyImported === 1 ? ' is' : 's are'} already in the ledger and will be skipped.
-        </p>
-      )}
+      </div>}
       {error && <p className="sync-review__error" role="alert">{error}</p>}
       {readyClaimGroups.length > 0 && (
-        <section className="sync-review__mapping-groups" aria-label="Account mappings">
+        <details className="sync-review__mapping-groups" open={!mappingsComplete}>
+          <summary>{mappingsComplete ? 'Destination accounts' : 'Choose destination account'} <span>· {aggregateSummary ? 1 : readyClaimGroups.length} account{!aggregateSummary && readyClaimGroups.length !== 1 ? 's' : ''}</span></summary>
           <div className="sync-review__mapping-groups-header">
             <div>
-              <h4>Account mappings</h4>
-              <p>Choose once per account. Each choice applies to every downloaded file for that account.</p>
+              <p>One choice applies to all files for that account.</p>
             </div>
-            <span>{aggregateSummary ? '1 account' : `${readyClaimGroups.length} account${readyClaimGroups.length === 1 ? '' : 's'}`}</span>
           </div>
           {aggregateSummary && aggregateClaim && aggregateChoice && (
             <div className="sync-review__mapping-group">
@@ -702,19 +693,24 @@ function SyncReviewPanel({
             );
           })}
           </>}
-        </section>
+        </details>
       )}
       <div className="sync-review__artifacts">
-        {review.artifacts.length > 0
-          ? review.artifacts.map((artifact, index) => (
+        {readyArtifacts.length > 0 && <h4 className="sync-review__files-heading">Files to review <span>{readyArtifacts.length}</span></h4>}
+        {readyArtifacts.length > 0
+          ? readyArtifacts.map(artifact => (
               <SyncArtifactDetails
                 artifact={artifact}
-                initiallyOpen={review.artifacts.length === 1 || syncArtifactNonMappingWarnings(artifact).length > 0 || index === 0}
+                initiallyOpen={syncArtifactNonMappingWarnings(artifact).length > 0}
                 key={`${artifact.importFileId}-${artifact.fileName}`}
               />
             ))
-          : <p className="sync-review__empty-claim">No files were downloaded. Confirm to finish this catch-up without importing anything.</p>}
+          : review.artifacts.length === 0 ? <p className="sync-review__empty-claim">No files were downloaded. Confirm to finish this catch-up without importing anything.</p> : null}
       </div>
+      {skippedArtifacts.length > 0 && <details className="sync-review__skipped">
+        <summary>{skippedArtifacts.length} file{skippedArtifacts.length === 1 ? '' : 's'} already imported <span>Skipped · no action needed</span></summary>
+        {skippedArtifacts.map(artifact => <SyncArtifactDetails artifact={artifact} initiallyOpen={false} key={`${artifact.importFileId}-${artifact.fileName}`} />)}
+      </details>}
     </section>
   );
 }
