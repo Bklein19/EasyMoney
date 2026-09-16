@@ -31,6 +31,7 @@ interface AiReviewTransaction {
 }
 
 interface AiSuggestion {
+  source?: 'history' | 'ai';
   id?: string;
   transactionId?: string;
   transactionIds?: string[];
@@ -100,6 +101,7 @@ interface ReviewQuestion extends AiQuestion {
 }
 
 interface ReviewRow {
+  source?: 'history' | 'ai';
   type: 'suggestion' | 'question';
   key: string;
   merchantName: string;
@@ -188,6 +190,7 @@ export default function TransactionReviewPage() {
         const transactionIds = suggestionTransactionIds(suggestion);
         return {
           type: 'suggestion',
+          source: suggestion.source,
           key: suggestionSelectionId(suggestion),
           merchantName: suggestion.merchantName || getAiTransactionTitle(transaction),
           transactionIds,
@@ -701,7 +704,7 @@ export default function TransactionReviewPage() {
               )}
             </div>
 
-            {aiCategorization?.configured && (aiSuggestions.length > 0 || aiQuestions.length > 0) && (
+            {(aiSuggestions.length > 0 || aiQuestions.length > 0) && (
               <div className="transaction-review-deck">
                 {reviewRows.length ? (
                   <div className="merchant-review-table-wrap">
@@ -750,7 +753,7 @@ export default function TransactionReviewPage() {
                       <tbody>
                         {reviewRows.map(row => {
                           const isExpanded = expandedReviewKey === row.key;
-                          const isUsingAiSuggestion = row.type === 'suggestion' && row.categoryId === row.suggestedCategoryId;
+                          const isUsingAiSuggestion = row.type === 'suggestion' && row.source !== 'history' && row.categoryId === row.suggestedCategoryId;
                           return (
                             <Fragment key={row.key}>
                               <tr

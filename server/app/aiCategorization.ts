@@ -46,6 +46,7 @@ interface ModelResponse {
 }
 
 export interface AiCategorySuggestion {
+  source?: 'history' | 'ai';
   id: string;
   groupId: string;
   merchantName: string;
@@ -498,6 +499,51 @@ function compactMerchantGroup(group: MerchantCategorizationGroup) {
   };
 }
 
+function historyKey(row: UncategorizedTransactionRow): string | null {
+  if (row.accountId === undefined) return null;
+  const text = transactionMerchantText(row).trim();
+  if (/^check(?:\s+#?\d+\*?)?$/i.test(text)) return JSON.stringify([row.accountId, 'check', row.amountCents]);
+  const key = normalizeMerchantText(text).key;
+  if (['UNKNOWN', 'PAYPAL', 'VENMO', 'ZELLE', 'CASH APP', 'CHECK'].includes(key)) return null;
+  return JSON.stringify([row.accountId, key, Math.sign(row.amountCents)]);
+}
+
+export function matchHistoricalCategories(groups: MerchantCategorizationGroup[], categories: CategorySummary[], history: Array<UncategorizedTransactionRow & { categoryId: number }>) {
+  const byKey = new Map<string, Set<number>>();
+  for (const row of history) {
+    const key = historyKey(row);
+    if (!key) continue;
+    if (!byKey.has(key)) byKey.set(key, new Set());
+    byKey.get(key)!.add(row.categoryId);
+  }
+  const suggestions: AiCategorySuggestion[] = [], questions: AiCategoryQuestion[] = [], unmatched: MerchantCategorizationGroup[] = [];
+  for (const group of groups) {
+    const matches = group.transactions.map(row => byKey.get(historyKey(row) ?? ''));
+    const ids = new Set(matches.flatMap(match => [...(match ?? [])]));
+    if (ids.size > 1) {
+      questions.push(reviewQuestion({ group, reason: 'Previous matching transactions have different categories. Choose a category for this group or handle transactions separately.' }));
+      continue;
+    }
+    const category = categories.find(category => ids.has(category.id));
+    // Internal transfers require pair evidence, not merchant history. Preserve
+    // explicit individual-review rules, and never let partial history decide a group.
+    if (!category || matches.some(match => !match?.size) || group.groupingRuleId !== null || category.type === 'internal_transfer' || shouldTreatInvestmentCategoryAsTransfer({ group, category })) {
+      unmatched.push(group); continue;
+    }
+    suggestions.push({ ...categorySuggestion({ group, category, decisionKind: 'category', reason: 'Matched previous transactions: all saved categories for this account and merchant agree.' }), source: 'history' });
+  }
+  return { suggestions, questions, unmatched };
+}
+
+function historicalCategories(groups: MerchantCategorizationGroup[], categories: CategorySummary[]) {
+  const history = getDb().prepare(`SELECT t.*, a.name AS accountName, a.institution AS accountInstitution,
+    a.type AS accountType, ta.categoryId FROM ledgerTransactions t
+    JOIN transactionAnnotations ta ON ta.ledgerTransactionId=t.ledgerTransactionId
+    JOIN categories c ON c.id=ta.categoryId JOIN accounts a ON a.id=t.accountId
+    WHERE lower(c.name)!='uncategorized' AND COALESCE(a.status,'active')!='archived'`).all() as Array<UncategorizedTransactionRow & { categoryId: number }>;
+  return matchHistoricalCategories(groups, categories, history);
+}
+
 function isInvestmentCategory(category: CategorySummary) {
   return category.type === 'investment' || category.name.toLowerCase() === 'investment';
 }
@@ -785,6 +831,7 @@ export async function previewAiCategorization(options: { limit?: unknown; sort?:
   const transactions = listUncategorizedTransactions();
   const groups = groupTransactionsForAiCategorization(transactions, { sort });
   const reviewGroups = groups.slice(0, groupLimit);
+  const historical = historicalCategories(reviewGroups, categories);
 
   if (!apiKey) {
     return {
@@ -794,9 +841,9 @@ export async function previewAiCategorization(options: { limit?: unknown; sort?:
       groupCount: groups.length,
       reviewedGroupCount: reviewGroups.length,
       sort,
-      suggestions: [] as AiCategorySuggestion[],
-      questions: [] as AiCategoryQuestion[],
-      message: 'Set OPENAI_API_KEY on the server to enable AI categorization.',
+      suggestions: historical.suggestions,
+      questions: historical.questions,
+      message: 'Historical matches are available without AI. Set OPENAI_API_KEY to review unmatched groups with AI.',
     };
   }
 
@@ -813,11 +860,11 @@ export async function previewAiCategorization(options: { limit?: unknown; sort?:
     };
   }
 
-  const suggestions: AiCategorySuggestion[] = [];
-  const questions: AiCategoryQuestion[] = [];
+  const suggestions: AiCategorySuggestion[] = [...historical.suggestions];
+  const questions: AiCategoryQuestion[] = [...historical.questions];
   let ignoredDecisionCount = 0;
 
-  for (const batch of chunk(reviewGroups, BATCH_SIZE)) {
+  for (const batch of chunk(historical.unmatched, BATCH_SIZE)) {
     const result = await categorizeBatchWithOpenAi({
       apiKey,
       model,
@@ -857,6 +904,7 @@ export async function autoApplyAiCategorization(
   const categories = listCategorizationCategories();
   const transactions = listUncategorizedTransactions();
   const groups = groupTransactionsForAiCategorization(transactions, { sort });
+	const historical = historicalCategories(groups, categories);
 	const progressBase = {
 		configured: Boolean(apiKey),
 		model,
@@ -876,9 +924,13 @@ export async function autoApplyAiCategorization(
 	};
 
   if (!apiKey) {
+    const applied = applyAiCategorizationSuggestions({ suggestions: historical.suggestions.flatMap(group => group.transactionIds.map(transactionId => ({ transactionId, categoryId: group.categoryId }))) });
     return {
       ...progressBase,
-      message: 'Set OPENAI_API_KEY on the server to enable AI categorization.',
+      appliedCount: applied.count, requested: applied.requested, skippedCount: applied.skipped.length,
+      undoOperation: applied.undoOperation, suggestedGroupCount: historical.suggestions.length,
+      unresolvedGroupCount: groups.length - historical.suggestions.length,
+      message: `Matched previous transactions: applied ${applied.count} categories without AI. Unmatched groups remain for review.`,
     };
   }
 
@@ -889,12 +941,12 @@ export async function autoApplyAiCategorization(
     };
   }
 
-  const suggestions: AiCategorySuggestion[] = [];
-  let questionGroupCount = 0;
+  const suggestions: AiCategorySuggestion[] = [...historical.suggestions];
+  let questionGroupCount = historical.questions.length;
   let ignoredDecisionCount = 0;
-  let reviewedGroupCount = 0;
+  let reviewedGroupCount = historical.suggestions.length + historical.questions.length;
 
-  for (const batch of chunk(groups, BATCH_SIZE)) {
+  for (const batch of chunk(historical.unmatched, BATCH_SIZE)) {
     const result = await categorizeBatchWithOpenAi({
       apiKey,
       model,

@@ -25,6 +25,7 @@ const { SYNC_WORKER_PROTOCOL_VERSION } = await import('./dataSync/types.ts');
 const { upsertTransactionAnnotation } = await import('./transactionAnnotations.ts');
 const {
   groupTransactionsForAiCategorization,
+  matchHistoricalCategories,
   shouldTreatInvestmentCategoryAsTransfer,
   shouldReviewInvestmentAccountTransferDecision,
 } = await import('./aiCategorization.ts');
@@ -2283,6 +2284,55 @@ test('check review groups use signed cents and account identity without collapsi
   expect(groups.flatMap(group => group.transactionIds).sort()).toEqual(rows.map(row => row.ledgerTransactionId).sort());
   expect(groups.some(group => group.merchantName === 'Checks · +$75.00')).toBe(true);
   expect(groupTransactionsForAiCategorization(rows.map(row => ({ ...row, accountId: undefined })))).toHaveLength(6);
+});
+
+test('history works without an AI key and automatic application remains undoable', async () => {
+  const previous = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    const accountId = Number(insertRow('accounts', {name:'Checking',type:'checking'}));
+    const categoryId = Number(insertRow('categories', {name:'Food',type:'expense'}));
+    for (const id of ['history-old','history-new']) insertRow('ledgerTransactions', {
+      ledgerTransactionId:id,accountId,date:'2026-06-01',amountCents:-1000,
+      description:'Specific Coffee',merchant:'Specific Coffee',type:'expense',transactionKind:'activity',
+    });
+    upsertTransactionAnnotation('history-old', {categoryId});
+    const preview = await caller.transactions.aiCategorizationPreview();
+    expect(preview.suggestions[0]).toMatchObject({source:'history',categoryId});
+    expect(getDb().prepare("SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='history-new'").get()).toBeNull();
+    const result = await caller.transactions.autoApplyAiCategorization({});
+    expect(result.appliedCount).toBe(1);
+    expect(result.undoOperation).not.toBeNull();
+    expect(getDb().prepare("SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='history-new'").get()?.categoryId).toBe(categoryId);
+    await caller.transactions.restoreCategories({undoOperationId:result.undoOperation!.id});
+    expect(getDb().prepare("SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='history-new'").get()?.categoryId ?? null).toBeNull();
+    expect(getDb().prepare("SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='history-old'").get()?.categoryId).toBe(categoryId);
+  } finally { if(previous === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY=previous; }
+});
+
+test('historical categorization requires unanimous saved categories scoped to account and check amount', () => {
+  const row = { id: 1, ledgerTransactionId: 'new-check', accountId: 1, accountName: 'Checking', accountInstitution: 'Bank', accountType: 'checking', date: '2026-06-01', amountCents: -7500, description: 'Check 123', merchant: 'Check 123', originalDescription: null, originalCategory: null, transactionKind: 'activity' };
+  const categories = [{ id: 1, name: 'Education', type: 'expense' }, { id: 2, name: 'Housing', type: 'expense' }] as Parameters<typeof matchHistoricalCategories>[1];
+  const groups = groupTransactionsForAiCategorization([row]);
+  const history = [{ ...row, ledgerTransactionId: 'old-check', merchant: 'Check 122', categoryId: 1 }];
+  const matched = matchHistoricalCategories(groups, categories, history);
+  expect(matched.suggestions[0]).toMatchObject({ source: 'history', categoryId: 1, transactionIds: ['new-check'] });
+  expect(matched.unmatched).toHaveLength(0);
+  for (const different of [{accountId:2}, {amountCents:-7501}, {amountCents:7500}]) {
+    expect(matchHistoricalCategories(groups, categories, history.map(r=>({...r,...different}))).suggestions).toHaveLength(0);
+  }
+  const conflict = matchHistoricalCategories(groups, categories, [...history, {...history[0]!, categoryId:2}]);
+  expect(conflict.questions).toHaveLength(1);
+  expect(conflict.unmatched).toHaveLength(0);
+  expect(conflict.suggestions).toHaveLength(0);
+});
+
+test('historical categories never imply internal transfer pairs or generic processor payees', () => {
+  const row = { id:1, ledgerTransactionId:'new', accountId:1, accountName:'Checking', accountInstitution:'Bank', accountType:'checking', date:'2026-06-01', amountCents:-1000, description:'Venmo', merchant:'Venmo', originalDescription:null, originalCategory:null, transactionKind:'activity' };
+  const categories = [{id:1,name:'Food',type:'expense'}, {id:2,name:'Internal Transfer',type:'internal_transfer'}] as Parameters<typeof matchHistoricalCategories>[1];
+  expect(matchHistoricalCategories(groupTransactionsForAiCategorization([row]),categories,[{...row,categoryId:1}]).suggestions).toHaveLength(0);
+  const merchant = {...row,merchant:'Specific merchant'};
+  expect(matchHistoricalCategories(groupTransactionsForAiCategorization([merchant]),categories,[{...merchant,categoryId:2}]).suggestions).toHaveLength(0);
 });
 
 test('ai categorization can sort merchant groups by money instead of count', () => {
