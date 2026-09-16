@@ -8,6 +8,23 @@
 
 .categories-page__header {
   margin-bottom: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+}
+
+.category-form-help {
+  flex: 1 1 100%;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  margin: 0;
+}
+
+.category-field input,
+.category-field select {
+  min-width: 180px;
 }
 
 .categories-page__count {

@@ -11,13 +11,13 @@ export function useCategories() {
 
   async function addCategory(category: Record<string, unknown>) {
     const result = await trpcClient.categories.create.mutate(category as Parameters<typeof trpcClient.categories.create.mutate>[0]);
-    await queryClient.invalidateQueries({ queryKey: trpc.categories.list.queryKey() });
+    await queryClient.invalidateQueries();
     return result.id;
   }
 
-  async function updateCategory(id: number | string, changes: Record<string, unknown>) {
-    const result = await trpcClient.categories.update.mutate({ id, ...changes } as Parameters<typeof trpcClient.categories.update.mutate>[0]);
-    await queryClient.invalidateQueries({ queryKey: trpc.categories.list.queryKey() });
+  async function updateCategory(id: number | string, changes: Omit<Parameters<typeof trpcClient.categories.update.mutate>[0], 'id'>) {
+    const result = await trpcClient.categories.update.mutate({ ...changes, id });
+    await queryClient.invalidateQueries();
     return result;
   }
 

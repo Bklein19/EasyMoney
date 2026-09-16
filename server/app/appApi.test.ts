@@ -944,6 +944,23 @@ test('category delete reassigns annotations to Uncategorized and protects Uncate
   });
 });
 
+test('category editing supports income subcategories and rejects invalid names', async () => {
+  const payroll = await caller.categories.create({ name: ' Payroll ', type: 'income', categoryGroup: 'income' });
+  const gifts = await caller.categories.create({ name: 'Gifts received', type: 'income', categoryGroup: 'income' });
+  await caller.categories.update({ id: payroll.id, name: 'Salary', type: 'income', description: 'Pay from work' });
+  expect(await caller.categories.list()).toMatchObject({ categories: expect.arrayContaining([
+    expect.objectContaining({ id: payroll.id, name: 'Salary', type: 'income', description: 'Pay from work' }),
+    expect.objectContaining({ id: gifts.id, name: 'Gifts received', type: 'income' }),
+  ]) });
+  await expect(caller.categories.create({ name: '   ' })).rejects.toThrow('Category name is required');
+  await expect(caller.categories.create({ name: 'salary' })).rejects.toThrow('already exists');
+  await expect(caller.categories.update({ id: gifts.id, name: ' Salary ' })).rejects.toThrow('already exists');
+  await expect(caller.categories.update({ id: gifts.id, name: ' ' })).rejects.toThrow('Category name is required');
+  const uncategorized = await caller.categories.create({ name: 'Uncategorized', type: 'expense' });
+  await expect(caller.categories.update({ id: uncategorized.id, name: 'Other' })).rejects.toThrow('cannot be renamed');
+  await expect(caller.categories.update({ id: uncategorized.id, type: 'income' })).rejects.toThrow('cannot be renamed');
+});
+
 test('trpc categories and categorization rules expose typed crud', async () => {
   const created = await caller.categories.create({
     name: 'TRPC Category',

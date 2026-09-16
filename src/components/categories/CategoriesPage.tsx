@@ -15,6 +15,15 @@ interface Category {
   icon?: string | null;
 }
 
+interface CategoryChanges {
+  name: string;
+  type: string | null;
+  categoryGroup: string | null;
+  description: string | null;
+}
+
+const CATEGORY_TYPES = ['expense', 'income', 'transfer', 'internal_transfer', 'investment'] as const;
+
 function labelFor(value: string | null | undefined, labels: Record<string, string> = {}) {
   if (!value) return 'None';
   return labels[value] ?? value.replace(/[_-]+/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase());
@@ -30,30 +39,57 @@ function CategoryDetails({
   onRequestDelete,
   onCancelDelete,
   onConfirmDelete,
+  isNew = false,
 }: {
   category: Category;
   isSaving: boolean;
   isDeleting: boolean;
   isConfirmingDelete: boolean;
   error?: string;
-  onSave: (changes: { description: string | null }) => void;
+  onSave: (changes: CategoryChanges) => void;
+  isNew?: boolean;
   onRequestDelete: () => void;
   onCancelDelete: () => void;
   onConfirmDelete: () => void;
 }) {
   const [description, setDescription] = useState(category.description || '');
+  const [name, setName] = useState(category.name);
+  const [type, setType] = useState(category.type || '');
+  const [group, setGroup] = useState(category.categoryGroup || '');
   const currentDescription = category.description || '';
-  const isDirty = description.trim() !== currentDescription;
-  const canDelete = category.name !== 'Uncategorized';
+  const isDirty = isNew || description.trim() !== currentDescription || name.trim() !== category.name || type !== (category.type || '') || group !== (category.categoryGroup || '');
+  const isProtected = category.name === 'Uncategorized';
+  const canDelete = !isNew && !isProtected;
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    onSave({ description: description.trim() || null });
+    onSave({ name: name.trim(), type: type || null, categoryGroup: group || null, description: description.trim() || null });
   };
 
   return (
     <div className="category-details-panel" onClick={(event) => event.stopPropagation()}>
       <form className="category-meta-form" onSubmit={submit}>
+        <div className="category-field">
+          <label htmlFor={`category-name-${category.id}`}>Name</label>
+          <input id={`category-name-${category.id}`} required value={name} disabled={isSaving || isProtected} onChange={event => setName(event.target.value)} placeholder="e.g. Gifts received" />
+        </div>
+        <div className="category-field">
+          <label htmlFor={`category-type-${category.id}`}>Type</label>
+          <select id={`category-type-${category.id}`} value={type} disabled={isSaving || isProtected} onChange={event => setType(event.target.value)}>
+            <option value="">None</option>
+            {type && !CATEGORY_TYPES.some(value => value === type) && <option value={type}>{labelFor(type)}</option>}
+            {CATEGORY_TYPES.map(value => <option key={value} value={value}>{labelFor(value)}</option>)}
+          </select>
+        </div>
+        <div className="category-field">
+          <label htmlFor={`category-group-${category.id}`}>Group</label>
+          <select id={`category-group-${category.id}`} value={group} disabled={isSaving} onChange={event => setGroup(event.target.value)}>
+            <option value="">None</option>
+            {group && !CATEGORY_GROUPS.some(value => value.key === group) && <option value={group}>{labelFor(group)}</option>}
+            {CATEGORY_GROUPS.map(value => <option key={value.key} value={value.key}>{value.label}</option>)}
+          </select>
+        </div>
+        <p className="category-form-help">For payroll or gifts received, choose Income as the type and group. Changing a type affects reporting for transactions already in this category.</p>
         <div className="category-field category-field--wide">
           <label htmlFor={`category-description-${category.id}`}>Description</label>
           <textarea
@@ -69,11 +105,12 @@ function CategoryDetails({
           <button
             className="btn btn--primary btn--sm"
             type="submit"
-            disabled={isSaving || !isDirty}
+            disabled={isSaving || !isDirty || !name.trim()}
           >
             <Check size={14} />
-            Save
+            {isSaving ? 'Saving...' : isNew ? 'Create category' : 'Save'}
           </button>
+          {isNew && <button className="btn btn--ghost btn--sm" type="button" disabled={isSaving} onClick={onCancelDelete}>Cancel</button>}
           {canDelete && (
             isConfirmingDelete ? (
               <div className="category-delete-confirm" role="group" aria-label={`Confirm deleting ${category.name}`}>
@@ -115,7 +152,8 @@ function CategoryDetails({
 }
 
 export default function CategoriesPage() {
-  const { categories, updateCategory, deleteCategory, isLoading } = useCategories();
+  const { categories, addCategory, updateCategory, deleteCategory, isLoading } = useCategories();
+  const [isCreating, setIsCreating] = useState(false);
   const [searchParams] = useSearchParams();
   const [expandedCategoryId, setExpandedCategoryId] = useState<number | null>(null);
   const [savingCategoryId, setSavingCategoryId] = useState<number | null>(null);
@@ -135,11 +173,16 @@ export default function CategoriesPage() {
     [categories, selectedGroup]
   );
 
-  const saveCategory = async (category: Category, changes: { description: string | null }) => {
+  const saveCategory = async (category: Category, changes: CategoryChanges) => {
     setSavingCategoryId(category.id);
     setErrorByCategoryId(current => ({ ...current, [category.id]: '' }));
     try {
-      await updateCategory(category.id, changes);
+      if (category.id === 0) {
+        await addCategory({ ...changes });
+        setIsCreating(false);
+      } else {
+        await updateCategory(category.id, { ...changes });
+      }
     } catch (saveError) {
       setErrorByCategoryId(current => ({
         ...current,
@@ -175,10 +218,16 @@ export default function CategoriesPage() {
             Categories <span className="categories-page__count">{sortedCategories.length}</span>
           </h1>
           <p className="page__subtitle">
-            {selectedGroupLabel ? `${selectedGroupLabel} category guidance.` : 'Edit category guidance used during AI review.'}
+            {selectedGroupLabel ? `${selectedGroupLabel} categories.` : 'Organize income and spending. Descriptions also guide categorization.'}
           </p>
         </div>
+        <button className="btn btn--primary" type="button" disabled={isCreating} onClick={() => { setErrorByCategoryId(current => ({ ...current, 0: '' })); setIsCreating(true); }}>New category</button>
       </header>
+
+      {isCreating && <section aria-label="New category">
+        <h2>New category</h2>
+        <CategoryDetails category={{ id: 0, name: '', type: selectedGroup === 'income' ? 'income' : 'expense', categoryGroup: selectedGroup || null }} isNew isSaving={savingCategoryId === 0} isDeleting={false} isConfirmingDelete={false} error={errorByCategoryId[0]} onSave={changes => saveCategory({ id: 0, name: '', type: null, categoryGroup: null }, changes)} onCancelDelete={() => setIsCreating(false)} onRequestDelete={() => {}} onConfirmDelete={() => {}} />
+      </section>}
 
       <div className="categories-table-wrap">
         {isLoading ? (
@@ -248,7 +297,7 @@ export default function CategoriesPage() {
                       <tr className="category-details-row">
                         <td colSpan={5}>
                           <CategoryDetails
-                            key={`${category.id}-${category.description || ''}`}
+                            key={JSON.stringify(category)}
                             category={category}
                             isSaving={isSaving}
                             isDeleting={isDeleting}

@@ -46,8 +46,13 @@ type CategoryMutationInput = Omit<Partial<CategorySummary>, 'parentId'> & {
 };
 
 export function createCategory(category: CategoryMutationInput) {
+  const name = category.name?.trim();
+  if (!name) throw new Error('Category name is required.');
+  if (getDb().prepare('SELECT id FROM categories WHERE lower(name) = lower(?)').get(name)) {
+    throw new Error('A category with this name already exists.');
+  }
   const id = Number(insertRow('categories', {
-    name: category.name,
+    name,
     parentId: category.parentId ?? null,
     type: category.type ?? null,
     categoryGroup: category.categoryGroup ?? null,
@@ -59,8 +64,18 @@ export function createCategory(category: CategoryMutationInput) {
 }
 
 export function updateCategory(id: number | string, changes: CategoryMutationInput) {
+  const current = getDb().prepare('SELECT name, type FROM categories WHERE id = ?').get(id) as { name: string; type: string | null } | undefined;
+  if (!current) throw new Error('Category not found.');
+  const name = changes.name?.trim();
+  if (changes.name !== undefined && !name) throw new Error('Category name is required.');
+  if (current.name === 'Uncategorized' && ((name !== undefined && name !== current.name) || (changes.type !== undefined && changes.type !== current.type))) {
+    throw new Error('Uncategorized cannot be renamed or have its type changed.');
+  }
+  if (name && getDb().prepare('SELECT id FROM categories WHERE lower(name) = lower(?) AND id != ?').get(name, id)) {
+    throw new Error('A category with this name already exists.');
+  }
   updateRow('categories', id, definedFields({
-    name: changes.name,
+    name,
     parentId: changes.parentId,
     type: changes.type,
     categoryGroup: changes.categoryGroup,
