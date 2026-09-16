@@ -17,9 +17,9 @@ export default function ParserRefreshStatus({ advanced = false }: { advanced?: b
   if (!advanced && !needsImportUpdateReview(status.data)) {
     if (!notice.count || notice.revision <= dismissedRevision) return null;
     return <section aria-label="Category update" style={{ marginBlock: 16 }}>
-      <p>Imported data was updated. {notice.count} previous category assignments couldn’t be matched safely; some transactions may need recategorizing. Your old choices are saved in history.</p>
+      <p>Imported data was updated. {notice.count} previous category assignments couldn’t be matched safely; some transactions may need recategorizing. Your previous categories are saved in history.</p>
       <Link to="/transactions">View transactions</Link>{' · '}
-      <Link to="/backups?history=open#advanced-history">View saved choices</Link>{' · '}
+      <Link to="/backups?section=choices">View previous categories</Link>{' · '}
       <button onClick={() => { localStorage.setItem('parser-recategorization-notice-dismissed', String(notice.revision)); setDismissedRevision(notice.revision); }}>Dismiss</button>
     </section>;
   }
@@ -33,7 +33,7 @@ export default function ParserRefreshStatus({ advanced = false }: { advanced?: b
     <h3>Some import updates need review</h3>
     <p>Your current data has not changed. We paused these updates to protect your saved categories, notes, and balances.</p>
     <p>You can keep using the app. Details are available below when you’re ready.</p>
-    <Link className="btn btn--secondary" to="/backups?history=open#advanced-history">Review update details</Link>{' '}
+    <Link className="btn btn--secondary" to="/backups?section=updates">Review update details</Link>{' '}
     <button disabled={retry.isPending} onClick={() => retry.mutate()}>{retry.isPending ? 'Checking…' : 'Check updates again'}</button>
     {retry.error && <p role="alert">The update still needs attention. Your current data is unchanged. Review the update details for more information.</p>}
   </section>;
