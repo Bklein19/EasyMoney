@@ -65,6 +65,9 @@ const Sidebar = ({
   const location = useLocation();
   const coverage = useQuery({ ...trpc.dataFreshness.report.queryOptions(), staleTime: 60_000 });
   const importAttention = importAttentionMessage(coverage.data?.accounts, coverage.isError);
+  const categorization = useQuery({ ...trpc.transactions.categorizationCoverage.queryOptions(), staleTime: 30_000, refetchInterval: 30_000 });
+  const uncategorizedCount = categorization.isError ? 0 : categorization.data?.uncategorizedCount ?? 0;
+  const categorizationLabel = uncategorizedCount > 0 ? `${uncategorizedCount.toLocaleString()} transactions need categorizing` : undefined;
   const sidebarRef = useRef<HTMLDivElement | null>(null);
   const { categories } = useCategories();
   const categoryGroupCounts = useMemo(() => {
@@ -204,11 +207,12 @@ const Sidebar = ({
                   `sidebar-link ${isActive ? 'active' : ''}`
                 }
                 onClick={onClose}
-                aria-label={item.path === '/import' && importAttention ? `Import: ${importAttention}` : item.label}
-                title={item.path === '/import' && importAttention ? importAttention : isCollapsed && !isPeekOpen ? item.label : undefined}
+                aria-label={item.path === '/transactions' && categorizationLabel ? `Transactions: ${categorizationLabel}` : item.path === '/import' && importAttention ? `Import: ${importAttention}` : item.label}
+                title={item.path === '/transactions' && categorizationLabel ? categorizationLabel : item.path === '/import' && importAttention ? importAttention : isCollapsed && !isPeekOpen ? item.label : undefined}
               >
                 <item.icon size={20} className="sidebar-link-icon" />
                 <span className="sidebar-link-label">{item.label}</span>
+                {item.path === '/transactions' && uncategorizedCount > 0 && <span className="sidebar-count-badge" aria-hidden="true">{uncategorizedCount.toLocaleString()}</span>}
                 {item.path === '/import' && importAttention && <span className="sidebar-import-indicator" aria-hidden="true" />}
               </NavLink>
 

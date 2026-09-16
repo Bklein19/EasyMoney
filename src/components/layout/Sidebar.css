@@ -582,3 +582,14 @@ body.sidebar-resizing {
     padding: var(--space-3) var(--space-4);
   }
 }
+.sidebar-count-badge {
+  margin-left: auto;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+.sidebar--collapsed:not(.sidebar--peek) .sidebar-count-badge { display: none; }
