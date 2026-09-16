@@ -9,7 +9,7 @@ interface Evidence {
 interface Annotation { ledgerTransactionId: string; categoryId: number | null; notes: string | null; createdAt: string | null; updatedAt: string | null }
 export interface AnnotationSnapshot { annotation: Annotation; categoryName: string | null; transaction: Record<string, unknown>; sources: Evidence[]; excluded: boolean }
 export interface AnnotationDisposition {
-  ledgerTransactionId: string; disposition: 'unchanged' | 'transferred' | 'retained-history' | 'review-required';
+  ledgerTransactionId: string; disposition: 'unchanged' | 'transferred' | 'retained-history' | 'recategorization-needed' | 'review-required';
   targetId: string | null; reason: string; evidence: AnnotationSnapshot;
 }
 const sourceQuery = `SELECT st.id,st.sourceFileId,sa.accountId,ir.rowIndex,st.date,st.amountCents,st.description,st.rawJson
@@ -92,6 +92,12 @@ export function planAnnotationRefresh(db: Db, before: AnnotationSnapshot[], ledg
     }));
     if (matches.size === 1) return {ledgerTransactionId:id,disposition:'transferred',targetId:[...matches][0]!,reason:'Same original document occurrence and economic evidence',evidence};
     if (matches.size === 0 && evidence.excluded) return {ledgerTransactionId:id,disposition:'retained-history',targetId:null,reason:'Intentionally excluded non-transaction summary; not copied to a purchase',evidence};
+    // A category is recoverable metadata, not a reason to retain invalid parsed
+    // facts. Keep the original choice in history, but never guess its destination.
+    // Notes and conflicting/collapsed destinations below still require review.
+    if (!evidence.annotation.notes?.trim()) return {ledgerTransactionId:id,
+      disposition:evidence.annotation.categoryId === null ? 'retained-history' : 'recategorization-needed',targetId:null,
+      reason:'Original category preserved in history; no safe destination in the updated transactions',evidence};
     return {ledgerTransactionId:id,disposition:'review-required',targetId:null,reason:matches.size > 1 ? 'Prior annotation now spans multiple transactions' : 'No unambiguous source-occurrence destination',evidence};
   });
   const groups = new Map<string,AnnotationDisposition[]>();

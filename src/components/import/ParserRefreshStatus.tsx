@@ -1,9 +1,11 @@
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { Link } from 'react-router';
+import { useState } from 'react';
 import { trpc, queryClient } from '../../api/trpc';
-import { needsImportUpdateReview } from './parserRefreshNotice';
+import { needsImportUpdateReview, recategorizationNotice } from './parserRefreshNotice';
 
 export default function ParserRefreshStatus({ advanced = false }: { advanced?: boolean }) {
+  const [dismissedRevision, setDismissedRevision] = useState(() => Number(localStorage.getItem('parser-recategorization-notice-dismissed') || 0));
   const status = useQuery({ ...trpc.imports.parserRefreshStatus.queryOptions(), refetchInterval: 3000 });
   const retry = useMutation(trpc.imports.previewParserRefresh.mutationOptions({
     onSuccess: () => { void queryClient.invalidateQueries(); },
@@ -11,7 +13,16 @@ export default function ParserRefreshStatus({ advanced = false }: { advanced?: b
   const apply = useMutation(trpc.imports.applyParserRefresh.mutationOptions({ onSuccess: () => { void queryClient.invalidateQueries(); } }));
   if (status.error) return <p role="alert">Unable to check for import updates. <button onClick={() => void status.refetch()}>Try again</button></p>;
   const history = status.data?.annotationHistory ?? [];
-  if (!advanced && !needsImportUpdateReview(status.data)) return null;
+  const notice = recategorizationNotice(history);
+  if (!advanced && !needsImportUpdateReview(status.data)) {
+    if (!notice.count || notice.revision <= dismissedRevision) return null;
+    return <section aria-label="Category update" style={{ marginBlock: 16 }}>
+      <p>Imported data was updated. {notice.count} previous category assignments couldn’t be matched safely; some transactions may need recategorizing. Your old choices are saved in history.</p>
+      <Link to="/transactions">View transactions</Link>{' · '}
+      <Link to="/backups?history=open#advanced-history">View saved choices</Link>{' · '}
+      <button onClick={() => { localStorage.setItem('parser-recategorization-notice-dismissed', String(notice.revision)); setDismissedRevision(notice.revision); }}>Dismiss</button>
+    </section>;
+  }
   const issues = status.data?.issues ?? [];
   const direct = issues.filter(item => item.status === 'review-required');
   const involved = issues.filter(item => item.status === 'conflict-involved');
@@ -21,17 +32,7 @@ export default function ParserRefreshStatus({ advanced = false }: { advanced?: b
   if (!advanced) return <section className="card" aria-label="Import updates need review">
     <h3>Some import updates need review</h3>
     <p>Your current data has not changed. We paused these updates to protect your saved categories, notes, and balances.</p>
-    {preview?.annotations.filter(row => row.disposition === 'review-required').map(row => <div key={row.ledgerTransactionId}>
-      <h4>A saved category or note needs review</h4>
-      <p>{String(row.evidence.transaction.date)} · {String(row.evidence.transaction.description)}</p>
-      <p>Category: {row.evidence.categoryName ?? 'Uncategorized'} · Note: {row.evidence.annotation.notes || 'None'}</p>
-      <p>We could not safely carry this information to the updated transaction.</p>
-    </div>)}
-    {diagnostics?.conflicts.filter(row => row.kind === 'balance' || row.origin === 'new').map(row => <div key={row.key}>
-      <h4>{row.kind === 'balance' ? 'Two files report different balances' : 'Transactions may overlap'}</h4>
-      <ul>{row.members.map((member, index) => <li key={index}>{member.accountName} · {member.date} · {(member.amountCents / 100).toFixed(2)} · {member.description} ({member.fileName})</li>)}</ul>
-    </div>)}
-    {direct.map(row => <p key={row.sourceFileId}>We couldn’t safely update <strong>{row.fileName}</strong>. Review the file details before trying again.</p>)}
+    <p>You can keep using the app. Details are available below when you’re ready.</p>
     <Link className="btn btn--secondary" to="/backups?history=open#advanced-history">Review update details</Link>{' '}
     <button disabled={retry.isPending} onClick={() => retry.mutate()}>{retry.isPending ? 'Checking…' : 'Check updates again'}</button>
     {retry.error && <p role="alert">The update still needs attention. Your current data is unchanged. Review the update details for more information.</p>}
@@ -46,6 +47,7 @@ export default function ParserRefreshStatus({ advanced = false }: { advanced?: b
       <h3>Proposed ledger changes</h3>
       <p>{preview.candidateFiles} files · {preview.transactionCountBefore} → {preview.transactionCountAfter} transactions. {preview.added.length} new identities; {preview.removed.length} retired identities. Identity changes can represent corrected or deduplicated transactions, not new spending.</p>
       <p>Annotations: {preview.annotationCounts.unchanged} unchanged, {preview.annotationCounts.transferred} transferred with source evidence, {preview.annotationCounts['retained-history']} retained in history, {preview.annotationCounts['review-required']} need review.</p>
+      {!!preview.annotationCounts['recategorization-needed'] && <p>{preview.annotationCounts['recategorization-needed']} category assignments will be saved in history without being copied to an uncertain destination. This does not block the update.</p>}
       <details><summary>Transaction changes</summary>
         {[['Retired',preview.removed],['Added',preview.added]].map(([label, rows])=><section key={String(label)}><h4>{String(label)}</h4>
           <ul>{(rows as typeof preview.added).map(row=><li key={row.ledgerTransactionId}>Account {row.accountId} · {row.date} · {row.amount.toFixed(2)} · {row.description}</li>)}</ul>

@@ -123,6 +123,35 @@ test('unchanged annotated identities survive a refresh', async () => {
   } finally { f.memory.close(); }
 });
 
+test.each([false, true])('uncertain category-only lineage is nonblocking and durable (split=%s)', async split => {
+  const f = fixture();
+  try {
+    f.db.exec("INSERT INTO categories(id,name) VALUES(1,'Education'); INSERT INTO transactionAnnotations(ledgerTransactionId,categoryId) SELECT ledgerTransactionId,1 FROM ledgerTransactions");
+    const original = f.db.prepare('SELECT * FROM transactionAnnotations').get();
+    if (split) f.parser.parse = () => ({ transactions: [0, 1].map(index => ({
+      sourceRowIndex: index, date: '2026-01-01', amountCents: -1000,
+      description: `Correct check ${index}`, sourceRole: 'activity' as const, remoteAccountId: 'remote', institution: 'Synthetic',
+    })), balances: [] });
+    expect((await f.run()).refreshed).toBe(1);
+    expect(f.db.prepare('SELECT * FROM transactionAnnotations').get()).toEqual(original);
+    expect(f.db.prepare('SELECT count(*) AS n FROM transactionAnnotations JOIN ledgerTransactions USING(ledgerTransactionId)').get()?.n).toBe(0);
+    expect(readAnnotationHistory(f.db)[0]).toMatchObject({ disposition: 'recategorization-needed', targetId: null, evidence: { annotation: { categoryId: 1 } } });
+    expect((await f.run()).refreshed).toBe(0);
+    expect(readAnnotationHistory(f.db)).toHaveLength(1);
+  } finally { f.memory.close(); }
+});
+
+test('conflicting categories on a shared destination still require review', () => {
+  const f = fixture();
+  try {
+    f.db.exec("INSERT INTO categories(id,name) VALUES(1,'First'),(2,'Second'); UPDATE sourceTransactions SET rawJson='{\"referenceNumber\":\"synthetic\"}'; INSERT INTO transactionAnnotations(ledgerTransactionId,categoryId) SELECT ledgerTransactionId,1 FROM ledgerTransactions");
+    const before = captureAnnotations(f.db, buildLedgerFromSourceFacts(f.db));
+    before.push({ ...before[0]!, annotation: { ...before[0]!.annotation, ledgerTransactionId: 'other-old-identity', categoryId: 2 } });
+    f.db.exec("UPDATE sourceTransactions SET description='Corrected description'");
+    expect(planAnnotationRefresh(f.db, before, buildLedgerFromSourceFacts(f.db)).map(row => row.disposition)).toEqual(['review-required', 'review-required']);
+  } finally { f.memory.close(); }
+});
+
 test('conflicting new balances roll back both parsed facts and ledger', async () => {
   const f = fixture();
   try {

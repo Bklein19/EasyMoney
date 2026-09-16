@@ -130,7 +130,8 @@ export async function refreshParserDerivations(options: {
   const currentVersions: Record<string, string> = options.versions ?? versions;
   const files = db.prepare(`SELECT sf.*, d.version, d.status AS derivationStatus, d.attemptedVersion, d.attemptedRevision, d.inputBytesHash FROM sourceFiles sf LEFT JOIN parserDerivations d ON d.sourceFileId=sf.id
     WHERE sf.status='committed' ORDER BY sf.id`).all() as unknown as SourceFile[];
-  const inputRevision = () => hashContent(JSON.stringify([revision(db), currentVersions]));
+  // Retry previously blocked batches when category-only lineage policy changes.
+  const inputRevision = () => hashContent(JSON.stringify([revision(db), currentVersions, 'category-history-v1']));
   const before = inputRevision();
   if (options.expectedRevision && options.expectedRevision !== before) throw new ReviewRequired('Refresh preview is stale. Preview again before applying.');
   const candidates: Candidate[] = [];
@@ -215,7 +216,7 @@ export async function refreshParserDerivations(options: {
         removed:savedTransactions.filter(row=>!ids.has(row.ledgerTransactionId)),
         updated:ledger.transactions.flatMap(row=>{const old=savedById.get(row.ledgerTransactionId);return old && (old.date!==row.date || old.description!==row.description) ? [{ledgerTransactionId:row.ledgerTransactionId,before:{date:old.date,description:old.description},after:{date:row.date,description:row.description}}] : [];}),
         annotations:dispositions.filter(row=>row.disposition!=='unchanged'),
-        annotationCounts:Object.fromEntries(['unchanged','transferred','retained-history','review-required'].map(kind=>[kind,dispositions.filter(row=>row.disposition===kind).length])) as NonNullable<RefreshDiagnostics['preview']>['annotationCounts'],mappings,
+        annotationCounts:Object.fromEntries(['unchanged','transferred','retained-history','recategorization-needed','review-required'].map(kind=>[kind,dispositions.filter(row=>row.disposition===kind).length])) as NonNullable<RefreshDiagnostics['preview']>['annotationCounts'],mappings,
         balancesBefore:savedBalances,balancesAfter:ledger.balanceSnapshots,balanceChanges };
       if (ledger.balanceConflicts?.length || diagnostics.conflicts.some(conflict => conflict.origin === 'new')) throw new ReviewRequired('Parser refresh introduces transaction ambiguity or contains conflicting balances. Review is required.');
       if (dispositions.some(row=>row.disposition==='review-required')) throw new ReviewRequired('An annotated transaction changed identity. Review its category or notes before applying the refresh.');
