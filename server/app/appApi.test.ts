@@ -2212,6 +2212,7 @@ test('ai categorization groups uncategorized transactions by merchant before mod
     {
       id: 1,
       ledgerTransactionId: 'check_123',
+      accountId: 1,
       accountName: 'Checking',
       accountInstitution: 'Bank',
       accountType: 'checking',
@@ -2226,6 +2227,7 @@ test('ai categorization groups uncategorized transactions by merchant before mod
     {
       id: 2,
       ledgerTransactionId: 'check_124',
+      accountId: 1,
       accountName: 'Checking',
       accountInstitution: 'Bank',
       accountType: 'checking',
@@ -2254,7 +2256,7 @@ test('ai categorization groups uncategorized transactions by merchant before mod
   ]);
 
   expect(groups[0]).toMatchObject({
-    merchantName: 'Check',
+    merchantName: 'Checks · $200.00',
     transactionIds: ['check_124', 'check_123'],
     transactionCount: 2,
     totalAmount: -400,
@@ -2265,6 +2267,22 @@ test('ai categorization groups uncategorized transactions by merchant before mod
     transactionIds: ['coffee_1'],
     transactionCount: 1,
   });
+});
+
+test('check review groups use signed cents and account identity without collapsing occurrences', () => {
+  const rows = [-7500, -7500, -7501, -150000, 7500, -7500].map((amountCents, index) => ({
+    id: index + 1, ledgerTransactionId: `amount-check-${index}`, accountId: index === 5 ? 2 : 1,
+    accountName: 'Same name', accountInstitution: 'Bank', accountType: 'checking', date: '2026-06-01',
+    amountCents, description: `Check ${index + 1}*`, merchant: `Check ${index + 1}*`,
+    originalDescription: null, originalCategory: null, transactionKind: 'activity',
+  }));
+  const groups = groupTransactionsForAiCategorization(rows);
+  expect(groups).toHaveLength(5);
+  expect(groups[0]!.transactionCount).toBe(2);
+  expect(groups[0]!.merchantName).toBe('Checks · $75.00');
+  expect(groups.flatMap(group => group.transactionIds).sort()).toEqual(rows.map(row => row.ledgerTransactionId).sort());
+  expect(groups.some(group => group.merchantName === 'Checks · +$75.00')).toBe(true);
+  expect(groupTransactionsForAiCategorization(rows.map(row => ({ ...row, accountId: undefined })))).toHaveLength(6);
 });
 
 test('ai categorization can sort merchant groups by money instead of count', () => {

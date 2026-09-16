@@ -14,6 +14,7 @@ type MerchantGroupingStrategy = typeof BANK_COUNTERPARTY_STRATEGY | typeof INDIV
 
 interface UncategorizedTransactionRow {
   id: number;
+  accountId?: number;
   ledgerTransactionId: string;
   accountName: string | null;
   accountInstitution: string | null;
@@ -195,6 +196,7 @@ function listUncategorizedTransactions() {
     .prepare(
       `SELECT
         t.id,
+        t.accountId,
         t.ledgerTransactionId,
         a.name AS accountName,
         a.institution AS accountInstitution,
@@ -360,6 +362,18 @@ function merchantGroupingForRow(row: UncategorizedTransactionRow, rulesBySourceK
       },
       sourceMerchantKey: base.key,
       groupingRuleId: rule.id,
+    };
+  }
+
+  // A bare check number is not a payee. Use signed cents within the account
+  // as a review convenience, without changing transaction identity or category.
+  if (/^check(?:\s+#?\d+\*?)?$/i.test(transactionMerchantText(row).trim())) {
+    const amount = (Math.abs(row.amountCents) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return {
+      normalized: { ...base, key: `CHECK\0${row.accountId ?? row.ledgerTransactionId}\0${row.amountCents}`,
+        displayName: `Checks · ${row.amountCents > 0 ? '+' : ''}$${amount}` },
+      sourceMerchantKey: base.key,
+      groupingRuleId: null,
     };
   }
 
