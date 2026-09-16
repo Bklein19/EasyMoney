@@ -4,7 +4,7 @@ import { getDb } from '../database.ts';
 import { upsertTransactionAnnotation } from './transactionAnnotations.ts';
 import type { CategorySummary } from './types.ts';
 
-const DEFAULT_MODEL = 'gpt-5.4-mini';
+const DEFAULT_MODEL = 'gpt-5.6-luna';
 const MAX_GROUPS = 500;
 const BATCH_SIZE = 32;
 const BANK_COUNTERPARTY_STRATEGY = 'bank_description_counterparty';
