@@ -20,6 +20,7 @@ export type DesktopTrpcResponse =
 export type EasyMoneyDesktopRpc = {
   bun: {
     requests: {
+      showSidebarContextMenu: { params: {}; response: boolean };
       showAccountContextMenu: {
         params: AccountMenuRequest;
         response: boolean;
@@ -33,6 +34,6 @@ export type EasyMoneyDesktopRpc = {
   };
   webview: {
     requests: {};
-    messages: { editAccount: { accountId: number } };
+    messages: { editAccount: { accountId: number }; navigateHistory: { delta: -1 | 1 }; customizeSidebar: {} };
   };
 };

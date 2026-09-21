@@ -9,6 +9,7 @@ import AccountsPage from './components/accounts/AccountsPage.jsx';
 import CategoriesPage from './components/categories/CategoriesPage';
 import Sidebar from './components/layout/Sidebar';
 import { SidebarContextProvider } from './components/layout/SidebarContext';
+import { installNavigationActions } from './components/layout/navigationActions';
 import AnalyticsPage from './components/analytics/AnalyticsPage.jsx';
 import BudgetingPage from './components/budgeting/BudgetingPage.jsx';
 import { NetWorthPage } from './components/investments/NetWorthPage';
@@ -141,6 +142,7 @@ function App() {
 
 function AppRoutes({ reportSelectedIds }: AppRoutesProps) {
   const navigate = useNavigate();
+  useEffect(() => installNavigationActions(window, delta => { void navigate(delta); }), [navigate]);
   useEffect(() => {
     const editAccount = (event: Event) => {
       const id: unknown = (event as CustomEvent).detail;

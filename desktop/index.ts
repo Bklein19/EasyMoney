@@ -60,6 +60,11 @@ const rpc = BrowserView.defineRPC<EasyMoneyDesktopRpc>({
   maxRequestTime: Infinity,
   handlers: {
     requests: {
+      showSidebarContextMenu: () => {
+        if (process.platform === 'linux') return false;
+        ContextMenu.showContextMenu([{ label: 'Customize sidebar…', action: 'customize-sidebar' }]);
+        return true;
+      },
       showAccountContextMenu: (account) => {
         if (process.platform === 'linux') return false;
         ContextMenu.showContextMenu(accountContextMenu(account));
@@ -110,8 +115,23 @@ const mainWindow = new BrowserWindow({
 });
 
 ContextMenu.on('context-menu-clicked', event => {
+  if (event && typeof event === 'object' && 'data' in event) {
+    const data = event.data;
+    if (data && typeof data === 'object' && 'action' in data && data.action === 'customize-sidebar') {
+      rpc.send.customizeSidebar({});
+      return;
+    }
+  }
   const accountId = accountIdFromMenuEvent(event);
   if (accountId !== null) rpc.send.editAccount({ accountId });
+});
+
+ApplicationMenu.on('application-menu-clicked', event => {
+  if (!event || typeof event !== 'object' || !('data' in event)) return;
+  const data = event.data;
+  if (!data || typeof data !== 'object' || !('action' in data)) return;
+  if (data.action === 'navigate-back') rpc.send.navigateHistory({ delta: -1 });
+  if (data.action === 'navigate-forward') rpc.send.navigateHistory({ delta: 1 });
 });
 
 if (process.platform === 'darwin') {

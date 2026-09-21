@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type MouseEvent } from 'react';
+import { SidebarContextMenu } from './SidebarContextMenu';
 import { NavLink, useLocation } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { trpc } from '../../api/trpc';
@@ -15,7 +16,7 @@ import {
   Landmark,
   Tags
 } from 'lucide-react';
-import { Ellipsis, GripVertical, ArrowUp, ArrowDown, Settings2 } from 'lucide-react';
+import { Ellipsis, GripVertical, Settings2 } from 'lucide-react';
 import { readSidebarPreferences, moveSidebarPath, insertSidebarPath, SIDEBAR_PREFERENCES_KEY } from './sidebarPreferences';
 import { SidebarContextSlot } from './SidebarContext';
 import type { LucideProps } from 'lucide-react';
@@ -78,6 +79,29 @@ const Sidebar = ({
     catch { return readSidebarPreferences(null); }
   });
   const [isCustomizing, setIsCustomizing] = useState(false);
+  const [contextPosition, setContextPosition] = useState<{ x: number; y: number } | null>(null);
+  const closeContextMenu = useCallback(() => setContextPosition(null), []);
+  const openCustomizer = useCallback(() => {
+    setContextPosition(null);
+    setIsCustomizing(true);
+    if (overflowRef.current) overflowRef.current.open = true;
+  }, []);
+  useEffect(() => {
+    window.addEventListener('easymoney:customize-sidebar', openCustomizer);
+    return () => window.removeEventListener('easymoney:customize-sidebar', openCustomizer);
+  }, [openCustomizer]);
+  const showContextMenu = async (event: MouseEvent<HTMLElement>) => {
+    if ((event.target as HTMLElement).closest('.sidebar-overflow-panel')) return;
+    event.preventDefault();
+    const position = { x: event.clientX, y: event.clientY };
+    if (typeof window.__electrobunWebviewId === 'number') {
+      try {
+        const { desktopBridge } = await import('../../api/desktopBridge');
+        if (await desktopBridge?.rpc?.request.showSidebarContextMenu({})) return;
+      } catch (error) { console.error('Could not open native sidebar menu', error); }
+    }
+    setContextPosition(position);
+  };
   const draggedPath = useRef<string | null>(null);
   const [draggingPath, setDraggingPath] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ path: string; edge: 'before' | 'after' } | null>(null);
@@ -220,7 +244,8 @@ const Sidebar = ({
         ref={sidebarRef}
         className={`sidebar ${isMobileOpen ? 'mobile-open' : ''} ${isCollapsed ? 'sidebar--collapsed' : ''} ${isPeekOpen ? 'sidebar--peek' : ''}`}
       >
-        <div className="sidebar-header electrobun-webkit-app-region-drag">
+        <div className="sidebar-scroll">
+        <div className="sidebar-header electrobun-webkit-app-region-drag" onContextMenu={showContextMenu}>
           <NavLink
             to="/"
             className="sidebar-brand electrobun-webkit-app-region-no-drag"
@@ -233,7 +258,7 @@ const Sidebar = ({
           </NavLink>
         </div>
 
-        <nav className="sidebar-nav" aria-label="Main navigation">
+        <nav className="sidebar-nav" aria-label="Main navigation" onContextMenu={showContextMenu}>
           {primaryItems.map((item) => (
             <div className="sidebar-nav-item" key={item.path}>
               <NavLink
@@ -278,14 +303,26 @@ const Sidebar = ({
                     clearDrag();
                   }}>
                   <label><input type="checkbox" checked={preferences.visible.includes(item.path)} onChange={event => { const checked = event.target.checked; setPreferences(current => ({ ...current, visible: checked ? [...current.visible, item.path] : current.visible.filter(path => path !== item.path) })); }} /><item.icon size={17} /><span>{item.label}</span></label>
-                  <button className="icon-btn" aria-label={`Move ${item.label} up`} disabled={index === 0} onClick={() => setPreferences(current => ({ ...current, order: moveSidebarPath(current.order, item.path, current.order[index - 1]) }))}><ArrowUp size={13} /></button>
-                  <button className="icon-btn" aria-label={`Move ${item.label} down`} disabled={index === orderedItems.length - 1} onClick={() => setPreferences(current => ({ ...current, order: moveSidebarPath(current.order, item.path, current.order[index + 1]) }))}><ArrowDown size={13} /></button>
-                  <span className="sidebar-drag-handle" draggable title={`Drag to reorder ${item.label}`} onDragStart={event => {
+                  <button type="button" className="sidebar-drag-handle" draggable aria-label={`Reorder ${item.label}`} title="Drag to reorder, or use Up and Down arrow keys" onKeyDown={event => {
+                    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+                    event.preventDefault();
+                    const destination = index + (event.key === 'ArrowUp' ? -1 : 1);
+                    if (destination >= 0 && destination < orderedItems.length) setPreferences(current => ({ ...current, order: moveSidebarPath(current.order, item.path, current.order[destination]) }));
+                  }} onDragStart={event => {
                     draggedPath.current = item.path; event.dataTransfer.setData('text/plain', item.path); event.dataTransfer.effectAllowed = 'move';
                     const row = event.currentTarget.parentElement;
-                    if (row) event.dataTransfer.setDragImage(row, row.clientWidth - 16, row.clientHeight / 2);
+                    if (row) {
+                      const rect = row.getBoundingClientRect();
+                      const preview = row.cloneNode(true) as HTMLElement;
+                      preview.className = 'sidebar-customize-row sidebar-drag-preview';
+                      preview.setAttribute('aria-hidden', 'true');
+                      Object.assign(preview.style, { position: 'fixed', left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, boxSizing: 'border-box', pointerEvents: 'none', zIndex: '1001' });
+                      row.parentElement?.appendChild(preview);
+                      event.dataTransfer.setDragImage(preview, row.clientWidth - 16, row.clientHeight / 2);
+                      requestAnimationFrame(() => preview.remove());
+                    }
                     setDraggingPath(item.path);
-                  }} onDragEnd={clearDrag}><GripVertical size={15} aria-hidden="true" /></span>
+                  }} onDragEnd={clearDrag}><GripVertical size={15} aria-hidden="true" /></button>
                 </div>)}
                 <button className="btn btn--ghost btn--sm" onClick={() => setPreferences(readSidebarPreferences(null))}>Reset to defaults</button>
               </> : <>
@@ -343,7 +380,9 @@ const Sidebar = ({
           <SidebarContextSlot />
         </div>
 
+        </div>
         <div className="sidebar-resize-handle" onPointerDown={startSidebarResize} />
+        {contextPosition && <SidebarContextMenu {...contextPosition} onCustomize={openCustomizer} onClose={closeContextMenu} />}
       </div>
     </>
   );

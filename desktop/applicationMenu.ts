@@ -28,6 +28,13 @@ export const macApplicationMenu: ApplicationMenuItemConfig[] = [
     ],
   },
   {
+    label: 'Go',
+    submenu: [
+      { label: 'Back', action: 'navigate-back', accelerator: 'CommandOrControl+[' },
+      { label: 'Forward', action: 'navigate-forward', accelerator: 'CommandOrControl+]' },
+    ],
+  },
+  {
     label: 'Window',
     submenu: [
       { role: 'minimize', accelerator: 'CommandOrControl+M' },

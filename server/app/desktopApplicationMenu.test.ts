@@ -18,6 +18,10 @@ describe('desktop application menu', () => {
   });
 
   test('provides standard edit and window commands', () => {
+    expect(submenuNamed('Go')).toEqual([
+      { label: 'Back', action: 'navigate-back', accelerator: 'CommandOrControl+[' },
+      { label: 'Forward', action: 'navigate-forward', accelerator: 'CommandOrControl+]' },
+    ]);
     expect(submenuNamed('Edit')).toEqual(expect.arrayContaining([
       expect.objectContaining({ role: 'undo', accelerator: 'CommandOrControl+Z' }),
       expect.objectContaining({ role: 'cut', accelerator: 'CommandOrControl+X' }),

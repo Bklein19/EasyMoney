@@ -8,6 +8,10 @@ function createDesktopBridge() {
     handlers: {
       requests: {},
       messages: {
+        customizeSidebar: () => window.dispatchEvent(new Event('easymoney:customize-sidebar')),
+        navigateHistory: ({ delta }) => {
+          window.dispatchEvent(new CustomEvent('easymoney:navigate-history', { detail: delta }));
+        },
         editAccount: ({ accountId }) => {
           window.dispatchEvent(new CustomEvent('easymoney:edit-account', { detail: accountId }));
         },

@@ -22,6 +22,14 @@
   transform: translateX(-100%);
 }
 
+.sidebar-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+
 .sidebar--collapsed.sidebar--peek {
   z-index: 80;
   transform: translateX(0);
@@ -84,7 +92,6 @@ body.sidebar-resizing {
   justify-content: space-between;
   gap: var(--space-2);
   padding: 0 var(--space-5);
-  border-bottom: 1px solid var(--hairline-muted);
   transition: padding var(--transition-base);
 }
 
@@ -132,11 +139,7 @@ body.sidebar-resizing {
 }
 
 .sidebar-nav {
-  flex: 0 1 auto;
-  max-height: 48vh;
   padding: 14px 12px;
-  overflow-y: auto;
-  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -144,10 +147,6 @@ body.sidebar-resizing {
 }
 
 .sidebar-context {
-  flex: 1 1 0;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
   border-top: 1px solid var(--hairline-muted);
   margin: 0 8px;
   padding: 16px 4px 24px;
@@ -187,12 +186,15 @@ body.sidebar-resizing {
 .sidebar-customize-button { border: 0; border-top: 1px solid var(--hairline-muted); border-radius: 0; margin-top: 6px; width: 100%; background: transparent; cursor: pointer; font: inherit; }
 .sidebar-customize-header { display: flex; align-items: center; justify-content: space-between; padding: 6px; color: var(--text-secondary); font-size: var(--text-sm); }
 .sidebar-customize-row { position: relative; display: flex; align-items: center; gap: 3px; border-radius: 8px; padding: 5px; color: var(--text-secondary); }
-.sidebar-customize-row.is-dragging { opacity: .35; }
+.sidebar-customize-row.is-dragging { opacity: .8; }
+.sidebar-drag-preview { opacity: 1; background: var(--bg-elevated); color: var(--text-primary); box-shadow: var(--shadow-lg); }
 .sidebar-customize-row.drop-before::before, .sidebar-customize-row.drop-after::after { content: ''; position: absolute; left: 4px; right: 4px; height: 2px; border-radius: 2px; background: var(--accent-blue); pointer-events: none; }
 .sidebar-customize-row.drop-before::before { top: -1px; }
 .sidebar-customize-row.drop-after::after { bottom: -1px; }
 .sidebar-drag-handle { display: flex; align-items: center; justify-content: center; width: 24px; height: 28px; flex-shrink: 0; cursor: grab; user-select: none; }
 .sidebar-drag-handle:active { cursor: grabbing; }
+.sidebar-drag-handle { border: 0; padding: 0; background: transparent; color: var(--text-muted); }
+.sidebar-drag-handle:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: -2px; border-radius: 4px; }
 .sidebar-customize-row:hover { background: var(--bg-subtle); }
 .sidebar-customize-row label { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; font-size: var(--text-sm); cursor: pointer; }
 .sidebar-customize-row label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -723,7 +725,7 @@ body.sidebar-resizing {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.account-context-menu a {
+.account-context-menu a, .account-context-menu button {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -734,8 +736,10 @@ body.sidebar-resizing {
   font-size: 13px;
   line-height: 18px;
 }
+.account-context-menu button { width: 100%; border: 0; background: transparent; cursor: pointer; text-align: left; font-family: inherit; }
 .account-context-menu__metadata { margin-top: 3px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
-.account-context-menu a:hover, .account-context-menu a:focus-visible {
+.account-context-menu a:hover, .account-context-menu a:focus-visible,
+.account-context-menu button:hover, .account-context-menu button:focus-visible {
   background: var(--color-info-bg);
   color: var(--accent-blue);
   outline: none;
