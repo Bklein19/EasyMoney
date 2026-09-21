@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type MouseEvent } from 'react';
 import { SidebarContextMenu } from './SidebarContextMenu';
-import { NavLink, useLocation } from 'react-router';
+import { useMenuAim } from './useMenuAim';
+import { Link, NavLink, useLocation } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { trpc } from '../../api/trpc';
 import { importAttentionMessage } from '../shared/importAttention';
@@ -73,6 +74,7 @@ const Sidebar = ({
   const uncategorizedCount = categorization.isError ? 0 : categorization.data?.uncategorizedCount ?? 0;
   const categorizationLabel = uncategorizedCount > 0 ? `${uncategorizedCount.toLocaleString()} transactions need categorizing` : undefined;
   const sidebarRef = useRef<HTMLDivElement | null>(null);
+  const [compactTitle, setCompactTitle] = useState(false);
   const overflowRef = useRef<HTMLDetailsElement | null>(null);
   const [preferences, setPreferences] = useState(() => {
     try { return readSidebarPreferences(localStorage.getItem(SIDEBAR_PREFERENCES_KEY)); }
@@ -143,6 +145,7 @@ const Sidebar = ({
   const primaryItems = orderedItems.filter(item => preferences.visible.includes(item.path));
   const overflowItems = orderedItems.filter(item => !preferences.visible.includes(item.path));
   const activeOverflow = overflowItems.find(item => item.path === location.pathname);
+  useMenuAim(overflowRef, isCustomizing);
 
   useEffect(() => {
     const close = (event: PointerEvent) => {
@@ -244,7 +247,8 @@ const Sidebar = ({
         ref={sidebarRef}
         className={`sidebar ${isMobileOpen ? 'mobile-open' : ''} ${isCollapsed ? 'sidebar--collapsed' : ''} ${isPeekOpen ? 'sidebar--peek' : ''}`}
       >
-        <div className="sidebar-scroll">
+        <div className={`sidebar-compact-title electrobun-webkit-app-region-drag${compactTitle ? ' is-visible' : ''}`} aria-hidden="true">EasyMoney</div>
+        <div className="sidebar-scroll" onScroll={event => setCompactTitle(event.currentTarget.scrollTop >= 68)}>
         <div className="sidebar-header electrobun-webkit-app-region-drag" onContextMenu={showContextMenu}>
           <NavLink
             to="/"
@@ -365,7 +369,7 @@ const Sidebar = ({
           {showAccountPicker && (
             <section className="sidebar-account-picker" aria-label="Report accounts">
               <div className="sidebar-account-picker__header">
-                <span>Accounts</span>
+                <Link to="/accounts" onClick={onClose}>Accounts</Link>
                 <span>{selectedReportAccountIds.size} of {reportAccounts.length}</span>
               </div>
               <AccountPicker
