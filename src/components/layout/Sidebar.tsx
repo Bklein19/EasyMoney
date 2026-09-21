@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type MouseEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type MouseEvent } from 'react';
 import { SidebarContextMenu } from './SidebarContextMenu';
 import { useMenuAim } from './useMenuAim';
 import { debugShortcut, visibleNavigationPath } from './debugNavigation';
@@ -9,8 +9,9 @@ import { importAttentionMessage } from '../shared/importAttention';
 import { 
   ArrowLeftRight, 
   WalletCards, 
-  Upload, 
-  PieChart,
+  Download,
+  ChartNoAxesCombined,
+  ChartColumnIncreasing,
   Activity,
   LineChart,
   Wallet,
@@ -26,6 +27,8 @@ import { useCategories } from '../../hooks/useCategories';
 import { CATEGORY_GROUPS, categoryGroupKey } from '../../utils/categoryGroups';
 import { AccountPicker } from '../investments/AccountPicker';
 import './Sidebar.css';
+import './SidebarTitleMotion.css';
+import { sidebarTitleMotion } from './sidebarTitleMotion';
 
 const REPORT_ROUTES = new Set(['/net-worth', '/performance', '/savings-rate', '/retirement']);
 const SIDEBAR_WIDTH_KEY = 'easymoney:sidebar-width';
@@ -75,7 +78,8 @@ const Sidebar = ({
   const uncategorizedCount = categorization.isError ? 0 : categorization.data?.uncategorizedCount ?? 0;
   const categorizationLabel = uncategorizedCount > 0 ? `${uncategorizedCount.toLocaleString()} transactions need categorizing` : undefined;
   const sidebarRef = useRef<HTMLDivElement | null>(null);
-  const [compactTitle, setCompactTitle] = useState(false);
+  const [titleScrollTop, setTitleScrollTop] = useState(0);
+  const titleMotion = sidebarTitleMotion(titleScrollTop);
   const [debugVisible, setDebugVisible] = useState(false);
   useEffect(() => {
     const toggle = () => setDebugVisible(visible => !visible);
@@ -138,18 +142,18 @@ const Sidebar = ({
     return counts;
   }, [categories]);
   const navItems: NavItem[] = [
-    { path: '/', label: 'Analytics', icon: PieChart },
+    { path: '/', label: 'Analytics', icon: ChartColumnIncreasing },
     { path: '/transactions', label: 'Transactions', icon: ArrowLeftRight },
     { path: '/accounts', label: 'Accounts', icon: WalletCards },
     { path: '/categories', label: 'Categories', icon: Tags },
     { path: '/budgeting', label: 'Budgeting', icon: PiggyBank },
     { path: '/backups', label: 'Backups', icon: WalletCards },
     { path: '/debug/palette', label: 'Color palette', icon: Settings2 },
-    { path: '/net-worth', label: 'Net Worth', icon: Wallet },
+    { path: '/net-worth', label: 'Net Worth', icon: ChartNoAxesCombined },
     { path: '/performance', label: 'Performance', icon: LineChart },
     { path: '/savings-rate', label: 'Savings Rate', icon: Activity },
     { path: '/retirement', label: 'Retirement', icon: Landmark },
-    { path: '/import', label: 'Import', icon: Upload },
+    { path: '/import', label: 'Import', icon: Download },
   ];
   const showAccountPicker = (
     (!isCollapsed || isPeekOpen || isMobileOpen) &&
@@ -265,12 +269,15 @@ const Sidebar = ({
         ref={sidebarRef}
         className={`sidebar ${isMobileOpen ? 'mobile-open' : ''} ${isCollapsed ? 'sidebar--collapsed' : ''} ${isPeekOpen ? 'sidebar--peek' : ''}`}
       >
-        <div className={`sidebar-compact-title electrobun-webkit-app-region-drag${compactTitle ? ' is-visible' : ''}`} aria-hidden="true"><span>EasyMoney</span></div>
-        <div className="sidebar-scroll" onScroll={event => setCompactTitle(event.currentTarget.scrollTop >= 52)}>
+        <div className={`sidebar-compact-title sidebar-title-motion electrobun-webkit-app-region-drag${titleMotion.docked ? ' is-docked' : ''}`} aria-hidden="true">
+          <span style={{ '--title-x': `${titleMotion.x}px`, '--title-y': `${titleMotion.y}px`, '--title-scale': titleMotion.scale } as CSSProperties}>EasyMoney</span>
+        </div>
+        <div className="sidebar-scroll" onScroll={event => setTitleScrollTop(Math.min(52, Math.max(0, event.currentTarget.scrollTop)))}>
         <div className="sidebar-header electrobun-webkit-app-region-drag" onContextMenu={showContextMenu}>
           <NavLink
             to="/"
             className="sidebar-brand electrobun-webkit-app-region-no-drag"
+            aria-label="EasyMoney"
             onClick={onClose}
           >
             <div className="sidebar-brand-icon">
