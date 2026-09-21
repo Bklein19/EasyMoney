@@ -117,13 +117,15 @@ body.sidebar-resizing {
   min-height: 42px;
   padding: 0 12px 0 78px;
   overflow: hidden;
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 20px;
   font-weight: 600;
   color: var(--text-primary);
   background: var(--bg-deep);
   user-select: none;
 }
 .sidebar-compact-title span {
+  transform: translateY(2px);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
