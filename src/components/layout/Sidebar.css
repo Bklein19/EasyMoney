@@ -468,6 +468,12 @@ body.sidebar-resizing {
   gap: 2px;
 }
 
+.account-picker .account-row-picker,
+.account-picker .account-chip {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 .account-row-picker {
   display: grid;
   grid-template-columns: 12px minmax(0, 1fr) auto;
