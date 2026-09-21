@@ -60,9 +60,9 @@ const rpc = BrowserView.defineRPC<EasyMoneyDesktopRpc>({
   maxRequestTime: Infinity,
   handlers: {
     requests: {
-      showAccountContextMenu: ({ accountId }) => {
+      showAccountContextMenu: (account) => {
         if (process.platform === 'linux') return false;
-        ContextMenu.showContextMenu(accountContextMenu(accountId));
+        ContextMenu.showContextMenu(accountContextMenu(account));
         return true;
       },
       trpc: async ({ path: procedurePath, type, input }) => {

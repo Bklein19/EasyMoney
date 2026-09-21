@@ -734,10 +734,9 @@ body.sidebar-resizing {
   font-size: 13px;
   line-height: 18px;
 }
-.account-context-menu a svg { flex-shrink: 0; color: var(--text-secondary); }
+.account-context-menu__metadata { margin-top: 3px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; }
 .account-context-menu a:hover, .account-context-menu a:focus-visible {
   background: var(--color-info-bg);
   color: var(--accent-blue);
   outline: none;
 }
-.account-context-menu a:hover svg, .account-context-menu a:focus-visible svg { color: inherit; }

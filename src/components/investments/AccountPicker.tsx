@@ -32,18 +32,18 @@ export function AccountPicker(props: AccountPickerProps) {
     ? 'Click to select; Command/Ctrl-click to toggle; Shift-click for a range; Command/Ctrl-A for all'
     : 'Select this account';
   const [lastClickedId, setLastClickedId] = useState<number | null>(null);
-  const [contextMenu, setContextMenu] = useState<{ id: number; name: string; x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ id: number; name: string; metadata: string; x: number; y: number } | null>(null);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
   const openContextMenu = async (account: PickerAccount, event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.currentTarget.focus();
     const rect = event.currentTarget.getBoundingClientRect();
-    const menu = { id: account.id, name: account.name, x: event.clientX || rect.left, y: event.clientY || rect.bottom };
+    const menu = { id: account.id, name: account.name, metadata: [account.institution, account.account_holder].filter(Boolean).join(' · '), x: event.clientX || rect.left, y: event.clientY || rect.bottom };
     closeContextMenu();
     if (typeof window.__electrobunWebviewId === 'number') {
       try {
         const { desktopBridge } = await import('../../api/desktopBridge');
-        if (await desktopBridge?.rpc?.request.showAccountContextMenu({ accountId: account.id })) return;
+        if (await desktopBridge?.rpc?.request.showAccountContextMenu({ accountId: account.id, name: account.name, institution: account.institution, owner: account.account_holder })) return;
       } catch (error) {
         console.error('Could not open native account menu', error);
       }

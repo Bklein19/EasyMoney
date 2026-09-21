@@ -1,5 +1,12 @@
 export type DesktopTrpcOperationType = 'query' | 'mutation';
 
+export interface AccountMenuRequest {
+  accountId: number;
+  name: string;
+  institution?: string | null;
+  owner?: string | null;
+}
+
 export interface DesktopTrpcRequest {
   path: string;
   type: DesktopTrpcOperationType;
@@ -14,7 +21,7 @@ export type EasyMoneyDesktopRpc = {
   bun: {
     requests: {
       showAccountContextMenu: {
-        params: { accountId: number };
+        params: AccountMenuRequest;
         response: boolean;
       };
       trpc: {

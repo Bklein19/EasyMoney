@@ -1,8 +1,15 @@
 import type { ApplicationMenuItemConfig } from 'electrobun/main';
+import type { AccountMenuRequest } from './rpc';
 
-export function accountContextMenu(accountId: number): ApplicationMenuItemConfig[] {
+export function accountContextMenu({ accountId, name, institution, owner }: AccountMenuRequest): ApplicationMenuItemConfig[] {
   if (!Number.isSafeInteger(accountId) || accountId <= 0) throw new Error('Invalid account ID');
-  return [{ label: 'Edit account…', action: 'edit-account', data: { accountId } }];
+  const metadata = [institution?.trim(), owner?.trim()].filter(Boolean).join(' · ');
+  return [
+    { label: name.trim() || 'Account', enabled: false },
+    ...(metadata ? [{ label: metadata, enabled: false }] : []),
+    { type: 'divider' },
+    { label: 'Edit…', action: 'edit-account', data: { accountId } },
+  ];
 }
 
 export function accountIdFromMenuEvent(event: unknown): number | null {
