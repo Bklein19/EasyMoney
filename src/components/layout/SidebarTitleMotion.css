@@ -1,4 +1,4 @@
-/* Move the actual brand link as one unit, outside the scrolling clip.
+/* Move the brand as one unit, outside the scrolling clip.
    Scroll updates set the transform directly: no easing or React render delay. */
 .easymoney-macos .sidebar-brand {
   position: absolute;

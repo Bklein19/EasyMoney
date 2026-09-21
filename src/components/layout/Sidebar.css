@@ -152,13 +152,11 @@ body.sidebar-resizing {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  cursor: default;
+  user-select: none;
   font-size: var(--text-base);
   font-weight: 700;
-  color: white;
-  background: var(--action-primary);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-accent);
-  padding-right: var(--space-2);
+  color: var(--text-primary);
   text-decoration: none;
   min-width: 0;
 }
@@ -169,6 +167,9 @@ body.sidebar-resizing {
   display: flex;
   align-items: center;
   justify-content: center;
+  background: var(--action-primary);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-accent);
   color: white;
   flex: 0 0 auto;
 }

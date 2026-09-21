@@ -78,7 +78,7 @@ const Sidebar = ({
   const uncategorizedCount = categorization.isError ? 0 : categorization.data?.uncategorizedCount ?? 0;
   const categorizationLabel = uncategorizedCount > 0 ? `${uncategorizedCount.toLocaleString()} transactions need categorizing` : undefined;
   const sidebarRef = useRef<HTMLDivElement | null>(null);
-  const brandRef = useRef<HTMLAnchorElement | null>(null);
+  const brandRef = useRef<HTMLDivElement | null>(null);
   const titleMotion = sidebarTitleMotion(0);
   const [debugVisible, setDebugVisible] = useState(false);
   useEffect(() => {
@@ -280,19 +280,16 @@ const Sidebar = ({
           brand.classList.toggle('is-docked', motion.docked);
         }}>
         <div className="sidebar-header electrobun-webkit-app-region-drag" onContextMenu={showContextMenu}>
-          <NavLink
-            to="/"
+          <div
             ref={brandRef}
             style={{ '--title-x': `${titleMotion.x}px`, '--title-y': `${titleMotion.y}px`, '--title-scale': titleMotion.scale } as CSSProperties}
-            className="sidebar-brand electrobun-webkit-app-region-no-drag"
-            aria-label="Easymoney"
-            onClick={onClose}
+            className="sidebar-brand electrobun-webkit-app-region-drag"
           >
             <div className="sidebar-brand-icon">
               <Wallet size={18} />
             </div>
             <span className="sidebar-brand-text">Easymoney</span>
-          </NavLink>
+          </div>
         </div>
 
         <nav className="sidebar-nav" aria-label="Main navigation" onContextMenu={showContextMenu}>
