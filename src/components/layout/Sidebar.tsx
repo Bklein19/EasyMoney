@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, 
 import { SidebarContextMenu } from './SidebarContextMenu';
 import { useMenuAim } from './useMenuAim';
 import { debugShortcut, visibleNavigationPath } from './debugNavigation';
+import { usePalette, setPalette, readPalette } from '../../styles/palette';
 import { Link, NavLink, useLocation } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { trpc } from '../../api/trpc';
@@ -81,6 +82,7 @@ const Sidebar = ({
   const brandRef = useRef<HTMLDivElement | null>(null);
   const titleMotion = sidebarTitleMotion(0);
   const [debugVisible, setDebugVisible] = useState(false);
+  const palette = usePalette();
   useEffect(() => {
     const toggle = () => setDebugVisible(visible => !visible);
     const toggleDebug = (event: KeyboardEvent) => {
@@ -366,6 +368,7 @@ const Sidebar = ({
                 {item.path === '/import' && importAttention && <span className="sidebar-import-indicator" title={importAttention} />}
               </NavLink>)}
               <button className="sidebar-link sidebar-customize-button" onClick={() => setIsCustomizing(true)}><Settings2 size={18} />Customize…</button>
+              <label className="sidebar-palette-picker"><span>Palette</span><select aria-label="Color palette" value={palette} onChange={event => setPalette(readPalette(event.target.value))}><option value="default">Default</option><option value="banknote">Banknote</option></select><small>Light and dark follow System</small></label>
               </>}
             </div>
           </details>

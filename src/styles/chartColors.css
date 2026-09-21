@@ -8,17 +8,18 @@
   --chart-total: var(--text-primary);
   --tooltip-bg: var(--bg-elevated);
   --tooltip-border: var(--glass-border-hover);
-  --data-income: #69b37a;
-  --data-expense: #cf6f6f;
-  --data-investment: #c79b55;
-  --data-series-0: #789bd0;
-  --data-series-1: #b89962;
-  --data-series-2: #9886d0;
-  --data-series-3: #66a5b4;
-  --data-series-4: #c58b6a;
-  --data-series-5: #7eb184;
-  --data-series-6: #c786ad;
-  --data-series-7: #9ba864;
+  /* Alternate warm/cool hues; do not tint every series toward the UI accent. */
+  --data-income: #81c58a;
+  --data-expense: #ec8c75;
+  --data-investment: #e9ba64;
+  --data-series-0: #7daaf5;
+  --data-series-1: #e9ba64;
+  --data-series-2: #b59bef;
+  --data-series-3: #5ccbd4;
+  --data-series-4: #ec8c75;
+  --data-series-5: #81c58a;
+  --data-series-6: #e195c6;
+  --data-series-7: #c2c963;
   --series-contributions: var(--data-series-0);
   --series-gains: var(--data-investment);
   --series-net-worth: var(--chart-total);
@@ -42,16 +43,16 @@
 
 @media (prefers-color-scheme: light) {
   :root {
-    --data-income: #28763d;
-    --data-expense: #b34f4f;
-    --data-investment: #946414;
-    --data-series-0: #3d68a6;
-    --data-series-1: #8b681c;
-    --data-series-2: #7054b1;
-    --data-series-3: #277888;
-    --data-series-4: #a25e37;
-    --data-series-5: #397c43;
-    --data-series-6: #a94e84;
-    --data-series-7: #667523;
+    --data-income: #337d47;
+    --data-expense: #b74b32;
+    --data-investment: #a36b0d;
+    --data-series-0: #3265ad;
+    --data-series-1: #a36b0d;
+    --data-series-2: #8052b3;
+    --data-series-3: #087d91;
+    --data-series-4: #b74b32;
+    --data-series-5: #337d47;
+    --data-series-6: #b03b80;
+    --data-series-7: #707a19;
   }
 }

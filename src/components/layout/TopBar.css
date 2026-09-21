@@ -71,7 +71,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: var(--action-primary-text);
   font-size: var(--text-xs);
   font-weight: 600;
 }

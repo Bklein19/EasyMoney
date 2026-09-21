@@ -4,6 +4,7 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 @import './styles/chartColors.css';
+@import './styles/banknote.css';
 
 /* ─── CSS Custom Properties ─────────────────────────────────────── */
 :root {
@@ -40,6 +41,7 @@
   --color-link-hover: #8170c8;
 
   --action-primary: #536da8;
+  --action-primary-text: #ffffff;
   --action-primary-hover: #5f78b5;
 
   /* Semantic colors */
@@ -312,7 +314,7 @@ a:hover {
 
 .btn--primary {
   background: var(--action-primary);
-  color: white;
+  color: var(--action-primary-text);
   border-color: transparent;
   box-shadow: var(--shadow-accent);
 }

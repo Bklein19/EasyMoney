@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import './PalettePage.css';
+import { usePalette } from '../../styles/palette';
 
 interface Token { name: string; value: string; group: string; effect: boolean }
 
@@ -32,6 +33,7 @@ function tokenNames(): string[] {
 }
 
 export default function PalettePage() {
+  const palette = usePalette();
   const probe = useRef<HTMLDivElement>(null);
   const [tokens, setTokens] = useState<Token[]>([]);
   const [theme, setTheme] = useState('');
@@ -52,14 +54,14 @@ export default function PalettePage() {
     refresh();
     media.addEventListener('change', refresh);
     const observer = new MutationObserver(refresh);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-palette'] });
     return () => { media.removeEventListener('change', refresh); observer.disconnect(); };
   }, []);
   const visible = tokens.filter(token => `${token.name} ${token.value} ${token.group}`.toLowerCase().includes(search.toLowerCase()));
   const groups = [...new Set(visible.map(token => token.group))];
   return <div className="palette-page">
     <header><p className="palette-eyebrow">Developer tools</p><h1>Color palette</h1>
-      <p>{theme} system theme · {tokens.length} color and shadow tokens · Live computed values</p>
+      <p>{palette === 'banknote' ? 'Banknote' : 'Default'} palette · {theme} system appearance · {tokens.length} color and shadow tokens</p>
     </header>
     <div ref={probe} className="page-networth palette-probe" aria-hidden="true" />
     <aside className="palette-note">UI roles and data visualization have independent palettes. These are live token values; saved category colors are user data and can differ. Chart aliases share a small base palette.</aside>

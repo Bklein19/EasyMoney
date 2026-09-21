@@ -5,6 +5,9 @@ import './index.css';
 import App from './App';
 import { queryClient } from './api/trpc';
 import { restoreNavigation } from './navigationHistory';
+import { initializePalette } from './styles/palette';
+
+initializePalette(window);
 
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing root element');
