@@ -1,4 +1,5 @@
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import type { FormEvent } from 'react';
 import { Archive, Check, ChevronRight, RotateCcw } from 'lucide-react';
 import { useAccounts } from '../../hooks/useAccounts';
@@ -192,9 +193,21 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }: A
 }
 
 export default function AccountsPage() {
+  const [searchParams] = useSearchParams();
+  const editId = Number(searchParams.get('edit')) || null;
   const [showArchived, setShowArchived] = useState(false);
   const { accounts, updateAccount, archiveAccount, unarchiveAccount, isLoading } = useAccounts({ includeArchived: showArchived });
-  const [expandedAccountId, setExpandedAccountId] = useState<number | null>(null);
+  const [expandedAccountId, setExpandedAccountId] = useState<number | null>(editId);
+  useEffect(() => {
+    if (!editId || isLoading) return;
+    setExpandedAccountId(editId);
+    const frame = requestAnimationFrame(() => {
+      const field = document.getElementById(`account-name-${editId}`);
+      field?.scrollIntoView({ block: 'center' });
+      field?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [editId, isLoading]);
   const [savingAccountId, setSavingAccountId] = useState<number | null>(null);
   const [errorByAccountId, setErrorByAccountId] = useState<ErrorByAccountId>({});
 

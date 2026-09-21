@@ -1,27 +1,45 @@
-import { useMemo, useState, type MouseEvent } from 'react';
+import { useCallback, useMemo, useState, type MouseEvent } from 'react';
+import { AccountContextMenu } from './AccountContextMenu';
 import { selectAccountIds } from './accountSelection';
 import { Check } from 'lucide-react';
 
 export interface PickerAccount {
   id: number;
   name: string;
-  institution: string;
-  type: string;
+  institution?: string | null;
+  type?: string;
   account_holder?: string | null;
 }
 
-export function AccountPicker({
-  accounts,
-  selectedIds,
-  onChange,
-  variant = 'chips',
-}: {
+type AccountPickerProps = {
   accounts: PickerAccount[];
+  variant?: 'chips' | 'owner-groups';
+} & ({
+  selectionMode: 'single';
+  selectedId: number | null;
+  onChange: (next: number | null) => void;
+} | {
+  selectionMode: 'multiple';
   selectedIds: Set<number>;
   onChange: (next: Set<number>) => void;
-  variant?: 'chips' | 'owner-groups';
-}) {
+});
+
+export function AccountPicker(props: AccountPickerProps) {
+  const { accounts, variant = 'owner-groups' } = props;
+  const selectedIds = props.selectionMode === 'multiple'
+    ? props.selectedIds : new Set(props.selectedId === null ? [] : [props.selectedId]);
+  const selectionHint = props.selectionMode === 'multiple'
+    ? 'Click to select; Command/Ctrl-click to toggle; Shift-click for a range; Command/Ctrl-A for all'
+    : 'Select this account';
   const [lastClickedId, setLastClickedId] = useState<number | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ id: number; name: string; x: number; y: number } | null>(null);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  const openContextMenu = (account: PickerAccount, event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.currentTarget.focus();
+    const rect = event.currentTarget.getBoundingClientRect();
+    setContextMenu({ id: account.id, name: account.name, x: event.clientX || rect.left, y: event.clientY || rect.bottom });
+  };
 
   const allIds = useMemo(() => accounts.map(account => account.id), [accounts]);
   const ownerGroups = useMemo(() => {
@@ -44,8 +62,12 @@ export function AccountPicker({
     : allIds;
 
   const selectAccount = (id: number, event: MouseEvent<HTMLButtonElement>) => {
+    if (props.selectionMode === 'single') {
+      props.onChange(id);
+      return;
+    }
     if (!event.shiftKey || lastClickedId === null || !visibleIds.includes(lastClickedId)) setLastClickedId(id);
-    onChange(selectAccountIds(visibleIds, selectedIds, lastClickedId, id, { shift: event.shiftKey, additive: event.metaKey || event.ctrlKey }));
+    props.onChange(selectAccountIds(visibleIds, selectedIds, lastClickedId, id, { shift: event.shiftKey, additive: event.metaKey || event.ctrlKey }));
   };
 
   return (
@@ -56,18 +78,26 @@ export function AccountPicker({
         if (!event.defaultPrevented && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
           event.preventDefault();
           event.stopPropagation();
-          onChange(new Set(allIds));
+          if (props.selectionMode === 'single') props.onChange(null);
+          else props.onChange(new Set(allIds));
           setLastClickedId(null);
         }
       }}
     >
+      {props.selectionMode === 'single' && (
+        <button type="button" className={`account-row-picker ${props.selectedId === null ? 'active' : ''}`}
+          aria-pressed={props.selectedId === null} onClick={() => props.onChange(null)}>
+          <Check size={13} className="account-row-picker__selection" aria-hidden="true" />
+          <span className="account-row-picker__name">All accounts</span>
+        </button>
+      )}
       {variant === 'owner-groups' ? (
         <div className="account-filter account-filter--owner-groups">
           {ownerGroups.map(([owner, ownerAccounts]) => (
             <section className="account-owner-group" key={owner} aria-label={owner}>
               <h3 className="account-owner-group__header">
                 <span>{owner}</span>
-                <span className="account-owner-count">{ownerAccounts.filter(account => selectedIds.has(account.id)).length}/{ownerAccounts.length}</span>
+                {props.selectionMode === 'multiple' && <span className="account-owner-count">{ownerAccounts.filter(account => selectedIds.has(account.id)).length}/{ownerAccounts.length}</span>}
               </h3>
               <div className="account-owner-group__list">
                 {ownerAccounts.map(account => (
@@ -76,8 +106,9 @@ export function AccountPicker({
                     type="button"
                     className={selectedIds.has(account.id) ? 'account-row-picker active' : 'account-row-picker'}
                     aria-pressed={selectedIds.has(account.id)}
-                    title="Click to select; Command/Ctrl-click to toggle; Shift-click for a range; Command/Ctrl-A for all"
+                    title={selectionHint}
                     onClick={event => selectAccount(account.id, event)}
+                    onContextMenu={event => openContextMenu(account, event)}
                   >
                     <Check size={13} className="account-row-picker__selection" aria-hidden="true" />
                     <span className="account-row-picker__name">{account.name}</span>
@@ -96,8 +127,9 @@ export function AccountPicker({
               type="button"
               className={selectedIds.has(account.id) ? 'account-chip active' : 'account-chip'}
               aria-pressed={selectedIds.has(account.id)}
-              title="Click to select; Command/Ctrl-click to toggle; Shift-click for a range; Command/Ctrl-A for all"
+              title={selectionHint}
               onClick={event => selectAccount(account.id, event)}
+              onContextMenu={event => openContextMenu(account, event)}
             >
               <span className="account-chip-name">{account.name}</span>
               {account.account_holder?.trim() && (
@@ -107,6 +139,7 @@ export function AccountPicker({
           ))}
         </div>
       )}
+      {contextMenu && <AccountContextMenu {...contextMenu} onClose={closeContextMenu} />}
     </div>
   );
 }

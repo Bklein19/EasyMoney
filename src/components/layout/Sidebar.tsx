@@ -332,6 +332,7 @@ const Sidebar = ({
                 <span>{selectedReportAccountIds.size} of {reportAccounts.length}</span>
               </div>
               <AccountPicker
+                selectionMode="multiple"
                 accounts={reportAccounts}
                 selectedIds={selectedReportAccountIds}
                 onChange={onReportAccountSelectionChange}

@@ -164,9 +164,6 @@ body.sidebar-resizing {
 .sidebar-context button.sidebar-link { border: 0; text-align: left; background: transparent; cursor: pointer; width: 100%; }
 .sidebar-context button.sidebar-link.active { background: var(--color-info-bg); }
 .sidebar-context button.sidebar-link:hover { background: var(--bg-subtle); }
-.sidebar-context-account { flex-direction: column; align-items: flex-start; gap: 2px; }
-.sidebar-context-account span, .sidebar-context-account small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sidebar-context-account small { font-size: 11px; color: var(--text-muted); font-weight: 400; }
 .sidebar-context .sidebar-account-picker { margin-top: 0; padding-top: 0; border-top: 0; }
 .sidebar-context .sidebar-category-groups { margin: 3px 0; padding: 0; border: 0; }
 .sidebar-context .sidebar-category-group { min-height: 32px; font-size: var(--text-sm); font-weight: 500; }
@@ -700,3 +697,15 @@ body.sidebar-resizing {
 .account-picker--owner-groups .account-row-picker__meta { max-width: 100px; font-size: 11px; font-weight: 400; text-transform: none; }
 .account-row-picker__selection { visibility: hidden; color: var(--accent-blue); }
 .account-row-picker.active .account-row-picker__selection { visibility: visible; }
+.account-context-menu {
+  position: fixed;
+  z-index: 1000;
+  width: 180px;
+  padding: 4px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-lg);
+}
+.account-context-menu a { display: block; padding: 7px 10px; border-radius: 4px; color: var(--text-primary); text-decoration: none; font-size: var(--text-sm); }
+.account-context-menu a:hover, .account-context-menu a:focus { background: var(--bg-hover); outline: none; }
