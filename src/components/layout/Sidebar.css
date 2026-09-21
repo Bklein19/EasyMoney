@@ -28,6 +28,20 @@
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 28%, var(--bg-deep)) transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar { width: 9px; }
+.sidebar-scroll::-webkit-scrollbar-track { background: transparent; }
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-muted) 28%, var(--bg-deep));
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 10px;
+}
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--text-muted) 48%, var(--bg-deep));
 }
 
 .sidebar--collapsed.sidebar--peek {
