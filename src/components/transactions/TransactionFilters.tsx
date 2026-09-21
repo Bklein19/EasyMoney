@@ -2,6 +2,7 @@ import type { ChangeEvent, Dispatch, KeyboardEvent, SetStateAction } from 'react
 import { useCategories } from '../../hooks/useCategories';
 import { useAccounts } from '../../hooks/useAccounts';
 import GroupedCategorySelect, { isUncategorized } from '../shared/GroupedCategorySelect';
+import { SidebarAccountList } from '../layout/SidebarContext';
 
 export interface TransactionFilterState {
   searchQuery?: string;
@@ -63,17 +64,7 @@ export default function TransactionFilters({ filters, setFilters }: TransactionF
         />
       </div>
 
-      <select 
-        name="accountId" 
-        className="filter-input"
-        value={filters.accountId || ''}
-        onChange={handleChange}
-      >
-        <option value="">All Accounts</option>
-        {accounts.map(a => (
-          <option key={a.id} value={a.id}>{a.name}</option>
-        ))}
-      </select>
+      <SidebarAccountList accounts={accounts} value={filters.accountId || ''} onChange={value => setFilterValue('accountId', value)} />
 
       <GroupedCategorySelect
         name="categoryId"

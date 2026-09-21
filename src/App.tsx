@@ -8,6 +8,7 @@ import TransactionReviewPage from './components/transactions/TransactionReviewPa
 import AccountsPage from './components/accounts/AccountsPage.jsx';
 import CategoriesPage from './components/categories/CategoriesPage';
 import Sidebar from './components/layout/Sidebar';
+import { SidebarContextProvider } from './components/layout/SidebarContext';
 import AnalyticsPage from './components/analytics/AnalyticsPage.jsx';
 import BudgetingPage from './components/budgeting/BudgetingPage.jsx';
 import { NetWorthPage } from './components/investments/NetWorthPage';
@@ -95,6 +96,7 @@ function App() {
 
   return (
     <Router>
+      <SidebarContextProvider>
       <div className={`app-shell ${isSidebarCollapsed ? 'app-shell--sidebar-collapsed' : ''} ${isSidebarPeekOpen ? 'app-shell--sidebar-peek' : ''}`}>
         <div
           className="desktop-window-drag-strip electrobun-webkit-app-region-drag"
@@ -132,6 +134,7 @@ function App() {
           </main>
         </div>
       </div>
+      </SidebarContextProvider>
     </Router>
   );
 }

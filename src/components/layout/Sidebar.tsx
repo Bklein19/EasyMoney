@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type ComponentType } from 'react';
+import { useEffect, useMemo, useRef, useState, type ComponentType } from 'react';
 import { NavLink, useLocation } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { trpc } from '../../api/trpc';
@@ -15,6 +15,9 @@ import {
   Landmark,
   Tags
 } from 'lucide-react';
+import { Ellipsis, GripVertical, ArrowUp, ArrowDown, Settings2 } from 'lucide-react';
+import { readSidebarPreferences, moveSidebarPath, SIDEBAR_PREFERENCES_KEY } from './sidebarPreferences';
+import { SidebarContextSlot } from './SidebarContext';
 import type { LucideProps } from 'lucide-react';
 import { useCategories } from '../../hooks/useCategories';
 import { CATEGORY_GROUPS, categoryGroupKey } from '../../utils/categoryGroups';
@@ -69,6 +72,16 @@ const Sidebar = ({
   const uncategorizedCount = categorization.isError ? 0 : categorization.data?.uncategorizedCount ?? 0;
   const categorizationLabel = uncategorizedCount > 0 ? `${uncategorizedCount.toLocaleString()} transactions need categorizing` : undefined;
   const sidebarRef = useRef<HTMLDivElement | null>(null);
+  const overflowRef = useRef<HTMLDetailsElement | null>(null);
+  const [preferences, setPreferences] = useState(() => {
+    try { return readSidebarPreferences(localStorage.getItem(SIDEBAR_PREFERENCES_KEY)); }
+    catch { return readSidebarPreferences(null); }
+  });
+  const [isCustomizing, setIsCustomizing] = useState(false);
+  const draggedPath = useRef<string | null>(null);
+  useEffect(() => {
+    try { localStorage.setItem(SIDEBAR_PREFERENCES_KEY, JSON.stringify(preferences)); } catch { /* Navigation still works without persistence. */ }
+  }, [preferences]);
   const { categories } = useCategories();
   const categoryGroupCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -92,13 +105,32 @@ const Sidebar = ({
     { path: '/import', label: 'Import', icon: Upload },
   ];
   const showAccountPicker = (
-    (!isCollapsed || isPeekOpen) &&
+    (!isCollapsed || isPeekOpen || isMobileOpen) &&
     REPORT_ROUTES.has(location.pathname) &&
     reportAccounts.length > 0 &&
     onReportAccountSelectionChange
   );
-  const showCategoryGroups = !isCollapsed || isPeekOpen;
+  const showCategoryGroups = !isCollapsed || isPeekOpen || isMobileOpen;
   const activeCategoryGroup = new URLSearchParams(location.search).get('group') || '';
+  const orderedItems = preferences.order.flatMap(path => navItems.filter(item => item.path === path));
+  const primaryItems = orderedItems.filter(item => preferences.visible.includes(item.path));
+  const overflowItems = orderedItems.filter(item => !preferences.visible.includes(item.path));
+  const activeOverflow = overflowItems.find(item => item.path === location.pathname);
+
+  useEffect(() => {
+    const close = (event: PointerEvent) => {
+      if (event.target instanceof Node && !overflowRef.current?.contains(event.target) && overflowRef.current) overflowRef.current.open = false;
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && overflowRef.current?.open) {
+        overflowRef.current.open = false;
+        overflowRef.current.querySelector('summary')?.focus();
+      }
+    };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', escape); };
+  }, []);
 
   useEffect(() => {
     const savedWidth = Number(window.localStorage.getItem(SIDEBAR_WIDTH_KEY));
@@ -198,8 +230,8 @@ const Sidebar = ({
           </NavLink>
         </div>
 
-        <nav className="sidebar-nav">
-          {navItems.map((item) => (
+        <nav className="sidebar-nav" aria-label="Main navigation">
+          {primaryItems.map((item) => (
             <div className="sidebar-nav-item" key={item.path}>
               <NavLink
                 to={item.path}
@@ -216,7 +248,43 @@ const Sidebar = ({
                 {item.path === '/import' && importAttention && <span className="sidebar-import-indicator" aria-hidden="true" />}
               </NavLink>
 
-              {item.path === '/categories' && showCategoryGroups && location.pathname === '/categories' && (
+            </div>
+          ))}
+          <details className="sidebar-overflow" ref={overflowRef}>
+            <summary className={`sidebar-link ${activeOverflow ? 'active' : ''}`} title="More pages">
+              <Ellipsis size={20} /><span className="sidebar-link-label">{activeOverflow?.label ?? 'More'}</span>
+              {!preferences.visible.includes('/import') && importAttention && <span className="sidebar-import-indicator" title={importAttention} />}
+            </summary>
+            <div className="sidebar-overflow-panel" aria-label="More pages">
+              {isCustomizing ? <>
+                <div className="sidebar-customize-header"><strong>Customize navigation</strong><button className="btn btn--ghost btn--sm" onClick={() => setIsCustomizing(false)}>Done</button></div>
+                {orderedItems.map((item, index) => <div className="sidebar-customize-row" key={item.path} draggable
+                  onDragStart={event => { draggedPath.current = item.path; event.dataTransfer.setData('text/plain', item.path); event.dataTransfer.effectAllowed = 'move'; }}
+                  onDragEnd={() => { draggedPath.current = null; }}
+                  onDragOver={event => event.preventDefault()}
+                  onDrop={event => { event.preventDefault(); const source = draggedPath.current; if (source) setPreferences(current => ({ ...current, order: moveSidebarPath(current.order, source, item.path) })); draggedPath.current = null; }}>
+                  <label><input type="checkbox" checked={preferences.visible.includes(item.path)} onChange={event => { const checked = event.target.checked; setPreferences(current => ({ ...current, visible: checked ? [...current.visible, item.path] : current.visible.filter(path => path !== item.path) })); }} /><item.icon size={17} /><span>{item.label}</span></label>
+                  <button className="icon-btn" aria-label={`Move ${item.label} up`} disabled={index === 0} onClick={() => setPreferences(current => ({ ...current, order: moveSidebarPath(current.order, item.path, current.order[index - 1]) }))}><ArrowUp size={13} /></button>
+                  <button className="icon-btn" aria-label={`Move ${item.label} down`} disabled={index === orderedItems.length - 1} onClick={() => setPreferences(current => ({ ...current, order: moveSidebarPath(current.order, item.path, current.order[index + 1]) }))}><ArrowDown size={13} /></button>
+                  <GripVertical size={15} aria-hidden="true" />
+                </div>)}
+                <button className="btn btn--ghost btn--sm" onClick={() => setPreferences(readSidebarPreferences(null))}>Reset to defaults</button>
+              </> : <>
+              {overflowItems.map(item => <NavLink key={item.path} to={item.path} className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`} onClick={() => { if (overflowRef.current) overflowRef.current.open = false; onClose(); }}>
+                <item.icon size={18} /><span>{item.label}</span>
+                {item.path === '/transactions' && uncategorizedCount > 0 && <span className="sidebar-count-badge" title={categorizationLabel}>{uncategorizedCount.toLocaleString()}</span>}
+                {item.path === '/import' && importAttention && <span className="sidebar-import-indicator" title={importAttention} />}
+              </NavLink>)}
+              <button className="sidebar-link sidebar-customize-button" onClick={() => setIsCustomizing(true)}><Settings2 size={18} />Customize…</button>
+              </>}
+            </div>
+          </details>
+        </nav>
+        <div className="sidebar-context" aria-label="Page controls" key={location.pathname}>
+              {showCategoryGroups && location.pathname === '/categories' && (
+                <section>
+                  <h2 className="sidebar-context-title">Category groups</h2>
+                  <NavLink to="/categories" className={`sidebar-category-group ${!activeCategoryGroup ? 'active' : ''}`} onClick={onClose}>All categories</NavLink>
                 <div className="sidebar-category-groups" aria-label="Category groups">
                   {CATEGORY_GROUPS.map(group => {
                     const count = categoryGroupCounts.get(group.key) ?? 0;
@@ -235,9 +303,8 @@ const Sidebar = ({
                     );
                   })}
                 </div>
+                </section>
               )}
-            </div>
-          ))}
 
           {showAccountPicker && (
             <section className="sidebar-account-picker" aria-label="Report accounts">
@@ -249,10 +316,12 @@ const Sidebar = ({
                 accounts={reportAccounts}
                 selectedIds={selectedReportAccountIds}
                 onChange={onReportAccountSelectionChange}
+                variant="owner-groups"
               />
             </section>
           )}
-        </nav>
+          <SidebarContextSlot />
+        </div>
 
         <div className="sidebar-resize-handle" onPointerDown={startSidebarResize} />
       </div>

@@ -2,7 +2,8 @@ import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent, UIEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { addMonths, endOfDay, endOfMonth, endOfWeek, endOfYear, format, parseISO, startOfMonth, startOfWeek, startOfYear, subMonths, subWeeks } from 'date-fns';
-import { Calendar, ChevronLeft, ChevronRight, HelpCircle, Landmark, Maximize2, RotateCcw, Search, X } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, HelpCircle, Maximize2, RotateCcw, Search, X } from 'lucide-react';
+import { SidebarAccountList } from '../layout/SidebarContext';
 import { useCategories } from '../../hooks/useCategories';
 import { useAccounts } from '../../hooks/useAccounts';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
@@ -566,24 +567,6 @@ export default function AnalyticsPage() {
 
   const renderAnalyticsFilters = (variant = 'page') => (
     <div className={`analytics-controls analytics-controls--${variant}`}>
-      <label className="analytics-control analytics-control--account">
-        <span className="analytics-control__label">Account</span>
-        <Landmark size={18} className="text-muted" />
-        <select
-          className="input input--sm"
-          value={accountId}
-          onChange={(e) => {
-            setAccountId(e.target.value);
-            setPendingDrilldownCategoryValue(null);
-            setDrilldown(null);
-          }}
-        >
-          <option value="">All Accounts</option>
-          {accounts.map(account => (
-            <option key={account.id} value={account.id}>{account.name}</option>
-          ))}
-        </select>
-      </label>
 
       <div className="analytics-control analytics-control--categories">
         <span className="analytics-control__label">Categories</span>
@@ -752,6 +735,7 @@ export default function AnalyticsPage() {
 
   return (
     <div className="page analytics-page stagger-in">
+      <SidebarAccountList accounts={accounts} value={accountId} onChange={value => { setAccountId(value); setPendingDrilldownCategoryValue(null); setDrilldown(null); }} />
       <div className="page__header analytics-page__header">
         <div>
           <h1 className="page__title">Analytics</h1>

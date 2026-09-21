@@ -132,7 +132,8 @@ body.sidebar-resizing {
 }
 
 .sidebar-nav {
-  flex: 1;
+  flex: 0 1 auto;
+  max-height: 48vh;
   padding: 14px 12px;
   overflow-y: auto;
   overflow-x: hidden;
@@ -141,6 +142,61 @@ body.sidebar-resizing {
   gap: 4px;
   transition: padding var(--transition-base);
 }
+
+.sidebar-context {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-top: 1px solid var(--hairline-muted);
+  margin: 0 8px;
+  padding: 16px 4px 24px;
+}
+
+.sidebar-context-title {
+  margin: 0 8px 10px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 650;
+}
+
+.sidebar-context-section { display: flex; flex-direction: column; gap: 3px; }
+.sidebar-context button.sidebar-link { border: 0; text-align: left; background: transparent; cursor: pointer; width: 100%; }
+.sidebar-context button.sidebar-link.active { background: var(--color-info-bg); }
+.sidebar-context button.sidebar-link:hover { background: var(--bg-subtle); }
+.sidebar-context-account { flex-direction: column; align-items: flex-start; gap: 2px; }
+.sidebar-context-account span, .sidebar-context-account small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-context-account small { font-size: 11px; color: var(--text-muted); font-weight: 400; }
+.sidebar-context .sidebar-account-picker { margin-top: 0; padding-top: 0; border-top: 0; }
+.sidebar-context .sidebar-category-groups { margin: 3px 0; padding: 0; border: 0; }
+.sidebar-context .sidebar-category-group { min-height: 32px; font-size: var(--text-sm); font-weight: 500; }
+.sidebar-overflow > summary { cursor: pointer; list-style: none; }
+.sidebar-overflow > summary::-webkit-details-marker { display: none; }
+.sidebar-overflow-panel {
+  position: fixed;
+  left: calc(var(--sidebar-width) - 8px);
+  top: 110px;
+  width: 310px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  background: var(--bg-elevated);
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  padding: 8px;
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+}
+.sidebar-customize-button { border: 0; border-top: 1px solid var(--hairline-muted); border-radius: 0; margin-top: 6px; width: 100%; background: transparent; cursor: pointer; font: inherit; }
+.sidebar-customize-header { display: flex; align-items: center; justify-content: space-between; padding: 6px; color: var(--text-secondary); font-size: var(--text-sm); }
+.sidebar-customize-row { display: flex; align-items: center; gap: 3px; border-radius: 8px; padding: 5px; color: var(--text-secondary); }
+.sidebar-customize-row:hover { background: var(--bg-subtle); }
+.sidebar-customize-row label { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; font-size: var(--text-sm); cursor: pointer; }
+.sidebar-customize-row label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-customize-row .icon-btn { padding: 3px; }
+.sidebar-customize-row > svg { cursor: grab; flex-shrink: 0; }
+.sidebar-link:focus-visible, .sidebar-category-group:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: -2px; }
+@media (max-width: 768px) { .sidebar-overflow-panel { left: 12px; top: 100px; } }
 
 .easymoney-desktop .sidebar-nav {
   padding-inline: var(--space-2);
