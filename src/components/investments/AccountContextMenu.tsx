@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router';
+import { Pencil } from 'lucide-react';
 
 export function AccountContextMenu({ id, name, x, y, onClose }: {
   id: number; name: string; x: number; y: number; onClose: () => void;
@@ -8,7 +9,7 @@ export function AccountContextMenu({ id, name, x, y, onClose }: {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const previousFocus = document.activeElement;
-    ref.current?.querySelector<HTMLAnchorElement>('a')?.focus();
+    ref.current?.querySelector<HTMLAnchorElement>('a')?.focus({ preventScroll: true });
     const outside = (event: PointerEvent) => {
       if (!ref.current?.contains(event.target as Node)) onClose();
     };
@@ -34,7 +35,11 @@ export function AccountContextMenu({ id, name, x, y, onClose }: {
     };
   }, [onClose]);
   return createPortal(<div ref={ref} role="menu" aria-label={name} className="account-context-menu"
-    style={{ left: Math.max(8, Math.min(x, window.innerWidth - 188)), top: Math.max(8, Math.min(y, window.innerHeight - 52)) }}>
-    <Link role="menuitem" to={`/accounts?edit=${id}`} onClick={onClose}>Edit account…</Link>
+    style={{ left: Math.max(8, Math.min(x, window.innerWidth - 224)), top: Math.max(8, Math.min(y, window.innerHeight - 92)) }}>
+    <div className="account-context-menu__label" role="presentation">{name}</div>
+    <Link role="menuitem" to={`/accounts?edit=${id}`} onClick={onClose}>
+      <Pencil size={14} strokeWidth={1.7} aria-hidden="true" />
+      <span>Edit account…</span>
+    </Link>
   </div>, document.body);
 }
