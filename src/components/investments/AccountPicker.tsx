@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useMemo, useState, type MouseEvent } from 'react';
+import { selectAccountIds } from './accountSelection';
 import { Check, ChevronRight, Folder } from 'lucide-react';
 
 export interface PickerAccount {
@@ -20,21 +21,10 @@ export function AccountPicker({
   onChange: (next: Set<number>) => void;
   variant?: 'chips' | 'owner-groups';
 }) {
-  const pickerRef = useRef<HTMLDivElement | null>(null);
-  const pickerActive = useRef(false);
   const [lastClickedId, setLastClickedId] = useState<number | null>(null);
+  const [collapsedOwners, setCollapsedOwners] = useState<Set<string>>(new Set());
 
   const allIds = useMemo(() => accounts.map(account => account.id), [accounts]);
-  const holders = useMemo(() => {
-    const holderMap = new Map<string, number[]>();
-    for (const account of accounts) {
-      if (!account.account_holder) continue;
-      const ids = holderMap.get(account.account_holder) ?? [];
-      ids.push(account.id);
-      holderMap.set(account.account_holder, ids);
-    }
-    return [...holderMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [accounts]);
   const ownerGroups = useMemo(() => {
     const groups = new Map<string, PickerAccount[]>();
     for (const account of accounts) {
@@ -50,108 +40,41 @@ export function AccountPicker({
     });
   }, [accounts]);
 
-  const setExactly = (ids: number[]) => {
-    setLastClickedId(null);
-    onChange(new Set(ids));
-  };
-
-  const invertSelection = () => {
-    setLastClickedId(null);
-    onChange(new Set(allIds.filter(id => !selectedIds.has(id))));
-  };
-
-  const rangeBetween = (fromId: number, toId: number) => {
-    const from = allIds.indexOf(fromId);
-    const to = allIds.indexOf(toId);
-    if (from === -1 || to === -1) return [toId];
-    return allIds.slice(Math.min(from, to), Math.max(from, to) + 1);
-  };
-
-  const isExactly = (ids: number[]) =>
-    ids.length === selectedIds.size && ids.every(id => selectedIds.has(id));
+  const visibleIds = variant === 'owner-groups'
+    ? ownerGroups.filter(([owner]) => !collapsedOwners.has(owner)).flatMap(([, items]) => items.map(account => account.id))
+    : allIds;
 
   const selectAccount = (id: number, event: MouseEvent<HTMLButtonElement>) => {
-    setLastClickedId(id);
-    if (event.altKey) {
-      invertSelection();
-      return;
-    }
-    if (event.shiftKey && lastClickedId !== null) {
-      const range = rangeBetween(lastClickedId, id);
-      onChange(event.metaKey || event.ctrlKey ? new Set([...selectedIds, ...range]) : new Set(range));
-      return;
-    }
-    if (event.metaKey || event.ctrlKey) {
-      const next = new Set(selectedIds);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      onChange(next);
-      return;
-    }
-    if (selectedIds.size === allIds.length) {
-      onChange(new Set([id]));
-      return;
-    }
-    const next = new Set(selectedIds);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    onChange(next);
+    if (!event.shiftKey || lastClickedId === null || !visibleIds.includes(lastClickedId)) setLastClickedId(id);
+    onChange(selectAccountIds(visibleIds, selectedIds, lastClickedId, id, { shift: event.shiftKey, additive: event.metaKey || event.ctrlKey }));
   };
-
-  useEffect(() => {
-    const isInPicker = (target: EventTarget | null) =>
-      target instanceof Node && Boolean(pickerRef.current?.contains(target));
-    const handlePointerDown = (event: PointerEvent) => {
-      pickerActive.current = isInPicker(event.target);
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (!pickerActive.current || event.defaultPrevented) return;
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
-        event.preventDefault();
-        setExactly(allIds);
-      }
-    };
-    document.addEventListener('pointerdown', handlePointerDown, true);
-    document.addEventListener('keydown', handleKeyDown, true);
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown, true);
-      document.removeEventListener('keydown', handleKeyDown, true);
-    };
-  }, [allIds]);
 
   return (
     <div
-      ref={pickerRef}
       className={`account-picker account-picker--${variant}`}
       tabIndex={-1}
-      onFocusCapture={() => {
-        pickerActive.current = true;
+      onKeyDown={event => {
+        if (!event.defaultPrevented && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'a') {
+          event.preventDefault();
+          event.stopPropagation();
+          onChange(new Set(allIds));
+          setLastClickedId(null);
+        }
       }}
     >
-      <details className="account-picker-selection-shortcuts">
-        <summary>Selection shortcuts</summary>
-        <div className="account-picker-shortcuts">
-        <button type="button" onClick={() => setExactly(allIds)}>All</button>
-        <button type="button" onClick={() => setExactly([])}>None</button>
-        <button type="button" onClick={invertSelection}>Invert</button>
-        {holders.map(([holder, ids]) => (
-          <button
-            key={holder}
-            type="button"
-            className={isExactly(ids) ? 'active' : ''}
-            title={`Select only ${holder}'s accounts`}
-            onClick={() => setExactly(ids)}
-          >
-            {holder}
-          </button>
-        ))}
-      </div>
-      </details>
-
       {variant === 'owner-groups' ? (
         <div className="account-filter account-filter--owner-groups">
           {ownerGroups.map(([owner, ownerAccounts]) => (
-            <details className="account-owner-group" key={owner} open>
+            <details className="account-owner-group" key={owner} open={!collapsedOwners.has(owner)} onToggle={event => {
+              const open = event.currentTarget.open;
+              setCollapsedOwners(current => {
+                if (current.has(owner) === !open) return current;
+                const next = new Set(current);
+                if (open) next.delete(owner);
+                else next.add(owner);
+                return next;
+              });
+            }}>
               <summary className="account-owner-group__header">
                 <ChevronRight size={13} className="account-owner-chevron" aria-hidden="true" />
                 <Folder size={16} aria-hidden="true" />
@@ -165,7 +88,7 @@ export function AccountPicker({
                     type="button"
                     className={selectedIds.has(account.id) ? 'account-row-picker active' : 'account-row-picker'}
                     aria-pressed={selectedIds.has(account.id)}
-                    title="Click to add or remove this account from the report"
+                    title="Click to select; Command/Ctrl-click to toggle; Shift-click for a range; Command/Ctrl-A for all"
                     onClick={event => selectAccount(account.id, event)}
                   >
                     <Check size={13} className="account-row-picker__selection" aria-hidden="true" />
@@ -185,7 +108,7 @@ export function AccountPicker({
               type="button"
               className={selectedIds.has(account.id) ? 'account-chip active' : 'account-chip'}
               aria-pressed={selectedIds.has(account.id)}
-              title="Click to add or remove this account from the report"
+              title="Click to select; Command/Ctrl-click to toggle; Shift-click for a range; Command/Ctrl-A for all"
               onClick={event => selectAccount(account.id, event)}
             >
               <span className="account-chip-name">{account.name}</span>

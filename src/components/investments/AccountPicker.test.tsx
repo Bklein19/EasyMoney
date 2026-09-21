@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { AccountPicker } from './AccountPicker';
 
-test('grouped picker has collapsible folders, selection state, metadata and quiet shortcuts', () => {
+test('grouped picker has collapsible folders, selection state and no shortcut controls', () => {
   const html = renderToStaticMarkup(<AccountPicker variant="owner-groups" accounts={[
     { id: 1, name: 'Brokerage', institution: 'Vanguard', type: 'investment', account_holder: 'Michael' },
     { id: 2, name: 'Checking', institution: 'Bank', type: 'checking', account_holder: 'Annie' },
@@ -12,6 +12,6 @@ test('grouped picker has collapsible folders, selection state, metadata and quie
   expect(html).toContain('aria-pressed="true"');
   expect(html).toContain('aria-pressed="false"');
   expect(html).toContain('investment');
-  expect(html).toContain('<details class="account-picker-selection-shortcuts">');
-  expect(html).toContain('Selection shortcuts');
+  expect(html).not.toContain('account-picker-selection-shortcuts');
+  expect(html).not.toContain('Selection shortcuts');
 });

@@ -663,14 +663,6 @@ body.sidebar-resizing {
   font-weight: 500;
   padding-inline: 8px;
 }
-.account-picker-selection-shortcuts { order: 2; margin-top: 6px; }
-.account-picker-selection-shortcuts > summary {
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: var(--text-xs);
-  padding: 6px 8px;
-}
-.account-picker-selection-shortcuts .account-picker-shortcuts { padding: 6px 8px; }
 .account-picker--owner-groups .account-owner-group { display: block; }
 .account-picker--owner-groups .account-owner-group__header {
   display: flex;
