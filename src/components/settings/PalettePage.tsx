@@ -4,10 +4,10 @@ import './PalettePage.css';
 interface Token { name: string; value: string; group: string; effect: boolean }
 
 export function paletteGroup(name: string): string {
-  if (/^--(chart-|tooltip-|series-|account-series-)/.test(name)) return 'Report charts';
+  if (/^--(chart-|tooltip-|series-|account-series-|data-)/.test(name)) return 'Data visualization';
   if (name.startsWith('--bg-')) return 'Surfaces';
   if (name.startsWith('--text-')) return 'Text';
-  if (name.startsWith('--accent-')) return 'Accents';
+  if (/^--(action-|color-accent|color-link)/.test(name)) return 'Interaction';
   if (name.startsWith('--color-')) return 'Status';
   if (name.startsWith('--cat-')) return 'Categories';
   if (name.startsWith('--shadow-')) return 'Shadows';
@@ -44,7 +44,7 @@ export default function PalettePage() {
       setTheme(media.matches ? 'Light' : 'Dark');
       setTokens(tokenNames().flatMap(name => {
         const group = paletteGroup(name);
-        const value = (group === 'Report charts' ? chart : root).getPropertyValue(name).trim();
+        const value = (group === 'Data visualization' ? chart : root).getPropertyValue(name).trim();
         const effect = name.startsWith('--shadow-');
         return value && (effect || CSS.supports('color', value)) ? [{ name, value, group, effect }] : [];
       }));
@@ -62,7 +62,7 @@ export default function PalettePage() {
       <p>{theme} system theme · {tokens.length} color and shadow tokens · Live computed values</p>
     </header>
     <div ref={probe} className="page-networth palette-probe" aria-hidden="true" />
-    <aside className="palette-note">This is the defined token palette, not every color rendered in the app. Hardcoded component colors and saved category colors can bypass it. Report-chart tokens are read in their own scope.</aside>
+    <aside className="palette-note">UI roles and data visualization have independent palettes. These are live token values; saved category colors are user data and can differ. Chart aliases share a small base palette.</aside>
     <input className="palette-search" type="search" aria-label="Filter palette tokens" placeholder="Find a token, color, or group…" value={search} onChange={event => setSearch(event.target.value)} />
     {!visible.length && <p>No matching tokens.</p>}
     {groups.map(group => <section key={group} aria-label={group}><h2>{group}</h2><div className="palette-grid">

@@ -59,7 +59,7 @@ export default function CategoryPicker({
     const id = await addCategory({
       name,
       type: ['investment', 'investments'].includes(name.toLowerCase()) ? 'investment' : 'expense',
-      color: '#94a3b8',
+      color: 'var(--cat-uncategorized)',
       icon: 'tag',
     });
     onChange(id);

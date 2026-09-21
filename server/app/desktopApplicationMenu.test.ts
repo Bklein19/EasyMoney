@@ -21,6 +21,8 @@ describe('desktop application menu', () => {
     expect(submenuNamed('Go')).toEqual([
       { label: 'Back', action: 'navigate-back', accelerator: 'CommandOrControl+[' },
       { label: 'Forward', action: 'navigate-forward', accelerator: 'CommandOrControl+]' },
+      { type: 'divider' },
+      { label: 'Show/Hide Debug Pages', action: 'toggle-debug', accelerator: 'CommandOrControl+D' },
     ]);
     expect(submenuNamed('Edit')).toEqual(expect.arrayContaining([
       expect.objectContaining({ role: 'undo', accelerator: 'CommandOrControl+Z' }),

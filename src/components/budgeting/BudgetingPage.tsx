@@ -220,11 +220,11 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
     .map(row => ({
       name: row.category.name,
       value: row.actual,
-      color: row.category.color || '#94a3b8'
+      color: row.category.color || 'var(--cat-uncategorized)'
     }));
   const allocationData = [
     ...spendingAllocationData,
-    ...(unspentIncome > 0 ? [{ name: 'Unspent', value: unspentIncome, color: '#10b981' }] : [])
+    ...(unspentIncome > 0 ? [{ name: 'Unspent', value: unspentIncome, color: 'var(--data-income)' }] : [])
   ];
   const allocationTotal = allocationData.reduce((sum, item) => sum + item.value, 0);
   const incomeCoveragePercent = cashFlow.expenses > 0
@@ -688,7 +688,7 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
             {rows.map(row => (
               <div className="budgeting-row" key={row.category.id}>
                 <div className="budgeting-category">
-                  <span className="budgeting-category__dot" style={{ backgroundColor: row.category.color || '#94a3b8' }} />
+                  <span className="budgeting-category__dot" style={{ backgroundColor: row.category.color || 'var(--cat-uncategorized)' }} />
                   <div>
                     <strong>{row.category.name}</strong>
                     <span>{formatCurrency(row.budgetAmount)} target</span>
@@ -849,7 +849,7 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
               return (
                 <div className="budgeting-design-row" key={category.id}>
                   <div className="budgeting-category">
-                    <span className="budgeting-category__dot" style={{ backgroundColor: category.color || '#94a3b8' }} />
+                    <span className="budgeting-category__dot" style={{ backgroundColor: category.color || 'var(--cat-uncategorized)' }} />
                     <div>
                       <strong>{category.name}</strong>
                       <span>{formatCurrency(draftAmounts[String(category.id)] || 0)} target</span>

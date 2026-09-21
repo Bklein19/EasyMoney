@@ -99,31 +99,31 @@ export default function IncomeVsExpense({ rows = [], onSelectPeriod }: IncomeVsE
             }
           }}
         >
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.1)" />
-          <XAxis 
-            dataKey="displayLabel" 
-            stroke="#94a3b8" 
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--chart-grid)" />
+          <XAxis
+            dataKey="displayLabel"
+            stroke="var(--chart-axis)"
             fontSize={12}
             tickLine={false}
             axisLine={false}
             dy={10}
           />
-          <YAxis 
+          <YAxis
             tickFormatter={formatCurrency}
-            stroke="#94a3b8"
+            stroke="var(--chart-axis)"
             fontSize={12}
             tickLine={false}
             axisLine={false}
             width={72}
           />
-          <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(148, 163, 184, 0.05)' }} />
-          <Legend 
+          <Tooltip content={<CustomTooltip />} cursor={{ fill: 'var(--chart-cursor)' }} />
+          <Legend
             wrapperStyle={{ paddingTop: '20px', fontSize: '12px', color: 'var(--text-secondary)' }}
             iconType="circle"
           />
           <Bar
             dataKey="Income"
-            fill="#10b981"
+            fill="var(--data-income)"
             radius={[4, 4, 0, 0]}
             maxBarSize={40}
             cursor="pointer"
@@ -131,7 +131,7 @@ export default function IncomeVsExpense({ rows = [], onSelectPeriod }: IncomeVsE
           />
           <Bar
             dataKey="Expense"
-            fill="#ef4444"
+            fill="var(--data-expense)"
             radius={[4, 4, 0, 0]}
             maxBarSize={40}
             cursor="pointer"

@@ -1,3 +1,4 @@
+import { CHART_SERIES_COLORS } from '../../styles/chartColors';
 import {
   LineChart,
   Line,
@@ -10,12 +11,9 @@ import {
 } from 'recharts';
 import PeriodClickOverlay, { type AnalyticsPeriodRow } from './PeriodClickOverlay';
 
-const COLORS = [
-  '#f97316', '#22c55e', '#6366f1', '#3b82f6', '#ec4899', 
-  '#ef4444', '#a855f7', '#eab308', '#14b8a6', '#06b6d4'
-];
+const COLORS = CHART_SERIES_COLORS;
 const TOTAL_SPEND_KEY = 'Total Spend';
-const TOTAL_SPEND_COLOR = '#f8fafc';
+const TOTAL_SPEND_COLOR = 'var(--chart-total)';
 
 interface SpendingTrendRow {
   key: string;
@@ -138,18 +136,18 @@ export default function SpendingTrends({
             }
           }}
         >
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.1)" />
-          <XAxis 
-            dataKey="displayLabel" 
-            stroke="#94a3b8" 
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--chart-grid)" />
+          <XAxis
+            dataKey="displayLabel"
+            stroke="var(--chart-axis)"
             fontSize={12}
             tickLine={false}
             axisLine={false}
             dy={10}
           />
-          <YAxis 
+          <YAxis
             tickFormatter={formatCurrency}
-            stroke="#94a3b8"
+            stroke="var(--chart-axis)"
             fontSize={12}
             tickLine={false}
             axisLine={false}

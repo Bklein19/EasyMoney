@@ -130,7 +130,7 @@ export default function PeriodClickOverlay({ data, onSelectPeriod }: PeriodClick
             y={plotArea.y}
             width={bands[index]!.width}
             height={plotArea.height}
-            fill={isInDragRange ? 'rgba(59, 130, 246, 0.18)' : 'rgba(255,255,255,0.001)'}
+            fill={isInDragRange ? 'var(--chart-selection)' : 'transparent'}
             cursor="pointer"
             role="button"
             tabIndex={0}

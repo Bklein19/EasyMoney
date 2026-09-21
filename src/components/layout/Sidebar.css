@@ -453,7 +453,7 @@ body.sidebar-resizing {
 }
 
 .account-owner-group__header span:last-child {
-  color: var(--text-subtle);
+  color: var(--text-muted);
   font-size: 0.62rem;
 }
 

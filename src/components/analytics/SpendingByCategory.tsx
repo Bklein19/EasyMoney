@@ -1,10 +1,8 @@
+import { CHART_SERIES_COLORS } from '../../styles/chartColors';
 import { X } from 'lucide-react';
 
-// A palette of nice colors from index.css for categories if they don't have a specific color
-const COLORS = [
-  '#f97316', '#22c55e', '#6366f1', '#3b82f6', '#ec4899', 
-  '#ef4444', '#a855f7', '#eab308', '#14b8a6', '#06b6d4'
-];
+// Shared theme-aware categorical fallback.
+const COLORS = CHART_SERIES_COLORS;
 
 export interface CategorySpendingRow {
   id: string | number;

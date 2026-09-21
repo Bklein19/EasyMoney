@@ -93,10 +93,10 @@ export default function InvestmentTrends({ rows = [], onSelectPeriod }: Investme
             }
           }}
         >
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(148, 163, 184, 0.1)" />
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--chart-grid)" />
           <XAxis
             dataKey="displayLabel"
-            stroke="#94a3b8"
+            stroke="var(--chart-axis)"
             fontSize={12}
             tickLine={false}
             axisLine={false}
@@ -104,14 +104,14 @@ export default function InvestmentTrends({ rows = [], onSelectPeriod }: Investme
           />
           <YAxis
             tickFormatter={formatCurrency}
-            stroke="#94a3b8"
+            stroke="var(--chart-axis)"
             fontSize={12}
             tickLine={false}
             axisLine={false}
             width={72}
           />
-          <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(245, 158, 11, 0.08)' }} />
-          <Bar dataKey="Investments" fill="#f59e0b" radius={[4, 4, 0, 0]} maxBarSize={44} />
+          <Tooltip content={<CustomTooltip />} cursor={{ fill: 'var(--chart-cursor)' }} />
+          <Bar dataKey="Investments" fill="var(--data-investment)" radius={[4, 4, 0, 0]} maxBarSize={44} />
         </BarChart>
       </ResponsiveContainer>
     </div>

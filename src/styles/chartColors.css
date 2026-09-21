@@ -1,0 +1,57 @@
+/* Data visualization colors are independent of UI warning/success semantics. */
+:root {
+  --chart-axis: var(--text-muted);
+  --chart-grid: var(--hairline);
+  --chart-zero: var(--glass-border-hover);
+  --chart-cursor: var(--bg-subtle);
+  --chart-selection: var(--focus-ring);
+  --chart-total: var(--text-primary);
+  --tooltip-bg: var(--bg-elevated);
+  --tooltip-border: var(--glass-border-hover);
+  --data-income: #69b37a;
+  --data-expense: #cf6f6f;
+  --data-investment: #c79b55;
+  --data-series-0: #789bd0;
+  --data-series-1: #b89962;
+  --data-series-2: #9886d0;
+  --data-series-3: #66a5b4;
+  --data-series-4: #c58b6a;
+  --data-series-5: #7eb184;
+  --data-series-6: #c786ad;
+  --data-series-7: #9ba864;
+  --series-contributions: var(--data-series-0);
+  --series-gains: var(--data-investment);
+  --series-net-worth: var(--chart-total);
+  --series-positive: var(--data-income);
+  --series-negative: var(--data-series-6);
+  --series-retained: var(--data-series-0);
+  --series-poof: var(--data-expense);
+  --series-retirement-band: var(--data-series-0);
+  --series-retirement-high: var(--data-series-0);
+  --series-retirement-median: var(--data-income);
+  --series-retirement-low: var(--data-investment);
+  --account-series-0: var(--data-series-0);
+  --account-series-1: var(--data-series-1);
+  --account-series-2: var(--data-series-2);
+  --account-series-3: var(--data-series-3);
+  --account-series-4: var(--data-series-4);
+  --account-series-5: var(--data-series-5);
+  --account-series-6: var(--data-series-6);
+  --account-series-7: var(--data-series-7);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --data-income: #28763d;
+    --data-expense: #b34f4f;
+    --data-investment: #946414;
+    --data-series-0: #3d68a6;
+    --data-series-1: #8b681c;
+    --data-series-2: #7054b1;
+    --data-series-3: #277888;
+    --data-series-4: #a25e37;
+    --data-series-5: #397c43;
+    --data-series-6: #a94e84;
+    --data-series-7: #667523;
+  }
+}

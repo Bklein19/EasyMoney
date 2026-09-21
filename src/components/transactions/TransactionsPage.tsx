@@ -254,7 +254,7 @@ export default function TransactionsPage() {
     const categoryId = existing?.id || await addCategory({
       name,
       type: inferBulkCategoryType(),
-      color: '#94a3b8',
+      color: 'var(--cat-uncategorized)',
       icon: 'tag'
     });
 

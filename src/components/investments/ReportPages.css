@@ -1,30 +1,6 @@
 .page-networth,
 .page-savings-rate,
 .page-retirement {
-  --chart-axis: var(--text-muted);
-  --chart-grid: var(--hairline);
-  --chart-zero: var(--glass-border-hover);
-  --tooltip-bg: var(--bg-elevated);
-  --tooltip-border: var(--glass-border-hover);
-  --series-contributions: #6f96d6;
-  --series-gains: #c79b55;
-  --series-net-worth: var(--text-primary);
-  --series-positive: #69b37a;
-  --series-negative: #c978a1;
-  --series-retained: #789bd0;
-  --series-poof: #cf6f6f;
-  --series-retirement-band: #6f96d6;
-  --series-retirement-high: #8fb0e3;
-  --series-retirement-median: #69b37a;
-  --series-retirement-low: #c79b55;
-  --account-series-0: #789bd0;
-  --account-series-1: #b89962;
-  --account-series-2: #9886d0;
-  --account-series-3: #66a5b4;
-  --account-series-4: #c58b6a;
-  --account-series-5: #7eb184;
-  --account-series-6: #c786ad;
-  --account-series-7: #9ba864;
   display: flex;
   flex-direction: column;
   gap: var(--space-6);

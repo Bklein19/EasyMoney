@@ -108,7 +108,7 @@
   flex: 0 0 auto;
   width: 10px;
   height: 10px;
-  border: 1px solid color-mix(in srgb, var(--bg-primary) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bg-base) 30%, transparent);
   border-radius: 50%;
 }
 

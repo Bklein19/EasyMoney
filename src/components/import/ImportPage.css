@@ -288,7 +288,7 @@
 
 .sync-review__mapping-groups > summary span,
 .sync-review__files-heading span {
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   font-weight: 400;
 }
 
@@ -324,7 +324,7 @@
 
 .sync-review__skipped > summary span {
   margin-left: 0.75rem;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 
 .sync-review__mapping-groups-header {
@@ -342,7 +342,7 @@
 
 .sync-review__mapping-groups-header p,
 .sync-review__mapping-groups-header > span {
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   font-size: var(--text-xs);
 }
 
@@ -383,7 +383,7 @@
 
 .sync-review__mapping-group small {
   margin-top: 0.1rem;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   font-size: var(--text-xs);
 }
 
@@ -472,7 +472,7 @@
 .sync-review__file small,
 .sync-review__destination > span,
 .sync-review__coverage > span {
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 
 .sync-review__file small {
@@ -496,13 +496,13 @@
   padding: 0.15rem 0.4rem;
   border-radius: 999px;
   background: var(--bg-subtle-hover);
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   font-weight: 600;
   white-space: nowrap;
 }
 
 .sync-review__artifact-chevron {
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   transition: none;
 }
 
@@ -520,7 +520,7 @@
   margin-top: 0.7rem;
   padding-top: 0.55rem;
   border-top: 1px solid var(--hairline);
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   font-size: var(--text-xs);
 }
 
@@ -577,7 +577,7 @@
 
 .sync-review h4 {
   margin: 0 0 0.35rem;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   font-size: var(--text-xs);
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -645,7 +645,7 @@
 
 .sync-review__claim-row small,
 .sync-review__empty-claim {
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   font-size: var(--text-xs);
 }
 
@@ -686,7 +686,7 @@
 
 .sync-review__transactions td:first-child {
   width: 115px;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 
 .sync-review__transactions td:last-child {
@@ -705,7 +705,7 @@
 }
 
 .sync-review__transactions td small {
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 
 .data-freshness__summary {
@@ -783,7 +783,7 @@
 .data-freshness__table th {
   padding-top: 0.38rem;
   padding-bottom: 0.38rem;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   background: var(--bg-subtle);
   font-size: var(--text-xs);
   font-weight: 700;
@@ -812,7 +812,7 @@
 
 .data-freshness__table small {
   margin-top: 0.08rem;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   font-size: var(--text-xs);
 }
 
@@ -852,7 +852,7 @@
 
 .data-freshness__status.closed {
   background: var(--bg-subtle-hover);
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 
 .data-freshness__download-text {
@@ -990,7 +990,7 @@
 }
 
 .import-history__search input::placeholder {
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 
 .import-history__bulk-actions {
@@ -1043,7 +1043,7 @@
 
 .import-history__tree-header {
   min-height: 34px;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   background: var(--bg-subtle);
   font-size: var(--text-xs);
   font-weight: 700;
@@ -1118,7 +1118,7 @@
 
 .import-history__chevron {
   flex: 0 0 auto;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   transition: transform 120ms ease;
 }
 
@@ -1141,7 +1141,7 @@
 
 .import-history__file-row .import-history__tree-name > svg {
   flex: 0 0 auto;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
 }
 
 .import-history__file-row .import-history__tree-name > span {
@@ -1158,7 +1158,7 @@
 
 .import-history__file-row .import-history__file small {
   margin-top: 0.1rem;
-  color: var(--text-tertiary);
+  color: var(--text-muted);
   font-size: var(--text-xs);
 }
 
