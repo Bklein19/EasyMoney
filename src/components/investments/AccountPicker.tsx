@@ -34,11 +34,21 @@ export function AccountPicker(props: AccountPickerProps) {
   const [lastClickedId, setLastClickedId] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<{ id: number; name: string; x: number; y: number } | null>(null);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
-  const openContextMenu = (account: PickerAccount, event: MouseEvent<HTMLButtonElement>) => {
+  const openContextMenu = async (account: PickerAccount, event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     event.currentTarget.focus();
     const rect = event.currentTarget.getBoundingClientRect();
-    setContextMenu({ id: account.id, name: account.name, x: event.clientX || rect.left, y: event.clientY || rect.bottom });
+    const menu = { id: account.id, name: account.name, x: event.clientX || rect.left, y: event.clientY || rect.bottom };
+    closeContextMenu();
+    if (typeof window.__electrobunWebviewId === 'number') {
+      try {
+        const { desktopBridge } = await import('../../api/desktopBridge');
+        if (await desktopBridge?.rpc?.request.showAccountContextMenu({ accountId: account.id })) return;
+      } catch (error) {
+        console.error('Could not open native account menu', error);
+      }
+    }
+    setContextMenu(menu);
   };
 
   const allIds = useMemo(() => accounts.map(account => account.id), [accounts]);

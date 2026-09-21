@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router';
 import { Menu } from 'lucide-react';
 import ImportPage from './components/import/ImportPage.jsx';
 import TransactionsPage from './components/transactions/TransactionsPage.jsx';
@@ -140,6 +140,15 @@ function App() {
 }
 
 function AppRoutes({ reportSelectedIds }: AppRoutesProps) {
+  const navigate = useNavigate();
+  useEffect(() => {
+    const editAccount = (event: Event) => {
+      const id: unknown = (event as CustomEvent).detail;
+      if (typeof id === 'number' && Number.isSafeInteger(id) && id > 0) navigate(`/accounts?edit=${id}`);
+    };
+    window.addEventListener('easymoney:edit-account', editAccount);
+    return () => window.removeEventListener('easymoney:edit-account', editAccount);
+  }, [navigate]);
   return (
     <Routes>
       <Route path="/" element={<AnalyticsPage />} />

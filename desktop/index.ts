@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import Electrobun, { ApplicationMenu, BrowserView, BrowserWindow, Utils } from 'electrobun/main';
+import Electrobun, { ApplicationMenu, ContextMenu, BrowserView, BrowserWindow, Utils } from 'electrobun/main';
+import { accountContextMenu, accountIdFromMenuEvent } from './accountContextMenu';
 import {
   callTRPCProcedure,
   getTRPCErrorFromUnknown,
@@ -59,6 +60,11 @@ const rpc = BrowserView.defineRPC<EasyMoneyDesktopRpc>({
   maxRequestTime: Infinity,
   handlers: {
     requests: {
+      showAccountContextMenu: ({ accountId }) => {
+        if (process.platform === 'linux') return false;
+        ContextMenu.showContextMenu(accountContextMenu(accountId));
+        return true;
+      },
       trpc: async ({ path: procedurePath, type, input }) => {
         try {
           const data = await callTRPCProcedure({
@@ -101,6 +107,11 @@ const mainWindow = new BrowserWindow({
     x: 80,
     y: 80,
   },
+});
+
+ContextMenu.on('context-menu-clicked', event => {
+  const accountId = accountIdFromMenuEvent(event);
+  if (accountId !== null) rpc.send.editAccount({ accountId });
 });
 
 if (process.platform === 'darwin') {
