@@ -52,8 +52,8 @@
 .budgeting-period-tabs button:hover,
 .budgeting-period-tabs button:focus-visible,
 .budgeting-period-tabs button.active {
-  border-color: rgba(6, 182, 212, 0.32);
-  background: rgba(6, 182, 212, 0.1);
+  border-color: color-mix(in srgb, var(--color-accent) 32%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
   color: var(--text-primary);
   outline: none;
 }
@@ -179,9 +179,9 @@
   gap: var(--space-2);
   min-height: 32px;
   padding: var(--space-1) var(--space-3);
-  border: 1px solid rgba(16, 185, 129, 0.25);
+  border: 1px solid color-mix(in srgb, var(--color-success) 25%, transparent);
   border-radius: var(--radius-full);
-  background: rgba(16, 185, 129, 0.1);
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
   color: var(--color-success);
   font-size: var(--text-sm);
   font-weight: 700;
@@ -189,8 +189,8 @@
 }
 
 .budgeting-target-total--over {
-  border-color: rgba(245, 158, 11, 0.35);
-  background: rgba(245, 158, 11, 0.1);
+  border-color: color-mix(in srgb, var(--color-warning) 35%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
   color: var(--color-warning);
 }
 
@@ -289,9 +289,9 @@
   flex-direction: column;
   gap: var(--space-2);
   padding: var(--space-3);
-  border: 1px solid rgba(239, 68, 68, 0.26);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 26%, transparent);
   border-radius: var(--radius-md);
-  background: rgba(239, 68, 68, 0.08);
+  background: color-mix(in srgb, var(--color-danger) 8%, transparent);
 }
 
 .budgeting-overflow-card__header,
@@ -324,7 +324,7 @@
   height: 12px;
   overflow: hidden;
   border-radius: var(--radius-full);
-  background: rgba(148, 163, 184, 0.12);
+  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
 }
 
 .budgeting-overflow-bar__income,
@@ -367,11 +367,11 @@
 .budgeting-row {
   min-height: 78px;
   padding: var(--space-3) var(--space-4);
-  border-top: 1px solid rgba(148, 163, 184, 0.08);
+  border-top: 1px solid color-mix(in srgb, var(--text-muted) 8%, transparent);
 }
 
 .budgeting-row:hover {
-  background: rgba(148, 163, 184, 0.04);
+  background: color-mix(in srgb, var(--text-muted) 4%, transparent);
 }
 
 .budgeting-category {
@@ -385,7 +385,7 @@
   width: 12px;
   height: 12px;
   border-radius: var(--radius-full);
-  box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.08);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--text-muted) 8%, transparent);
   flex: 0 0 auto;
 }
 
@@ -421,7 +421,7 @@
 
 .budgeting-target-control input[type="range"] {
   width: 100%;
-  accent-color: var(--accent-cyan);
+  accent-color: var(--color-accent);
 }
 
 .budgeting-target-control input[type="range"]:disabled {
@@ -500,7 +500,7 @@
   height: 10px;
   overflow: hidden;
   border-radius: var(--radius-full);
-  background: rgba(148, 163, 184, 0.12);
+  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
 }
 
 .budgeting-meter span {
@@ -614,7 +614,7 @@
 
 .budgeting-design-row input[type="range"] {
   width: 100%;
-  accent-color: var(--accent-cyan);
+  accent-color: var(--color-accent);
 }
 
 .budgeting-save-period-modal {

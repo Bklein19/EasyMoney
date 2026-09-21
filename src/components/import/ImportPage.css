@@ -93,13 +93,13 @@
 
 .data-freshness__sync-menu.is-primary summary {
   border-color: transparent;
-  background: var(--accent-fill);
+  background: var(--action-primary);
   color: white;
-  box-shadow: var(--shadow-glow-blue);
+  box-shadow: var(--shadow-accent);
 }
 
 .data-freshness__sync-menu.is-primary summary:hover {
-  background: var(--accent-fill-hover);
+  background: var(--action-primary-hover);
   box-shadow: var(--shadow-md);
 }
 
@@ -189,7 +189,7 @@
 .sync-review {
   container-type: inline-size;
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--accent-blue) 48%, var(--glass-border));
+  border: 1px solid color-mix(in srgb, var(--color-accent) 48%, var(--glass-border));
   border-radius: var(--radius-lg);
   background: var(--bg-elevated);
   box-shadow: 0 0 0 3px var(--focus-ring), var(--shadow-md);
@@ -202,7 +202,7 @@
   gap: 1rem;
   padding: 0.85rem 1rem;
   border-bottom: 1px solid var(--hairline);
-  background: color-mix(in srgb, var(--accent-blue) 5%, var(--bg-elevated));
+  background: color-mix(in srgb, var(--color-accent) 5%, var(--bg-elevated));
 }
 
 .sync-review__header h3,
@@ -221,10 +221,10 @@
   min-height: 18px;
   margin-bottom: 0.3rem;
   padding: 1px 6px;
-  border: 1px solid color-mix(in srgb, var(--accent-blue) 28%, var(--glass-border));
+  border: 1px solid color-mix(in srgb, var(--color-accent) 28%, var(--glass-border));
   border-radius: var(--radius-sm);
   background: var(--color-info-bg);
-  color: var(--accent-blue);
+  color: var(--color-accent);
   font-size: 0.64rem;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -408,7 +408,7 @@
 
 .sync-review__source-identifiers > summary::-webkit-details-marker { display: none; }
 .sync-review__source-identifiers > summary:hover { background: var(--bg-hover); }
-.sync-review__source-identifiers > summary:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 2px; }
+.sync-review__source-identifiers > summary:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
 .sync-review__source-identifiers > summary svg { transform: rotate(-90deg); }
 .sync-review__source-identifiers[open] > summary svg { transform: rotate(0); }
 .sync-review__source-identifiers p,
@@ -837,7 +837,7 @@
 
 .data-freshness__status.due {
   background: var(--color-info-bg);
-  color: var(--accent-blue);
+  color: var(--color-accent);
 }
 
 .data-freshness__status.stale {
@@ -892,7 +892,7 @@
   width: 18px;
   height: 18px;
   margin-top: 0.2rem;
-  accent-color: var(--accent-blue);
+  accent-color: var(--color-accent);
 }
 
 .import-options__toggle span {
@@ -1124,7 +1124,7 @@
 
 .import-history__folder-icon {
   flex: 0 0 auto;
-  color: var(--accent-blue);
+  color: var(--color-accent);
 }
 
 .import-history__file-row {
@@ -1288,7 +1288,7 @@
   height: 100%;
   min-width: 0;
   border-radius: inherit;
-  background: var(--accent-blue);
+  background: var(--color-accent);
   transition: width 0.2s ease;
 }
 

@@ -16,7 +16,7 @@ export default function TransactionDetails({ ledgerTransactionId, onClose }: { l
       <p>Original description: {detail.transaction.originalDescription || detail.transaction.description}</p>
       {detail.transaction.notes && <p>Notes: {detail.transaction.notes}</p>}
       {!detail.sources.length && <p>No active source explanation is available for this transaction.</p>}
-      {detail.sources.map(source => <section key={source.id} style={{ borderTop: '1px solid var(--border-color, #64748b)', paddingBlock: 12 }}>
+      {detail.sources.map(source => <section key={source.id} style={{ borderTop: '1px solid var(--glass-border)', paddingBlock: 12 }}>
         <strong>{source.selected ? 'Retained source' : 'Related source excluded during rebuild'}</strong>
         <p>{source.fileName} · {source.parserName || 'Unknown parser'} · {source.status}</p>
         <p>{source.sourceAccountName || 'Unnamed source account'} → {source.mappedAccountName || 'Unmapped account'}</p>

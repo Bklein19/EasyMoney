@@ -16,7 +16,7 @@ export default function DataCompleteness({ accountIds, startDate, endDate }: { a
   if (!query.data) return <p role="status">Checking report coverage…</p>;
   const affected = query.data.accounts.filter(account => !account.closed && (account.transactionCoverage === 'unverified' || account.balanceStatus !== 'current'));
   if (!query.data.accounts.length) return null;
-  return <details className="data-completeness" style={{ marginBlock: 16, padding: 12, border: '1px solid var(--border-color, #64748b)', borderRadius: 8 }}>
+  return <details className="data-completeness" style={{ marginBlock: 16, padding: 12, border: '1px solid var(--glass-border)', borderRadius: 8 }}>
     <summary>Data coverage · {affected.length ? `${affected.length} account${affected.length === 1 ? '' : 's'} need attention` : 'No open accounts need attention'} · as of {query.data.asOf}</summary>
     <p>Declared coverage comes from file date ranges for a single account. Unverified dates may include quiet periods. Recent transactions do not refresh an older balance.</p>
     {query.data.accounts.map(account => <div key={account.accountId} style={{ marginBlock: 12 }}>

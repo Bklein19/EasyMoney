@@ -26,7 +26,7 @@
   width: 15px;
   height: 15px;
   margin: 0;
-  accent-color: var(--accent-blue);
+  accent-color: var(--color-accent);
 }
 
 .accounts-page__count {
@@ -192,9 +192,9 @@
 }
 
 .account-owner-badge {
-  color: var(--accent-blue);
+  color: var(--color-accent);
   background: var(--color-info-bg);
-  border-color: color-mix(in srgb, var(--accent-blue) 24%, var(--glass-border));
+  border-color: color-mix(in srgb, var(--color-accent) 24%, var(--glass-border));
 }
 
 .account-last4-badge {
@@ -278,7 +278,7 @@
 
 .account-field input:focus,
 .account-field select:focus {
-  border-color: var(--accent-blue);
+  border-color: var(--color-accent);
 }
 
 .account-field input::placeholder {

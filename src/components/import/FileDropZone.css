@@ -9,7 +9,7 @@
 }
 
 .file-drop-zone.dragging {
-  outline: 2px solid var(--accent-blue);
+  outline: 2px solid var(--color-accent);
   outline-offset: 4px;
 }
 
@@ -40,12 +40,12 @@
 }
 
 .drop-icon {
-  color: var(--accent-blue);
+  color: var(--color-accent);
   opacity: 0.9;
 }
 
 .drop-zone-content:hover,
 .file-drop-zone.dragging .drop-zone-content {
-  border-color: var(--accent-blue);
+  border-color: var(--color-accent);
   background: var(--bg-hover);
 }

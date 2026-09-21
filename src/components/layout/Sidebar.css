@@ -79,7 +79,7 @@ body.sidebar-resizing .sidebar-resize-handle {
 
 .sidebar-resize-handle:hover::after,
 body.sidebar-resizing .sidebar-resize-handle::after {
-  background: color-mix(in srgb, var(--accent-blue) 24%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 24%, transparent);
 }
 
 .sidebar-mobile-overlay {
@@ -87,7 +87,7 @@ body.sidebar-resizing .sidebar-resize-handle::after {
   inset: 0;
   z-index: 40;
   display: none;
-  background: rgba(0, 0, 0, 0.52);
+  background: var(--overlay-bg);
 }
 
 body.sidebar-resizing .sidebar {
@@ -162,13 +162,13 @@ body.sidebar-resizing {
 .sidebar-brand-icon {
   width: 28px;
   height: 28px;
-  background: var(--accent-fill);
+  background: var(--action-primary);
   border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
   color: white;
-  box-shadow: var(--shadow-glow-blue);
+  box-shadow: var(--shadow-accent);
   flex: 0 0 auto;
 }
 
@@ -202,7 +202,7 @@ body.sidebar-resizing {
 }
 .sidebar-context-title a, .sidebar-account-picker__header a { color: inherit; text-decoration: none; }
 .sidebar-context-title a:hover, .sidebar-account-picker__header a:hover { color: var(--text-primary); }
-.sidebar-context-title a:focus-visible, .sidebar-account-picker__header a:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: 3px; border-radius: 2px; }
+.sidebar-context-title a:focus-visible, .sidebar-account-picker__header a:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; border-radius: 2px; }
 
 .sidebar-context-section { display: flex; flex-direction: column; gap: 3px; }
 .sidebar-context button.sidebar-link { border: 0; text-align: left; background: transparent; cursor: pointer; width: 100%; }
@@ -233,19 +233,19 @@ body.sidebar-resizing {
 .sidebar-customize-row { position: relative; display: flex; align-items: center; gap: 3px; border-radius: 8px; padding: 5px; color: var(--text-secondary); }
 .sidebar-customize-row.is-dragging { opacity: .8; }
 .sidebar-drag-preview { opacity: 1; background: var(--bg-elevated); color: var(--text-primary); box-shadow: var(--shadow-lg); }
-.sidebar-customize-row.drop-before::before, .sidebar-customize-row.drop-after::after { content: ''; position: absolute; left: 4px; right: 4px; height: 2px; border-radius: 2px; background: var(--accent-blue); pointer-events: none; }
+.sidebar-customize-row.drop-before::before, .sidebar-customize-row.drop-after::after { content: ''; position: absolute; left: 4px; right: 4px; height: 2px; border-radius: 2px; background: var(--color-accent); pointer-events: none; }
 .sidebar-customize-row.drop-before::before { top: -1px; }
 .sidebar-customize-row.drop-after::after { bottom: -1px; }
 .sidebar-drag-handle { display: flex; align-items: center; justify-content: center; width: 24px; height: 28px; flex-shrink: 0; cursor: grab; user-select: none; }
 .sidebar-drag-handle:active { cursor: grabbing; }
 .sidebar-drag-handle { border: 0; padding: 0; background: transparent; color: var(--text-muted); }
-.sidebar-drag-handle:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: -2px; border-radius: 4px; }
+.sidebar-drag-handle:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; border-radius: 4px; }
 .sidebar-customize-row:hover { background: var(--bg-subtle); }
 .sidebar-customize-row label { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; font-size: var(--text-sm); cursor: pointer; }
 .sidebar-customize-row label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-customize-row .icon-btn { padding: 3px; }
 .sidebar-customize-row > svg { cursor: grab; flex-shrink: 0; }
-.sidebar-link:focus-visible, .sidebar-category-group:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: -2px; }
+.sidebar-link:focus-visible, .sidebar-category-group:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
 @media (max-width: 768px) { .sidebar-overflow-panel { left: 12px; top: 100px; } }
 
 .easymoney-desktop .sidebar-nav {
@@ -302,7 +302,7 @@ body.sidebar-resizing {
   flex: 0 0 7px;
   margin-left: auto;
   border-radius: 50%;
-  background: var(--accent-amber, #c99742);
+  background: var(--color-warning);
 }
 
 .sidebar-category-groups {
@@ -405,9 +405,9 @@ body.sidebar-resizing {
 .account-picker-shortcuts button:hover,
 .account-picker-shortcuts button:focus-visible,
 .account-picker-shortcuts button.active {
-  border-color: color-mix(in srgb, var(--accent-blue) 36%, var(--glass-border));
+  border-color: color-mix(in srgb, var(--color-accent) 36%, var(--glass-border));
   background: var(--color-info-bg);
-  color: var(--accent-blue);
+  color: var(--color-accent);
   outline: none;
 }
 
@@ -489,7 +489,7 @@ body.sidebar-resizing {
 }
 
 .account-row-picker.active {
-  border-color: color-mix(in srgb, var(--accent-blue) 22%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 22%, transparent);
   background: var(--color-info-bg);
   color: var(--text-primary);
 }
@@ -502,8 +502,8 @@ body.sidebar-resizing {
 }
 
 .account-row-picker.active .account-row-picker__check {
-  border-color: var(--accent-blue);
-  background: var(--accent-blue);
+  border-color: var(--color-accent);
+  background: var(--color-accent);
 }
 
 .account-row-picker__name,
@@ -554,9 +554,9 @@ body.sidebar-resizing {
 }
 
 .account-chip.active {
-  border-color: color-mix(in srgb, var(--accent-blue) 34%, var(--glass-border));
+  border-color: color-mix(in srgb, var(--color-accent) 34%, var(--glass-border));
   background: var(--color-info-bg);
-  color: var(--accent-blue);
+  color: var(--color-accent);
 }
 
 .account-chip-name,
@@ -581,7 +581,7 @@ body.sidebar-resizing {
 }
 
 .account-chip-holder {
-  color: var(--accent-blue);
+  color: var(--color-accent);
   font-size: 0.6rem;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -589,7 +589,7 @@ body.sidebar-resizing {
 
 .account-chip.active .account-chip-meta,
 .account-chip.active .account-chip-holder {
-  color: color-mix(in srgb, var(--accent-blue) 72%, var(--text-secondary));
+  color: color-mix(in srgb, var(--color-accent) 72%, var(--text-secondary));
 }
 
 .sidebar--collapsed .sidebar-header {
@@ -739,10 +739,10 @@ body.sidebar-resizing {
   color: var(--text-primary);
 }
 .account-picker--owner-groups .account-row-picker:hover { background: var(--bg-hover); }
-.account-picker--owner-groups .account-row-picker:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: -2px; }
+.account-picker--owner-groups .account-row-picker:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; }
 .account-picker--owner-groups .account-row-picker__name { font-size: var(--text-sm); font-weight: 400; }
 .account-picker--owner-groups .account-row-picker__meta { max-width: 100px; font-size: 11px; font-weight: 400; text-transform: none; }
-.account-row-picker__selection { visibility: hidden; color: var(--accent-blue); }
+.account-row-picker__selection { visibility: hidden; color: var(--color-accent); }
 .account-row-picker.active .account-row-picker__selection { visibility: visible; }
 .account-context-menu {
   position: fixed;
@@ -756,7 +756,7 @@ body.sidebar-resizing {
   background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  box-shadow: 0 8px 28px rgb(0 0 0 / 22%), 0 2px 6px rgb(0 0 0 / 12%);
+  box-shadow: var(--shadow-lg);
 }
 .account-context-menu__label {
   padding: 6px 9px 8px;
@@ -786,6 +786,6 @@ body.sidebar-resizing {
 .account-context-menu a:hover, .account-context-menu a:focus-visible,
 .account-context-menu button:hover, .account-context-menu button:focus-visible {
   background: var(--color-info-bg);
-  color: var(--accent-blue);
+  color: var(--color-accent);
   outline: none;
 }
