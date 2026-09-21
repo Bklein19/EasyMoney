@@ -655,3 +655,60 @@ body.sidebar-resizing {
   line-height: 1.4;
 }
 .sidebar--collapsed:not(.sidebar--peek) .sidebar-count-badge { display: none; }
+
+/* Keep report selection dense, but distinguish it from primary navigation. */
+.sidebar-context .sidebar-account-picker__header {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
+  padding-inline: 8px;
+}
+.account-picker-selection-shortcuts { order: 2; margin-top: 6px; }
+.account-picker-selection-shortcuts > summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  padding: 6px 8px;
+}
+.account-picker-selection-shortcuts .account-picker-shortcuts { padding: 6px 8px; }
+.account-picker--owner-groups .account-owner-group { display: block; }
+.account-picker--owner-groups .account-owner-group__header {
+  display: flex;
+  justify-content: flex-start;
+  gap: 7px;
+  padding: 7px 4px;
+  cursor: pointer;
+  list-style: none;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: var(--text-sm);
+  font-weight: 400;
+}
+.account-owner-group__header::-webkit-details-marker { display: none; }
+.account-owner-group[open] > summary .account-owner-chevron { transform: rotate(90deg); }
+.account-owner-group__header > svg { flex-shrink: 0; }
+.account-owner-group__header .account-owner-count { margin-left: auto; font-weight: 400; font-size: 11px; }
+.account-picker--owner-groups .account-owner-group__list {
+  margin-left: 10px;
+  padding-left: 7px;
+  border-left: 1px solid var(--hairline-muted);
+  gap: 3px;
+}
+.account-picker--owner-groups .account-row-picker {
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  min-height: 32px;
+  padding: 5px 7px;
+  border: 0;
+  border-radius: 6px;
+  text-align: left;
+}
+.account-picker--owner-groups .account-row-picker.active {
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+}
+.account-picker--owner-groups .account-row-picker:hover { background: var(--bg-hover); }
+.account-picker--owner-groups .account-row-picker:focus-visible { outline: 2px solid var(--accent-blue); outline-offset: -2px; }
+.account-picker--owner-groups .account-row-picker__name { font-size: var(--text-sm); font-weight: 400; }
+.account-picker--owner-groups .account-row-picker__meta { font-size: 11px; font-weight: 400; }
+.account-row-picker__selection { visibility: hidden; color: var(--accent-blue); }
+.account-row-picker.active .account-row-picker__selection { visibility: visible; }

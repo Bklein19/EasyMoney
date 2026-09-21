@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { Check, ChevronRight, Folder } from 'lucide-react';
 
 export interface PickerAccount {
   id: number;
@@ -121,13 +122,15 @@ export function AccountPicker({
   return (
     <div
       ref={pickerRef}
-      className="account-picker"
+      className={`account-picker account-picker--${variant}`}
       tabIndex={-1}
       onFocusCapture={() => {
         pickerActive.current = true;
       }}
     >
-      <div className="account-picker-shortcuts">
+      <details className="account-picker-selection-shortcuts">
+        <summary>Selection shortcuts</summary>
+        <div className="account-picker-shortcuts">
         <button type="button" onClick={() => setExactly(allIds)}>All</button>
         <button type="button" onClick={() => setExactly([])}>None</button>
         <button type="button" onClick={invertSelection}>Invert</button>
@@ -143,15 +146,18 @@ export function AccountPicker({
           </button>
         ))}
       </div>
+      </details>
 
       {variant === 'owner-groups' ? (
         <div className="account-filter account-filter--owner-groups">
           {ownerGroups.map(([owner, ownerAccounts]) => (
-            <div className="account-owner-group" key={owner}>
-              <div className="account-owner-group__header">
+            <details className="account-owner-group" key={owner} open>
+              <summary className="account-owner-group__header">
+                <ChevronRight size={13} className="account-owner-chevron" aria-hidden="true" />
+                <Folder size={16} aria-hidden="true" />
                 <span>{owner}</span>
-                <span>{ownerAccounts.filter(account => selectedIds.has(account.id)).length}/{ownerAccounts.length}</span>
-              </div>
+                <span className="account-owner-count">{ownerAccounts.filter(account => selectedIds.has(account.id)).length}/{ownerAccounts.length}</span>
+              </summary>
               <div className="account-owner-group__list">
                 {ownerAccounts.map(account => (
                   <button
@@ -162,13 +168,13 @@ export function AccountPicker({
                     title="Click to add or remove this account from the report"
                     onClick={event => selectAccount(account.id, event)}
                   >
-                    <span className="account-row-picker__check" aria-hidden="true" />
+                    <Check size={13} className="account-row-picker__selection" aria-hidden="true" />
                     <span className="account-row-picker__name">{account.name}</span>
                     <span className="account-row-picker__meta">{account.type}</span>
                   </button>
                 ))}
               </div>
-            </div>
+            </details>
           ))}
         </div>
       ) : (
