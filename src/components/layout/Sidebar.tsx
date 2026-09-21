@@ -247,8 +247,8 @@ const Sidebar = ({
         ref={sidebarRef}
         className={`sidebar ${isMobileOpen ? 'mobile-open' : ''} ${isCollapsed ? 'sidebar--collapsed' : ''} ${isPeekOpen ? 'sidebar--peek' : ''}`}
       >
-        <div className={`sidebar-compact-title electrobun-webkit-app-region-drag${compactTitle ? ' is-visible' : ''}`} aria-hidden="true">EasyMoney</div>
-        <div className="sidebar-scroll" onScroll={event => setCompactTitle(event.currentTarget.scrollTop >= 68)}>
+        <div className={`sidebar-compact-title electrobun-webkit-app-region-drag${compactTitle ? ' is-visible' : ''}`} aria-hidden="true"><span>EasyMoney</span></div>
+        <div className="sidebar-scroll" onScroll={event => setCompactTitle(event.currentTarget.scrollTop >= 52)}>
         <div className="sidebar-header electrobun-webkit-app-region-drag" onContextMenu={showContextMenu}>
           <NavLink
             to="/"
