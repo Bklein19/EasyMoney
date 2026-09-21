@@ -375,6 +375,7 @@ export const appRouter = t.router({
     list: t.procedure
       .input(z.object({
         accountId: optionalId,
+        accountIds: z.array(z.number().int().positive()).optional(),
         categoryId: optionalId,
         accountKind: z.string().nullish(),
         startDate: z.string().nullish(),
@@ -400,6 +401,7 @@ export const appRouter = t.router({
       .input(z.object({
         query: z.object({
           accountId: optionalId,
+          accountIds: z.array(z.number().int().positive()).optional(),
           categoryId: optionalId,
           accountKind: z.string().nullish(),
           startDate: z.string().nullish(),
@@ -502,6 +504,7 @@ export const appRouter = t.router({
         startDate: z.string().nullish(),
         endDate: z.string().nullish(),
         accountId: optionalId,
+        accountIds: z.array(z.number().int().positive()).optional(),
         categoryFilterIds: z.array(z.union([z.string(), z.number()])).optional(),
         categoryFilterMode: z.enum(['include', 'exclude']).nullish(),
         groupMode: z.enum(['Auto', 'Daily', 'Weekly', 'Monthly', 'Yearly']).nullish(),

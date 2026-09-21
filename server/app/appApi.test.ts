@@ -1240,6 +1240,30 @@ test('trpc transaction totals classify bank-side card payments and investment tr
   });
 });
 
+test('account sets scope transaction pages, totals, analytics and bulk categorization', async () => {
+  const ids = ['One', 'Two', 'Three'].map(name => insertRow('accounts', { name, institution: 'Bank', type: 'checking' }));
+  for (const [index, accountId] of ids.entries()) {
+    insertLegacyFixture('transactions', { accountId, date: '2026-06-10', amount: -(index + 1) * 10, description: `Purchase ${index}`, type: 'expense' });
+  }
+  const accountIds = [ids[0]!, ids[2]!];
+  const result = await caller.transactions.list({ accountIds, limit: 1 });
+  expect(result.totalCount).toBe(2);
+  expect(result.totals.expenses).toBe(40);
+  expect(result.transactions).toHaveLength(1);
+  const second = await caller.transactions.list({ accountIds, limit: 1, offset: 1 });
+  expect(new Set([...result.transactions, ...second.transactions].map(row => row.account?.id))).toEqual(new Set(accountIds));
+  expect((await caller.analytics.report({ accountIds })).summary.expenses).toBe(40);
+  expect((await caller.transactions.list({ accountIds: [] })).totalCount).toBe(0);
+  expect((await caller.analytics.report({ accountIds: [] })).summary.transactionCount).toBe(0);
+  expect((await caller.transactions.list()).totalCount).toBe(3);
+  expect((await caller.transactions.list({ accountIds: [ids[0]!, ids[0]!] })).totalCount).toBe(1);
+  const categoryId = insertRow('categories', { name: 'Selected only', type: 'expense' });
+  expect((await caller.transactions.categorizeMatching({ query: { accountIds: [] }, categoryId })).count).toBe(0);
+  expect((await caller.transactions.categorizeMatching({ query: { accountIds }, categoryId })).count).toBe(2);
+  expect((await caller.transactions.list({ accountIds: [ids[1]!] })).transactions[0]?.category).toBeNull();
+  await expect(caller.transactions.list({ accountIds: [-1] })).rejects.toThrow();
+});
+
 test('trpc analytics report aggregates backend-owned cashflow semantics', async () => {
   const checkingId = insertRow('accounts', {
     name: 'Checking',

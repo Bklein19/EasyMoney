@@ -160,7 +160,7 @@ export default function AnalyticsPage() {
   const [dateRange, setDateRange] = useState<DateRange>(DATE_RANGES.ALL_TIME);
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
-  const [accountId, setAccountId] = useState('');
+  const [accountIds, setAccountIds] = useState<number[]>();
   const [categoryFilterIdsByMode, setCategoryFilterIdsByMode] = useState<CategoryFilterIdsByMode>({
     [CATEGORY_FILTER_MODES.INCLUDE]: [],
     [CATEGORY_FILTER_MODES.EXCLUDE]: []
@@ -214,11 +214,11 @@ export default function AnalyticsPage() {
   const analyticsInput = useMemo(() => ({
     startDate,
     endDate,
-    accountId: accountId || null,
+    accountIds,
     categoryFilterIds,
     categoryFilterMode: categoryFilterMode as CategoryFilterMode,
     groupMode: cashFlowGroup,
-  }), [accountId, cashFlowGroup, categoryFilterIds, categoryFilterMode, endDate, startDate]);
+  }), [accountIds, cashFlowGroup, categoryFilterIds, categoryFilterMode, endDate, startDate]);
   const analyticsReportQuery = useQuery(trpc.analytics.report.queryOptions(analyticsInput));
   const analyticsReport = analyticsReportQuery.data as AnalyticsReport | undefined;
   const reportTransactions = useMemo(
@@ -735,7 +735,7 @@ export default function AnalyticsPage() {
 
   return (
     <div className="page analytics-page stagger-in">
-      <SidebarAccountList accounts={accounts} value={accountId} onChange={value => { setAccountId(value); setPendingDrilldownCategoryValue(null); setDrilldown(null); }} />
+      <SidebarAccountList accounts={accounts} value={accountIds} onChange={value => { setAccountIds(value); setPendingDrilldownCategoryValue(null); setDrilldown(null); }} />
       <div className="page__header analytics-page__header">
         <div>
           <h1 className="page__title">Analytics</h1>

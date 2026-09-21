@@ -4,6 +4,7 @@ import { queryClient, trpc, trpcClient } from '../api/trpc';
 import type { TransactionListItem } from '../../server/app/types.ts';
 
 interface TransactionFilters {
+  accountIds?: number[];
   accountId?: string | number | null;
   categoryId?: string | number | null;
   startDate?: string | null;
@@ -32,6 +33,7 @@ export function useTransactions(filters: TransactionFilters = {}) {
   const accountId = normalizeId(filters.accountId);
   const categoryId = normalizeId(filters.categoryId);
   const query = useMemo(() => ({
+    accountIds: filters.accountIds,
     accountId,
     categoryId,
     accountKind: filters.accountKind,
@@ -40,7 +42,7 @@ export function useTransactions(filters: TransactionFilters = {}) {
     search: filters.searchQuery,
     flowType: filters.flowType,
     sortBy: filters.sortBy,
-  }), [accountId, categoryId, filters.accountKind, filters.startDate, filters.endDate, filters.searchQuery, filters.flowType, filters.sortBy]);
+  }), [accountId, categoryId, filters.accountIds, filters.accountKind, filters.startDate, filters.endDate, filters.searchQuery, filters.flowType, filters.sortBy]);
 
   const pageSize = filters.limit ?? 100;
   const isInfinite = filters.infinite === true;

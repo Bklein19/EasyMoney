@@ -80,6 +80,7 @@ export interface TransactionListItem {
 }
 
 export interface ListTransactionsOptions {
+  accountIds?: number[];
   accountId?: string | number | null;
   categoryId?: string | number | null;
   accountKind?: string | null;

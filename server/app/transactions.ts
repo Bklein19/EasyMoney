@@ -167,7 +167,14 @@ function buildTransactionFilter(options: ListTransactionsOptions = {}) {
   const includeArchived = options.includeArchived === true || options.includeArchived === 'true';
 
   const accountId = optionalNumber(options.accountId);
-  if (accountId !== null) {
+  if (options.accountIds !== undefined) {
+    const ids = [...new Set(options.accountIds)];
+    if (ids.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new Error('Invalid account selection');
+    clauses.push(ids.length ? `t.accountId IN (${ids.map((id, index) => {
+      params[`selectedAccount${index}`] = id;
+      return `$selectedAccount${index}`;
+    }).join(', ')})` : '0 = 1');
+  } else if (accountId !== null) {
     clauses.push('t.accountId = $accountId');
     params.accountId = accountId;
   } else if (!includeArchived) {

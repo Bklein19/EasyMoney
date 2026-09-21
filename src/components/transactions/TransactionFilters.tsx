@@ -6,7 +6,7 @@ import { SidebarAccountList } from '../layout/SidebarContext';
 
 export interface TransactionFilterState {
   searchQuery?: string;
-  accountId?: string;
+  accountIds?: number[];
   categoryId?: string;
   accountKind?: string;
   flowType?: string;
@@ -64,7 +64,7 @@ export default function TransactionFilters({ filters, setFilters }: TransactionF
         />
       </div>
 
-      <SidebarAccountList accounts={accounts} value={filters.accountId || ''} onChange={value => setFilterValue('accountId', value)} />
+      <SidebarAccountList accounts={accounts} value={filters.accountIds} onChange={accountIds => setFilters(prev => ({ ...prev, accountIds }))} />
 
       <GroupedCategorySelect
         name="categoryId"

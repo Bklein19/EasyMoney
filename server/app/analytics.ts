@@ -28,6 +28,7 @@ export type AnalyticsGroupMode = 'Auto' | 'Daily' | 'Weekly' | 'Monthly' | 'Year
 export type CategoryFilterMode = 'include' | 'exclude';
 
 export interface AnalyticsReportInput {
+  accountIds?: number[];
   startDate?: string | null;
   endDate?: string | null;
   accountId?: string | number | null;
@@ -113,6 +114,7 @@ export function getAnalyticsReport(input: AnalyticsReportInput = {}) {
     startDate: input.startDate,
     endDate: input.endDate,
     accountId: input.accountId,
+    accountIds: input.accountIds,
   };
   const transactionResponse = listTransactions(query);
   const categoryScopedTransactions = applyCategoryFilter(transactionResponse.transactions, input);
