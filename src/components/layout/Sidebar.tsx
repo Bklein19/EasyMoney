@@ -78,8 +78,8 @@ const Sidebar = ({
   const uncategorizedCount = categorization.isError ? 0 : categorization.data?.uncategorizedCount ?? 0;
   const categorizationLabel = uncategorizedCount > 0 ? `${uncategorizedCount.toLocaleString()} transactions need categorizing` : undefined;
   const sidebarRef = useRef<HTMLDivElement | null>(null);
-  const [titleScrollTop, setTitleScrollTop] = useState(0);
-  const titleMotion = sidebarTitleMotion(titleScrollTop);
+  const brandRef = useRef<HTMLAnchorElement | null>(null);
+  const titleMotion = sidebarTitleMotion(0);
   const [debugVisible, setDebugVisible] = useState(false);
   useEffect(() => {
     const toggle = () => setDebugVisible(visible => !visible);
@@ -269,21 +269,29 @@ const Sidebar = ({
         ref={sidebarRef}
         className={`sidebar ${isMobileOpen ? 'mobile-open' : ''} ${isCollapsed ? 'sidebar--collapsed' : ''} ${isPeekOpen ? 'sidebar--peek' : ''}`}
       >
-        <div className={`sidebar-compact-title sidebar-title-motion electrobun-webkit-app-region-drag${titleMotion.docked ? ' is-docked' : ''}`} aria-hidden="true">
-          <span style={{ '--title-x': `${titleMotion.x}px`, '--title-y': `${titleMotion.y}px`, '--title-scale': titleMotion.scale } as CSSProperties}>EasyMoney</span>
-        </div>
-        <div className="sidebar-scroll" onScroll={event => setTitleScrollTop(Math.min(52, Math.max(0, event.currentTarget.scrollTop)))}>
+        <div className="sidebar-compact-title electrobun-webkit-app-region-drag" aria-hidden="true" />
+        <div className="sidebar-scroll" onScroll={event => {
+          const motion = sidebarTitleMotion(event.currentTarget.scrollTop);
+          const brand = brandRef.current;
+          if (!brand) return;
+          brand.style.setProperty('--title-x', `${motion.x}px`);
+          brand.style.setProperty('--title-y', `${motion.y}px`);
+          brand.style.setProperty('--title-scale', String(motion.scale));
+          brand.classList.toggle('is-docked', motion.docked);
+        }}>
         <div className="sidebar-header electrobun-webkit-app-region-drag" onContextMenu={showContextMenu}>
           <NavLink
             to="/"
+            ref={brandRef}
+            style={{ '--title-x': `${titleMotion.x}px`, '--title-y': `${titleMotion.y}px`, '--title-scale': titleMotion.scale } as CSSProperties}
             className="sidebar-brand electrobun-webkit-app-region-no-drag"
-            aria-label="EasyMoney"
+            aria-label="Easymoney"
             onClick={onClose}
           >
             <div className="sidebar-brand-icon">
               <Wallet size={18} />
             </div>
-            <span className="sidebar-brand-text">EasyMoney</span>
+            <span className="sidebar-brand-text">Easymoney</span>
           </NavLink>
         </div>
 

@@ -10,9 +10,9 @@ function submenuNamed(label: string) {
 
 describe('desktop application menu', () => {
   test('provides the standard macOS quit command', () => {
-    expect(submenuNamed('EasyMoney')).toContainEqual(expect.objectContaining({
+    expect(submenuNamed('Easymoney')).toContainEqual(expect.objectContaining({
       role: 'quit',
-      label: 'Quit EasyMoney',
+      label: 'Quit Easymoney',
       accelerator: 'CommandOrControl+Q',
     }));
   });

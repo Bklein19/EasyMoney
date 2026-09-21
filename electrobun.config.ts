@@ -2,7 +2,7 @@ import type { ElectrobunConfig } from 'electrobun';
 
 export default {
   app: {
-    name: 'EasyMoney',
+    name: 'Easymoney',
     identifier: 'com.easymoney.app',
     version: '0.1.0',
     description: 'Local-first personal finance',

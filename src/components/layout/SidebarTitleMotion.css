@@ -1,29 +1,16 @@
-/* One visual title moves between the full header and the macOS control strip.
-   Keep this independent of the shared palette and non-macOS native title bars. */
-.easymoney-macos .sidebar-compact-title.sidebar-title-motion {
-  overflow: visible;
-  padding: 0;
-}
-.easymoney-macos .sidebar-title-motion > span {
+/* Move the actual brand link as one unit, outside the scrolling clip.
+   Scroll updates set the transform directly: no easing or React render delay. */
+.easymoney-macos .sidebar-brand {
   position: absolute;
   top: 0;
   left: 0;
-  opacity: 1;
-  max-width: calc(var(--sidebar-width) - 98px);
   transform-origin: top left;
   transform: translate(var(--title-x), var(--title-y)) scale(var(--title-scale));
-  transition: transform 100ms ease-out;
-  pointer-events: none;
-  z-index: 1;
+  transition: none;
+  z-index: 2;
 }
-.easymoney-macos .sidebar-brand-text { visibility: hidden; }
 
 @media (prefers-reduced-motion: reduce) {
-  .easymoney-macos .sidebar-title-motion > span {
-    transition: none;
-    transform: translate(86px, 13px);
-    visibility: hidden;
-  }
-  .easymoney-macos .sidebar-title-motion.is-docked > span { visibility: visible; }
-  .easymoney-macos .sidebar-brand-text { visibility: visible; }
+  .easymoney-macos .sidebar-brand { transform: translate(16px, 54px); }
+  .easymoney-macos .sidebar-brand.is-docked { transform: translate(86px, 9px) scale(0.866667); }
 }

@@ -2,15 +2,15 @@ import type { ApplicationMenuItemConfig } from 'electrobun/main';
 
 export const macApplicationMenu: ApplicationMenuItemConfig[] = [
   {
-    label: 'EasyMoney',
+    label: 'Easymoney',
     submenu: [
-      { role: 'about', label: 'About EasyMoney' },
+      { role: 'about', label: 'About Easymoney' },
       { type: 'divider' },
       { role: 'hide', accelerator: 'CommandOrControl+H' },
       { role: 'hideOthers', accelerator: 'CommandOrControl+Alt+H' },
       { role: 'showAll' },
       { type: 'divider' },
-      { role: 'quit', label: 'Quit EasyMoney', accelerator: 'CommandOrControl+Q' },
+      { role: 'quit', label: 'Quit Easymoney', accelerator: 'CommandOrControl+Q' },
     ],
   },
   {

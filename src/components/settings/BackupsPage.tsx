@@ -32,12 +32,12 @@ export default function BackupsPage() {
     {section === 'choices' && <SavedChoices />}
     {section === 'updates' && <section><h2>Import update details</h2><p className="recovery-muted">Diagnostic history for troubleshooting. You don’t need to manage this during normal use.</p><ParserRefreshStatus advanced /></section>}
     {section === 'backups' && <section>
-    <div className="recovery-heading"><div><h2>Database backups</h2><p>Snapshots of your EasyMoney data, newest first.</p></div>
+    <div className="recovery-heading"><div><h2>Database backups</h2><p>Snapshots of your Easymoney data, newest first.</p></div>
       <button className="btn btn--primary" disabled={busy || !query.data || query.data.restorePending} onClick={() => void run(() => trpcClient.backups.create.mutate())}>{busy ? 'Working…' : 'Create backup'}</button></div>
     <div className="recovery-note">Backups include retained original files, import history, categories, notes, and budget plans. Browser sign-ins and API keys aren’t included. Older backups contain only the originals retained at that time.</div>
     <details className="recovery-storage"><summary>Storage & off-device protection</summary><p>These backups are on this Mac. Copy them to another drive to protect against computer failure.</p>{query.data && <code>{query.data.backupDirectory}</code>}</details>
     {(error || query.error) && <p role="alert">{error || query.error?.message}</p>}
-    {query.data?.restorePending && <p role="status">Restore scheduled. Quit and reopen EasyMoney to use the restored database. Changes are paused until restart. A backup of the previous database was saved.</p>}
+    {query.data?.restorePending && <p role="status">Restore scheduled. Quit and reopen Easymoney to use the restored database. Changes are paused until restart. A backup of the previous database was saved.</p>}
     {query.isPending && <p role="status">Loading backups…</p>}
     {query.data?.backups.length === 0 && <p>No backups yet.</p>}
     <div className="recovery-list">{query.data?.backups.slice(0, limit).map((backup, index) => <article className="backup-entry" key={backup.id}>
@@ -53,7 +53,7 @@ export default function BackupsPage() {
       {preview.error && <p role="alert">{preview.error.message}</p>}
       {preview.data && <>
         <p>This backup contains {preview.data.accounts} accounts, {preview.data.files} source files, {preview.data.transactions} transactions, and {preview.data.annotations} transaction annotations.</p>
-        <p>After restart, EasyMoney will use this backup. A snapshot of your current database will be saved first. The current database will also remain on disk.</p>
+        <p>After restart, Easymoney will use this backup. A snapshot of your current database will be saved first. The current database will also remain on disk.</p>
         <button className="btn btn--primary" disabled={busy} onClick={() => void run(() => trpcClient.backups.restore.mutate({ id: selected }))}>Restore after restart</button>
       </>}
     </Modal>

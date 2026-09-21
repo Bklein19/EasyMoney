@@ -103,7 +103,7 @@ const rpc = BrowserView.defineRPC<EasyMoneyDesktopRpc>({
 });
 
 const mainWindow = new BrowserWindow({
-  title: 'EasyMoney',
+  title: 'Easymoney',
   ...windowChrome(process.platform),
   url: 'views://mainview/index.html',
   rpc,

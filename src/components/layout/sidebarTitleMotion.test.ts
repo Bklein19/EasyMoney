@@ -2,9 +2,9 @@ import { expect, test } from 'bun:test';
 import { sidebarTitleMotion } from './sidebarTitleMotion';
 
 test('sidebar title moves and shrinks continuously into the control strip', () => {
-  expect(sidebarTitleMotion(0)).toEqual({ x: 52, y: 58, scale: 15 / 13, docked: false });
-  expect(sidebarTitleMotion(26)).toEqual({ x: 69, y: 35.5, scale: 14 / 13, docked: false });
-  expect(sidebarTitleMotion(52)).toEqual({ x: 86, y: 13, scale: 1, docked: true });
+  expect(sidebarTitleMotion(0)).toEqual({ x: 16, y: 54, scale: 1, docked: false });
+  expect(sidebarTitleMotion(26)).toEqual({ x: 51, y: 31.5, scale: 14 / 15, docked: false });
+  expect(sidebarTitleMotion(52)).toEqual({ x: 86, y: 9, scale: 13 / 15, docked: true });
 });
 
 test('overscroll cannot move the title beyond either endpoint', () => {

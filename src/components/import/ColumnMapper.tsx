@@ -82,7 +82,7 @@ export default function ColumnMapper({ headers, initialMapping = {}, onComplete,
       <div className="mapper-header">
         <Settings className="mapper-icon" size={24} />
         <h2>Map Your Columns</h2>
-        <p>Match the columns in your CSV to the fields EasyMoney needs.</p>
+        <p>Match the columns in your CSV to the fields Easymoney needs.</p>
       </div>
 
       <form onSubmit={handleSubmit} className="mapper-form">

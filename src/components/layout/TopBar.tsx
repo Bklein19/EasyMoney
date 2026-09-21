@@ -7,7 +7,7 @@ interface TopBarProps {
   title?: string;
 }
 
-const TopBar = ({ onMenuClick, title = 'EasyMoney' }: TopBarProps) => {
+const TopBar = ({ onMenuClick, title = 'Easymoney' }: TopBarProps) => {
   return (
     <header className="topbar">
       <div className="topbar-left">
