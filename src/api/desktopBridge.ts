@@ -8,6 +8,7 @@ function createDesktopBridge() {
     handlers: {
       requests: {},
       messages: {
+        toggleDebug: () => window.dispatchEvent(new Event('easymoney:toggle-debug')),
         customizeSidebar: () => window.dispatchEvent(new Event('easymoney:customize-sidebar')),
         navigateHistory: ({ delta }) => {
           window.dispatchEvent(new CustomEvent('easymoney:navigate-history', { detail: delta }));

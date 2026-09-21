@@ -34,6 +34,6 @@ export type EasyMoneyDesktopRpc = {
   };
   webview: {
     requests: {};
-    messages: { editAccount: { accountId: number }; navigateHistory: { delta: -1 | 1 }; customizeSidebar: {} };
+    messages: { editAccount: { accountId: number }; navigateHistory: { delta: -1 | 1 }; customizeSidebar: {}; toggleDebug: {} };
   };
 };

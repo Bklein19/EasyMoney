@@ -32,6 +32,8 @@ export const macApplicationMenu: ApplicationMenuItemConfig[] = [
     submenu: [
       { label: 'Back', action: 'navigate-back', accelerator: 'CommandOrControl+[' },
       { label: 'Forward', action: 'navigate-forward', accelerator: 'CommandOrControl+]' },
+      { type: 'divider' },
+      { label: 'Show/Hide Debug Pages', action: 'toggle-debug', accelerator: 'CommandOrControl+D' },
     ],
   },
   {

@@ -133,6 +133,7 @@ ApplicationMenu.on('application-menu-clicked', event => {
   if (!data || typeof data !== 'object' || !('action' in data)) return;
   if (data.action === 'navigate-back') rpc.send.navigateHistory({ delta: -1 });
   if (data.action === 'navigate-forward') rpc.send.navigateHistory({ delta: 1 });
+  if (data.action === 'toggle-debug') rpc.send.toggleDebug({});
 });
 
 if (process.platform === 'darwin') {

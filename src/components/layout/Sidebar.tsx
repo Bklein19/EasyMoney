@@ -78,13 +78,19 @@ const Sidebar = ({
   const [compactTitle, setCompactTitle] = useState(false);
   const [debugVisible, setDebugVisible] = useState(false);
   useEffect(() => {
+    const toggle = () => setDebugVisible(visible => !visible);
     const toggleDebug = (event: KeyboardEvent) => {
       if (!debugShortcut(event)) return;
+      if (event.metaKey && document.documentElement.classList.contains('easymoney-macos')) return;
       event.preventDefault();
-      setDebugVisible(visible => !visible);
+      toggle();
     };
+    window.addEventListener('easymoney:toggle-debug', toggle);
     window.addEventListener('keydown', toggleDebug);
-    return () => window.removeEventListener('keydown', toggleDebug);
+    return () => {
+      window.removeEventListener('easymoney:toggle-debug', toggle);
+      window.removeEventListener('keydown', toggleDebug);
+    };
   }, []);
   const overflowRef = useRef<HTMLDetailsElement | null>(null);
   const [preferences, setPreferences] = useState(() => {
