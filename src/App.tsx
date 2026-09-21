@@ -18,6 +18,7 @@ import { SavingsRatePage } from './components/investments/SavingsRatePage';
 import { trpc, queryClient } from './api/trpc';
 import './App.css';
 import BackupsPage from './components/settings/BackupsPage';
+import PalettePage from './components/settings/PalettePage';
 
 import { expandReportSelection, visibleReportAccounts } from './components/investments/reportAccountSelection';
 
@@ -166,6 +167,7 @@ function AppRoutes({ reportSelectedIds }: AppRoutesProps) {
       <Route path="/investments" element={<Navigate to="/net-worth" replace />} />
       <Route path="/import" element={<ImportPage />} />
       <Route path="/backups" element={<BackupsPage />} />
+      <Route path="/debug/palette" element={<PalettePage />} />
       <Route path="/analytics" element={<Navigate to="/" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

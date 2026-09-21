@@ -1,0 +1,14 @@
+.palette-page { max-width: 1200px; display: grid; gap: var(--space-6); padding-bottom: var(--space-8); }
+.palette-page header p { color: var(--text-secondary); margin-top: var(--space-2); }
+.palette-page .palette-eyebrow { color: var(--text-muted); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .08em; }
+.palette-page h2 { font-size: var(--text-lg); margin-bottom: var(--space-3); }
+.palette-note { padding: var(--space-4); border: 1px solid var(--glass-border); border-radius: var(--radius-md); background: var(--bg-elevated); color: var(--text-secondary); line-height: 1.6; }
+.palette-search { width: 100%; padding: var(--space-3); font: inherit; color: var(--text-primary); background: var(--bg-elevated); border: 1px solid var(--glass-border); border-radius: var(--radius-sm); }
+.palette-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--space-3); }
+.palette-card { min-width: 0; border: 1px solid var(--glass-border); border-radius: var(--radius-md); overflow: hidden; background: var(--bg-elevated); }
+.palette-swatch-base { padding: var(--space-3); background: repeating-conic-gradient(var(--bg-deep) 0% 25%, var(--bg-hover) 0% 50%) 0 0 / 16px 16px; }
+.palette-swatch { height: 64px; border-radius: var(--radius-sm); }
+.palette-token { display: grid; gap: var(--space-2); padding: var(--space-3); }
+.palette-token code { font-size: var(--text-xs); color: var(--text-primary); overflow-wrap: anywhere; }
+.palette-token span { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-secondary); overflow-wrap: anywhere; }
+.palette-probe { position: absolute; visibility: hidden; pointer-events: none; width: 0; height: 0; overflow: hidden; }

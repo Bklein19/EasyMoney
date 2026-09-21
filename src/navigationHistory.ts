@@ -1,7 +1,7 @@
 const STORAGE_KEY = 'easymoney:navigation-history:v1';
 const SESSION = '__easyMoneyHistorySession';
 const ENTRY = '__easyMoneyHistoryEntry';
-const ROUTES = new Set(['/', '/analytics', '/transactions', '/transactions/review', '/accounts', '/categories', '/budgeting', '/backups', '/net-worth', '/performance', '/savings-rate', '/retirement', '/investments', '/import']);
+const ROUTES = new Set(['/', '/analytics', '/transactions', '/transactions/review', '/accounts', '/categories', '/budgeting', '/backups', '/net-worth', '/performance', '/savings-rate', '/retirement', '/investments', '/import', '/debug/palette']);
 
 interface HistoryEntry { url: string; key: string }
 export interface SavedNavigation { version: 1; session: string; entries: HistoryEntry[]; index: number }

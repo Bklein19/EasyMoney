@@ -1,4 +1,4 @@
-export const SIDEBAR_PATHS = ['/', '/transactions', '/accounts', '/categories', '/budgeting', '/backups', '/net-worth', '/performance', '/savings-rate', '/retirement', '/import'];
+export const SIDEBAR_PATHS = ['/', '/transactions', '/accounts', '/categories', '/budgeting', '/backups', '/net-worth', '/performance', '/savings-rate', '/retirement', '/import', '/debug/palette'];
 export const DEFAULT_PRIMARY_PATHS = ['/', '/transactions', '/net-worth', '/import'];
 export const SIDEBAR_PREFERENCES_KEY = 'easymoney:sidebar-navigation';
 export interface SidebarPreferences { order: string[]; visible: string[] }

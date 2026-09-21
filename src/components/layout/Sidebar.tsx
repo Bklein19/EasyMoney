@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type MouseEvent } from 'react';
 import { SidebarContextMenu } from './SidebarContextMenu';
 import { useMenuAim } from './useMenuAim';
+import { debugShortcut, visibleNavigationPath } from './debugNavigation';
 import { Link, NavLink, useLocation } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { trpc } from '../../api/trpc';
@@ -75,6 +76,16 @@ const Sidebar = ({
   const categorizationLabel = uncategorizedCount > 0 ? `${uncategorizedCount.toLocaleString()} transactions need categorizing` : undefined;
   const sidebarRef = useRef<HTMLDivElement | null>(null);
   const [compactTitle, setCompactTitle] = useState(false);
+  const [debugVisible, setDebugVisible] = useState(false);
+  useEffect(() => {
+    const toggleDebug = (event: KeyboardEvent) => {
+      if (!debugShortcut(event)) return;
+      event.preventDefault();
+      setDebugVisible(visible => !visible);
+    };
+    window.addEventListener('keydown', toggleDebug);
+    return () => window.removeEventListener('keydown', toggleDebug);
+  }, []);
   const overflowRef = useRef<HTMLDetailsElement | null>(null);
   const [preferences, setPreferences] = useState(() => {
     try { return readSidebarPreferences(localStorage.getItem(SIDEBAR_PREFERENCES_KEY)); }
@@ -127,6 +138,7 @@ const Sidebar = ({
     { path: '/categories', label: 'Categories', icon: Tags },
     { path: '/budgeting', label: 'Budgeting', icon: PiggyBank },
     { path: '/backups', label: 'Backups', icon: WalletCards },
+    { path: '/debug/palette', label: 'Color palette', icon: Settings2 },
     { path: '/net-worth', label: 'Net Worth', icon: Wallet },
     { path: '/performance', label: 'Performance', icon: LineChart },
     { path: '/savings-rate', label: 'Savings Rate', icon: Activity },
@@ -141,7 +153,7 @@ const Sidebar = ({
   );
   const showCategoryGroups = !isCollapsed || isPeekOpen || isMobileOpen;
   const activeCategoryGroup = new URLSearchParams(location.search).get('group') || '';
-  const orderedItems = preferences.order.flatMap(path => navItems.filter(item => item.path === path));
+  const orderedItems = preferences.order.filter(path => visibleNavigationPath(path, debugVisible)).flatMap(path => navItems.filter(item => item.path === path));
   const primaryItems = orderedItems.filter(item => preferences.visible.includes(item.path));
   const overflowItems = orderedItems.filter(item => !preferences.visible.includes(item.path));
   const activeOverflow = overflowItems.find(item => item.path === location.pathname);
@@ -311,7 +323,7 @@ const Sidebar = ({
                     if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
                     event.preventDefault();
                     const destination = index + (event.key === 'ArrowUp' ? -1 : 1);
-                    if (destination >= 0 && destination < orderedItems.length) setPreferences(current => ({ ...current, order: moveSidebarPath(current.order, item.path, current.order[destination]) }));
+                    if (destination >= 0 && destination < orderedItems.length) setPreferences(current => ({ ...current, order: moveSidebarPath(current.order, item.path, orderedItems[destination].path) }));
                   }} onDragStart={event => {
                     draggedPath.current = item.path; event.dataTransfer.setData('text/plain', item.path); event.dataTransfer.effectAllowed = 'move';
                     const row = event.currentTarget.parentElement;
