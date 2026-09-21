@@ -1,6 +1,6 @@
 import { useMemo, useState, type MouseEvent } from 'react';
 import { selectAccountIds } from './accountSelection';
-import { Check, ChevronRight, Folder } from 'lucide-react';
+import { Check } from 'lucide-react';
 
 export interface PickerAccount {
   id: number;
@@ -22,7 +22,6 @@ export function AccountPicker({
   variant?: 'chips' | 'owner-groups';
 }) {
   const [lastClickedId, setLastClickedId] = useState<number | null>(null);
-  const [collapsedOwners, setCollapsedOwners] = useState<Set<string>>(new Set());
 
   const allIds = useMemo(() => accounts.map(account => account.id), [accounts]);
   const ownerGroups = useMemo(() => {
@@ -41,7 +40,7 @@ export function AccountPicker({
   }, [accounts]);
 
   const visibleIds = variant === 'owner-groups'
-    ? ownerGroups.filter(([owner]) => !collapsedOwners.has(owner)).flatMap(([, items]) => items.map(account => account.id))
+    ? ownerGroups.flatMap(([, items]) => items.map(account => account.id))
     : allIds;
 
   const selectAccount = (id: number, event: MouseEvent<HTMLButtonElement>) => {
@@ -65,22 +64,11 @@ export function AccountPicker({
       {variant === 'owner-groups' ? (
         <div className="account-filter account-filter--owner-groups">
           {ownerGroups.map(([owner, ownerAccounts]) => (
-            <details className="account-owner-group" key={owner} open={!collapsedOwners.has(owner)} onToggle={event => {
-              const open = event.currentTarget.open;
-              setCollapsedOwners(current => {
-                if (current.has(owner) === !open) return current;
-                const next = new Set(current);
-                if (open) next.delete(owner);
-                else next.add(owner);
-                return next;
-              });
-            }}>
-              <summary className="account-owner-group__header">
-                <ChevronRight size={13} className="account-owner-chevron" aria-hidden="true" />
-                <Folder size={16} aria-hidden="true" />
+            <section className="account-owner-group" key={owner} aria-label={owner}>
+              <h3 className="account-owner-group__header">
                 <span>{owner}</span>
                 <span className="account-owner-count">{ownerAccounts.filter(account => selectedIds.has(account.id)).length}/{ownerAccounts.length}</span>
-              </summary>
+              </h3>
               <div className="account-owner-group__list">
                 {ownerAccounts.map(account => (
                   <button
@@ -93,11 +81,11 @@ export function AccountPicker({
                   >
                     <Check size={13} className="account-row-picker__selection" aria-hidden="true" />
                     <span className="account-row-picker__name">{account.name}</span>
-                    <span className="account-row-picker__meta">{account.type}</span>
+                    <span className="account-row-picker__meta">{account.institution}</span>
                   </button>
                 ))}
               </div>
-            </details>
+            </section>
           ))}
         </div>
       ) : (
