@@ -110,7 +110,7 @@ body.sidebar-resizing {
 }
 
 .sidebar-compact-title { display: none; }
-.easymoney-desktop .sidebar-compact-title {
+.easymoney-macos .sidebar-compact-title {
   display: flex;
   align-items: center;
   flex: 0 0 42px;

@@ -9,6 +9,7 @@ import {
 } from '@trpc/server';
 import { migrateLegacyData } from './dataMigration.ts';
 import { macApplicationMenu } from './applicationMenu.ts';
+import { windowChrome } from './windowChrome.ts';
 import type { EasyMoneyDesktopRpc } from './rpc.ts';
 
 const dataDirectory = Utils.paths.userData;
@@ -103,7 +104,7 @@ const rpc = BrowserView.defineRPC<EasyMoneyDesktopRpc>({
 
 const mainWindow = new BrowserWindow({
   title: 'EasyMoney',
-  titleBarStyle: 'hiddenInset',
+  ...windowChrome(process.platform),
   url: 'views://mainview/index.html',
   rpc,
   frame: {

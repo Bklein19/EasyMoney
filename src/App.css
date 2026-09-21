@@ -13,7 +13,7 @@
   display: none;
 }
 
-.easymoney-desktop .desktop-window-drag-strip {
+.easymoney-macos .desktop-window-drag-strip {
   position: fixed;
   z-index: 70;
   top: 0;
