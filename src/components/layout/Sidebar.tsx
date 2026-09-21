@@ -16,7 +16,7 @@ import {
   Tags
 } from 'lucide-react';
 import { Ellipsis, GripVertical, ArrowUp, ArrowDown, Settings2 } from 'lucide-react';
-import { readSidebarPreferences, moveSidebarPath, SIDEBAR_PREFERENCES_KEY } from './sidebarPreferences';
+import { readSidebarPreferences, moveSidebarPath, insertSidebarPath, SIDEBAR_PREFERENCES_KEY } from './sidebarPreferences';
 import { SidebarContextSlot } from './SidebarContext';
 import type { LucideProps } from 'lucide-react';
 import { useCategories } from '../../hooks/useCategories';
@@ -79,6 +79,9 @@ const Sidebar = ({
   });
   const [isCustomizing, setIsCustomizing] = useState(false);
   const draggedPath = useRef<string | null>(null);
+  const [draggingPath, setDraggingPath] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ path: string; edge: 'before' | 'after' } | null>(null);
+  const clearDrag = () => { draggedPath.current = null; setDraggingPath(null); setDropTarget(null); };
   useEffect(() => {
     try { localStorage.setItem(SIDEBAR_PREFERENCES_KEY, JSON.stringify(preferences)); } catch { /* Navigation still works without persistence. */ }
   }, [preferences]);
@@ -258,15 +261,31 @@ const Sidebar = ({
             <div className="sidebar-overflow-panel" aria-label="More pages">
               {isCustomizing ? <>
                 <div className="sidebar-customize-header"><strong>Customize navigation</strong><button className="btn btn--ghost btn--sm" onClick={() => setIsCustomizing(false)}>Done</button></div>
-                {orderedItems.map((item, index) => <div className="sidebar-customize-row" key={item.path} draggable
-                  onDragStart={event => { draggedPath.current = item.path; event.dataTransfer.setData('text/plain', item.path); event.dataTransfer.effectAllowed = 'move'; }}
-                  onDragEnd={() => { draggedPath.current = null; }}
-                  onDragOver={event => event.preventDefault()}
-                  onDrop={event => { event.preventDefault(); const source = draggedPath.current; if (source) setPreferences(current => ({ ...current, order: moveSidebarPath(current.order, source, item.path) })); draggedPath.current = null; }}>
+                {orderedItems.map((item, index) => <div className={`sidebar-customize-row ${draggingPath === item.path ? 'is-dragging' : ''} ${dropTarget?.path === item.path ? `drop-${dropTarget.edge}` : ''}`} key={item.path}
+                  onDragOver={event => {
+                    if (!draggedPath.current) return;
+                    event.preventDefault(); event.dataTransfer.dropEffect = 'move';
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const edge = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+                    setDropTarget(current => current?.path === item.path && current.edge === edge ? current : { path: item.path, edge });
+                  }}
+                  onDragLeave={event => { if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) setDropTarget(null); }}
+                  onDrop={event => {
+                    event.preventDefault(); const source = draggedPath.current;
+                    const rect = event.currentTarget.getBoundingClientRect();
+                    const edge = event.clientY < rect.top + rect.height / 2 ? 'before' : 'after';
+                    if (source) setPreferences(current => ({ ...current, order: insertSidebarPath(current.order, source, item.path, edge) }));
+                    clearDrag();
+                  }}>
                   <label><input type="checkbox" checked={preferences.visible.includes(item.path)} onChange={event => { const checked = event.target.checked; setPreferences(current => ({ ...current, visible: checked ? [...current.visible, item.path] : current.visible.filter(path => path !== item.path) })); }} /><item.icon size={17} /><span>{item.label}</span></label>
                   <button className="icon-btn" aria-label={`Move ${item.label} up`} disabled={index === 0} onClick={() => setPreferences(current => ({ ...current, order: moveSidebarPath(current.order, item.path, current.order[index - 1]) }))}><ArrowUp size={13} /></button>
                   <button className="icon-btn" aria-label={`Move ${item.label} down`} disabled={index === orderedItems.length - 1} onClick={() => setPreferences(current => ({ ...current, order: moveSidebarPath(current.order, item.path, current.order[index + 1]) }))}><ArrowDown size={13} /></button>
-                  <GripVertical size={15} aria-hidden="true" />
+                  <span className="sidebar-drag-handle" draggable title={`Drag to reorder ${item.label}`} onDragStart={event => {
+                    draggedPath.current = item.path; event.dataTransfer.setData('text/plain', item.path); event.dataTransfer.effectAllowed = 'move';
+                    const row = event.currentTarget.parentElement;
+                    if (row) event.dataTransfer.setDragImage(row, row.clientWidth - 16, row.clientHeight / 2);
+                    setDraggingPath(item.path);
+                  }} onDragEnd={clearDrag}><GripVertical size={15} aria-hidden="true" /></span>
                 </div>)}
                 <button className="btn btn--ghost btn--sm" onClick={() => setPreferences(readSidebarPreferences(null))}>Reset to defaults</button>
               </> : <>
@@ -316,7 +335,6 @@ const Sidebar = ({
                 accounts={reportAccounts}
                 selectedIds={selectedReportAccountIds}
                 onChange={onReportAccountSelectionChange}
-                variant="owner-groups"
               />
             </section>
           )}

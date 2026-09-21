@@ -189,7 +189,13 @@ body.sidebar-resizing {
 }
 .sidebar-customize-button { border: 0; border-top: 1px solid var(--hairline-muted); border-radius: 0; margin-top: 6px; width: 100%; background: transparent; cursor: pointer; font: inherit; }
 .sidebar-customize-header { display: flex; align-items: center; justify-content: space-between; padding: 6px; color: var(--text-secondary); font-size: var(--text-sm); }
-.sidebar-customize-row { display: flex; align-items: center; gap: 3px; border-radius: 8px; padding: 5px; color: var(--text-secondary); }
+.sidebar-customize-row { position: relative; display: flex; align-items: center; gap: 3px; border-radius: 8px; padding: 5px; color: var(--text-secondary); }
+.sidebar-customize-row.is-dragging { opacity: .35; }
+.sidebar-customize-row.drop-before::before, .sidebar-customize-row.drop-after::after { content: ''; position: absolute; left: 4px; right: 4px; height: 2px; border-radius: 2px; background: var(--accent-blue); pointer-events: none; }
+.sidebar-customize-row.drop-before::before { top: -1px; }
+.sidebar-customize-row.drop-after::after { bottom: -1px; }
+.sidebar-drag-handle { display: flex; align-items: center; justify-content: center; width: 24px; height: 28px; flex-shrink: 0; cursor: grab; user-select: none; }
+.sidebar-drag-handle:active { cursor: grabbing; }
 .sidebar-customize-row:hover { background: var(--bg-subtle); }
 .sidebar-customize-row label { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; font-size: var(--text-sm); cursor: pointer; }
 .sidebar-customize-row label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

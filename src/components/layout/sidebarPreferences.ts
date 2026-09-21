@@ -20,3 +20,10 @@ export function moveSidebarPath(order: string[], source: string, target: string)
   next.splice(order.indexOf(target), 0, source);
   return next;
 }
+
+export function insertSidebarPath(order: string[], source: string, target: string, edge: 'before' | 'after') {
+  if (!order.includes(source) || !order.includes(target) || source === target) return order;
+  const next = order.filter(path => path !== source);
+  next.splice(next.indexOf(target) + (edge === 'after' ? 1 : 0), 0, source);
+  return next;
+}
