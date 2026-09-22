@@ -1,23 +1,23 @@
-/* Banknote: cotton paper and engraved green ink. Appearance always follows System. */
+/* Banknote: neutral paper/charcoal surfaces with green and tan accents. */
 :root[data-palette='banknote'] {
-  --bg-deepest: #101c18;
-  --bg-deep: #13211c;
-  --bg-base: #172720;
-  --bg-elevated: #1d3027;
-  --bg-surface: #263c31;
-  --bg-hover: #304a3d;
-  --bg-subtle: rgba(232, 222, 197, .05);
-  --bg-subtle-hover: rgba(232, 222, 197, .09);
-  --glass-bg: rgba(29, 48, 39, .92);
-  --glass-bg-light: rgba(38, 60, 49, .88);
-  --glass-border: rgba(232, 222, 197, .13);
-  --glass-border-hover: rgba(232, 222, 197, .25);
+  --bg-deepest: #101110;
+  --bg-deep: #141514;
+  --bg-base: #191a19;
+  --bg-elevated: #212221;
+  --bg-surface: #292b29;
+  --bg-hover: #333633;
+  --bg-subtle: rgba(236, 238, 233, .05);
+  --bg-subtle-hover: rgba(236, 238, 233, .09);
+  --glass-bg: rgba(33, 34, 33, .92);
+  --glass-bg-light: rgba(41, 43, 41, .88);
+  --glass-border: rgba(236, 238, 233, .13);
+  --glass-border-hover: rgba(236, 238, 233, .25);
   --hairline: var(--glass-border);
-  --hairline-muted: rgba(232, 222, 197, .07);
-  --overlay-bg: rgba(5, 13, 9, .65);
-  --text-primary: #efe6d1;
-  --text-secondary: #bfc7b4;
-  --text-muted: #9da994;
+  --hairline-muted: rgba(236, 238, 233, .07);
+  --overlay-bg: rgba(5, 6, 5, .65);
+  --text-primary: #eceee9;
+  --text-secondary: #bfc4ba;
+  --text-muted: #9da697;
   --text-inverse: #182d22;
   --color-accent: #d8c99e;
   --color-link-hover: #f3e6bd;
@@ -36,7 +36,7 @@
   --shadow-accent: 0 0 0 1px rgba(216, 201, 158, .18);
   --shadow-glow-success: 0 0 0 1px rgba(164, 196, 155, .18);
   --shadow-glow-danger: 0 0 0 1px rgba(224, 160, 153, .18);
-  --inset-highlight: rgba(239, 230, 209, .035);
+  --inset-highlight: rgba(236, 238, 233, .035);
   /* Charts need stronger separation than the deliberately quiet UI. */
   --data-income: #66bd8f;
   --data-expense: #ec8678;
@@ -53,20 +53,20 @@
 
 @media (prefers-color-scheme: light) {
   :root[data-palette='banknote'] {
-    --bg-deepest: #eee7d7;
-    --bg-deep: #e9e1ce;
-    --bg-base: #f3edde;
-    --bg-elevated: #faf5e9;
-    --bg-surface: #e8e3d2;
-    --bg-hover: #dfddc9;
-    --bg-subtle: rgba(32, 64, 46, .045);
-    --bg-subtle-hover: rgba(32, 64, 46, .08);
-    --glass-bg: rgba(250, 245, 233, .94);
-    --glass-bg-light: rgba(250, 245, 233, .98);
-    --glass-border: rgba(32, 64, 46, .15);
-    --glass-border-hover: rgba(32, 64, 46, .28);
-    --hairline-muted: rgba(32, 64, 46, .08);
-    --overlay-bg: rgba(19, 33, 24, .4);
+    --bg-deepest: #f2f2ef;
+    --bg-deep: #eeefeb;
+    --bg-base: #f8f8f5;
+    --bg-elevated: #fefefb;
+    --bg-surface: #eeeeea;
+    --bg-hover: #e5e7e1;
+    --bg-subtle: rgba(35, 40, 34, .045);
+    --bg-subtle-hover: rgba(35, 40, 34, .08);
+    --glass-bg: rgba(254, 254, 251, .94);
+    --glass-bg-light: rgba(254, 254, 251, .98);
+    --glass-border: rgba(35, 40, 34, .15);
+    --glass-border-hover: rgba(35, 40, 34, .28);
+    --hairline-muted: rgba(35, 40, 34, .08);
+    --overlay-bg: rgba(20, 22, 20, .4);
     --text-primary: #203a2b;
     --text-secondary: #50604c;
     --text-muted: #606c58;
@@ -91,7 +91,7 @@
     --shadow-accent: 0 0 0 1px rgba(40, 88, 61, .15);
     --shadow-glow-success: 0 0 0 1px rgba(53, 100, 67, .15);
     --shadow-glow-danger: 0 0 0 1px rgba(160, 68, 59, .15);
-    --inset-highlight: rgba(250, 245, 233, .65);
+    --inset-highlight: rgba(254, 254, 251, .65);
     --data-income: #24734c;
     --data-expense: #bc4935;
     --data-investment: #a77714;
