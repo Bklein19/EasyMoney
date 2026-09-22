@@ -1,5 +1,23 @@
 /* Move the brand as one unit, outside the scrolling clip.
    Scroll updates set the transform directly: no easing or React render delay. */
+.easymoney-macos .sidebar::after {
+  content: '';
+  position: absolute;
+  top: 42px;
+  left: 0;
+  right: 0;
+  height: 18px;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(to bottom, var(--bg-deep), transparent);
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.easymoney-macos .sidebar:has(.sidebar-brand.is-docked)::after {
+  opacity: 1;
+}
+
 .easymoney-macos .sidebar-brand {
   position: absolute;
   top: 0;
@@ -11,6 +29,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .easymoney-macos .sidebar::after { transition: none; }
   .easymoney-macos .sidebar-brand { transform: translate(16px, 54px); }
   .easymoney-macos .sidebar-brand.is-docked { transform: translate(86px, 9px) scale(0.866667); }
 }
