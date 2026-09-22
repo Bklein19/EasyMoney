@@ -1117,6 +1117,11 @@ export function initDatabase() {
   }
 
   const accountColumns = tableColumnNames('accounts');
+  runSchemaMigration('2026-09-21-account-freshness-policy', () => {
+    if (!tableColumnNames('accounts').includes('freshnessPolicy')) {
+      db.exec("ALTER TABLE accounts ADD COLUMN freshnessPolicy TEXT NOT NULL DEFAULT 'regular' CHECK (freshnessPolicy IN ('regular', 'on-demand'))");
+    }
+  });
   if (!accountColumns.includes('status')) {
     db.prepare("ALTER TABLE accounts ADD COLUMN status TEXT DEFAULT 'active'").run();
   }

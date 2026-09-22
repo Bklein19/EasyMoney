@@ -26,7 +26,7 @@ import {
   syncAccountGroupClaim,
 } from './syncAccountMapping.ts';
 
-type FreshnessStatus = 'current' | 'due' | 'stale' | 'no-data' | 'closed';
+type FreshnessStatus = 'current' | 'due' | 'stale' | 'no-data' | 'closed' | 'on-demand';
 interface FreshnessAccount {
   accountId: number;
   accountName: string;
@@ -34,6 +34,7 @@ interface FreshnessAccount {
   accountType: string;
   latestTransactionDate: string | null;
   latestBalanceDate: string | null;
+  activityCheckedThrough: string | null;
   transactionStatus: FreshnessStatus;
   balanceStatus: FreshnessStatus;
   latestFactDate: string | null;
@@ -59,6 +60,7 @@ interface FreshnessReport {
     staleAccounts: number;
     noDataAccounts: number;
     closedAccounts: number;
+    onDemandAccounts: number;
   };
   accounts: FreshnessAccount[];
 }
@@ -140,6 +142,7 @@ const STATUS_LABELS: Record<FreshnessStatus, string> = {
   stale: 'Stale',
   'no-data': 'No data',
   closed: 'Closed',
+  'on-demand': 'On demand',
 };
 
 const STATUS_ICONS = {
@@ -148,6 +151,7 @@ const STATUS_ICONS = {
   stale: AlertTriangle,
   'no-data': CircleDashed,
   closed: Lock,
+  'on-demand': Clock3,
 };
 
 interface SyncActionMenuProps {
@@ -216,7 +220,7 @@ function formatAge(account: FreshnessAccount) {
 }
 
 function accountSort(a: FreshnessAccount, b: FreshnessAccount) {
-  const rank: Record<FreshnessStatus, number> = { stale: 0, 'no-data': 1, due: 2, current: 3, closed: 4 };
+  const rank: Record<FreshnessStatus, number> = { stale: 0, 'no-data': 1, due: 2, current: 3, 'on-demand': 4, closed: 5 };
   return rank[a.status] - rank[b.status] ||
     (b.daysSinceLatestFact ?? Number.POSITIVE_INFINITY) - (a.daysSinceLatestFact ?? Number.POSITIVE_INFINITY) ||
     (a.institution || '').localeCompare(b.institution || '') ||
@@ -865,7 +869,7 @@ export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPa
           <h2>Data Freshness</h2>
           <p>
             {report
-              ? `${needsUpdate} accounts have overdue source facts. ${report.accounts.filter(account => account.balanceStatus !== 'current' && account.balanceStatus !== 'closed').length} need newer balances. Stale after ${report.staleAfterDays} days.`
+              ? `${needsUpdate} accounts have overdue source facts. ${report.accounts.filter(account => account.status !== 'on-demand' && account.balanceStatus !== 'current' && account.balanceStatus !== 'closed').length} need newer balances. Stale after ${report.staleAfterDays} days.`
               : 'Checking latest imported activity and balances.'}
           </p>
         </div>
@@ -893,6 +897,7 @@ export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPa
             <span><strong>{report.summary.staleAccounts}</strong> stale</span>
             <span><strong>{report.summary.noDataAccounts}</strong> no data</span>
             <span><strong>{report.summary.closedAccounts}</strong> closed</span>
+            {report.summary.onDemandAccounts > 0 && <span><strong>{report.summary.onDemandAccounts}</strong> on demand</span>}
           </div>
         </div>}
       </div>
@@ -960,10 +965,12 @@ export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPa
                       </span>
                       <small>Transactions: {STATUS_LABELS[account.transactionStatus]}</small>
                       <small>Balance: {STATUS_LABELS[account.balanceStatus]}</small>
+                      {account.status === 'on-demand' && <small>No regular statements · reminders off</small>}
                     </td>
                     <td>
                       <strong>{formatFreshnessDate(account.latestFactDate)}</strong>
                       <small>{formatAge(account)} old</small>
+                      {account.activityCheckedThrough && <small>Activity covered through {formatFreshnessDate(account.activityCheckedThrough)}</small>}
                     </td>
                     <td>
                       <strong>{account.latestParserName || '—'}</strong>

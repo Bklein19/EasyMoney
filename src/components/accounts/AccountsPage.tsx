@@ -17,6 +17,7 @@ type AccountDraft = {
   currency: string;
   accountHolder: string;
   last4: string;
+  freshnessPolicy: 'regular' | 'on-demand';
 };
 
 type AccountDraftField = keyof AccountDraft;
@@ -48,10 +49,12 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }: A
     currency: account.currency || 'USD',
     accountHolder: account.accountHolder || '',
     last4: account.last4 || '',
+    freshnessPolicy: account.freshnessPolicy,
   });
 
   const isArchived = account.status === 'archived';
   const isDirty =
+    draft.freshnessPolicy !== account.freshnessPolicy ||
     draft.name.trim() !== (account.name || '') ||
     draft.institution.trim() !== (account.institution || '') ||
     draft.type !== (account.type || 'other') ||
@@ -72,12 +75,22 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }: A
       currency: draft.currency,
       accountHolder: draft.accountHolder.trim() || null,
       last4: draft.last4.trim() || null,
+      freshnessPolicy: draft.freshnessPolicy,
     });
   };
 
   return (
     <div className="account-details-panel" onClick={(event) => event.stopPropagation()}>
       <form className="account-meta-form" onSubmit={handleSubmit}>
+        <div className="account-field account-field--wide">
+          <label htmlFor={`account-freshness-${account.id}`}>Statement schedule</label>
+          <select id={`account-freshness-${account.id}`} value={draft.freshnessPolicy} disabled={isSaving}
+            onChange={event => setDraft(current => ({ ...current, freshnessPolicy: event.target.value === 'on-demand' ? 'on-demand' : 'regular' }))}>
+            <option value="regular">Regular statements</option>
+            <option value="on-demand">No regular statements</option>
+          </select>
+          <small>No regular statements silences routine freshness reminders. It does not verify or change the balance; you can still sync this account.</small>
+        </div>
         <div className="account-field account-field--wide">
           <label htmlFor={`account-name-${account.id}`}>Name</label>
           <input

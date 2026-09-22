@@ -79,6 +79,7 @@ const accountMetadataInput = z.object({
     currency: z.unknown().optional(),
     accountHolder: z.unknown().optional(),
     last4: z.unknown().optional(),
+    freshnessPolicy: z.enum(['regular', 'on-demand']).optional(),
   }),
 });
 const accountMappingIdInput = z.coerce.number().int().positive();

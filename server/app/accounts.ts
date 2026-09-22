@@ -21,6 +21,7 @@ interface AccountRow {
   updatedAt: string | null;
   reportingClosedOn: string | null;
   closureBalanceConflict: number;
+  freshnessPolicy: 'regular' | 'on-demand';
 }
 
 interface AccountAliasRow {
@@ -48,6 +49,7 @@ function toAccountSummary(row: AccountRow, aliases: AccountAliasSummary[]): Acco
     accountHolder: row.accountHolder,
     last4: row.last4,
     status,
+    freshnessPolicy: row.freshnessPolicy,
     archivedAt: row.archivedAt,
     updatedAt: row.updatedAt,
     reportingClosedOn: row.reportingClosedOn,
@@ -57,13 +59,17 @@ function toAccountSummary(row: AccountRow, aliases: AccountAliasSummary[]): Acco
 }
 
 function normalizeAccountMetadata(changes: Record<string, unknown>) {
-  const allowed = new Set(['name', 'institution', 'type', 'currency', 'accountHolder', 'last4']);
+  const allowed = new Set(['name', 'institution', 'type', 'currency', 'accountHolder', 'last4', 'freshnessPolicy']);
   const unsupported = Object.keys(changes).filter(field => !allowed.has(field));
   if (unsupported.length) {
     throw new Error(`Accounts only support metadata updates: ${unsupported.join(', ')}`);
   }
 
   const normalized: Record<string, string | null> = {};
+  if ('freshnessPolicy' in changes) {
+    if (changes.freshnessPolicy !== 'regular' && changes.freshnessPolicy !== 'on-demand') throw new Error('Invalid freshness policy');
+    normalized.freshnessPolicy = changes.freshnessPolicy;
+  }
   if ('name' in changes) {
     const name = String(changes.name || '').trim();
     if (!name) throw new Error('Account name is required.');
@@ -114,6 +120,7 @@ export function listAccounts(options: ListAccountsOptions = {}): AccountListResp
          a.type,
          a.accountHolder,
          a.last4,
+         a.freshnessPolicy,
          (
            SELECT lb.balanceCents
            FROM ledgerBalances lb

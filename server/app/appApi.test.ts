@@ -672,6 +672,7 @@ test('app accounts endpoint returns domain-shaped accounts', async () => {
         accountHolder: 'Example Owner',
         last4: '0123',
         status: 'active',
+        freshnessPolicy: 'regular',
         archivedAt: null,
         updatedAt: '2026-06-14T12:00:00.000Z',
         reportingClosedOn: null,
@@ -3571,6 +3572,39 @@ test('app import history returns each consolidated file once with deduplicated a
       accountHolder: 'Example Owner',
     },
   ]);
+});
+
+test('quiet account reminders are explicit, reversible and do not manufacture balances', async () => {
+  const id = Number(insertRow('accounts', { name: 'Quiet IRA', institution: 'Vanguard', type: 'investment' }));
+  await caller.accounts.updateMetadata({ id, changes: { freshnessPolicy: 'on-demand' } });
+  const report = await caller.dataFreshness.report({ today: '2026-09-21' });
+  expect(report.accounts.find(a => a.accountId === id)).toMatchObject({ status: 'on-demand', balanceStatus: 'no-data', latestBalanceDate: null, activityCheckedThrough: null });
+  expect(report.catchUp.items.some(a => a.accountId === id)).toBe(false);
+  expect((await caller.accounts.list()).accounts.find(a => a.id === id)).toMatchObject({ status: 'active', freshnessPolicy: 'on-demand' });
+  expect(getDb().prepare('SELECT COUNT(*) AS n FROM sourceBalances').get()!.n).toBe(0);
+  await expect(caller.accounts.updateMetadata({ id, changes: { freshnessPolicy: 'invalid' as 'regular' } })).rejects.toThrow();
+  await caller.accounts.updateMetadata({ id, changes: { freshnessPolicy: 'regular' } });
+  expect((await caller.dataFreshness.report({ today: '2026-09-21' })).catchUp.items.some(a => a.accountId === id)).toBe(true);
+});
+
+test('declared single-account coverage recognizes quiet periods without refreshing a balance', async () => {
+  const id = Number(insertRow('accounts', { name: 'Quiet IRA', institution: 'Vanguard', type: 'investment' }));
+  const file = Number(insertRow('sourceFiles', { fileName: 'quiet.csv', contentHash: 'quiet', parserName: 'test', status: 'committed', coverageBasis: 'declared', coveredFrom: '2026-09-01', coveredTo: '2026-09-20' }));
+  const sourceAccountId = Number(insertRow('sourceAccounts', { sourceFileId: file, accountId: id, sourceAccountKey: 'quiet', institution: 'Vanguard' }));
+  const account = async () => (await caller.dataFreshness.report({ today: '2026-09-21' })).accounts.find(a => a.accountId === id)!;
+  expect(await account()).toMatchObject({ transactionStatus: 'current', activityCheckedThrough: '2026-09-20', latestTransactionDate: null, balanceStatus: 'no-data', latestBalanceDate: null });
+  insertRow('sourceBalances', { sourceFileId: file, sourceAccountId, date: '2026-09-20', balanceCents: 0, priority: 100 });
+  expect(await account()).toMatchObject({ status: 'current', transactionStatus: 'current', balanceStatus: 'current', latestBalanceDate: '2026-09-20' });
+  expect((await caller.dataFreshness.report({ today: '2026-12-01' })).accounts.find(a => a.accountId === id)).toMatchObject({ status: 'stale', transactionStatus: 'stale', balanceStatus: 'stale' });
+  getDb().prepare("UPDATE sourceFiles SET coverageBasis='observed' WHERE id=?").run(file);
+  expect((await account()).activityCheckedThrough).toBeNull();
+  getDb().prepare("UPDATE sourceFiles SET coverageBasis='declared', status='unimported' WHERE id=?").run(file);
+  expect((await account()).activityCheckedThrough).toBeNull();
+  getDb().prepare("UPDATE sourceFiles SET status='committed', coveredTo='2027-01-01' WHERE id=?").run(file);
+  expect((await account()).activityCheckedThrough).toBeNull();
+  getDb().prepare("UPDATE sourceFiles SET coveredTo='2026-09-20' WHERE id=?").run(file);
+  insertRow('sourceAccounts', { sourceFileId: file, accountId: id, sourceAccountKey: 'another', institution: 'Vanguard' });
+  expect((await account()).activityCheckedThrough).toBeNull();
 });
 
 test('app data freshness reports latest source fact dates by account', async () => {

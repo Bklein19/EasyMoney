@@ -1,4 +1,8 @@
 import { expect, test } from 'bun:test';
+
+test('on-demand accounts keep stale facts visible without a sidebar reminder', () => {
+  expect(importAttentionMessage([{ status: 'on-demand', balanceStatus: 'stale' }])).toBeNull();
+});
 import { importAttentionMessage } from './importAttention';
 
 test('quiet while loading or healthy; failed checks are not reported as healthy', () => {

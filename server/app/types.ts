@@ -16,6 +16,7 @@ export interface AccountSummary {
   currency: string;
   accountHolder: string | null;
   last4: string | null;
+  freshnessPolicy?: 'regular' | 'on-demand';
   status: 'active' | 'archived' | 'closed' | string;
   archivedAt: string | null;
   updatedAt: string | null;

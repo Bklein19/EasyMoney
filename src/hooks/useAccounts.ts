@@ -9,6 +9,7 @@ export type AccountMetadataChanges = {
   currency?: unknown;
   accountHolder?: unknown;
   last4?: unknown;
+  freshnessPolicy?: 'regular' | 'on-demand';
 };
 
 export type AccountRow = ReturnType<typeof fromAppAccount>;
@@ -20,7 +21,7 @@ export function useAccounts(options: { includeArchived?: boolean } = {}) {
   }));
 
   async function updateAccount(id: number | string, changes: AccountMetadataChanges) {
-    const allowed = new Set(['name', 'institution', 'type', 'currency', 'accountHolder', 'last4']);
+    const allowed = new Set(['name', 'institution', 'type', 'currency', 'accountHolder', 'last4', 'freshnessPolicy']);
     const unsupported = Object.keys(changes).filter(field => !allowed.has(field));
     if (unsupported.length) {
       throw new Error(`Accounts only support metadata updates: ${unsupported.join(', ')}`);
@@ -28,6 +29,7 @@ export function useAccounts(options: { includeArchived?: boolean } = {}) {
 
     const result = await trpcClient.accounts.updateMetadata.mutate({ id, changes });
     await queryClient.invalidateQueries({ queryKey: trpc.accounts.list.queryKey() });
+    await queryClient.invalidateQueries({ queryKey: trpc.dataFreshness.report.queryKey() });
     return result;
   }
 
@@ -68,6 +70,7 @@ function fromAppAccount(account: AccountSummary) {
     currency: account.currency,
     accountHolder: account.accountHolder,
     last4: account.last4,
+    freshnessPolicy: account.freshnessPolicy ?? 'regular',
     status: account.status,
     archivedAt: account.archivedAt,
     updatedAt: account.updatedAt,

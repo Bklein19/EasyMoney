@@ -11,6 +11,8 @@ interface DataFreshnessRow {
   institution: string | null;
   accountType: string;
   accountStatus: string | null;
+  freshnessPolicy: 'regular' | 'on-demand';
+  activityCheckedThrough: string | null;
   latestTransactionDate: string | null;
   latestBalanceDate: string | null;
   transactionCount: number;
@@ -21,7 +23,7 @@ interface DataFreshnessRow {
   latestImportedAt: string | null;
 }
 
-type DataFreshnessStatus = 'current' | 'due' | 'stale' | 'no-data' | 'closed';
+type DataFreshnessStatus = 'current' | 'due' | 'stale' | 'no-data' | 'closed' | 'on-demand';
 
 interface DataFreshnessAccount {
   accountId: number;
@@ -99,7 +101,7 @@ function downloadWindowFor(account: DataFreshnessAccount, today: string) {
 
 function buildCatchUpPlan(accounts: DataFreshnessAccount[], today: string) {
   const items = accounts
-    .filter(account => account.status !== 'current' && account.status !== 'closed')
+    .filter(account => account.status !== 'current' && account.status !== 'closed' && account.status !== 'on-demand')
     .map(account => ({
       id: `account-${account.accountId}`,
       accountId: account.accountId,
@@ -192,6 +194,15 @@ export function getDataFreshnessReport(options: { today?: string } = {}) {
       a.institution,
       a.type AS accountType,
       a.status AS accountStatus,
+      a.freshnessPolicy,
+      (
+        SELECT MAX(SUBSTR(sf.coveredTo, 1, 10))
+        FROM sourceAccounts sa JOIN sourceFiles sf ON sf.id = sa.sourceFileId
+        WHERE sa.accountId = a.id AND sf.status = 'committed'
+          AND sf.coverageBasis = 'declared' AND sf.coveredFrom <= sf.coveredTo
+          AND SUBSTR(sf.coveredTo, 1, 10) <= ?
+          AND (SELECT COUNT(*) FROM sourceAccounts peers WHERE peers.sourceFileId = sf.id) = 1
+      ) AS activityCheckedThrough,
       tf.latestTransactionDate,
       bf.latestBalanceDate,
       COALESCE(tf.transactionCount, 0) AS transactionCount,
@@ -237,23 +248,29 @@ export function getDataFreshnessReport(options: { today?: string } = {}) {
     LEFT JOIN balanceFacts bf ON bf.accountId = a.id
     WHERE COALESCE(a.status, 'active') != 'archived'
     ORDER BY COALESCE(a.institution, ''), a.name, a.id
-  `).all() as DataFreshnessRow[];
+  `).all(today) as DataFreshnessRow[];
 
   const accounts = rows.map(row => {
     const latestFactDate = maxDate(row.latestTransactionDate, row.latestBalanceDate);
     const daysSinceLatestFact = daysBetween(latestFactDate, today);
     const accountStatus = row.accountStatus || 'active';
-    const status = freshnessStatusFor(accountStatus, daysSinceLatestFact);
+    const transactionStatus = freshnessStatusFor(accountStatus, daysBetween(maxDate(row.latestTransactionDate, row.activityCheckedThrough), today));
+    const balanceStatus = freshnessStatusFor(accountStatus, daysBetween(row.latestBalanceDate, today));
+    const factStatus = freshnessStatusFor(accountStatus, daysBetween(maxDate(latestFactDate, row.activityCheckedThrough), today));
+    const status = accountStatus !== 'closed' && row.freshnessPolicy === 'on-demand' && (transactionStatus !== 'current' || balanceStatus !== 'current')
+      ? 'on-demand' as const : factStatus;
     return {
       accountId: row.accountId,
       accountName: row.accountName,
       institution: row.institution,
       accountType: row.accountType,
       accountStatus,
+      freshnessPolicy: row.freshnessPolicy,
+      activityCheckedThrough: row.activityCheckedThrough,
       latestTransactionDate: row.latestTransactionDate,
       latestBalanceDate: row.latestBalanceDate,
-      transactionStatus: freshnessStatusFor(accountStatus, daysBetween(row.latestTransactionDate, today)),
-      balanceStatus: freshnessStatusFor(accountStatus, daysBetween(row.latestBalanceDate, today)),
+      transactionStatus,
+      balanceStatus,
       latestFactDate,
       daysSinceLatestFact,
       status,
@@ -275,8 +292,9 @@ export function getDataFreshnessReport(options: { today?: string } = {}) {
       staleAccounts: current.staleAccounts + (account.status === 'stale' ? 1 : 0),
       noDataAccounts: current.noDataAccounts + (account.status === 'no-data' ? 1 : 0),
       closedAccounts: current.closedAccounts + (account.status === 'closed' ? 1 : 0),
+      onDemandAccounts: current.onDemandAccounts + (account.status === 'on-demand' ? 1 : 0),
     }),
-    { totalAccounts: 0, currentAccounts: 0, dueAccounts: 0, staleAccounts: 0, noDataAccounts: 0, closedAccounts: 0 }
+    { totalAccounts: 0, currentAccounts: 0, dueAccounts: 0, staleAccounts: 0, noDataAccounts: 0, closedAccounts: 0, onDemandAccounts: 0 }
   );
 
   return {
