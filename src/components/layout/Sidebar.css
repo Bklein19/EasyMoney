@@ -197,7 +197,7 @@ body.sidebar-resizing {
 }
 
 .sidebar-context-title {
-  margin: 0 8px 10px;
+  margin: 0 8px 10px 0;
   color: var(--text-muted);
   font-size: var(--text-xs);
   font-weight: 650;
@@ -713,7 +713,7 @@ body.sidebar-resizing {
   text-transform: none;
   letter-spacing: 0;
   font-weight: 500;
-  padding-inline: 8px;
+  padding-inline: 0 8px;
 }
 .account-picker--owner-groups .account-owner-group { display: block; }
 .account-picker--owner-groups .account-owner-group__header {
@@ -721,7 +721,7 @@ body.sidebar-resizing {
   justify-content: flex-start;
   gap: 7px;
   margin: 0;
-  padding: 7px;
+  padding: 7px 7px 7px 0;
   color: var(--text-muted);
   text-transform: none;
   letter-spacing: 0;
