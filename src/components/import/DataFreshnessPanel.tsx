@@ -812,13 +812,14 @@ export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPa
     {focusedAccountId && <button className="btn btn--text" onClick={() => setSearchParams({})}>Clear account filter</button>}
     <div className="connection-list">
       {targets.filter(target => target.accountIds?.some(id => visibleAccounts.some(account => account.accountId === id))).map(target => <div className="connection-group" key={target.id}>
-        <div className="connection-group__heading"><h3>{target.label}</h3>
-          <button className="btn btn-secondary btn--sm" disabled={starting || targetBusy(target)} onClick={() => void startTargets([target], 'current')}>{targetBusy(target) ? 'Update in progress' : 'Update'}</button>
-        </div>
+        <h3>{target.label}</h3>
+        <div className="connection-group__accounts">
         {visibleAccounts.filter(account => target.accountIds?.includes(account.accountId)).map(account => <div className="connection-account" key={account.accountId}>
           <span><strong>{account.accountName}</strong><small>{accountMetadata.find(item => item.id === account.accountId)?.accountHolder}</small></span>
           <span className={needsAttention(account) ? 'connection-account__reason' : ''}>{reason(account)}</span>
         </div>)}
+        </div>
+        <button className="btn btn-secondary btn--sm" disabled={starting || targetBusy(target)} onClick={() => void startTargets([target], 'current')}>{targetBusy(target) ? 'Update in progress' : 'Update'}</button>
       </div>)}
       {visibleAccounts.filter(account => !targets.some(target => target.accountIds?.includes(account.accountId))).map(account => <div className="connection-account" key={account.accountId}>
         <span><strong>{account.accountName}</strong><small>{account.institution} · {accountMetadata.find(item => item.id === account.accountId)?.accountHolder}</small></span>
