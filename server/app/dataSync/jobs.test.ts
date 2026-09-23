@@ -31,6 +31,14 @@ describe('sync child process options', () => {
 });
 
 describe('persisted sync job recovery', () => {
+  test('interrupted queued work fails safely, while a staged review remains pending', () => {
+    const base = { runId: 'sync-test', message: '', completedAt: null, events: [] as SyncEvent[], error: null };
+    const queued = { ...base, status: 'queued' as const };
+    expect(markInterruptedSyncJob(queued)).toBe(true);
+    const review = { ...base, status: 'awaiting-confirmation' as const };
+    expect(markInterruptedSyncJob(review)).toBe(false);
+    expect(review.status).toBe('awaiting-confirmation');
+  });
   test('fails an orphaned running job instead of leaving the app spinning', () => {
     const job = {
       runId: 'sync-bank-of-america-stale',

@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { writeSnapshot } from '../databaseSnapshots';
 
-import type { SyncInstitutionId } from './dataSync/types.ts';
+import type { SyncInstitutionId, SyncRunReview } from './dataSync/types.ts';
 
 process.env.EASYMONEY_DB_PATH = path.join(os.tmpdir(), `easymoney-app-api-${process.pid}.sqlite`);
 process.env.EASYMONEY_SYNC_ROOT = path.join(os.tmpdir(), `easymoney-sync-runs-${process.pid}`);
@@ -144,6 +144,7 @@ async function saveAwaitingSyncReview(review: {
   const directory = path.join(process.env.EASYMONEY_SYNC_ROOT!, review.runId);
   await fs.promises.mkdir(directory, { recursive: true });
   await fs.promises.writeFile(path.join(directory, 'run.json'), `${JSON.stringify({
+    databasePath: databaseBackupStatus().databasePath,
     runId: review.runId,
     institutionId: review.institutionId,
     goal: { kind: 'current', overlapDays: 7 },
@@ -157,6 +158,33 @@ async function saveAwaitingSyncReview(review: {
     error: null,
   }, null, 2)}\n`);
 }
+
+test('discovers multiple saved reviews and discards only the selected connection batch', async () => {
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'multi-review-'));
+  const accountId = Number(insertRow('accounts', { name: 'Checking', institution: 'Bank of America', type: 'checking', currentBalance: 0 }));
+  const reviews: SyncRunReview[] = [];
+  try {
+    for (const index of [1, 2]) {
+      const filePath = path.join(directory, `bofa-checking-1234-2026-01-0${index}-to-2026-01-0${index}.csv`);
+      await fs.promises.writeFile(filePath, `Description,,Summary Amt.\nOpening Balance,,100.00\nDate,Description,Amount,Running Bal.\n01/0${index}/2026,EXAMPLE ${index},10.00,110.00`);
+      const artifact = await stageSyncArtifact({ path: filePath, accountId });
+      const review = { runId: `sync-multiple-${index}`, institutionId: 'bank-of-america' as const, downloaded: 1, readyToImport: 1, alreadyImported: 0, artifacts: [artifact] };
+      await saveAwaitingSyncReview(review);
+      reviews.push(review);
+    }
+    const recovered = await caller.dataSync.jobs();
+    expect(recovered.filter(job => job.runId.startsWith('sync-multiple-'))).toHaveLength(2);
+    expect(recovered.find(job => job.runId === reviews[1]!.runId)?.status).toBe('awaiting-confirmation');
+    const duplicateStart = await caller.dataSync.start({ institutionId: 'bank-of-america', goal: { kind: 'current', overlapDays: 7 } });
+    expect(reviews.map(review => review.runId)).toContain(duplicateStart.runId);
+    expect(duplicateStart.status).toBe('awaiting-confirmation');
+    await caller.dataSync.discard({ runId: reviews[0]!.runId });
+    expect((await caller.dataSync.status({ runId: reviews[1]!.runId }))?.status).toBe('awaiting-confirmation');
+    expect(getDb().prepare('SELECT status FROM importFiles WHERE id=?').get(reviews[1]!.artifacts[0]!.importFileId)?.status).toBe('previewed');
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()?.count).toBe(0);
+    await caller.dataSync.discard({ runId: reviews[1]!.runId });
+  } finally { await fs.promises.rm(directory, { recursive: true, force: true }); }
+});
 
 let consolidatedSyncFixtureSequence = 0;
 
@@ -3855,6 +3883,7 @@ test('Vanguard sync targets survive reversible unimport provenance', async () =>
 
   expect(await caller.dataSync.targets()).toContainEqual({
     id: 'vanguard:account-2',
+    accountIds: [accountId],
     institutionId: 'vanguard',
     connectionId: 'account-2',
     label: 'Vanguard (Example Holder)',
@@ -3874,6 +3903,7 @@ test('TIAA has one app catch-up target for any active local TIAA account', async
 
   expect(await caller.dataSync.targets()).toEqual([{
     id: 'tiaa',
+    accountIds: [1],
     institutionId: 'tiaa',
     label: 'TIAA',
   }]);
@@ -3906,6 +3936,7 @@ test('Fidelity local accounts expose exactly one registered app catch-up menu ta
 
   expect((await caller.dataSync.targets()).filter(target => target.institutionId === 'fidelity')).toEqual([{
     id: 'fidelity',
+    accountIds: [2, 3],
     institutionId: 'fidelity',
     label: 'Fidelity (Synthetic Holder)',
   }]);

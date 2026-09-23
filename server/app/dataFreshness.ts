@@ -26,6 +26,7 @@ interface DataFreshnessRow {
 type DataFreshnessStatus = 'current' | 'due' | 'stale' | 'no-data' | 'closed' | 'on-demand';
 
 interface DataFreshnessAccount {
+  needsUpdate: boolean;
   accountId: number;
   accountName: string;
   institution: string | null;
@@ -101,7 +102,7 @@ function downloadWindowFor(account: DataFreshnessAccount, today: string) {
 
 function buildCatchUpPlan(accounts: DataFreshnessAccount[], today: string) {
   const items = accounts
-    .filter(account => account.status !== 'current' && account.status !== 'closed' && account.status !== 'on-demand')
+    .filter(account => account.needsUpdate)
     .map(account => ({
       id: `account-${account.accountId}`,
       accountId: account.accountId,
@@ -266,6 +267,7 @@ export function getDataFreshnessReport(options: { today?: string } = {}) {
       accountType: row.accountType,
       accountStatus,
       freshnessPolicy: row.freshnessPolicy,
+      needsUpdate: accountStatus !== 'closed' && row.freshnessPolicy !== 'on-demand' && (transactionStatus !== 'current' || balanceStatus !== 'current'),
       activityCheckedThrough: row.activityCheckedThrough,
       latestTransactionDate: row.latestTransactionDate,
       latestBalanceDate: row.latestBalanceDate,

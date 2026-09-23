@@ -249,6 +249,7 @@ export function vanguardTargetsForProfiles(
   return profiles.map(profile => ({
     connectionId: profile.id,
     label: `Vanguard (${profile.accountHolder})`,
+    accountIds: profile.accounts.map(account => account.accountId),
   }));
 }
 

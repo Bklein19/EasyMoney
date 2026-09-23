@@ -1,7 +1,9 @@
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { databaseBackupStatus, getDb } from '../../database.ts';
 
 import { runSerializedSyncDatabaseWork } from './databaseQueue.ts';
+import { SyncDownloadQueue } from './downloadQueue.ts';
 import { createSyncExecutionPlan } from './executionPlan.ts';
 import { markInterruptedSyncJob } from './jobState.ts';
 import { syncApplicationDataRoot } from './paths.ts';
@@ -33,7 +35,7 @@ import {
 } from './workerProtocol.ts';
 import { stageCompletedSyncWorker } from './workerCompletion.ts';
 
-export type SyncJobStatus = 'running' | 'awaiting-confirmation' | 'importing' | 'complete' | 'failed' | 'cancelled';
+export type SyncJobStatus = 'queued' | 'running' | 'awaiting-confirmation' | 'importing' | 'complete' | 'failed' | 'cancelled';
 
 export interface SyncJob {
   runId: string;
@@ -60,8 +62,9 @@ type ManagedSyncJob = SyncJob & {
 };
 
 const jobs = new Map<string, ManagedSyncJob>();
+const downloads = new SyncDownloadQueue();
 export function hasActiveSyncJobs() {
-  return [...jobs.values()].some(job => ['running', 'importing'].includes(job.status) || job.reviewAction !== null);
+  return [...jobs.values()].some(job => ['queued', 'running', 'importing'].includes(job.status) || job.reviewAction !== null);
 }
 const childEventTypes = new Set<SyncEvent['type']>([
   'phase',
@@ -93,8 +96,9 @@ function persistJob(job: ManagedSyncJob) {
   job.persistence = job.persistence.catch(() => {}).then(async () => {
     const path = runFilePath(job.runId);
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, `${JSON.stringify(publicJob(job), null, 2)}\n`);
-    if (process.platform !== 'win32') await chmod(path, 0o600);
+    const temporaryPath = `${path}.tmp`;
+    await writeFile(temporaryPath, `${JSON.stringify({ ...publicJob(job), databasePath: databaseBackupStatus().databasePath }, null, 2)}\n`, { mode: 0o600 });
+    await rename(temporaryPath, path);
   });
   return job.persistence;
 }
@@ -106,7 +110,13 @@ async function managedJob(runId: string): Promise<ManagedSyncJob | null> {
     return current;
   }
   try {
-    const saved = JSON.parse(await readFile(runFilePath(runId), 'utf8')) as Partial<SyncJob>;
+    const saved = JSON.parse(await readFile(runFilePath(runId), 'utf8')) as Partial<SyncJob> & { databasePath?: string };
+    if (saved.databasePath && saved.databasePath !== databaseBackupStatus().databasePath) return null;
+    // Older records predate database scoping. Only recover reviews whose files
+    // demonstrably belong to this ledger, not another dev/production database.
+    if (!saved.databasePath && (!saved.review?.artifacts.length || !saved.review.artifacts.every(artifact =>
+      getDb().prepare('SELECT id FROM importFiles WHERE id = ? AND fileName = ?').get(artifact.importFileId, artifact.fileName)
+    ))) return null;
     const loadedWhileReading = jobs.get(runId);
     if (loadedWhileReading) return loadedWhileReading;
     if (saved.runId !== runId || !saved.institutionId || !saved.goal || !saved.status) return null;
@@ -273,19 +283,20 @@ async function finishWorker(
   }
 }
 
-export function startSyncJob(input: {
+export async function startSyncJob(input: {
   institutionId: SyncJob['institutionId'];
   connectionId?: string;
   goal: SyncGoal;
-}): SyncJob {
+}): Promise<SyncJob> {
+  await listSyncJobs();
   const active = [...jobs.values()].find(job =>
     job.institutionId === input.institutionId &&
-    job.connectionId === input.connectionId &&
-    ['running', 'awaiting-confirmation', 'importing'].includes(job.status)
+    (!job.connectionId || !input.connectionId || job.connectionId === input.connectionId) &&
+    ['queued', 'running', 'awaiting-confirmation', 'importing'].includes(job.status)
   );
   if (active) return publicJob(active);
 
-  const runId = `sync-${input.institutionId}-${Date.now()}`;
+  const runId = `sync-${input.institutionId}-${crypto.randomUUID()}`;
   const startedAt = new Date().toISOString();
   const executionPlan = createSyncExecutionPlan({ runId, ...input });
   const job: ManagedSyncJob = {
@@ -293,8 +304,8 @@ export function startSyncJob(input: {
     institutionId: input.institutionId,
     connectionId: input.connectionId,
     goal: input.goal,
-    status: 'running',
-    message: 'Starting sync',
+    status: 'queued',
+    message: 'Waiting for a download slot',
     startedAt,
     completedAt: null,
     events: [],
@@ -311,30 +322,37 @@ export function startSyncJob(input: {
   jobs.set(runId, job);
   void persistJob(job);
 
-  try {
-    const child = Bun.spawn(commandForSyncWorker(), syncChildProcessOptions());
-    job.process = child;
-    sendSyncExecutionPlan(child, executionPlan);
+  void downloads.enqueue(input.institutionId, async () => {
+    if (job.cancelRequested) return;
+    job.status = 'running';
+    job.message = 'Starting update';
+    await persistJob(job);
+    if (job.cancelRequested) return;
+    try {
+      const child = Bun.spawn(commandForSyncWorker(), syncChildProcessOptions());
+      job.process = child;
+      sendSyncExecutionPlan(child, executionPlan);
 
-    const stdout = readLines(child.stdout, line => acceptWorkerMessage(job, executionPlan, line));
-    const stderr = readLines(child.stderr, line => {
-      appendEvent(job, {
-        runId,
-        timestamp: new Date().toISOString(),
-        type: 'warning',
-        message: line,
+      const stdout = readLines(child.stdout, line => acceptWorkerMessage(job, executionPlan, line));
+      const stderr = readLines(child.stderr, line => {
+        appendEvent(job, {
+          runId,
+          timestamp: new Date().toISOString(),
+          type: 'warning',
+          message: line,
+        });
       });
-    });
-    void child.exited.then(async exitCode => {
-      await Promise.allSettled([stdout, stderr]);
+      await child.exited.then(async exitCode => {
+        await Promise.allSettled([stdout, stderr]);
+        job.process = null;
+        await finishWorker(job, executionPlan, exitCode);
+      });
+    } catch (error) {
+      job.process?.kill();
       job.process = null;
-      await finishWorker(job, executionPlan, exitCode);
-    });
-  } catch (error) {
-    job.process?.kill();
-    job.process = null;
-    failJob(job, error instanceof Error ? error.message : String(error));
-  }
+      failJob(job, error instanceof Error ? error.message : String(error));
+    }
+  }).catch(error => failJob(job, error instanceof Error ? error.message : String(error)));
 
   return publicJob(job);
 }
@@ -344,10 +362,30 @@ export async function getSyncJob(runId: string): Promise<SyncJob | null> {
   return job ? publicJob(job) : null;
 }
 
+/** Discover pending reviews on disk, not just the last run remembered by a tab. */
+export async function listSyncJobs(): Promise<SyncJob[]> {
+  try {
+    const entries = await readdir(syncApplicationDataRoot(), { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !/^sync-[A-Za-z0-9_-]+$/.test(entry.name)) continue;
+      try { await managedJob(entry.name); } catch (error) {
+        // A damaged historical record must not hide other recoverable reviews.
+        if (!(error instanceof SyntaxError)) throw error;
+      }
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  return [...jobs.values()]
+    .filter(job => ['queued', 'running', 'awaiting-confirmation', 'importing'].includes(job.status)
+      || Date.now() - Date.parse(job.completedAt || job.startedAt) < 86_400_000)
+    .map(publicJob).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+}
+
 export async function cancelSyncJob(runId: string): Promise<SyncJob> {
   const job = await managedJob(runId);
   if (!job) throw new Error('Sync job not found');
-  if (job.status === 'running') {
+  if (job.status === 'running' || job.status === 'queued') {
     job.cancelRequested = true;
     job.process?.kill();
     job.status = 'cancelled';

@@ -261,8 +261,8 @@ test('Vanguard connector rejects unsafe provenance and incomplete or conflicting
 
 test('Vanguard targets identify every valid login by account holder', () => {
   expect(vanguardConnector.listTargets(context(twoProfileAccounts))).toEqual([
-    { connectionId: 'current', label: 'Vanguard (Example One)' },
-    { connectionId: 'account-2', label: 'Vanguard (Example Two)' },
+    { connectionId: 'current', label: 'Vanguard (Example One)', accountIds: [10] },
+    { connectionId: 'account-2', label: 'Vanguard (Example Two)', accountIds: [20] },
   ]);
 });
 

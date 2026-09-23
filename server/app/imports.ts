@@ -51,6 +51,8 @@ interface CommitImportOptions {
 }
 
 export interface ImportHistoryItem {
+  coveredFrom?: string | null;
+  coveredTo?: string | null;
   id: number;
   fileName: string;
   parserName: string | null;
@@ -207,6 +209,8 @@ export function listImportHistory(): ImportHistoryItem[] {
       ifs.importBatchId,
       ifs.createdAt,
       ifs.committedAt,
+      (SELECT MIN(sf.coveredFrom) FROM sourceFiles sf WHERE sf.importFileId = ifs.id) AS coveredFrom,
+      (SELECT MAX(sf.coveredTo) FROM sourceFiles sf WHERE sf.importFileId = ifs.id) AS coveredTo,
       COALESCE(tc.transactionCount, 0) AS transactionCount,
       COALESCE(bc.balanceCount, 0) AS balanceCount,
       COALESCE(uac.unresolvedSourceAccountCount, 0) AS unresolvedSourceAccountCount

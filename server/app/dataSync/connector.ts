@@ -20,6 +20,7 @@ export interface SyncAccountCoverage {
 }
 
 export interface SyncConnectorTarget {
+  accountIds?: number[];
   connectionId?: string;
   label: string;
 }

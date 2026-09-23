@@ -53,6 +53,7 @@ export type SyncWorkerMessage =
     };
 
 export interface SyncTarget {
+  accountIds?: number[];
   id: string;
   institutionId: SyncInstitutionId;
   connectionId?: string;

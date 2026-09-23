@@ -21,6 +21,7 @@ export function listSyncTargets(): SyncTarget[] {
     institutionId: connector.id,
     ...(target.connectionId ? { connectionId: target.connectionId } : {}),
     label: target.label,
+    accountIds: target.accountIds ?? context.accounts.filter(account => connector.matchesAccount(account)).map(account => account.id),
   })));
 }
 

@@ -37,6 +37,49 @@
   gap: 0.75rem;
 }
 
+.connection-runs, .connection-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.connection-runs h2 { font-size: var(--text-xl); margin: 0; }
+
+.recent-import { border-bottom: 1px solid var(--hairline); }
+.recent-import > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto 16px; align-items: center; gap: var(--space-4); padding: var(--space-4) 0; cursor: pointer; list-style: none; }
+.recent-import > summary::-webkit-details-marker { display: none; }
+.recent-import small { display: block; margin-top: var(--space-1); color: var(--text-muted); font-size: var(--text-sm); }
+.recent-import__details { color: var(--text-secondary); padding-bottom: var(--space-4); overflow-wrap: anywhere; }
+.recent-import[open] > summary > svg { transform: rotate(90deg); }
+
+.connection-run, .connection-group {
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+  background: var(--bg-surface);
+}
+
+.connection-group__heading, .connection-account, .data-freshness__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.connection-group__heading h3 { margin: 0; font-size: var(--text-base); }
+.connection-account { padding: var(--space-3) 0; color: var(--text-secondary); font-size: var(--text-sm); }
+.connection-account strong { color: var(--text-primary); font-weight: 500; }
+.connection-account small { display: block; color: var(--text-muted); }
+.connection-account__reason { text-align: right; }
+.connection-run__review > summary { cursor: pointer; padding: var(--space-3) 0; color: var(--text-primary); }
+.connection-run__review .sync-review { box-shadow: none; }
+.data-freshness__footer { flex-wrap: wrap; }
+
+@media (max-width: 700px) {
+  .connection-account, .data-freshness__header { align-items: flex-start; flex-direction: column; gap: var(--space-2); }
+  .connection-account__reason { text-align: left; }
+}
+
 .data-freshness__header {
   display: flex;
   align-items: flex-end;

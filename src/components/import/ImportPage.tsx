@@ -529,7 +529,7 @@ export default function ImportPage() {
       <header className="page__header import-page__header">
         <div>
           <h1 className="page__title">Import Data</h1>
-          <p className="page__subtitle">Upload exports or statements to import transactions, balances, and accounts.</p>
+          <p className="page__subtitle">Keep your accounts up to date and review what’s been imported.</p>
         </div>
         {stage === 'upload' && (
           <FileDropZone
@@ -816,6 +816,8 @@ function ImportHistory({
   onBulkUnimport,
   onBulkReimport,
 }: ImportHistoryProps) {
+  const [browseAll, setBrowseAll] = useState(false);
+  const [recentLimit, setRecentLimit] = useState(10);
   const [searchTerm, setSearchTerm] = useState('');
   const normalizedSearch = searchTerm.trim();
   const filteredImports = useMemo(
@@ -832,7 +834,8 @@ function ImportHistory({
   return (
     <section className="import-history" aria-busy={loading}>
       <div className="import-history__header">
-        <h3>Import History</h3>
+        <h3>Import history</h3>
+        <button className="btn btn--text btn--sm" onClick={() => setBrowseAll(!browseAll)}>{browseAll ? 'Recent imports' : 'Browse by account'}</button>
       </div>
 
       <div className="import-history__toolbar">
@@ -843,9 +846,10 @@ function ImportHistory({
             value={searchTerm}
             onChange={event => setSearchTerm(event.target.value)}
             placeholder="Search imports"
+            aria-label="Search imports"
           />
         </label>
-        <div className="import-history__bulk-actions">
+        {browseAll && <details><summary>Manage imports</summary><div className="import-history__bulk-actions">
           <button
             type="button"
             className="btn btn-secondary import-history__bulk-btn"
@@ -864,7 +868,7 @@ function ImportHistory({
             <RotateCcw size={16} />
             {bulkAction === 'reimport' ? 'Reimporting...' : `Reimport All${reimportableImports.length ? ` (${reimportableImports.length})` : ''}`}
           </button>
-        </div>
+        </div></details>}
       </div>
 
       {error && <div className="import-history__error">{error}</div>}
@@ -878,6 +882,24 @@ function ImportHistory({
         <div className="import-history__empty">No imports yet.</div>
       ) : filteredImports.length === 0 ? (
         <div className="import-history__empty">No imports match "{searchTerm}".</div>
+      ) : !browseAll ? (
+        <div className="recent-imports">
+          {filteredImports.slice(0, recentLimit).map(item => <details className="recent-import" key={item.id}>
+            <summary>
+              <span><strong>{item.accounts.map(account => account.name || 'Unmapped account').join(', ') || item.institution || 'Imported file'}</strong>
+                <small>{[...new Set(item.accounts.map(account => account.accountHolder).filter(Boolean))].join(', ')} · {item.sourceKind === 'statements' ? 'Statement' : item.sourceKind === 'activity' ? 'Activity' : 'Import'}{item.coveredFrom && item.coveredTo ? ` · ${item.coveredFrom} – ${item.coveredTo}` : ''}</small></span>
+              <span>{formatImportStatus(item.status)}<small>{formatImportDate(item.committedAt || item.createdAt)}</small></span>
+              <ChevronRight size={15} />
+            </summary>
+            <div className="recent-import__details">
+              <p>{item.transactionCount.toLocaleString()} transactions · {item.balanceCount.toLocaleString()} balances represented in your ledger</p>
+              <p>{item.fileName}</p>
+              {item.status === 'committed' && <button className="btn btn-secondary btn--sm" disabled={bulkAction !== null || unimportingId === item.id} onClick={() => onUnimport(item)}>Unimport file</button>}
+              {item.status === 'unimported' && <button className="btn btn-secondary btn--sm" disabled={bulkAction !== null || reimportingId === item.id || item.unresolvedSourceAccountCount > 0} onClick={() => onReimport(item)}>Reimport file</button>}
+            </div>
+          </details>)}
+          {filteredImports.length > recentLimit && <button className="btn btn--text" onClick={() => setRecentLimit(recentLimit + 20)}>Show more imports</button>}
+        </div>
       ) : (
         <div className="import-history__tree-wrap">
           {hasSearch && (

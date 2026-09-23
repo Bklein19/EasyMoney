@@ -27,7 +27,7 @@ import {
 import { createCategory, deleteCategory, listCategories, updateCategory } from './categories.ts';
 import { getDataFreshnessReport } from './dataFreshness.ts';
 import { getDataCompleteness } from './dataCompleteness.ts';
-import { cancelSyncJob, confirmSyncJob, discardSyncJob, getSyncJob, startSyncJob } from './dataSync/jobs.ts';
+import { cancelSyncJob, confirmSyncJob, discardSyncJob, getSyncJob, listSyncJobs, startSyncJob } from './dataSync/jobs.ts';
 import { previewSyncReviewOutcomes } from './dataSync/reviewOutcomes.ts';
 import { isSyncInstitutionId } from './dataSync/registry.ts';
 import { listSyncTargets } from './dataSync/executionPlan.ts';
@@ -331,6 +331,7 @@ export const appRouter = t.router({
   }),
 
   dataSync: t.router({
+    jobs: t.procedure.query(() => listSyncJobs()),
     targets: t.procedure.query(() => listSyncTargets()),
 
     start: t.procedure

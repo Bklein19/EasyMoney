@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
-import { AlertTriangle, CheckCircle2, ChevronDown, CircleDashed, Clock3, History, LoaderCircle, Lock, RefreshCw, X } from 'lucide-react';
+import { AlertTriangle, ChevronDown, History, LoaderCircle, RefreshCw, X } from 'lucide-react';
+import type { SyncJob } from '../../../server/app/dataSync/jobs.ts';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import { useAccounts, type AccountRow } from '../../hooks/useAccounts';
 import { formatCurrency, formatDate } from '../../utils/formatters';
@@ -28,6 +29,7 @@ import {
 
 type FreshnessStatus = 'current' | 'due' | 'stale' | 'no-data' | 'closed' | 'on-demand';
 interface FreshnessAccount {
+  needsUpdate: boolean;
   accountId: number;
   accountName: string;
   institution: string | null;
@@ -136,24 +138,6 @@ function syncMappingChoiceComplete(choice: SyncMappingChoice | undefined, claim:
   return false;
 }
 
-const STATUS_LABELS: Record<FreshnessStatus, string> = {
-  current: 'Current',
-  due: 'Due',
-  stale: 'Stale',
-  'no-data': 'No data',
-  closed: 'Closed',
-  'on-demand': 'On demand',
-};
-
-const STATUS_ICONS = {
-  current: CheckCircle2,
-  due: Clock3,
-  stale: AlertTriangle,
-  'no-data': CircleDashed,
-  closed: Lock,
-  'on-demand': Clock3,
-};
-
 interface SyncActionMenuProps {
   icon: 'history' | 'refresh';
   label: string;
@@ -181,6 +165,7 @@ function SyncActionMenu({ icon, label, primary = false, targets, onSelect }: Syn
     };
   }, []);
 
+  if (targets.length === 0) return null;
   return (
     <details className={`data-freshness__sync-menu${primary ? ' is-primary' : ''}`} ref={detailsRef}>
       <summary>
@@ -210,21 +195,6 @@ function SyncActionMenu({ icon, label, primary = false, targets, onSelect }: Syn
 function formatFreshnessDate(value: string | null) {
   if (!value) return '—';
   return formatDate(value, 'medium');
-}
-
-function formatAge(account: FreshnessAccount) {
-  if (account.daysSinceLatestFact === null) return 'No imports';
-  if (account.daysSinceLatestFact === 0) return 'Today';
-  if (account.daysSinceLatestFact === 1) return '1 day';
-  return `${account.daysSinceLatestFact} days`;
-}
-
-function accountSort(a: FreshnessAccount, b: FreshnessAccount) {
-  const rank: Record<FreshnessStatus, number> = { stale: 0, 'no-data': 1, due: 2, current: 3, 'on-demand': 4, closed: 5 };
-  return rank[a.status] - rank[b.status] ||
-    (b.daysSinceLatestFact ?? Number.POSITIVE_INFINITY) - (a.daysSinceLatestFact ?? Number.POSITIVE_INFINITY) ||
-    (a.institution || '').localeCompare(b.institution || '') ||
-    a.accountName.localeCompare(b.accountName);
 }
 
 function artifactCoverage(artifact: SyncArtifactReview) {
@@ -718,289 +688,149 @@ function SyncReviewPanel({
     </section>
   );
 }
-
 interface DataFreshnessPanelProps {
   onImportComplete?: () => Promise<void> | void;
+}
+
+function SyncConnectionRun({ job, label, onImportComplete, onDismiss }: {
+  job: SyncJob;
+  label: string;
+  onImportComplete?: () => Promise<void> | void;
+  onDismiss: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const refresh = () => queryClient.invalidateQueries({ queryKey: trpc.dataSync.jobs.queryKey() });
+  const act = async (action: () => Promise<unknown>, committed = false) => {
+    setBusy(true);
+    setError('');
+    try {
+      await action();
+      // A confirmed batch can change every other review's duplicate outcomes.
+      await queryClient.invalidateQueries({ queryKey: ['sync-review-outcomes'] });
+      if (committed) await onImportComplete?.();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Update failed');
+      await queryClient.invalidateQueries({ queryKey: ['sync-review-outcomes'] });
+    } finally {
+      await refresh();
+      setBusy(false);
+    }
+  };
+  const working = ['queued', 'running', 'importing'].includes(job.status);
+  const reviewable = job.status === 'awaiting-confirmation' && job.review;
+  return <article className="connection-run">
+    <div className={`data-freshness__sync-status is-${job.status}`} role="status">
+      {working && <LoaderCircle className="spin" size={15} />}
+      <strong>{label}</strong>
+      <span>{reviewable ? 'Ready to review' : job.message}</span>
+      {['queued', 'running'].includes(job.status)
+        ? <button className="btn btn--text btn--sm" disabled={busy} onClick={() => void act(() => trpcClient.dataSync.cancel.mutate({ runId: job.runId }))}>Cancel</button>
+        : !working && !reviewable && <button className="icon-btn" aria-label={`Dismiss ${label} update`} onClick={onDismiss}><X size={14} /></button>}
+    </div>
+    {error && <p role="alert">{error}</p>}
+    {reviewable && <details className="connection-run__review">
+      <summary>Review downloaded data</summary>
+      <SyncReviewPanel
+        review={job.review!}
+        isWorking={busy}
+        error={job.error || ''}
+        onConfirm={(accountMappings, outcomeRevision) => void act(() => trpcClient.dataSync.confirm.mutate({ runId: job.runId, accountMappings, outcomeRevision }), true)}
+        onDiscard={() => void act(() => trpcClient.dataSync.discard.mutate({ runId: job.runId }))}
+      />
+    </details>}
+  </article>;
 }
 
 export default function DataFreshnessPanel({ onImportComplete }: DataFreshnessPanelProps) {
   const [searchParams, setSearchParams] = useSearchParams();
   const focusedAccountId = Number(searchParams.get('accountId')) || null;
-  const [syncRunId, setSyncRunId] = useState(() => localStorage.getItem('easymoney-active-sync-run') || '');
-  const [syncAction, setSyncAction] = useState<'confirm' | 'discard' | ''>('');
-  const [syncActionError, setSyncActionError] = useState('');
-  const [closingAccount, setClosingAccount] = useState<FreshnessAccount | null>(null);
-  const [closureDate, setClosureDate] = useState('');
-  const [closureDestination, setClosureDestination] = useState('');
-  const { accounts: closureAccounts } = useAccounts();
-  const [closureBusy, setClosureBusy] = useState(false);
-  const [closureError, setClosureError] = useState('');
-  const closureFormRef = useRef<HTMLFormElement>(null);
-  useEffect(() => {
-    if (closingAccount) closureFormRef.current?.scrollIntoView({ block: 'center' });
-  }, [closingAccount]);
-  const freshnessQuery = useQuery(trpc.dataFreshness.report.queryOptions());
-  const syncTargetsQuery = useQuery(trpc.dataSync.targets.queryOptions());
-  const syncQuery = useQuery({
-    ...trpc.dataSync.status.queryOptions({ runId: syncRunId || 'none' }),
-    enabled: Boolean(syncRunId),
-    refetchInterval: query => query.state.data?.status === 'running' ? 750 : false,
+  const [showAll, setShowAll] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [actionError, setActionError] = useState('');
+  const [dismissed, setDismissed] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('easymoney-dismissed-sync-runs') || '[]') as string[]; }
+    catch { return []; }
   });
+  const { accounts: accountMetadata } = useAccounts();
+  const freshnessQuery = useQuery(trpc.dataFreshness.report.queryOptions());
+  const targetsQuery = useQuery(trpc.dataSync.targets.queryOptions());
+  const jobsQuery = useQuery({ ...trpc.dataSync.jobs.queryOptions(), refetchInterval: 1500 });
   const report = freshnessQuery.data as FreshnessReport | undefined;
-  const syncJob = syncQuery.data;
-  const error = freshnessQuery.error ? freshnessQuery.error.message : '';
-
-  const accounts = useMemo(
-    () => [...(report?.accounts || [])].filter(account => !focusedAccountId || account.accountId === focusedAccountId).sort(accountSort),
-    [report?.accounts, focusedAccountId]
-  );
-  const needsUpdate = (report?.summary.staleAccounts || 0) +
-    (report?.summary.dueAccounts || 0) +
-    (report?.summary.noDataAccounts || 0);
-  const syncTargets = (syncTargetsQuery.data ?? []) as SyncTarget[];
-  const syncIsActive = syncJob?.status === 'running' || syncJob?.status === 'importing' || syncJob?.status === 'awaiting-confirmation';
-
-  useEffect(() => {
-    if (!syncJob || syncJob.status !== 'complete') return;
-    void Promise.all([
-      queryClient.invalidateQueries({ queryKey: trpc.dataFreshness.report.queryKey() }),
-      queryClient.invalidateQueries({ queryKey: trpc.imports.history.queryKey() }),
-    ]);
-  }, [syncJob?.status]);
-
-  const startInstitutionSync = async (
-    target: SyncTarget,
-    kind: 'current' | 'backfill',
-  ) => {
-    const goal = kind === 'current'
-      ? { kind: 'current' as const, overlapDays: 7 }
-      : { kind: 'backfill' as const };
-    setSyncActionError('');
-    const job = await trpcClient.dataSync.start.mutate({
-      institutionId: target.institutionId,
-      connectionId: target.connectionId,
-      goal,
-    });
-    localStorage.setItem('easymoney-active-sync-run', job.runId);
-    setSyncRunId(job.runId);
+  const targets = targetsQuery.data || [];
+  const jobs = jobsQuery.data || [];
+  const activeJobs = jobs.filter(job => ['queued', 'running', 'awaiting-confirmation', 'importing'].includes(job.status));
+  const visibleJobs = jobs.filter(job => activeJobs.includes(job) || (!dismissed.includes(job.runId) && Date.now() - Date.parse(job.startedAt) < 86_400_000));
+  const accounts = (report?.accounts || []).filter(account => !focusedAccountId || account.accountId === focusedAccountId);
+  const needsAttention = (account: FreshnessAccount) => account.needsUpdate;
+  const dueAccounts = accounts.filter(needsAttention);
+  const visibleAccounts = showAll || focusedAccountId ? accounts : dueAccounts;
+  const targetBusy = (target: SyncTarget) => activeJobs.some(job => job.institutionId === target.institutionId && (!job.connectionId || !target.connectionId || job.connectionId === target.connectionId));
+  const dueTargets = targets.filter(target => target.accountIds?.some(id => dueAccounts.some(account => account.accountId === id)));
+  const startTargets = async (selected: SyncTarget[], kind: 'current' | 'backfill') => {
+    setStarting(true);
+    setActionError('');
+    const results = await Promise.allSettled(selected.filter(target => !targetBusy(target)).map(target => trpcClient.dataSync.start.mutate({
+      institutionId: target.institutionId, connectionId: target.connectionId,
+      goal: kind === 'current' ? { kind: 'current', overlapDays: 7 } : { kind: 'backfill' },
+    })));
+    const failures = results.filter(result => result.status === 'rejected');
+    if (failures.length) setActionError(`${failures.length} update(s) could not start. ${failures.map(result => result.reason instanceof Error ? result.reason.message : 'Please try again.').join(' ')}`);
+    await jobsQuery.refetch();
+    setStarting(false);
   };
-
-  const cancelSync = async () => {
-    if (!syncRunId) return;
-    await trpcClient.dataSync.cancel.mutate({ runId: syncRunId });
-    await syncQuery.refetch();
+  const reason = (account: FreshnessAccount) => {
+    if (account.status === 'closed') return 'Closed · no updates needed';
+    if (account.status === 'on-demand') return 'No regular statements · reminders off';
+    const reasons: string[] = [];
+    if (account.transactionStatus !== 'current') reasons.push(account.activityCheckedThrough || account.latestTransactionDate
+      ? `Activity through ${formatFreshnessDate(account.activityCheckedThrough || account.latestTransactionDate)}` : 'No activity imported');
+    if (account.balanceStatus !== 'current') reasons.push(account.latestBalanceDate ? `Balance last reported ${formatFreshnessDate(account.latestBalanceDate)}` : 'No balance imported');
+    return reasons.join(' · ') || 'Up to date';
   };
-
-  const dismissSync = () => {
-    localStorage.removeItem('easymoney-active-sync-run');
-    setSyncRunId('');
-  };
-
-  const confirmSync = async (accountMappings: SyncAccountMappingDecision[], outcomeRevision: string) => {
-    if (!syncRunId) return;
-    setSyncAction('confirm');
-    setSyncActionError('');
-    try {
-      await trpcClient.dataSync.confirm.mutate({ runId: syncRunId, accountMappings, outcomeRevision });
-      await onImportComplete?.();
-      await syncQuery.refetch();
-    } catch (actionError) {
-      setSyncActionError(actionError instanceof Error ? actionError.message : 'Import failed');
-      await syncQuery.refetch();
-    } finally {
-      setSyncAction('');
-    }
-  };
-
-  const discardSync = async () => {
-    if (!syncRunId) return;
-    setSyncAction('discard');
-    setSyncActionError('');
-    try {
-      await trpcClient.dataSync.discard.mutate({ runId: syncRunId });
-      await syncQuery.refetch();
-    } catch (actionError) {
-      setSyncActionError(actionError instanceof Error ? actionError.message : 'Could not discard downloaded data');
-    } finally {
-      setSyncAction('');
-    }
-  };
-
-  const setAccountStatus = async (account: FreshnessAccount) => {
-    if (account.status === 'closed') {
-      await trpcClient.accounts.unarchive.mutate({ id: account.accountId });
-    } else {
-      setClosureError('');
-      setClosureDate('');
-      setClosureDestination('');
-      setClosingAccount(account);
-      return;
-    }
-    await queryClient.invalidateQueries();
-  };
-
-  return (
-    <section className="data-freshness" aria-label="Data freshness">
-      {closingAccount && <form ref={closureFormRef} className="sync-review" aria-label="Close account for reporting" onSubmit={async event => {
-        event.preventDefault();
-        setClosureBusy(true);
-        setClosureError('');
-        try {
-          await trpcClient.accounts.markClosed.mutate({ id: closingAccount.accountId, closedOn: closureDate, destinationAccountId: closureDestination ? Number(closureDestination) : undefined });
-          await queryClient.invalidateQueries();
-          setClosingAccount(null);
-        } catch (error) {
-          setClosureError(error instanceof Error ? error.message : 'Could not close account');
-        } finally { setClosureBusy(false); }
-      }}>
-        <h3>Close {closingAccount.accountName} for reporting</h3>
-        <p>Confirm its balance is zero as of this date. Earlier history is preserved; no expense or transfer is created. Newer statements remain authoritative. Reopening removes this assertion.</p>
-        <label>Zero balance as of <input type="date" required value={closureDate} onChange={event => setClosureDate(event.target.value)} /></label>
-        <label>Transferred to <select value={closureDestination} onChange={event => setClosureDestination(event.target.value)}>
-          <option value="">Not specified</option>
-          {closureAccounts.filter(account => account.id !== closingAccount.accountId).map(account => <option key={account.id} value={account.id}>{account.name} · {account.institution} {account.last4 ? `••${account.last4}` : ''}</option>)}
-        </select></label>
-        {closureError && <p role="alert">{closureError}</p>}
-        <button type="submit" disabled={closureBusy}>{closureBusy ? 'Closing…' : 'Confirm zero balance and close'}</button>
-        <button type="button" disabled={closureBusy} onClick={() => setClosingAccount(null)}>Cancel</button>
-      </form>}
-      <div className="data-freshness__header">
-        <div>
-          <h2>Data Freshness</h2>
-          <p>
-            {report
-              ? `${needsUpdate} accounts have overdue source facts. ${report.accounts.filter(account => account.status !== 'on-demand' && account.balanceStatus !== 'current' && account.balanceStatus !== 'closed').length} need newer balances. Stale after ${report.staleAfterDays} days.`
-              : 'Checking latest imported activity and balances.'}
-          </p>
-        </div>
-        {report && <div className="data-freshness__header-actions">
-          {syncTargets.length > 0 && !syncIsActive && (
-            <div className="data-freshness__sync-actions">
-              <SyncActionMenu
-                icon="history"
-                label="Import older data"
-                targets={syncTargets}
-                onSelect={target => void startInstitutionSync(target, 'backfill')}
-              />
-              <SyncActionMenu
-                icon="refresh"
-                label="Catch up"
-                primary
-                targets={syncTargets}
-                onSelect={target => void startInstitutionSync(target, 'current')}
-              />
-            </div>
-          )}
-          <div className="data-freshness__summary" aria-label="Freshness summary">
-            <span><strong>{report.summary.currentAccounts}</strong> current</span>
-            <span><strong>{report.summary.dueAccounts}</strong> due</span>
-            <span><strong>{report.summary.staleAccounts}</strong> stale</span>
-            <span><strong>{report.summary.noDataAccounts}</strong> no data</span>
-            <span><strong>{report.summary.closedAccounts}</strong> closed</span>
-            {report.summary.onDemandAccounts > 0 && <span><strong>{report.summary.onDemandAccounts}</strong> on demand</span>}
-          </div>
-        </div>}
+  return <section className="data-freshness" aria-label="Account updates">
+    {visibleJobs.length > 0 && <section className="connection-runs" aria-label="Updates">
+      <h2>Updates</h2>
+      {visibleJobs.map(job => <SyncConnectionRun key={job.runId} job={job}
+        label={targets.find(target => target.institutionId === job.institutionId && target.connectionId === job.connectionId)?.label || job.institutionId.replaceAll('-', ' ').replace(/\b\w/g, letter => letter.toUpperCase())}
+        onImportComplete={onImportComplete}
+        onDismiss={() => {
+          const next = [...dismissed, job.runId];
+          setDismissed(next);
+          try { localStorage.setItem('easymoney-dismissed-sync-runs', JSON.stringify(next)); } catch { /* Optional preference. */ }
+        }} />)}
+    </section>}
+    <div className="data-freshness__header">
+      <div><h2>{dueAccounts.length ? 'Needs updating' : 'Account updates'}</h2>
+        <p>{report ? dueAccounts.length ? `${dueAccounts.length} account${dueAccounts.length === 1 ? '' : 's'} need${dueAccounts.length === 1 ? 's' : ''} newer activity or balances.` : 'No scheduled updates due.' : 'Checking your accounts…'}</p>
       </div>
-
-      {syncJob && syncJob.status !== 'awaiting-confirmation' && (
-        <div className={`data-freshness__sync-status is-${syncJob.status}`} role="status">
-          {(syncJob.status === 'running' || syncJob.status === 'importing') && <LoaderCircle className="spin" size={15} />}
-          <span>{syncJob.message}</span>
-          {syncJob.status === 'running' ? (
-            <button className="btn btn--text btn--sm" type="button" onClick={() => void cancelSync()}>Cancel</button>
-          ) : syncJob.status === 'importing' ? null : (
-            <button className="icon-btn icon-btn--sm" type="button" aria-label="Dismiss sync status" onClick={dismissSync}><X size={14} /></button>
-          )}
+      <button className="btn btn-primary" disabled={starting || !dueTargets.some(target => !targetBusy(target))} onClick={() => void startTargets(dueTargets, 'current')}>
+        <RefreshCw size={15} />Update due accounts
+      </button>
+    </div>
+    {(actionError || freshnessQuery.error || jobsQuery.error || targetsQuery.error) && <p role="alert">{actionError || freshnessQuery.error?.message || jobsQuery.error?.message || targetsQuery.error?.message}</p>}
+    {focusedAccountId && <button className="btn btn--text" onClick={() => setSearchParams({})}>Clear account filter</button>}
+    <div className="connection-list">
+      {targets.filter(target => target.accountIds?.some(id => visibleAccounts.some(account => account.accountId === id))).map(target => <div className="connection-group" key={target.id}>
+        <div className="connection-group__heading"><h3>{target.label}</h3>
+          <button className="btn btn-secondary btn--sm" disabled={starting || targetBusy(target)} onClick={() => void startTargets([target], 'current')}>{targetBusy(target) ? 'Update in progress' : 'Update'}</button>
         </div>
-      )}
-
-      {syncJob?.status === 'awaiting-confirmation' && syncJob.review && (
-        <SyncReviewPanel
-          review={syncJob.review}
-          isWorking={Boolean(syncAction)}
-          error={syncActionError || syncJob.error || ''}
-          onConfirm={(accountMappings, revision) => void confirmSync(accountMappings, revision)}
-          onDiscard={() => void discardSync()}
-        />
-      )}
-
-      {error && <div className="import-history__error">{error}</div>}
-      {!report && !error && <div className="empty-state-simple">Loading freshness...</div>}
-
-      {report && (
-        <div className="data-freshness__table-wrap">
-          {focusedAccountId && <p>Showing the account selected in your report. <button onClick={() => setSearchParams({})}>Show all accounts</button></p>}
-          <table className="data-freshness__table">
-            <colgroup>
-              <col className="data-freshness__col-account" />
-              <col className="data-freshness__col-status" />
-              <col className="data-freshness__col-latest" />
-              <col className="data-freshness__col-import" />
-              <col className="data-freshness__col-download" />
-              <col className="data-freshness__col-action" />
-            </colgroup>
-            <thead>
-              <tr>
-                <th>Account</th>
-                <th>Status</th>
-                <th>Latest data</th>
-                <th>Last import</th>
-                <th>Download</th>
-                <th aria-label="Actions" />
-              </tr>
-            </thead>
-            <tbody>
-              {accounts.map(account => {
-                const StatusIcon = STATUS_ICONS[account.status];
-                return (
-                  <tr key={account.accountId}>
-                    <td>
-                      <strong>{account.accountName}</strong>
-                      <small>{account.institution || 'Unknown institution'} · {account.accountType}</small>
-                    </td>
-                    <td>
-                      <span className={`data-freshness__status ${account.status}`}>
-                        <StatusIcon size={13} />
-                        {STATUS_LABELS[account.status]}
-                      </span>
-                      <small>Transactions: {STATUS_LABELS[account.transactionStatus]}</small>
-                      <small>Balance: {STATUS_LABELS[account.balanceStatus]}</small>
-                      {account.status === 'on-demand' && <small>No regular statements · reminders off</small>}
-                    </td>
-                    <td>
-                      <strong>{formatFreshnessDate(account.latestFactDate)}</strong>
-                      <small>{formatAge(account)} old</small>
-                      {account.activityCheckedThrough && <small>Activity covered through {formatFreshnessDate(account.activityCheckedThrough)}</small>}
-                    </td>
-                    <td>
-                      <strong>{account.latestParserName || '—'}</strong>
-                      <small>{account.latestImportFileName || 'No committed import'}</small>
-                    </td>
-                    <td>
-                      <span className="data-freshness__download-text">
-                        {account.status === 'closed'
-                          ? 'No catch-up needed'
-                          : account.suggestedDownloads.length > 0
-                          ? account.suggestedDownloads.join(', ')
-                          : 'Custom CSV'}
-                      </span>
-                    </td>
-                    <td className="data-freshness__actions">
-                      <button
-                        className="btn btn--secondary btn--sm"
-                        type="button"
-                        onClick={() => void setAccountStatus(account)}
-                      >
-                        {account.status === 'closed' ? 'Reopen' : 'Mark closed'}
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
-  );
+        {visibleAccounts.filter(account => target.accountIds?.includes(account.accountId)).map(account => <div className="connection-account" key={account.accountId}>
+          <span><strong>{account.accountName}</strong><small>{accountMetadata.find(item => item.id === account.accountId)?.accountHolder}</small></span>
+          <span className={needsAttention(account) ? 'connection-account__reason' : ''}>{reason(account)}</span>
+        </div>)}
+      </div>)}
+      {visibleAccounts.filter(account => !targets.some(target => target.accountIds?.includes(account.accountId))).map(account => <div className="connection-account" key={account.accountId}>
+        <span><strong>{account.accountName}</strong><small>{account.institution} · {accountMetadata.find(item => item.id === account.accountId)?.accountHolder}</small></span>
+        <span>{reason(account)}{needsAttention(account) && <small>Upload a statement or activity export</small>}</span>
+      </div>)}
+    </div>
+    <div className="data-freshness__footer">
+      <button className="btn btn--text btn--sm" onClick={() => setShowAll(!showAll)}>{showAll ? 'Show only accounts needing updates' : `Show all ${accounts.length} accounts`}</button>
+      <div className="data-freshness__sync-actions">
+        <SyncActionMenu icon="refresh" label="Update a connection" targets={targets.filter(target => !targetBusy(target))} onSelect={target => void startTargets([target], 'current')} />
+        <SyncActionMenu icon="history" label="Import older data" targets={targets.filter(target => !targetBusy(target))} onSelect={target => void startTargets([target], 'backfill')} />
+      </div>
+    </div>
+  </section>;
 }
