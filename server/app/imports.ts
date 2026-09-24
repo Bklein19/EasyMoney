@@ -16,7 +16,7 @@ import { CUSTOM_CSV_PARSER_ID, parseCustomCsv } from './importParsers/customCsv.
 import { mappingFromProfile } from './importParsers/csvMapping.ts';
 import { resolveImportParser } from './importParsers/index.ts';
 import parserVersions from './importParsers/versions.json';
-import { buildLedgerFromSourceFacts, materializeLedger } from './ledgerRebuild.ts';
+import { buildLedgerFromSourceFacts, materializeLedger, rebuildLedgerForAccounts } from './ledgerRebuild.ts';
 import { assignLedgerTransactionIdentities, getLedgerTransactionBaseKey } from './transactionIdentity.ts';
 
 interface PreviewImportOptions {
@@ -265,6 +265,32 @@ export function listImportHistory(): ImportHistoryItem[] {
   }));
 }
 
+/** Include both mapped destinations and accounts still owning prior ledger rows. */
+export function getImportLedgerAccountIds(importFileIds: readonly number[], sourceAccountIds: readonly number[] = []) {
+  const files = [...new Set(importFileIds)];
+  const sources = [...new Set(sourceAccountIds)];
+  const fileSlots = files.map(() => '?').join(',') || 'NULL';
+  const sourceSlots = sources.map(() => '?').join(',') || 'NULL';
+  const rows = getDb().prepare(`
+    SELECT sa.accountId FROM sourceAccounts sa JOIN sourceFiles sf ON sf.id = sa.sourceFileId
+    WHERE sa.accountId IS NOT NULL AND (sf.importFileId IN (${fileSlots}) OR sa.id IN (${sourceSlots}))
+    UNION
+    SELECT accountId FROM ledgerTransactions WHERE importFileId IN (${fileSlots})
+    UNION
+    SELECT lt.accountId FROM ledgerTransactions lt
+    JOIN ledgerProvenance lp ON lp.ledgerTransactionId = lt.ledgerTransactionId
+    JOIN sourceTransactions st ON st.id = lp.sourceTransactionId
+    JOIN sourceFiles sf ON sf.id = st.sourceFileId
+    WHERE sf.importFileId IN (${fileSlots}) OR st.sourceAccountId IN (${sourceSlots})
+    UNION
+    SELECT lb.accountId FROM ledgerBalances lb
+    JOIN sourceBalances sb ON sb.id = lb.sourceBalanceId
+    JOIN sourceFiles sf ON sf.id = sb.sourceFileId
+    WHERE sf.importFileId IN (${fileSlots}) OR sb.sourceAccountId IN (${sourceSlots})
+  `).all(...files, ...sources, ...files, ...files, ...sources, ...files, ...sources) as Array<{ accountId: number }>;
+  return rows.map(row => row.accountId).sort((a, b) => a - b);
+}
+
 export function unimportFile(importFileId: number | string) {
   const id = Number(importFileId);
   if (!Number.isFinite(id)) throw new Error('Invalid import file id');
@@ -276,6 +302,7 @@ export function unimportFile(importFileId: number | string) {
   if (!importFile) throw new Error(`Import file not found: ${id}`);
 
   db.transaction(() => {
+    const affectedAccountIds = getImportLedgerAccountIds([id]);
     db.prepare(`
       UPDATE importRows
       SET transactionId = NULL, fingerprint = NULL
@@ -291,9 +318,8 @@ export function unimportFile(importFileId: number | string) {
       SET status = 'unimported', importBatchId = NULL, committedAt = NULL
       WHERE id = ?
     `).run(id);
+    rebuildLedgerReadModel(affectedAccountIds);
   })();
-
-  materializeLedger(db, buildLedgerFromSourceFacts(db));
   return { ok: true, importFileId: id };
 }
 
@@ -337,7 +363,8 @@ export function reimportFile(importFileId: number | string) {
   }
 
   const now = new Date().toISOString();
-  db.transaction(() => {
+  const materialized = db.transaction(() => {
+    const affectedAccountIds = getImportLedgerAccountIds([id]);
     db.prepare(`
       UPDATE importRows
       SET transactionId = NULL, fingerprint = NULL
@@ -362,9 +389,8 @@ export function reimportFile(importFileId: number | string) {
       importBatchId: `reimport-${id}-${hashContent(now).slice(0, 12)}`,
       committedAt: now,
     });
+    return rebuildLedgerReadModel(affectedAccountIds);
   })();
-
-  const materialized = materializeLedger(db, buildLedgerFromSourceFacts(db));
   return { ok: true, importFileId: id, ...materialized };
 }
 
@@ -386,6 +412,7 @@ export function unimportFiles(importFileIds: Array<number | string> | undefined 
   if (missing.length > 0) throw new Error(`Import file not found: ${missing[0]}`);
 
   db.transaction(() => {
+    const affectedAccountIds = getImportLedgerAccountIds(ids);
     for (const id of ids) {
       db.prepare(`
         UPDATE importRows
@@ -403,9 +430,8 @@ export function unimportFiles(importFileIds: Array<number | string> | undefined 
         WHERE id = ?
       `).run(id);
     }
+    rebuildLedgerReadModel(affectedAccountIds);
   })();
-
-  materializeLedger(db, buildLedgerFromSourceFacts(db));
   return { ok: true, importFileIds: ids, count: ids.length };
 }
 
@@ -452,7 +478,8 @@ export function reimportFiles(importFileIds: Array<number | string> | undefined 
   }
 
   const now = new Date().toISOString();
-  db.transaction(() => {
+  const materialized = db.transaction(() => {
+    const affectedAccountIds = getImportLedgerAccountIds(ids);
     for (const id of ids) {
       db.prepare(`
         UPDATE importRows
@@ -479,9 +506,8 @@ export function reimportFiles(importFileIds: Array<number | string> | undefined 
         committedAt: now,
       });
     }
+    return rebuildLedgerReadModel(affectedAccountIds);
   })();
-
-  const materialized = materializeLedger(db, buildLedgerFromSourceFacts(db));
   return { ok: true, importFileIds: ids, count: ids.length, ...materialized };
 }
 
@@ -1876,6 +1902,9 @@ function commitImportUnsafe({
     }
   }
 
+  const mappings = accountMappings || importMeta?.accountMappings || null;
+  const sourceAccountIds = mappings?.map(mapping => Number(mapping.sourceAccountId)) ?? [];
+  const affectedAccountIds = rebuildLedger ? getImportLedgerAccountIds([stagedImportFileId], sourceAccountIds) : [];
   const result = materializeImportTransactions({
     accountId,
     importFileId,
@@ -1883,7 +1912,7 @@ function commitImportUnsafe({
     forceImportRowIds,
     balanceRowIds,
     transactions,
-    accountMappings: accountMappings || importMeta?.accountMappings || null,
+    accountMappings: mappings,
     fallbackImportFileId: importMeta?.importFileId || null,
   });
 
@@ -1913,8 +1942,8 @@ function commitImportUnsafe({
     }
   }
 
-  if (rebuildLedger && importFileHasSourceFacts(importFileId) && !(forceImportRowIds?.length)) {
-    rebuildLedgerReadModel();
+  if (rebuildLedger && importFileHasSourceFacts(stagedImportFileId) && !(forceImportRowIds?.length)) {
+    rebuildLedgerReadModel([...affectedAccountIds, ...getImportLedgerAccountIds([stagedImportFileId], sourceAccountIds)]);
   }
 
   return result;
@@ -1924,7 +1953,9 @@ export function commitImport(options: CommitImportOptions) {
   return getDb().transaction(() => commitImportUnsafe(options))();
 }
 
-export function rebuildLedgerReadModel() {
+export function rebuildLedgerReadModel(accountIds?: readonly number[]) {
   const db = getDb();
-  return materializeLedger(db, buildLedgerFromSourceFacts(db));
+  return accountIds === undefined
+    ? materializeLedger(db, buildLedgerFromSourceFacts(db))
+    : rebuildLedgerForAccounts(accountIds, db);
 }

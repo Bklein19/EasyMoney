@@ -70,6 +70,8 @@ export interface RebuiltBalanceSnapshot {
 }
 
 export interface RebuiltLedger {
+  /** Omitted for a full rebuild; an empty list is an explicit no-op. */
+  accountIds?: number[];
   transactions: RebuiltTransaction[];
   balanceSnapshots: RebuiltBalanceSnapshot[];
   provenance?: Array<{ ledgerTransactionId: string; sourceTransactionId: number; reason: string; selected: boolean }>;
@@ -176,7 +178,17 @@ export function isStatementSummary(transaction: {
     (transaction.raw.source === 'fidelity-portfolio-statement' && transaction.raw.type === 'securities-transferred-out');
 }
 
-export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
+function normalizeRebuildAccounts(accountIds: readonly number[]) {
+  if (accountIds.some(id => !Number.isSafeInteger(id) || id === 0)) {
+    throw new Error('Ledger rebuild account IDs must be nonzero safe integers.');
+  }
+  return [...new Set(accountIds)].sort((a, b) => a - b);
+}
+
+export function buildLedgerFromSourceFacts(db = getDb(), accountIds?: readonly number[]): RebuiltLedger {
+  const scope = accountIds === undefined ? undefined : normalizeRebuildAccounts(accountIds);
+  const parameters = scope ?? [];
+  const accountFilter = scope === undefined ? '' : `AND sa.accountId IN (${scope.map(() => '?').join(',') || 'NULL'})`;
   const decisions = new Map<number, { representative: number; reason: string }>();
   const sourceTransactions = db.prepare(`
     SELECT
@@ -203,8 +215,9 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
     LEFT JOIN importRows ir ON ir.id = st.importRowId
     WHERE sf.status = 'committed'
       AND sa.accountId IS NOT NULL
+      ${accountFilter}
     ORDER BY st.sourceFileId ASC, st.id ASC
-  `).all() as SourceTransactionRow[];
+  `).all(...parameters) as SourceTransactionRow[];
 
   const transactionInputs = sourceTransactions.map(row => {
     const raw = parseRaw(row.rawJson);
@@ -323,11 +336,12 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
   // Legacy parser moneyIds can be hashes, not authoritative bank IDs. They
   // must never collapse multiple occurrences retained from the same document.
   const sourceIdentityGroups = new Map<string, Map<number, typeof transactionInputs>>();
-  for (const transaction of [...retainedTransactionInputs].sort((a, b) =>
-    getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b)))) {
-    // Document activity already has occurrence-aware matching above. A parser
-    // hash cannot establish equality for otherwise different descriptions.
-    if (['activity-export', 'statement'].includes(transaction.sourceType || '')) continue;
+  // Document activity already has occurrence-aware matching above. Exclude it
+  // before sorting so normal imports do not pay for unused occurrence keys.
+  const sourceIdentityInputs = [...retainedTransactionInputs]
+    .filter(transaction => !['activity-export', 'statement'].includes(transaction.sourceType || ''))
+    .sort((a, b) => getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b)));
+  for (const transaction of sourceIdentityInputs) {
     const identity = sourceIdentityKey(transaction);
     const files = sourceIdentityGroups.get(identity) ?? new Map<number, typeof transactionInputs>();
     sourceIdentityGroups.set(identity, files);
@@ -556,8 +570,9 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
     JOIN sourceAccounts sa ON sa.id = sb.sourceAccountId
     WHERE sf.status = 'committed'
       AND sa.accountId IS NOT NULL
+      ${accountFilter}
     ORDER BY sb.date ASC, sb.id ASC
-  `).all() as SourceBalanceRow[];
+  `).all(...parameters) as SourceBalanceRow[];
   const balancesByAccountMonth = new Map<string, RebuiltBalanceSnapshot>();
   const sourceBalanceByAccountMonth = new Map<string, SourceBalanceRow[]>();
   const balanceConflicts: NonNullable<RebuiltLedger['balanceConflicts']> = [];
@@ -593,7 +608,9 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
   // A confirmed closure is a dated balance assertion, never a transaction.
   // Newer imported balances remain authoritative (and disagreements are surfaced
   // by the account read model). Earlier months and all source facts stay intact.
-  const closures = db.prepare('SELECT id, reportingClosedOn FROM accounts WHERE reportingClosedOn IS NOT NULL').all() as Array<{ id: number; reportingClosedOn: string }>;
+  const closures = db.prepare(`SELECT id, reportingClosedOn FROM accounts WHERE reportingClosedOn IS NOT NULL
+    ${scope === undefined ? '' : `AND id IN (${scope.map(() => '?').join(',') || 'NULL'})`}
+  `).all(...parameters) as Array<{ id: number; reportingClosedOn: string }>;
   for (const closure of closures) {
     const month = closure.reportingClosedOn.slice(0, 7);
     const key = `${closure.id}|${month}`;
@@ -607,6 +624,7 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
   }
 
   return {
+    ...(scope === undefined ? {} : { accountIds: scope }),
     transactions,
     provenance,
     ambiguities,
@@ -626,15 +644,45 @@ export function ledgerFingerprint(ledger: RebuiltLedger) {
 }
 
 export function materializeLedger(db = getDb(), ledger = buildLedgerFromSourceFacts(db)) {
+  return db.transaction(() => materializeLedgerInTransaction(db, ledger))();
+}
+
+/** Build and replace an account's complete history in the same transaction. */
+export function rebuildLedgerForAccounts(accountIds: readonly number[], db = getDb()) {
+  return db.transaction(() => materializeLedger(db, buildLedgerFromSourceFacts(db, accountIds)))();
+}
+
+function materializeLedgerInTransaction(db: ReturnType<typeof getDb>, ledger: RebuiltLedger) {
+  let scope = ledger.accountIds === undefined ? undefined : normalizeRebuildAccounts(ledger.accountIds);
+  if (scope !== undefined) {
+    const accounts = new Set(scope);
+    const transactionIds = new Set(ledger.transactions.map(row => row.ledgerTransactionId));
+    if (ledger.transactions.some(row => !accounts.has(row.accountId)) ||
+      ledger.balanceSnapshots.some(row => !accounts.has(row.accountId)) ||
+      ledger.provenance?.some(row => !transactionIds.has(row.ledgerTransactionId))) {
+      throw new Error('Scoped ledger contains rows outside its rebuild accounts.');
+    }
+    if (scope.length === 0) return { transactionCount: 0, balanceSnapshotCount: 0 };
+    // A new installation or changed matching policy needs one complete rebuild.
+    // Never leave other accounts materialized under a different policy.
+    if (db.prepare('SELECT policyVersion FROM ledgerRebuildState WHERE id = 1').get()?.policyVersion !== LEDGER_REBUILD_POLICY_VERSION) {
+      ledger = buildLedgerFromSourceFacts(db);
+      scope = undefined;
+    }
+  }
   if (ledger.balanceConflicts?.length) {
     throw new Error('Ledger contains conflicting same-date balances; resolve conflicts before materializing.');
   }
   db.transaction(() => {
-    db.prepare('DELETE FROM ledgerProvenance').run();
-    db.prepare('DELETE FROM ledgerTransactions').run();
-    db.prepare('DELETE FROM ledgerBalances').run();
-    db.prepare('DELETE FROM transactions').run();
-    db.prepare('DELETE FROM balanceSnapshots').run();
+    const parameters = scope ?? [];
+    const filter = scope === undefined ? '' : `WHERE accountId IN (${scope.map(() => '?').join(',')})`;
+    db.prepare(`DELETE FROM ledgerProvenance ${scope === undefined ? '' : `WHERE ledgerTransactionId IN (SELECT ledgerTransactionId FROM ledgerTransactions ${filter})`}`).run(...parameters);
+    // Clear pointers to replaced legacy rows, including occurrences no longer
+    // selected after an unimport or remapping. Leave other accounts untouched.
+    db.prepare(`UPDATE importRows SET transactionId = NULL WHERE transactionId IN (SELECT id FROM transactions ${filter})`).run(...parameters);
+    for (const table of ['ledgerTransactions', 'ledgerBalances', 'transactions', 'balanceSnapshots']) {
+      db.prepare(`DELETE FROM ${table} ${filter}`).run(...parameters);
+    }
 
     const insertTransaction = db.prepare(`
       INSERT INTO transactions (
@@ -796,6 +844,10 @@ export function materializeLedger(db = getDb(), ledger = buildLedgerFromSourceFa
         createdAt: now,
         updatedAt: now,
       });
+    }
+    if (scope === undefined) {
+      db.prepare('INSERT INTO ledgerRebuildState (id, policyVersion) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET policyVersion = excluded.policyVersion')
+        .run(LEDGER_REBUILD_POLICY_VERSION);
     }
   })();
 

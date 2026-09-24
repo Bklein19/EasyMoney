@@ -5,7 +5,7 @@ import path from 'node:path';
 process.env.EASYMONEY_DB_PATH = path.join(os.tmpdir(), `easymoney-ledger-rebuild-${process.pid}.sqlite`);
 
 const { getDb, initDatabase, insertRow } = await import('../database.ts');
-const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
+const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger, rebuildLedgerForAccounts, LEDGER_REBUILD_POLICY_VERSION } = await import('./ledgerRebuild.ts');
 const { upsertTransactionAnnotation } = await import('./transactionAnnotations.ts');
 const { getTransactionDetails } = await import('./transactionDetails.ts');
 const { overlapOccurrenceKey, recordDistinctOverlap } = await import('./reviewedOverlap');
@@ -15,6 +15,8 @@ function resetAppTables() {
   initDatabase();
   db.transaction(() => {
     for (const table of [
+      'ledgerRebuildState',
+      'ledgerProvenance',
       'reviewedDistinctOverlaps',
       'parserAnnotationHistory',
       'parserRefreshAccountChoices',
@@ -168,6 +170,50 @@ function insertSourceBalance({
 
 beforeEach(() => {
   resetAppTables();
+});
+
+test('existing databases gain indexed import-row lookups without changing source occurrences', () => {
+  const db = getDb();
+  const accountId = Number(insertRow('accounts', { name: 'Index fixture', type: 'checking' }));
+  const source = insertCommittedSourceFile({ fileName: 'index.csv', parserName: 'fixture', sourceType: 'activity-export', priority: 100, institution: 'Fixture' });
+  const sourceAccountId = insertSourceAccount(source.sourceFileId, accountId, 'index-fixture');
+  const importRowId = Number(insertRow('importRows', { importFileId: source.importFileId, rowIndex: 0, rawJson: '{}', normalizedJson: '{}' }));
+  for (let occurrence = 0; occurrence < 3; occurrence++) {
+    const id = insertSourceTransaction({ ...source, sourceAccountId, stableSourceId: `occurrence-${occurrence}`, date: '2026-09-01', amountCents: -1000, description: 'Repeated purchase', priority: 100 });
+    // The lookup is deliberately non-unique; absent references are valid too.
+    if (occurrence < 2) db.prepare('UPDATE sourceTransactions SET importRowId = ? WHERE id = ?').run(importRowId, id);
+  }
+  const before = buildLedgerFromSourceFacts(db);
+  const sourceRows = db.prepare('SELECT * FROM sourceTransactions ORDER BY id').all();
+  db.exec('DROP INDEX idx_source_transactions_import_row');
+  db.prepare('DELETE FROM schemaMigrations WHERE name = ?').run('2026-09-24-source-transaction-import-row-index');
+
+  initDatabase();
+  initDatabase();
+
+  const plan = db.prepare('EXPLAIN QUERY PLAN SELECT id FROM sourceTransactions WHERE importRowId = ? LIMIT 1').all(importRowId);
+  expect(plan.some(row => String(row.detail).includes('SEARCH sourceTransactions USING COVERING INDEX idx_source_transactions_import_row'))).toBe(true);
+  expect(db.prepare('SELECT * FROM sourceTransactions ORDER BY id').all()).toEqual(sourceRows);
+  expect(buildLedgerFromSourceFacts(db)).toEqual(before);
+  expect(before.transactions).toHaveLength(3);
+});
+
+test('legacy source identity matching preserves occurrences alongside document imports', () => {
+  const accountId = Number(insertRow('accounts', { name: 'Mixed source fixture', type: 'checking' }));
+  for (const [index, sourceType, count] of [[0, 'legacy', 2], [1, 'legacy', 1], [2, 'activity-export', 1]] as const) {
+    const source = insertCommittedSourceFile({ fileName: `mixed-${index}`, parserName: 'fixture', sourceType, priority: 100, institution: 'Fixture' });
+    const sourceAccountId = insertSourceAccount(source.sourceFileId, accountId, `mixed-${index}`);
+    for (let occurrence = 0; occurrence < count; occurrence++) {
+      insertSourceTransaction({ ...source, sourceAccountId, stableSourceId: `${index}-${occurrence}`, date: '2026-09-01', amountCents: -1000, description: 'Repeated purchase', priority: 100, raw: { moneyId: 'shared-parser-id' } });
+    }
+  }
+
+  const ledger = buildLedgerFromSourceFacts(getDb());
+  expect(ledger.transactions).toHaveLength(3);
+  expect(ledger.provenance).toHaveLength(4);
+  expect(ledger.provenance?.filter(row => !row.selected).map(row => row.reason)).toEqual([
+    'Same parser source identity matched by file occurrence; largest occurrence count retained.',
+  ]);
 });
 
 test('dated reporting closure survives rebuilds, preserves evidence, and yields to later statements', async () => {
@@ -1147,4 +1193,163 @@ test('source rebuild de-duplicates parser-stable money ids across duplicate file
     description: 'Shares Purchased -ACH',
     amount: 400,
   });
+});
+
+function scopedFixture() {
+  const db = getDb();
+  const accounts = [0, 1, 2].map(index => Number(insertRow('accounts', { name: `Scoped ${index}`, type: 'checking' })));
+  const files = accounts.map((accountId, index) => {
+    const file = insertCommittedSourceFile({ fileName: `scoped-${index}.csv`, parserName: 'fixture', sourceType: 'activity-export', priority: 100, institution: 'Fixture' });
+    const sourceAccountId = insertSourceAccount(file.sourceFileId, accountId, `scoped-${index}`);
+    for (let occurrence = 0; occurrence < 2; occurrence++) {
+      const id = insertSourceTransaction({ ...file, sourceAccountId, stableSourceId: `scoped-${index}-${occurrence}`, date: `2026-0${index + 1}-01`, amountCents: -1000, description: 'Repeated purchase', priority: 100 });
+      const importRowId = Number(insertRow('importRows', { importFileId: file.importFileId, rowIndex: occurrence, rawJson: '{}' }));
+      db.prepare('UPDATE sourceTransactions SET importRowId = ? WHERE id = ?').run(importRowId, id);
+    }
+    insertSourceBalance({ ...file, sourceAccountId, date: `2026-0${index + 1}-28`, balanceCents: 10000, priority: 100 });
+    return { ...file, sourceAccountId };
+  });
+  materializeLedger(db);
+  const transaction = db.prepare('SELECT ledgerTransactionId FROM ledgerTransactions ORDER BY ledgerTransactionId LIMIT 1').get()!;
+  insertRow('transactionAnnotations', { ledgerTransactionId: transaction.ledgerTransactionId, notes: 'Preserve my note' });
+  return { db, accounts, files };
+}
+
+function materializedContents() {
+  const db = getDb();
+  const read = (table: string, order: string, omitted: string[]) => db.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all()
+    .map(row => Object.fromEntries(Object.entries(row).filter(([key]) => !omitted.includes(key))));
+  return {
+    transactions: read('ledgerTransactions', 'ledgerTransactionId', ['id', 'legacyTransactionId', 'createdAt', 'updatedAt']),
+    balances: read('ledgerBalances', 'accountId, month', ['id', 'createdAt', 'updatedAt']),
+    provenance: read('ledgerProvenance', 'ledgerTransactionId, sourceTransactionId', []),
+    legacyTransactions: read('transactions', 'ledgerTransactionId', ['id', 'createdAt']),
+    legacyBalances: read('balanceSnapshots', 'accountId, month', ['id']),
+    pointers: db.prepare('SELECT ir.id, t.ledgerTransactionId FROM importRows ir LEFT JOIN transactions t ON t.id = ir.transactionId ORDER BY ir.id').all(),
+  };
+}
+
+function expectSameAsFullRebuild() {
+  const scoped = materializedContents();
+  getDb().exec('SAVEPOINT full_rebuild_oracle');
+  try {
+    materializeLedger();
+    expect(materializedContents()).toEqual(scoped);
+    expect(getDb().prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  } finally {
+    getDb().exec('ROLLBACK TO full_rebuild_oracle; RELEASE full_rebuild_oracle');
+  }
+}
+
+test('scoped rebuild matches full history for overlapping occurrences and preserves unrelated rows', () => {
+  const { db, accounts, files } = scopedFixture();
+  const untouched = db.prepare('SELECT * FROM ledgerTransactions WHERE accountId = ? ORDER BY id').all(accounts[2]);
+  const legacyUntouched = db.prepare('SELECT * FROM transactions WHERE accountId = ? ORDER BY id').all(accounts[2]);
+  const annotations = db.prepare('SELECT * FROM transactionAnnotations').all();
+  const mappings = db.prepare('SELECT id, accountId FROM sourceAccounts ORDER BY id').all();
+  const overlap = insertCommittedSourceFile({ fileName: 'overlap.csv', parserName: 'fixture', sourceType: 'activity-export', priority: 100, institution: 'Fixture' });
+  const overlapAccount = insertSourceAccount(overlap.sourceFileId, accounts[0]!, 'overlap');
+  for (let i = 0; i < 3; i++) insertSourceTransaction({ ...overlap, sourceAccountId: overlapAccount, stableSourceId: `overlap-${i}`, date: '2026-01-01', amountCents: -1000, description: 'Repeated purchase', priority: 100 });
+  const statement = insertCommittedSourceFile({ fileName: 'posting-drift.pdf', parserName: 'fixture', sourceType: 'statement', priority: 50, institution: 'Fixture' });
+  const statementAccount = insertSourceAccount(statement.sourceFileId, accounts[0]!, 'statement');
+  insertSourceTransaction({ ...statement, sourceAccountId: statementAccount, stableSourceId: 'posted', date: '2026-01-02', amountCents: -1000, description: 'Repeated purchase', priority: 50 });
+
+  rebuildLedgerForAccounts([accounts[0]!, accounts[0]!]);
+  expect(db.prepare('SELECT COUNT(*) n FROM ledgerTransactions WHERE accountId = ?').get(accounts[0])).toEqual({ n: 3 });
+  expectSameAsFullRebuild();
+  // Remove the largest document: the two original occurrences must reappear.
+  db.prepare("UPDATE sourceFiles SET status = 'unimported' WHERE id = ?").run(overlap.sourceFileId);
+  rebuildLedgerForAccounts([accounts[0]!]);
+  expect(db.prepare('SELECT COUNT(*) n FROM ledgerTransactions WHERE accountId = ?').get(accounts[0])).toEqual({ n: 2 });
+  expectSameAsFullRebuild();
+  db.prepare("UPDATE sourceFiles SET status = 'committed' WHERE id = ?").run(overlap.sourceFileId);
+  rebuildLedgerForAccounts([accounts[0]!]);
+  expectSameAsFullRebuild();
+  expect(db.prepare('SELECT * FROM ledgerTransactions WHERE accountId = ? ORDER BY id').all(accounts[2])).toEqual(untouched);
+  expect(db.prepare('SELECT * FROM transactions WHERE accountId = ? ORDER BY id').all(accounts[2])).toEqual(legacyUntouched);
+  expect(db.prepare('SELECT * FROM transactionAnnotations').all()).toEqual(annotations);
+  expect(db.prepare('SELECT id, accountId FROM sourceAccounts WHERE id IN (?, ?, ?) ORDER BY id').all(...files.map(file => file.sourceAccountId))).toEqual(mappings);
+});
+
+test('consolidated remapping rebuilds old and new destinations including an emptied account', async () => {
+  const { getImportLedgerAccountIds } = await import('./imports');
+  const { db, accounts, files } = scopedFixture();
+  const consolidatedAccount = insertSourceAccount(files[0]!.sourceFileId, accounts[1]!, 'consolidated-second');
+  insertSourceTransaction({ ...files[0]!, sourceAccountId: consolidatedAccount, stableSourceId: 'consolidated', date: '2026-04-01', amountCents: -2500, description: 'Second account purchase', priority: 100 });
+  rebuildLedgerForAccounts([accounts[0]!, accounts[1]!]);
+  const before = getImportLedgerAccountIds([files[0]!.importFileId]);
+  expect(before).toEqual(accounts.slice(0, 2));
+  db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(accounts[1], files[0]!.sourceAccountId);
+  const affected = getImportLedgerAccountIds([files[0]!.importFileId]);
+  expect(affected).toEqual(before); // Prior ledger provenance still owns the old account.
+  rebuildLedgerForAccounts(affected);
+  expect(db.prepare('SELECT COUNT(*) n FROM ledgerTransactions WHERE accountId = ?').get(accounts[0])).toEqual({ n: 0 });
+  expect(db.prepare('SELECT COUNT(*) n FROM ledgerBalances WHERE accountId = ?').get(accounts[0])).toEqual({ n: 0 });
+  expectSameAsFullRebuild();
+});
+
+test('empty scopes are no-ops and scoped payloads cannot overwrite other accounts', () => {
+  const { db, accounts } = scopedFixture();
+  const before = db.prepare('SELECT * FROM ledgerTransactions ORDER BY id').all();
+  expect(rebuildLedgerForAccounts([])).toEqual({ transactionCount: 0, balanceSnapshotCount: 0 });
+  expect(() => materializeLedger(db, { ...buildLedgerFromSourceFacts(db), accountIds: [accounts[0]!] })).toThrow('outside its rebuild accounts');
+  expect(() => rebuildLedgerForAccounts([Number.NaN])).toThrow('safe integers');
+  expect(db.prepare('SELECT * FROM ledgerTransactions ORDER BY id').all()).toEqual(before);
+});
+
+for (const policy of [null, 'old-policy']) test(`scoped rebuild falls back to full when policy is ${policy}`, () => {
+  const { db, accounts, files } = scopedFixture();
+  db.exec('DELETE FROM ledgerRebuildState');
+  if (policy) db.prepare('INSERT INTO ledgerRebuildState VALUES (1, ?)').run(policy);
+  db.prepare('UPDATE sourceTransactions SET amountCents = -2000 WHERE sourceAccountId = ?').run(files[1]!.sourceAccountId);
+  rebuildLedgerForAccounts([accounts[0]!]);
+  expectSameAsFullRebuild();
+  expect(db.prepare('SELECT policyVersion FROM ledgerRebuildState WHERE id = 1').get()).toEqual({ policyVersion: LEDGER_REBUILD_POLICY_VERSION });
+});
+
+test('failed scoped unimport rolls back source statuses, pointers, and all read models', async () => {
+  const { unimportFile } = await import('./imports');
+  const { db, files, accounts } = scopedFixture();
+  const overlap = insertCommittedSourceFile({ fileName: 'remaining.csv', parserName: 'fixture', sourceType: 'activity-export', priority: 100, institution: 'Fixture' });
+  const sourceAccountId = insertSourceAccount(overlap.sourceFileId, accounts[0]!, 'remaining');
+  insertSourceTransaction({ ...overlap, sourceAccountId, stableSourceId: 'remaining', date: '2026-01-01', amountCents: -1000, description: 'Repeated purchase', priority: 100 });
+  rebuildLedgerForAccounts([accounts[0]!]);
+  const before = materializedContents();
+  const sources = db.prepare('SELECT * FROM sourceFiles ORDER BY id').all();
+  const imports = db.prepare('SELECT * FROM importFiles ORDER BY id').all();
+  db.exec("CREATE TEMP TRIGGER fail_scoped_write BEFORE INSERT ON ledgerTransactions BEGIN SELECT RAISE(ABORT, 'injected scoped failure'); END");
+  try {
+    expect(() => unimportFile(files[0]!.importFileId)).toThrow('injected scoped failure');
+  } finally { db.exec('DROP TRIGGER fail_scoped_write'); }
+  expect(materializedContents()).toEqual(before);
+  expect(db.prepare('SELECT * FROM sourceFiles ORDER BY id').all()).toEqual(sources);
+  expect(db.prepare('SELECT * FROM importFiles ORDER BY id').all()).toEqual(imports);
+});
+
+test('account type and reporting closure rebuild only the changed account', async () => {
+  const { updateAccountMetadata, closeAccount, unarchiveAccount } = await import('./accounts');
+  const { db, accounts, files } = scopedFixture();
+  db.prepare('UPDATE sourceTransactions SET amountCents = 1000 WHERE sourceAccountId = ?').run(files[0]!.sourceAccountId);
+  rebuildLedgerForAccounts([accounts[0]!]);
+  const untouched = db.prepare('SELECT * FROM ledgerTransactions WHERE accountId = ? ORDER BY id').all(accounts[2]);
+  updateAccountMetadata(accounts[0]!, { type: 'credit' });
+  expect(db.prepare('SELECT DISTINCT transactionKind FROM ledgerTransactions WHERE accountId = ?').all(accounts[0])).toEqual([{ transactionKind: 'card_payment' }]);
+  closeAccount(accounts[0]!, '2026-04-01');
+  expectSameAsFullRebuild();
+  unarchiveAccount(accounts[0]!);
+  expectSameAsFullRebuild();
+  expect(db.prepare('SELECT * FROM ledgerTransactions WHERE accountId = ? ORDER BY id').all(accounts[2])).toEqual(untouched);
+});
+
+test('balance-only remapping finds the prior account from materialized balance provenance', async () => {
+  const { getImportLedgerAccountIds } = await import('./imports');
+  const { db, files, accounts } = scopedFixture();
+  db.prepare('DELETE FROM sourceTransactions WHERE sourceFileId = ?').run(files[0]!.sourceFileId);
+  materializeLedger();
+  db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(accounts[1], files[0]!.sourceAccountId);
+  const affected = getImportLedgerAccountIds([files[0]!.importFileId]);
+  expect(affected).toEqual(accounts.slice(0, 2));
+  rebuildLedgerForAccounts(affected);
+  expect(db.prepare('SELECT COUNT(*) n FROM ledgerBalances WHERE accountId = ?').get(accounts[0])).toEqual({ n: 0 });
+  expectSameAsFullRebuild();
 });

@@ -93,6 +93,8 @@ function resetAppTables() {
   initDatabase();
   db.transaction(() => {
     for (const table of [
+      'ledgerRebuildState',
+      'ledgerProvenance',
       'reviewedDistinctOverlaps',
       'parserAnnotationHistory',
       'parserRefreshAccountChoices',
@@ -385,6 +387,8 @@ function snapshotBalanceSnapshots(accountId: number) {
 function resetMaterializedImports(accountId: number) {
   const db = getDb();
   db.transaction(() => {
+    db.prepare('DELETE FROM ledgerProvenance WHERE ledgerTransactionId IN (SELECT ledgerTransactionId FROM ledgerTransactions WHERE accountId = ?)').run(accountId);
+    db.prepare('DELETE FROM ledgerRebuildState').run();
     db.prepare('DELETE FROM transactions WHERE accountId = ?').run(accountId);
     db.prepare('DELETE FROM ledgerTransactions WHERE accountId = ?').run(accountId);
     db.prepare('UPDATE accounts SET currentBalance = 0 WHERE id = ?').run(accountId);
@@ -6292,4 +6296,67 @@ test('app import materialization is independent of import file commit order', as
   const reverse = snapshotAccountTransactions(accountId);
 
   expect(reverse).toEqual(forward);
+});
+
+test('manual import, unimport, and reimport preserve unrelated account rows and legacy IDs', async () => {
+  const first = Number(insertRow('accounts', { name: 'First scoped card', type: 'credit' }));
+  const other = Number(insertRow('accounts', { name: 'Untouched scoped card', type: 'credit' }));
+  const firstPreview = await postImportPreview('scoped-first.csv', csvFromRows([
+    '06/13/2026,06/14/2026,FIRST PURCHASE,Food & Drink,Sale,-42.37',
+    '06/13/2026,06/14/2026,FIRST PURCHASE,Food & Drink,Sale,-42.37',
+  ]));
+  const otherPreview = await postImportPreview('scoped-other.csv', csvFromRows([
+    '06/12/2026,06/13/2026,OTHER PURCHASE,Food & Drink,Sale,-10.00',
+  ]));
+  await commitImportForTest({ accountId: other, importFileId: otherPreview.importFileId });
+  const untouched = getDb().prepare('SELECT * FROM ledgerTransactions WHERE accountId = ?').all(other);
+  const legacy = getDb().prepare('SELECT * FROM transactions WHERE accountId = ?').all(other);
+  const importRows = getDb().prepare('SELECT * FROM importRows WHERE importFileId = ?').all(otherPreview.importFileId);
+  await commitImportForTest({ accountId: first, importFileId: firstPreview.importFileId });
+  const assertUntouched = () => {
+    expect(getDb().prepare('SELECT * FROM ledgerTransactions WHERE accountId = ?').all(other)).toEqual(untouched);
+    expect(getDb().prepare('SELECT * FROM transactions WHERE accountId = ?').all(other)).toEqual(legacy);
+    expect(getDb().prepare('SELECT * FROM importRows WHERE importFileId = ?').all(otherPreview.importFileId)).toEqual(importRows);
+  };
+  assertUntouched();
+  await caller.imports.unimport({ importFileId: firstPreview.importFileId });
+  assertUntouched();
+  await caller.imports.reimport({ importFileId: firstPreview.importFileId });
+  assertUntouched();
+  await caller.imports.bulkUnimport({ importFileIds: [firstPreview.importFileId] });
+  assertUntouched();
+  await caller.imports.bulkReimport({ importFileIds: [firstPreview.importFileId] });
+  assertUntouched();
+  const built = buildLedgerFromSourceFacts();
+  expect(getDb().prepare('SELECT COUNT(*) n FROM ledgerTransactions').get()).toEqual({ n: built.transactions.length });
+  expect(built.transactions.filter(row => row.accountId === first)).toHaveLength(2);
+});
+
+test('sync confirmation scopes a consolidated artifact without rewriting another account', async () => {
+  const other = Number(insertRow('accounts', { name: 'Untouched sync card', type: 'credit' }));
+  const preview = await postImportPreview('untouched-sync.csv', csvFromRows([
+    '06/12/2026,06/13/2026,UNRELATED PURCHASE,Food & Drink,Sale,-10.00',
+  ]));
+  await commitImportForTest({ accountId: other, importFileId: preview.importFileId });
+  const untouched = getDb().prepare('SELECT * FROM ledgerTransactions WHERE accountId = ?').all(other);
+  const legacy = getDb().prepare('SELECT * FROM transactions WHERE accountId = ?').all(other);
+  const accounts = ['First', 'Second'].map(name => Number(insertRow('accounts', { name: `Scoped sync ${name}`, institution: 'Example Institution', type: 'checking' })));
+  const staged = stageConsolidatedSyncFacts([
+    { remoteAccountId: 'remote:scoped-first', accountName: 'First' },
+    { remoteAccountId: 'remote:scoped-second', accountName: 'Second' },
+  ], 'scoped-consolidated.csv');
+  const artifact = buildSyncArtifactReview({
+    importFileId: staged.importFileId, fileName: staged.fileName, status: 'ready',
+    accountRoutes: [
+      { remoteAccountId: 'remote:scoped-first', accountId: accounts[0]! },
+      { remoteAccountId: 'remote:scoped-second', accountId: accounts[1]! },
+    ],
+  });
+  const review = { runId: 'sync-scoped-consolidated', institutionId: 'bank-of-america' as const, downloaded: 1, readyToImport: 1, alreadyImported: 0, artifacts: [artifact] };
+  await saveAwaitingSyncReview(review);
+  expect((await confirmReviewedSync({ runId: review.runId })).status).toBe('complete');
+  expect(getDb().prepare('SELECT * FROM ledgerTransactions WHERE accountId = ?').all(other)).toEqual(untouched);
+  expect(getDb().prepare('SELECT * FROM transactions WHERE accountId = ?').all(other)).toEqual(legacy);
+  expect(getDb().prepare('SELECT DISTINCT accountId FROM ledgerTransactions ORDER BY accountId').all()).toEqual([other, ...accounts].map(accountId => ({ accountId })));
+  expect(getDb().prepare('SELECT ledgerTransactionId FROM ledgerTransactions ORDER BY ledgerTransactionId').all()).toEqual(buildLedgerFromSourceFacts().transactions.map(row => ({ ledgerTransactionId: row.ledgerTransactionId })));
 });

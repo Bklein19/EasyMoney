@@ -1,7 +1,7 @@
 import { getDb } from '../database.ts';
 import { normalizeAccountType } from '../../src/domain/accountType';
 import { normalizeAccountLast4 } from './accountLast4.ts';
-import { materializeLedger } from './ledgerRebuild.ts';
+import { rebuildLedgerForAccounts } from './ledgerRebuild.ts';
 import { localCalendarDate } from './calendarDate.ts';
 import { confirmClosureTransfer, revokeClosureTransfer } from './transferRecords.ts';
 import type { AccountAliasSummary, AccountListResponse, AccountSummary } from './types';
@@ -181,16 +181,20 @@ export function updateAccountMetadata(id: number | string, changes: Record<strin
   assertAccountExists(accountId);
   if (!Object.keys(metadata).length) return { ok: true, accountId };
 
-  getDb().prepare(`
-    UPDATE accounts
-    SET ${Object.keys(metadata).map(field => `${field} = @${field}`).join(', ')},
-        updatedAt = @updatedAt
-    WHERE id = @id
-  `).run({
-    ...metadata,
-    updatedAt: new Date().toISOString(),
-    id: accountId,
-  });
+  getDb().transaction(() => {
+    const priorType = getDb().prepare('SELECT type FROM accounts WHERE id = ?').get(accountId)?.type;
+    getDb().prepare(`
+      UPDATE accounts
+      SET ${Object.keys(metadata).map(field => `${field} = @${field}`).join(', ')},
+          updatedAt = @updatedAt
+      WHERE id = @id
+    `).run({
+      ...metadata,
+      updatedAt: new Date().toISOString(),
+      id: accountId,
+    });
+    if (metadata.type !== undefined && metadata.type !== priorType) rebuildLedgerForAccounts([accountId]);
+  })();
 
   return { ok: true, accountId };
 }
@@ -233,7 +237,7 @@ export function closeAccount(id: number | string, closedOn?: string, destination
     WHERE id = @id
   `).run({ id: accountId, closedOn: closedOn ?? null, now: new Date().toISOString() });
   if (closedOn) confirmClosureTransfer(accountId, closedOn, destinationAccountId ?? null);
-  if (closedOn) materializeLedger();
+  if (closedOn) rebuildLedgerForAccounts([accountId]);
   })();
   return { ok: true, accountId };
 }
@@ -253,7 +257,7 @@ export function unarchiveAccount(id: number | string) {
     WHERE id = @id
   `).run({ id: accountId, now: new Date().toISOString() });
   revokeClosureTransfer(accountId);
-  if (hadClosure) materializeLedger();
+  if (hadClosure) rebuildLedgerForAccounts([accountId]);
   })();
   return { ok: true, accountId };
 }

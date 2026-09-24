@@ -7,6 +7,7 @@ import { findCommittedImportArtifactDuplicate } from '../importArtifactIdentity.
 import {
   commitImport,
   getImportAccountMappings,
+  getImportLedgerAccountIds,
   hashImportContent,
   previewImport,
   rebuildLedgerReadModel,
@@ -753,6 +754,7 @@ export async function commitSyncReview(
     if (!outcomeRevision) throw new Error('Calculate and review ledger changes before confirming the import.');
     assertSyncReviewConfirmation(previewSyncReviewOutcomes(review, accountMappings), outcomeRevision);
     const mappingsByImportFile = validatedSyncAccountMappings(review, accountMappings);
+    const affectedAccountIds = new Set<number>();
     const accountIdByRemoteId = new Map<string, number>();
     let recordedTransactionFacts = 0;
     let recordedBalanceFacts = 0;
@@ -774,6 +776,7 @@ export async function commitSyncReview(
               accountId: existingAccountId,
             };
       });
+      const priorAccountIds = getImportLedgerAccountIds([artifact.importFileId]);
       const result = commitArtifact(artifact, mappings);
       if ('skippedArtifact' in result && result.skippedArtifact) {
         skippedArtifacts += 1;
@@ -784,6 +787,7 @@ export async function commitSyncReview(
         continue;
       }
 
+      for (const id of [...priorAccountIds, ...getImportLedgerAccountIds([artifact.importFileId])]) affectedAccountIds.add(id);
       const destinationIds = new Set<number>();
       for (const { remoteAccountId, mapping } of plannedMappings) {
         const linked = getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?')
@@ -818,7 +822,7 @@ export async function commitSyncReview(
 
     if (committedArtifacts > 0) {
       pendingReports.push({ type: 'phase', message: 'Rebuilding ledger from imported source facts' });
-      rebuildLedgerReadModel();
+      rebuildLedgerReadModel([...affectedAccountIds]);
     }
     return {
       recordedTransactionFacts,
