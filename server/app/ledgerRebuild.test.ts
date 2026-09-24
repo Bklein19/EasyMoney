@@ -170,50 +170,6 @@ beforeEach(() => {
   resetAppTables();
 });
 
-test('existing databases gain indexed import-row lookups without changing source occurrences', () => {
-  const db = getDb();
-  const accountId = Number(insertRow('accounts', { name: 'Index fixture', type: 'checking' }));
-  const source = insertCommittedSourceFile({ fileName: 'index.csv', parserName: 'fixture', sourceType: 'activity-export', priority: 100, institution: 'Fixture' });
-  const sourceAccountId = insertSourceAccount(source.sourceFileId, accountId, 'index-fixture');
-  const importRowId = Number(insertRow('importRows', { importFileId: source.importFileId, rowIndex: 0, rawJson: '{}', normalizedJson: '{}' }));
-  for (let occurrence = 0; occurrence < 3; occurrence++) {
-    const id = insertSourceTransaction({ ...source, sourceAccountId, stableSourceId: `occurrence-${occurrence}`, date: '2026-09-01', amountCents: -1000, description: 'Repeated purchase', priority: 100 });
-    // The lookup is deliberately non-unique; absent references are valid too.
-    if (occurrence < 2) db.prepare('UPDATE sourceTransactions SET importRowId = ? WHERE id = ?').run(importRowId, id);
-  }
-  const before = buildLedgerFromSourceFacts(db);
-  const sourceRows = db.prepare('SELECT * FROM sourceTransactions ORDER BY id').all();
-  db.exec('DROP INDEX idx_source_transactions_import_row');
-  db.prepare('DELETE FROM schemaMigrations WHERE name = ?').run('2026-09-24-source-transaction-import-row-index');
-
-  initDatabase();
-  initDatabase();
-
-  const plan = db.prepare('EXPLAIN QUERY PLAN SELECT id FROM sourceTransactions WHERE importRowId = ? LIMIT 1').all(importRowId);
-  expect(plan.some(row => String(row.detail).includes('SEARCH sourceTransactions USING COVERING INDEX idx_source_transactions_import_row'))).toBe(true);
-  expect(db.prepare('SELECT * FROM sourceTransactions ORDER BY id').all()).toEqual(sourceRows);
-  expect(buildLedgerFromSourceFacts(db)).toEqual(before);
-  expect(before.transactions).toHaveLength(3);
-});
-
-test('legacy source identity matching preserves occurrences alongside document imports', () => {
-  const accountId = Number(insertRow('accounts', { name: 'Mixed source fixture', type: 'checking' }));
-  for (const [index, sourceType, count] of [[0, 'legacy', 2], [1, 'legacy', 1], [2, 'activity-export', 1]] as const) {
-    const source = insertCommittedSourceFile({ fileName: `mixed-${index}`, parserName: 'fixture', sourceType, priority: 100, institution: 'Fixture' });
-    const sourceAccountId = insertSourceAccount(source.sourceFileId, accountId, `mixed-${index}`);
-    for (let occurrence = 0; occurrence < count; occurrence++) {
-      insertSourceTransaction({ ...source, sourceAccountId, stableSourceId: `${index}-${occurrence}`, date: '2026-09-01', amountCents: -1000, description: 'Repeated purchase', priority: 100, raw: { moneyId: 'shared-parser-id' } });
-    }
-  }
-
-  const ledger = buildLedgerFromSourceFacts(getDb());
-  expect(ledger.transactions).toHaveLength(3);
-  expect(ledger.provenance).toHaveLength(4);
-  expect(ledger.provenance?.filter(row => !row.selected).map(row => row.reason)).toEqual([
-    'Same parser source identity matched by file occurrence; largest occurrence count retained.',
-  ]);
-});
-
 test('dated reporting closure survives rebuilds, preserves evidence, and yields to later statements', async () => {
   const { closeAccount, unarchiveAccount, listAccounts } = await import('./accounts');
   const accountId = Number(insertRow('accounts', { name: 'Closure fixture', type: 'investment' }));

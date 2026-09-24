@@ -176,12 +176,28 @@ function syncAccountClaimIdentity(
 
 /**
  * Reviews saved by older builds do not contain the display-only evidence fields.
- * Fill only those absent fields from the same staged source identity; all saved
- * routing and resolution choices remain authoritative until confirmation.
+ * Fill absent evidence and add shared recommendations for unresolved claims.
+ * Existing resolved destinations and connector routing remain authoritative.
  */
 export function hydrateSyncReviewEvidence(review: SyncRunReview): SyncRunReview {
   let reviewChanged = false;
   const artifacts = review.artifacts.map(artifact => {
+    // Existing staged reviews can acquire a recommendation without changing their
+    // routing or confirming a destination. Re-evaluate only unresolved claims.
+    const needsRecommendation = artifact.accountClaims.some(claim =>
+      !claim.resolvedAccountId && ['auto-create', 'unresolved'].includes(claim.resolution));
+    const mappings = new Map((needsRecommendation ? getImportAccountMappings(artifact.importFileId) : [])
+      .map(mapping => [mapping.sourceAccountId, mapping]));
+    const recommendedClaims = artifact.accountClaims.map(claim => {
+      if (claim.resolvedAccountId || !['auto-create', 'unresolved'].includes(claim.resolution)) return claim;
+      const mapping = mappings.get(claim.sourceAccountId);
+      if (mapping?.resolution !== 'identifier' || !mapping.resolvedAccountId) return claim;
+      const account = destinationAccount(mapping.resolvedAccountId, { allowArchived: true });
+      reviewChanged = true;
+      return { ...claim, resolvedAccountId: account.id, resolvedAccountName: account.name,
+        resolvedAccountStatus: account.status, resolution: mapping.resolution, requiresExplicitMapping: true };
+    });
+    artifact = { ...artifact, accountClaims: recommendedClaims };
     if (!artifact.accountClaims.some(claim =>
       syncAccountEvidenceFields.some(key => !hasOwnSyncAccountEvidence(claim, key))
     )) {

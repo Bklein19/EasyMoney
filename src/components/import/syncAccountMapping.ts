@@ -99,6 +99,12 @@ export function syncAccountGroupClaim(claims: SyncAccountClaim[]): SyncAccountCl
   const archivedMatches = claims.filter(claim =>
     claim.resolution === 'archived-match' && claim.resolvedAccountId !== null
   );
+  if (claims.some(claim => claim.resolution === 'identifier') &&
+      (claims.some(claim => !claim.resolvedAccountId || claim.resolution === 'ambiguous' || claim.resolution === 'archived-match') ||
+       new Set(claims.map(claim => claim.resolvedAccountId)).size !== 1)) {
+    return { ...withGroupLast4(firstClaim), resolvedAccountId: null, resolvedAccountName: null,
+      resolvedAccountStatus: null, resolution: 'ambiguous', requiresExplicitMapping: true };
+  }
   const archivedAccountIds = new Set(archivedMatches.map(claim => claim.resolvedAccountId));
   if (archivedAccountIds.size === 1) {
     return { ...withGroupLast4(archivedMatches[0]!), requiresExplicitMapping: true };

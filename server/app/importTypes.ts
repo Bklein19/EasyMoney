@@ -94,6 +94,7 @@ export type ImportAccountMappingResolution =
   | 'linked'
   | 'alias'
   | 'exact'
+  | 'identifier'
   | 'auto-create'
   | 'archived-match'
   | 'selected-fallback'

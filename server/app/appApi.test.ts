@@ -31,6 +31,51 @@ const {
 } = await import('./aiCategorization.ts');
 const caller = appRouter.createCaller({});
 
+test('shared account resolver recommends institution + suffix with conservative conflict handling', async () => {
+  const { getImportAccountResolution: resolve } = await import('./imports.ts');
+  const id = Number(insertRow('accounts', { name: 'Brokerage', institution: 'Fidelity', last4: '1234', accountHolder: 'Test Owner', status: 'active', type: 'investment' }));
+  const source = { id: 0, accountId: null, institution: ' fidelity ', sourceAccountName: 'Account ending in 1234', accountHolder: ' test  owner ' };
+  expect(resolve(source)).toMatchObject({ resolvedAccountId: id, resolution: 'identifier' });
+  expect(resolve({ ...source, sourceAccountName: null, sourceAccountKey: 'account:1234' })).toMatchObject({ resolvedAccountId: id, resolution: 'identifier' });
+  expect(resolve({ ...source, accountHolder: null })).toMatchObject({ resolvedAccountId: id });
+  expect(resolve({ ...source, accountHolder: 'Other Owner' })).toMatchObject({ resolvedAccountId: null, resolution: 'unresolved' });
+  expect(resolve({ ...source, institution: 'Other Bank' }).resolvedAccountId).toBeNull();
+  expect(resolve({ ...source, sourceAccountName: 'Statement 2026' }).resolvedAccountId).toBeNull();
+  expect(resolve({ ...source, sourceAccountKey: 'fidelity:9999' }).resolvedAccountId).toBeNull();
+  getDb().prepare('UPDATE accounts SET status = ? WHERE id = ?').run('archived', id);
+  expect(resolve(source)).toMatchObject({ resolvedAccountId: id, resolution: 'archived-match' });
+  insertRow('accounts', { name: 'Other brokerage', institution: 'Fidelity', last4: '1234', accountHolder: 'Other Owner', type: 'investment' });
+  expect(resolve(source)).toMatchObject({ resolvedAccountId: null, resolution: 'ambiguous' });
+  expect(resolve({ ...source, accountId: id })).toMatchObject({ resolvedAccountId: id, resolution: 'archived-match' });
+});
+
+test('shared resolver preserves confirmed aliases and supports retirement identity suffixes', async () => {
+  const { getImportAccountResolution: resolve } = await import('./imports.ts');
+  const id = Number(insertRow('accounts', { name: 'Retirement', institution: 'Example Retirement', last4: '5678', type: 'investment' }));
+  const source = { id: 0, accountId: null, institution: 'Example Retirement', sourceAccountName: 'Retirement plan 45678', sourceAccountKey: 'retirement:45678' };
+  expect(resolve(source)).toMatchObject({ resolvedAccountId: id, resolution: 'identifier' });
+  const confirmed = Number(insertRow('accounts', { name: 'Confirmed', institution: 'Example Retirement', type: 'investment' }));
+  insertRow('accountAliases', { institution: source.institution, alias: source.sourceAccountName, accountId: confirmed });
+  expect(resolve(source)).toMatchObject({ resolvedAccountId: confirmed, resolution: 'alias' });
+});
+
+test('uploaded and sync review share identifier recommendations without auto-confirming sync mapping', async () => {
+  const { getImportAccountMappings } = await import('./imports.ts');
+  const { hydrateSyncReviewEvidence } = await import('./dataSync/review.ts');
+  const id = Number(insertRow('accounts', { name: 'Checking', institution: 'Bank of America', last4: '1234', type: 'checking' }));
+  const preview = await postImportPreview('bofa-checking-1234-2026-01-01-to-2026-01-31.csv', [
+    'Description,,Summary Amt.', 'Opening Balance,,"1,000.00"',
+    'Date,Description,Amount,Running Bal.', '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+  ].join('\n'));
+  expect(getImportAccountMappings(preview.importFileId)[0]).toMatchObject({ resolvedAccountId: id, resolution: 'identifier' });
+  const artifact = buildSyncArtifactReview({ importFileId: preview.importFileId, status: 'ready' });
+  expect(artifact.accountClaims[0]).toMatchObject({ resolvedAccountId: id, resolution: 'identifier', requiresExplicitMapping: true });
+  const pending = { runId: 'test', institutionId: 'bank-of-america' as const, downloaded: 1, readyToImport: 1, alreadyImported: 0,
+    artifacts: [{ ...artifact, accountClaims: artifact.accountClaims.map(claim => ({ ...claim, resolvedAccountId: null, resolvedAccountName: null, resolution: 'auto-create' as const })) }] };
+  expect(hydrateSyncReviewEvidence(pending).artifacts[0]!.accountClaims[0]).toMatchObject({ resolvedAccountId: id, resolution: 'identifier', requiresExplicitMapping: true });
+  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(artifact.accountClaims[0]!.sourceAccountId)).toEqual({ accountId: null });
+});
+
 async function confirmReviewedSync(input: Omit<Parameters<typeof caller.dataSync.confirm>[0], 'outcomeRevision'>) {
   const outcomes = await caller.dataSync.outcomes(input);
   return caller.dataSync.confirm({ ...input, outcomeRevision: outcomes.revision });

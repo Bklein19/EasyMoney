@@ -27,6 +27,13 @@ function routedClaim(sourceAccountId: number, resolvedAccountId: number | null):
   };
 }
 
+test('identifier recommendations stay explicit and conflicting grouped evidence is not recommended', () => {
+  const claim: SyncAccountClaim = { ...routedClaim(1, 10), resolution: 'identifier', requiresExplicitMapping: true };
+  expect(syncAccountGroupAutoDestination([claim])).toBeNull();
+  expect(syncAccountGroupClaim([claim])).toMatchObject({ resolvedAccountId: 10, requiresExplicitMapping: true });
+  expect(syncAccountGroupClaim([claim, { ...claim, sourceAccountId: 2, resolvedAccountId: 20 }])).toMatchObject({ resolvedAccountId: null, resolution: 'ambiguous' });
+});
+
 test('sync review only offers auto mapping for one common safe group destination', () => {
   expect(syncAccountGroupAutoDestination([
     routedClaim(1, 10),

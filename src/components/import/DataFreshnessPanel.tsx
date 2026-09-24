@@ -278,10 +278,13 @@ function SyncAccountMappingControl({
         {allowCreate && <option value="__create__">Create account from this download</option>}
         {activeAccounts.map(account => (
           <option key={account.id} value={account.id}>
-            {formatAccountMappingCandidate(account)}
+            {claim.resolvedAccountId === account.id && claim.resolution !== 'ambiguous' ? 'Recommended: ' : ''}{formatAccountMappingCandidate(account)}
           </option>
         ))}
       </select>
+      {claim.resolution === 'identifier' && matchedAccount && (
+        <small className="text-muted">Recommended: {matchedAccount.name} · matching institution and last four</small>
+      )}
       {choice.mode === 'create' && (
         <div className="sync-review__account-create">
           <input

@@ -88,7 +88,7 @@ function createDraftFromMapping(mapping: SourceAccountMapping): AccountDraft {
 }
 
 function initialDecision(mapping: SourceAccountMapping): MappingDecision {
-  if (mapping.resolution === 'archived-match') {
+  if (mapping.resolution === 'archived-match' || mapping.resolution === 'identifier') {
     return {
       mode: 'needs-selection',
       accountId: mapping.resolvedAccountId ? String(mapping.resolvedAccountId) : '',
@@ -460,7 +460,7 @@ function ImportPreviewContent({
                     <option value="">Choose account action</option>
                     {mapping.resolvedAccountId && mapping.resolution !== 'archived-match' && (
                       <option value="__auto__">
-                        Use matched account{matchedAccount ? `: ${formatAccountMappingCandidate(matchedAccount)}` : ''}
+                        {mapping.resolution === 'identifier' ? 'Recommended account' : 'Use matched account'}{matchedAccount ? `: ${formatAccountMappingCandidate(matchedAccount)}` : ''}
                       </option>
                     )}
                     {mapping.resolution === 'archived-match' && mapping.resolvedAccountId && (

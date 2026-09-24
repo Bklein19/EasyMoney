@@ -770,11 +770,12 @@ function applyAccountMappingOverrides(accountMappings: ImportAccountMappingDecis
   }
 }
 
-function getImportAccountResolution(sourceAccount: {
+export function getImportAccountResolution(sourceAccount: {
   id: number;
   accountId: number | null;
   institution: string | null;
   sourceAccountName: string | null;
+  sourceAccountKey?: string | null;
   accountHolder?: string | null;
 }): Pick<ImportAccountMapping, 'resolvedAccountId' | 'resolvedAccountStatus' | 'resolution'> {
   if (sourceAccount.accountId) {
@@ -794,10 +795,6 @@ function getImportAccountResolution(sourceAccount: {
 
   const alias = (sourceAccount.sourceAccountName || '').trim();
   const institution = (sourceAccount.institution || 'Unknown Institution').trim();
-  if (!alias || alias === 'Selected account') {
-    return { resolvedAccountId: null, resolvedAccountStatus: null, resolution: 'selected-fallback' };
-  }
-
   const aliased = getDb().prepare(`
     SELECT aa.accountId, a.status
     FROM accountAliases aa
@@ -814,6 +811,37 @@ function getImportAccountResolution(sourceAccount: {
       resolvedAccountStatus: status,
       resolution: status === 'archived' ? 'archived-match' : 'alias',
     };
+  }
+
+  const last4 = sourceAccountLast4(sourceAccount);
+  if (last4) {
+    const matches = getDb().prepare(`
+      SELECT id, status, accountHolder FROM accounts
+      WHERE LOWER(TRIM(institution)) = LOWER(TRIM(?)) AND last4 = ?
+    `).all(institution, last4) as Array<{ id: number; status: string | null; accountHolder: string | null }>;
+    // Never use holder filtering to hide a suffix collision (including archived accounts).
+    if (matches.length > 1) {
+      return { resolvedAccountId: null, resolvedAccountStatus: null, resolution: 'ambiguous' };
+    }
+    const match = matches[0];
+    if (match) {
+      const normalizeHolder = (value: string | null | undefined) => value?.trim().replace(/\s+/g, ' ').toLowerCase();
+      const sourceHolder = normalizeHolder(sourceAccount.accountHolder);
+      const destinationHolder = normalizeHolder(match.accountHolder);
+      if (sourceHolder && destinationHolder && sourceHolder !== destinationHolder) {
+        return { resolvedAccountId: null, resolvedAccountStatus: null, resolution: 'unresolved' };
+      }
+      const status = normalizeAccountStatus(match.status);
+      return {
+        resolvedAccountId: match.id,
+        resolvedAccountStatus: status,
+        resolution: status === 'archived' ? 'archived-match' : 'identifier',
+      };
+    }
+  }
+
+  if (!alias || alias === 'Selected account') {
+    return { resolvedAccountId: null, resolvedAccountStatus: null, resolution: 'selected-fallback' };
   }
 
   const exact = getDb().prepare(`
@@ -876,6 +904,7 @@ export function getImportAccountMappings(importFileId: number): ImportAccountMap
       accountId: row.accountId,
       institution: row.institution,
       sourceAccountName: row.sourceAccountName,
+      sourceAccountKey: row.sourceAccountKey,
       accountHolder: row.sourceAccountHolder,
     }),
     transactionCount: Number(row.transactionCount || 0),
