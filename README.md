@@ -22,6 +22,10 @@ The stable build produces a native package for the host operating system. macOS 
 
 Desktop builds store their database and local environment file under Electrobun's channel-specific user-data directory. On first launch, an existing `~/src/EasyMoney/data/easymoney.sqlite` database and `~/src/EasyMoney/.env.local` are copied there as a consistent local snapshot. If an earlier launch already created a provably pristine database, recovery is published to a separate sibling database and selected without replacing the original SQLite file or its journal. Development and installed launches use the same channel data path; `EASYMONEY_LEGACY_DB_PATH` and `EASYMONEY_LEGACY_ENV_PATH` can select another migration source, while explicit `EASYMONEY_DB_PATH` and `EASYMONEY_ENV_PATH` overrides remain untouched.
 
+### PDF runtime dependency
+
+PDF statement import requires the external Poppler `pdftotext` executable (not bundled). On macOS, install it with `brew install poppler`; on Debian/Ubuntu, use `sudo apt install poppler-utils`. On Windows, install Poppler and add its executable directory to PATH. Alternatively, set `EASYMONEY_PDFTOTEXT` to the full executable path. Restart EasyMoney after installation or configuration changes. macOS also checks `/opt/homebrew/bin` and `/usr/local/bin`, since Finder-launched apps do not inherit your shell PATH. Missing Poppler is reported explicitly; extraction never falls back to text that discards statement column layout.
+
 ## Features
 
 - Import CSV, PDF, TXT, and HTML exports from supported institutions.
