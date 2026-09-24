@@ -23,6 +23,7 @@ import {
 } from '../browserRequest.ts';
 import { runInstitutionBrowserProgram } from '../browserSession.ts';
 import { runAuthenticatedHttpRequest } from '../authenticatedHttp.ts';
+import { fetchNetBenefitsStatements } from './fidelityNetBenefits.ts';
 import {
   fidelityHttpEndpoints, fidelityHttpHeaders, fidelityAccountListBody,
   parseFidelityHttpAccounts, fidelityActivityBody, fidelityStatementListBody,
@@ -829,6 +830,7 @@ function fidelityAuthenticatedRoute(url: URL): boolean {
   if (!/(?:^|\.)fidelity\.com$/i.test(url.hostname)) return false;
   return /\/ftgw\/digital\/portfolio(?:\/|$)/i.test(url.pathname)
     || /\/mybenefits(?:\/|$)/i.test(url.pathname)
+    || /\/nbretail\/savings2\/(?:navigation\/dc|sod)(?:\/|$)/i.test(url.pathname)
     || /\/navigate\/ent-documentcenter\//i.test(url.pathname);
 }
 
@@ -862,7 +864,7 @@ export async function waitUntilFidelityAuthenticated(page: Page, timeoutMs: numb
     };
     const hasAuthenticationField = Array.from(document.querySelectorAll(selector)).some(visible);
     const fidelityHost = /(?:^|\.)fidelity\.com$/i.test(location.hostname);
-    const authenticatedPath = /\/ftgw\/digital\/portfolio(?:\/|$)|\/mybenefits(?:\/|$)/i.test(location.pathname);
+    const authenticatedPath = /\/ftgw\/digital\/portfolio(?:\/|$)|\/mybenefits(?:\/|$)|\/nbretail\/savings2\/(?:navigation\/dc|sod)(?:\/|$)/i.test(location.pathname);
     const authenticationPath = /(?:login|logon|sign[-_]?in|authenticate|authorization|oauth|sso|auth)/i.test(
       location.hostname + location.pathname,
     );
@@ -1448,6 +1450,30 @@ export async function runAuthenticatedFidelity(
       () => downloadRetailStatements(page, config, retailAccounts, report),
     ));
   }
+  const retirementAccounts = retailAccounts.filter(account => account.httpAccount?.acctType === 'WPS');
+  await reportStep(report, 'artifact-discovery', 'retirement-statements', 'Downloading Fidelity retirement statements', async () => {
+    await fetchNetBenefitsStatements(page, retirementAccounts.map(account => account.siteAccountId), config, async statement => {
+      const account = retirementAccounts.find(candidate => candidate.siteAccountId === statement.planId);
+      if (!account) throw new Error('NetBenefits statement account was not discovered');
+      const fileName = `fidelity-401k-${account.accountKey}-${statement.through.slice(0, 7)}.html`;
+      const plan: FidelityArtifactPlan = { artifactType: 'statement-html', fileName, account,
+        coveredFrom: statement.from, coveredThrough: statement.through };
+      const path = join(config.outputDir, fileName);
+      const temporaryPath = `${path}.${randomUUID()}.partial`;
+      try {
+        await writeFile(temporaryPath, statement.bytes, { mode: 0o600 });
+        const validated = await validateFidelityArtifact(temporaryPath, plan);
+        if (validated.sourceAccounts.length !== 1 || validated.sourceAccounts[0]!.remoteAccountId !== account.remoteAccountId
+            || validated.coveredFrom !== statement.from || validated.coveredThrough !== statement.through) {
+          throw new Error('NetBenefits statement identity or dates do not match the requested plan');
+        }
+        await rename(temporaryPath, path);
+        artifacts.push({ ...plan, path, ...validated });
+      } finally {
+        await rm(temporaryPath, { force: true });
+      }
+    });
+  });
   const sourceAccounts = new Set(artifacts.flatMap(artifact => (
     artifact.sourceAccounts.map(account => account.remoteAccountId)
   )));

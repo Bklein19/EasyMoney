@@ -36,6 +36,14 @@ remain in the data flow.
   Eastern-time day boundaries including DST transitions.
 - Requests each covered statement year directly, resolves document account type
   against account API metadata, and downloads only intersecting PDFs.
+- Downloads retirement statement HTML through the NetBenefits online-statement
+  form using fresh server fields/CSRF token for each month. The form plan number
+  must match the account API's WPS identity; the retained statement's `sodPlan`
+  must independently match the parser-backed account claim. Includes the latest
+  partial month through the server's available date (normally yesterday).
+- Current NetBenefits account switching is conservative: one verified selected
+  retirement plan is supported. Multiple WPS plans or a different selected plan
+  fail explicitly; they must not silently produce a retail-only successful run.
 - Supports parser-validated activity JSON/CSV and statement PDF/HTML artifacts
   when the corresponding Fidelity surface provides them.
 - Requires parser-backed remote account claims and leaves ambiguous account
@@ -59,6 +67,15 @@ run restored authentication without user login and persisted three artifacts
 with three parser validations (two activity JSON files and one statement PDF).
 This is live harness evidence for the HTTP migration; the updated connector
 still needs the user's final app-button test before renewed end-to-end claims.
+
+On September 23, 2026, a fresh production development run completed with 13
+parser-validated artifacts: two activity JSON files, five brokerage PDFs, and six
+retirement HTML statements (April through August month-end and September 22).
+The retirement identities and requested periods were independently checked by
+the production parser before accepting each artifact. This used restored
+authentication, including an already-established NetBenefits session; a fresh
+login/NetBenefits SSO path has not yet been verified. No imports were confirmed.
+This is **live harness green**, not final app-button or end-to-end evidence.
 
 If the API changes, inspect the working browser flow's network protocol privately
 and update the request contracts. Do not recreate the retired DOM connector.

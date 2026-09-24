@@ -68,7 +68,7 @@ describe('Fidelity HTTP protocol', () => {
       async fetch(url: string, options: { data: Buffer }) {
         const body = JSON.parse(options.data.toString());
         requests.push({ url, body });
-        const response = url === fidelityHttpEndpoints.accounts ? { acctDetails: [brokerage, retirement] }
+        const response = url === fidelityHttpEndpoints.accounts ? { acctDetails: [brokerage] }
           : url === fidelityHttpEndpoints.activity ? { data: { transactions: [] }, errors: [] }
             : { statement: { docDetails: { docDetail: [] } } };
         return {
@@ -82,19 +82,54 @@ describe('Fidelity HTTP protocol', () => {
       const result = await runAuthenticatedFidelity(page, {
         outputDir, from: '2025-12-28', through: '2026-01-03', session: 'synthetic',
       }, () => {});
-      expect(result.accountsDiscovered).toBe(2);
+      expect(result.accountsDiscovered).toBe(1);
       expect(result.artifacts).toEqual([]);
       expect(await readdir(outputDir)).toEqual([]);
       expect(requests.map(request => request.url)).toEqual([
-        fidelityHttpEndpoints.accounts, fidelityHttpEndpoints.activity, fidelityHttpEndpoints.activity,
+        fidelityHttpEndpoints.accounts, fidelityHttpEndpoints.activity,
         fidelityHttpEndpoints.statements, fidelityHttpEndpoints.statements,
       ]);
       expect(requests[1]!.body.filter.accounts[0].acctNum).toBe(brokerage.acctNum);
-      expect(requests[2]!.body.filter.accounts[0].acctNum).toBe(retirement.acctNum);
-      expect(requests[3]!.body.startDate).toBe('2025-01-01');
-      expect(requests[4]!.body.startDate).toBe('2026-01-01');
+      expect(requests[2]!.body.startDate).toBe('2025-01-01');
+      expect(requests[3]!.body.startDate).toBe('2026-01-01');
     } finally {
       await rm(outputDir, { recursive: true, force: true });
     }
+  });
+
+  test.each(['12345','67890'])('retirement statements survive empty activity and enforce identity %s', async statementPlan => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'fidelity-retirement-http-test-'));
+    let statementPosts = 0;
+    const page = { request: { async fetch(url: string, options: {method:string}) {
+      let contentType = 'application/json';
+      let body = JSON.stringify(url === fidelityHttpEndpoints.accounts ? {acctDetails:[retirement]}
+        : url === fidelityHttpEndpoints.activity ? {data:{transactions:[]},errors:[]}
+        : {statement:{docDetails:{docDetail:[]}}});
+      if (url.includes('retiretxn.')) {
+        contentType = 'text/html';
+        if (options.method === 'POST') {
+          statementPosts += 1;
+          body = `<html>Statement Period: 08/01/2026 to 08/31/2026 Ending Balance $123.00
+            <input type="hidden" name="sodPlan" value="${statementPlan}"></html>`;
+        } else {
+          body = `<script>var planNumber = '12345';</script><form name="frmRequest" method="post" action="/nbretail/savings2/sod/soddetail">
+            ${Object.entries({txntoken:'synthetic',sodReqIndicator:'HACK',dateRange:'HACK',ytdDateRange:'01/01/2026-08/31/2026',sodPreview:'N',consentReq:'N'}).map(([name,value])=>`<input type="hidden" name="${name}" value="${value}">`).join('')}</form>`;
+        }
+      }
+      return {status:()=>200,statusText:()=> 'OK',url:()=>url,headersArray:()=>[{name:'content-type',value:contentType}],body:async()=>Buffer.from(body),dispose:async()=>{}};
+    } } } as unknown as Page;
+    try {
+      const run = runAuthenticatedFidelity(page,{outputDir,from:'2026-08-01',through:'2026-08-31',session:'synthetic'},()=>{});
+      if (statementPlan !== retirement.acctNum) {
+        await expect(run).rejects.toThrow('identity or dates');
+        expect(await readdir(outputDir)).toEqual([]);
+      } else {
+        const result = await run;
+        expect(result.artifacts).toHaveLength(1);
+        expect(result.artifacts[0]).toMatchObject({artifactType:'statement-html',balanceCount:1,transactionCount:0,coveredThrough:'2026-08-31'});
+        expect(result.artifacts[0]!.sourceAccounts[0]!.remoteAccountId).toBe('fidelity:retail-token:12345');
+      }
+      expect(statementPosts).toBe(1);
+    } finally { await rm(outputDir,{recursive:true,force:true}); }
   });
 });
