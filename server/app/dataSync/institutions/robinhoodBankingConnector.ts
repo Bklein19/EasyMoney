@@ -156,9 +156,9 @@ export function createRobinhoodBankingConnector(
           balances: selected.reduce((sum, item) => sum + item.artifact.balanceCount, 0),
         },
       });
-      return selected.map(({ artifact, account }): RoutedSyncArtifact => ({
+      return selected.map(({ artifact }): RoutedSyncArtifact => ({
         fileName: artifact.fileName,
-        accountId: account.id,
+        routing: 'source',
       }));
     },
   };

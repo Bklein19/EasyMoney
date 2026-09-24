@@ -59,7 +59,6 @@ export function selectSequoiaFundAccount(
 
 function routeArtifacts(
   artifacts: SequoiaFundDownloadedArtifact[],
-  account: SyncAccountCoverage,
   accountToken: string,
 ): RoutedSyncArtifact[] {
   const accountName = accountNameForToken(accountToken);
@@ -70,7 +69,7 @@ function routeArtifacts(
     }
     if (fileNames.has(artifact.fileName)) throw new Error('Sequoia Fund returned a duplicate artifact filename');
     fileNames.add(artifact.fileName);
-    return { fileName: artifact.fileName, accountId: account.id };
+    return { fileName: artifact.fileName, routing: 'source' };
   });
 }
 
@@ -137,7 +136,7 @@ export function createSequoiaFundConnector(
         event => reportProgress(context, event),
       );
       if (result.accountCount !== 1) throw new Error('Sequoia Fund returned an invalid account count');
-      const routed = routeArtifacts(result.artifacts, account, accountToken);
+      const routed = routeArtifacts(result.artifacts, accountToken);
 
       context.report({
         type: 'phase',

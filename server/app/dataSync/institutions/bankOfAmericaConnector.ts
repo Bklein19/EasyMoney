@@ -77,37 +77,12 @@ function accountPlans(context: SyncConnectorRunContext): BankOfAmericaAccountPla
   return plans;
 }
 
-function accountForArtifact(
-  fileName: string,
-  accounts: SyncAccountCoverage[],
-): SyncAccountCoverage {
-  const match = fileName.match(/^bofa-(checking|savings|deposit|credit-card)-(\d{4})-/i);
-  if (!match) {
-    throw new Error(`Cannot read the Bank of America account identity from ${fileName}.`);
-  }
-
-  const kind = match[1]!.toLowerCase() as BankOfAmericaAccountKind;
-  const last4 = match[2]!;
-  const exact = accounts.filter(account =>
-    accountKind(account) === kind && accountLast4(account) === last4
-  );
-  if (exact.length === 1) return exact[0]!;
-
-  const sameNumber = accounts.filter(account => accountLast4(account) === last4);
-  if (sameNumber.length === 1) return sameNumber[0]!;
-
-  throw new Error(
-    `Expected one local Bank of America ${kind} account ending in ${last4}, found ${exact.length}.`,
-  );
-}
-
 function routeArtifacts(
   fileNames: string[],
-  accounts: SyncAccountCoverage[],
 ): RoutedSyncArtifact[] {
   return fileNames.map(fileName => ({
     fileName,
-    accountId: accountForArtifact(fileName, accounts).id,
+    routing: 'source',
   }));
 }
 
@@ -169,7 +144,7 @@ export function createBankOfAmericaConnector(
         type: 'phase',
         message: `Validated ${downloaded.saved.length} new artifact${downloaded.saved.length === 1 ? '' : 's'}`,
       });
-      return routeArtifacts(downloaded.saved, accounts);
+      return routeArtifacts(downloaded.saved);
     },
   };
 }

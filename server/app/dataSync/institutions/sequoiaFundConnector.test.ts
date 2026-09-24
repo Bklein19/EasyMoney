@@ -185,9 +185,9 @@ describe('Sequoia Fund connector execution', () => {
       event => events.push(event),
       'account-2',
     ))).resolves.toEqual([
-      { fileName: 'first-scope.csv', accountId: 2 },
-      { fileName: 'second-scope.csv', accountId: 2 },
-      { fileName: 'statement.pdf', accountId: 2 },
+      { fileName: 'first-scope.csv', routing: 'source' },
+      { fileName: 'second-scope.csv', routing: 'source' },
+      { fileName: 'statement.pdf', routing: 'source' },
     ]);
     expect(calls).toEqual([{
       outputDir: '/tmp/sequoia-connector-test',
@@ -230,7 +230,7 @@ describe('Sequoia Fund connector execution', () => {
     });
 
     await expect(connector.run(runContext([account(42)]))).resolves.toEqual([
-      { fileName: 'activity.csv', accountId: 42 },
+      { fileName: 'activity.csv', routing: 'source' },
     ]);
     expect(calls[0]).toMatchObject({
       accountToken: 'key-90a2dadb275a',

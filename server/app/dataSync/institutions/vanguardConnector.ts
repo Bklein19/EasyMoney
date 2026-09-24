@@ -256,7 +256,7 @@ export function vanguardTargetsForProfiles(
 export function routeVanguardArtifacts(
   artifacts: readonly Pick<VanguardDownloadedArtifact, 'fileName' | 'accountId'>[],
 ): RoutedSyncArtifact[] {
-  return artifacts.map(({ fileName, accountId }) => ({ fileName, accountId }));
+  return artifacts.map(({ fileName }) => ({ fileName, routing: 'source' }));
 }
 
 export function reportVanguardProgress(

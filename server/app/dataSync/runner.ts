@@ -32,7 +32,8 @@ async function manifestEntry(
   const plannedAccountIds = new Set(plan.accounts.map(account => account.id));
   const hasAccountId = typeof artifact.accountId === 'number';
   const hasAccountRoutes = Array.isArray(artifact.accountRoutes);
-  if (hasAccountId === hasAccountRoutes) {
+  const sourceRouting = 'routing' in artifact && artifact.routing === 'source';
+  if (Number(hasAccountId) + Number(hasAccountRoutes) + Number(sourceRouting) !== 1) {
     throw new Error('Connector artifacts require exactly one account routing form');
   }
   if (hasAccountId && !plannedAccountIds.has(artifact.accountId!)) {

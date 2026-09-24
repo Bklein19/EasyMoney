@@ -225,7 +225,7 @@ describe('Wells Fargo connector', () => {
       account({ id: 10 }),
     ], event => events.push(event)))).resolves.toEqual([{
       fileName: 'wells-fargo-checking-1111-2026-07-25-to-2026-08-20.csv',
-      accountId: 10,
+      routing: 'source',
     }]);
 
     expect(capturedConfig).toEqual({

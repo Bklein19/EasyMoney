@@ -116,7 +116,7 @@ export function routeWellsFargoArtifacts(
         planned.last4 !== artifact.account.last4) {
       throw new Error('A Wells Fargo artifact did not match its planned local account');
     }
-    return { fileName: artifact.fileName, accountId: artifact.accountId };
+    return { fileName: artifact.fileName, routing: 'source' };
   });
 }
 

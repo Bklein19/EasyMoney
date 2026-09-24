@@ -23,7 +23,6 @@ function tiaaAccounts(accounts: readonly SyncAccountCoverage[]): SyncAccountCove
 
 export function routeTiaaArtifacts(
   artifacts: readonly TiaaDownloadedArtifact[],
-  aggregateAccountId?: number,
 ): MultiAccountSyncArtifact[] {
   return artifacts.map(artifact => {
     if (artifact.account.remoteAccounts.length === 0) {
@@ -37,31 +36,9 @@ export function routeTiaaArtifacts(
       fileName: artifact.fileName,
       accountRoutes: claimKeys.map(remoteAccountId => ({
         remoteAccountId,
-        ...(aggregateAccountId === undefined ? {} : { accountId: aggregateAccountId }),
       })),
     };
   });
-}
-
-export function tiaaAggregateDestination(
-  accounts: readonly SyncAccountCoverage[],
-  artifacts: readonly TiaaDownloadedArtifact[],
-  accountSelectionsDiscovered: number,
-): number | undefined {
-  // CSV AccountIds are retained as source identities, while the statement is
-  // the aggregate. Only reuse a previously established aggregate mapping when
-  // the live selection and the local destination are both unambiguous.
-  const candidates = tiaaAccounts(accounts);
-  if (accountSelectionsDiscovered !== 1 || candidates.length !== 1) return undefined;
-  const account = candidates[0]!;
-  const names = [account.sourceAccountName, ...account.sourceAccountNames];
-  if (!names.some(name => name?.trim() === 'Retirement Annuity')) return undefined;
-  const aggregateClaim = 'TIAA||Retirement Annuity';
-  const hasAggregateStatement = artifacts.some(artifact =>
-    artifact.artifactType === 'statement' && artifact.account.remoteAccounts.length === 1 &&
-    artifact.account.remoteAccounts[0]?.claimKey === aggregateClaim
-  );
-  return hasAggregateStatement ? account.id : undefined;
 }
 
 function combinedTiaaWindow(context: SyncConnectorRunContext, accounts: SyncAccountCoverage[]) {
@@ -127,8 +104,7 @@ export function createTiaaConnector(runSync: TiaaSyncRunner = runTiaaSync) {
         through,
         session: 'tiaa-catchup',
       }, event => reportTiaaProgress(context, event));
-      const routed = routeTiaaArtifacts(result.artifacts,
-        tiaaAggregateDestination(accounts, result.artifacts, result.accountSelectionsDiscovered));
+      const routed = routeTiaaArtifacts(result.artifacts);
 
       for (const artifact of result.artifacts) {
         context.report({

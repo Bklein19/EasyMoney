@@ -94,6 +94,12 @@ const syncArtifactManifestSchema = z.object({
   artifacts: z.array(z.union([
     z.object({
       fileName: artifactFileNameSchema,
+      routing: z.literal('source'),
+      sizeBytes: z.number().int().nonnegative(),
+      sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    }).strict(),
+    z.object({
+      fileName: artifactFileNameSchema,
       accountId: z.number().int().positive(),
       sizeBytes: z.number().int().nonnegative(),
       sha256: z.string().regex(/^[a-f0-9]{64}$/),
@@ -175,7 +181,7 @@ export function validateSyncArtifactManifestForPlan(
   const concreteAccountIds = manifest.artifacts.flatMap(artifact =>
     artifact.accountId !== undefined
       ? [artifact.accountId]
-      : artifact.accountRoutes.flatMap(route =>
+      : (artifact.accountRoutes ?? []).flatMap(route =>
           route.accountId === undefined ? [] : [route.accountId]
         )
   );

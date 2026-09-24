@@ -5,6 +5,7 @@ import { join } from 'node:path';
 
 import type { SyncConnector } from './connector.ts';
 import { runSyncExecutionPlan } from './runner.ts';
+import { validateSyncArtifactManifestForPlan } from './workerProtocol.ts';
 import {
   SYNC_WORKER_PROTOCOL_VERSION,
   type SyncExecutionPlan,
@@ -80,7 +81,7 @@ test('two DB-free connector downloads can overlap and emit independent manifests
       await released;
       const fileName = 'bofa-checking-1234-synthetic.csv';
       await writeFile(join(context.outputDir, fileName), context.outputDir);
-      return [{ fileName, accountId: 1 }];
+      return [{ fileName, routing: 'source' }];
     },
   };
   const resolveConnector = () => connector;
@@ -94,6 +95,12 @@ test('two DB-free connector downloads can overlap and emit independent manifests
     const manifests = await Promise.all([first, second]);
     expect(manifests.map(manifest => manifest.runId)).toEqual(['sync-first', 'sync-second']);
     expect(manifests.every(manifest => manifest.artifacts[0]?.sha256.length === 64)).toBe(true);
+    for (const [index, manifest] of manifests.entries()) {
+      expect(manifest.artifacts[0]).toMatchObject({ routing: 'source' });
+      expect(manifest.artifacts[0]?.accountId).toBeUndefined();
+      expect(() => validateSyncArtifactManifestForPlan(manifest,
+        plan(manifest.runId, join(root, index === 0 ? 'first' : 'second')))).not.toThrow();
+    }
   } finally {
     releaseDownloads();
     await rm(root, { recursive: true, force: true });

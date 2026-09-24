@@ -171,12 +171,12 @@ describe('Bank of America connector', () => {
       account({ id: 10, name: 'Checking 1111' }),
       account({ id: 20, name: 'Travel Rewards Visa 2222', type: 'credit' }),
     ]))).resolves.toEqual([
-      { fileName: 'bofa-checking-1111-2026-08-01-to-2026-08-20.csv', accountId: 10 },
-      { fileName: 'bofa-credit-card-2222-current-to-2026-08-20.csv', accountId: 20 },
+      { fileName: 'bofa-checking-1111-2026-08-01-to-2026-08-20.csv', routing: 'source' },
+      { fileName: 'bofa-credit-card-2222-current-to-2026-08-20.csv', routing: 'source' },
     ]);
   });
 
-  test('rejects artifacts that cannot route to one local account', async () => {
+  test('leaves suffix collisions to the shared import resolver', async () => {
     const connector = createBankOfAmericaConnector(async () => ({
       saved: ['bofa-savings-1111-2026-08-01-to-2026-08-20.csv'],
       skipped: [],
@@ -186,8 +186,6 @@ describe('Bank of America connector', () => {
     await expect(connector.run(runContext([
       account({ id: 10, name: 'Checking 1111' }),
       account({ id: 20, name: 'Travel Rewards Visa 1111', type: 'credit' }),
-    ]))).rejects.toThrow(
-      'Expected one local Bank of America savings account ending in 1111, found 0.',
-    );
+    ]))).resolves.toEqual([{ fileName: 'bofa-savings-1111-2026-08-01-to-2026-08-20.csv', routing: 'source' }]);
   });
 });

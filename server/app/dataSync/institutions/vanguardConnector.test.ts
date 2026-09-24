@@ -306,7 +306,7 @@ test('Vanguard downloaded artifacts expose only generic routing data', () => {
     artifactType: 'activity',
   };
 
-  expect(routeVanguardArtifacts([artifact])).toEqual([{ fileName: 'activity.csv', accountId: 42 }]);
+  expect(routeVanguardArtifacts([artifact])).toEqual([{ fileName: 'activity.csv', routing: 'source' }]);
 });
 
 test('Vanguard connector selects one profile, translates progress, and routes artifacts', async () => {
@@ -341,7 +341,7 @@ test('Vanguard connector selects one profile, translates progress, and routes ar
     twoProfileAccounts,
     event => events.push(event),
     'current',
-  ))).resolves.toEqual([{ fileName: 'activity.csv', accountId: 10 }]);
+  ))).resolves.toEqual([{ fileName: 'activity.csv', routing: 'source' }]);
 
   expect(configs).toHaveLength(1);
   expect(configs[0]?.profiles.map(profile => profile.id)).toEqual(['current']);

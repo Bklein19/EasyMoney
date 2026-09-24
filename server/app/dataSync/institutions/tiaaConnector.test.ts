@@ -15,7 +15,6 @@ import {
   matchesTiaaAccount,
   routeTiaaArtifacts,
   tiaaConnector,
-  tiaaAggregateDestination,
 } from './tiaaConnector.ts';
 
 function account(id: number, overrides: Partial<SyncAccountCoverage> = {}): SyncAccountCoverage {
@@ -100,7 +99,7 @@ describe('TIAA connector targeting', () => {
 });
 
 describe('TIAA artifact routing', () => {
-  test('rolls CSV identities and a verified aggregate statement into the established account', () => {
+  test('leaves CSV and aggregate statement destinations to shared matching', () => {
     const statementClaim: TiaaRemoteAccountIdentity = {
       routingKey: 'bbbbbbbbbbbb', remoteAccountId: 'Retirement Annuity',
       sourceAccountName: 'Retirement Annuity', claimKey: 'TIAA||Retirement Annuity',
@@ -109,15 +108,9 @@ describe('TIAA artifact routing', () => {
       artifact('activity.csv', [tiaaActivityRemoteAccount('RET123'), tiaaActivityRemoteAccount('RET456')]),
       artifact('statement.pdf', [statementClaim], 'statement'),
     ];
-    const destination = tiaaAggregateDestination([account(10)], artifacts, 1);
-    expect(destination).toBe(10);
-    const routes = routeTiaaArtifacts(artifacts, destination).flatMap(item => item.accountRoutes);
-    expect(routes.map(route => route.accountId)).toEqual([10, 10, 10]);
+    const routes = routeTiaaArtifacts(artifacts).flatMap(item => item.accountRoutes);
+    expect(routes.map(route => route.accountId)).toEqual([undefined, undefined, undefined]);
     expect(new Set(routes.map(route => route.remoteAccountId)).size).toBe(3);
-    expect(tiaaAggregateDestination([account(10), account(11)], artifacts, 1)).toBeUndefined();
-    expect(tiaaAggregateDestination([account(10)], artifacts, 2)).toBeUndefined();
-    expect(tiaaAggregateDestination([account(10)], [artifacts[0]!], 1)).toBeUndefined();
-    expect(tiaaAggregateDestination([account(10, { sourceAccountName: null, sourceAccountNames: [] })], artifacts, 1)).toBeUndefined();
   });
 
   test('routes every consolidated parser claim independently without forcing a destination', () => {

@@ -199,7 +199,7 @@ describe('Marcus connector', () => {
       account({ id: 10 }),
     ], event => events.push(event)))).resolves.toEqual([{
       fileName: artifact.fileName,
-      accountId: 10,
+      routing: 'source',
     }]);
     expect(capturedConfig).toEqual({
       outputDir: '/tmp/easymoney-marcus-connector-test',

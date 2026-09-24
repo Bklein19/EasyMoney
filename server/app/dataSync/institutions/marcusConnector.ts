@@ -114,7 +114,7 @@ export function routeMarcusArtifacts(
       throw new Error('Marcus returned a duplicate artifact filename');
     }
     fileNames.add(artifact.fileName);
-    return { fileName: artifact.fileName, accountId: artifact.accountId };
+    return { fileName: artifact.fileName, routing: 'source' };
   });
 }
 
