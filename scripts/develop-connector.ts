@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 
 import { runConnectorDevelopment } from '../server/app/dataSync/developmentRunner.ts';
 import { isSyncInstitutionId } from '../server/app/dataSync/registry.ts';
+import { setDevelopmentPageInspector } from '../server/app/dataSync/browserSession.ts';
 
 interface Options {
   institutionId: string;
@@ -60,6 +61,11 @@ function parseArguments(argv: string[]): Options {
 }
 
 async function main(): Promise<void> {
+  if (process.env.EASYMONEY_DEVELOPMENT_INSPECTOR) {
+    const inspector = await import(resolve(process.env.EASYMONEY_DEVELOPMENT_INSPECTOR));
+    if (typeof inspector.inspect !== 'function') throw new Error('Development inspector must export inspect');
+    setDevelopmentPageInspector(inspector.inspect);
+  }
   const options = parseArguments(Bun.argv.slice(2));
   if (!isSyncInstitutionId(options.institutionId)) {
     throw new Error('Connector development names an unsupported institution');
@@ -99,7 +105,7 @@ async function main(): Promise<void> {
   if (result.status !== 'complete') process.exitCode = 1;
 }
 
-main().catch(() => {
+main().finally(() => setDevelopmentPageInspector(undefined)).catch(() => {
   console.error(JSON.stringify({
     type: 'connector-development-run',
     status: 'failed-to-start',

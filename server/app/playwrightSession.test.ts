@@ -33,6 +33,7 @@ import {
   restoredInstitutionStartUrl,
   savedAuthenticationResumeUrl,
   runInstitutionBrowserProgram,
+  setDevelopmentPageInspector,
   runWhileBrowserOpen,
   runWhilePersistentBrowserOpen,
   showAuthenticationChapter,
@@ -46,7 +47,28 @@ import {
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
+  setDevelopmentPageInspector(undefined);
   await Promise.all(temporaryDirectories.splice(0).map(path => rm(path, { recursive: true, force: true })));
+});
+
+describe('development browser inspection', () => {
+  test.each([true, false])('inspects only authenticated pages: %s', async authenticated => {
+    let inspections = 0;
+    setDevelopmentPageInspector(async () => { inspections += 1; });
+    const page = { screencast: { showChapter: async () => {} } } as unknown as Page;
+    await runInstitutionBrowserProgram({
+      name: 'inspection-test', startUrl: 'https://example.test', persistAuthentication: false,
+    }, 'async () => JSON.stringify({ status: "complete" })', {
+      completionDescription: 'Done', isAuthenticated: async () => authenticated,
+    }, {
+      withPlaywrightPage: async (options, operation) => {
+        expect(options.contextOptions?.headless).toBe(false);
+        return operation(page, {} as BrowserContext);
+      },
+      withTransientBrowserProfile: async operation => operation('/private/tmp/inspection-test'),
+    });
+    expect(inspections).toBe(authenticated ? 1 : 0);
+  });
 });
 
 describe('Playwright session helper', () => {

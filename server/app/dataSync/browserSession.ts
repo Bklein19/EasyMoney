@@ -1524,6 +1524,13 @@ type InstitutionBrowserProgramDependencies = {
   withTransientBrowserProfile: typeof withTransientBrowserProfile;
 };
 
+let developmentPageInspector: ((page: Page) => Promise<void>) | undefined;
+
+/** Installed only by the explicit connector development runner. */
+export function setDevelopmentPageInspector(inspector: ((page: Page) => Promise<void>) | undefined): void {
+  developmentPageInspector = inspector;
+}
+
 export async function runInstitutionBrowserProgram<T extends Record<string, unknown>>(
   session: SessionOptions,
   code: string,
@@ -1531,11 +1538,19 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
   dependencyOverrides: Partial<InstitutionBrowserProgramDependencies> = {},
 ): Promise<InstitutionBrowserProgramResult<T>> {
   // Browser programs are repository-owned strings retained from the former CLI runner.
-  const program = Function(`"use strict"; return (${code});`)() as (
+  const originalProgram = Function(`"use strict"; return (${code});`)() as (
     browserPage: Page,
     reportProgress: (message: string) => void,
     bindings: Record<string, unknown>,
   ) => Promise<unknown>;
+  let inspected = false;
+  const program: typeof originalProgram = async (page, report, bindings) => {
+    if (!inspected && developmentPageInspector && await (options.isAuthenticated ?? hasDefaultAuthentication)(page)) {
+      inspected = true;
+      await developmentPageInspector(page);
+    }
+    return originalProgram(page, report, bindings);
+  };
   const runWithPlaywrightPage = dependencyOverrides.withPlaywrightPage ?? withPlaywrightPage;
   const runWithTransientBrowserProfile = dependencyOverrides.withTransientBrowserProfile ??
     withTransientBrowserProfile;
@@ -1547,7 +1562,7 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
   const launchStrategy = institutionBrowserLaunchStrategy({
     hasSavedAuthentication,
     persistAuthentication: session.persistAuthentication,
-    requestedHeadless: session.contextOptions?.headless,
+    requestedHeadless: developmentPageInspector ? false : session.contextOptions?.headless,
   });
   const runAttempt = async (
     headless: boolean,
