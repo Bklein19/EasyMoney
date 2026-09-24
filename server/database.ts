@@ -998,6 +998,12 @@ export function initDatabase() {
     ) WHERE status='current' AND version IS NOT NULL`);
   });
 
+  runSchemaMigration('2026-09-24-source-transaction-import-row-index', () => {
+    // Materialization resolves a source transaction for every imported ledger
+    // row. Without this index, each lookup scans the entire source table.
+    db.exec('CREATE INDEX idx_source_transactions_import_row ON sourceTransactions (importRowId)');
+  });
+
   runSchemaMigration('2026-08-27-account-last4', () => {
     if (!tableColumnNames('accounts').includes('last4')) {
       db.prepare('ALTER TABLE accounts ADD COLUMN last4 TEXT').run();

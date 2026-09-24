@@ -323,11 +323,12 @@ export function buildLedgerFromSourceFacts(db = getDb()): RebuiltLedger {
   // Legacy parser moneyIds can be hashes, not authoritative bank IDs. They
   // must never collapse multiple occurrences retained from the same document.
   const sourceIdentityGroups = new Map<string, Map<number, typeof transactionInputs>>();
-  for (const transaction of [...retainedTransactionInputs].sort((a, b) =>
-    getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b)))) {
-    // Document activity already has occurrence-aware matching above. A parser
-    // hash cannot establish equality for otherwise different descriptions.
-    if (['activity-export', 'statement'].includes(transaction.sourceType || '')) continue;
+  // Document activity already has occurrence-aware matching above. Exclude it
+  // before sorting so normal imports do not pay for unused occurrence keys.
+  const sourceIdentityInputs = [...retainedTransactionInputs]
+    .filter(transaction => !['activity-export', 'statement'].includes(transaction.sourceType || ''))
+    .sort((a, b) => getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b)));
+  for (const transaction of sourceIdentityInputs) {
     const identity = sourceIdentityKey(transaction);
     const files = sourceIdentityGroups.get(identity) ?? new Map<number, typeof transactionInputs>();
     sourceIdentityGroups.set(identity, files);
