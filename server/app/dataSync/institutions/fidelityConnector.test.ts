@@ -229,6 +229,31 @@ describe('Fidelity connector execution', () => {
     await expect(maintenance.run(runContext(accounts))).rejects.toThrow('temporarily unavailable');
   });
 
+  test('recent activity does not skip missing retirement statement months', async () => {
+    let captured: FidelitySyncConfig | undefined;
+    const connector = createFidelityConnector(async config => {
+      captured = config;
+      return completeResult([]);
+    });
+    const accounts = [account(20, {
+      latestFactDate: '2026-08-19', latestBalanceDate: '2026-04-30',
+    })];
+    await connector.run(runContext(accounts));
+    expect(captured?.from).toBe('2026-04-23');
+    expect(captured?.through).toBe('2026-08-20');
+
+    await connector.run(runContext([account(20, {
+      latestFactDate: '2026-08-19', latestBalanceDate: null,
+    })]));
+    expect(captured?.from).toBe('2025-08-20');
+
+    await connector.run({ ...runContext(accounts), goal: {
+      kind: 'range', startDate: '2026-07-01', endDate: '2026-07-31',
+    } });
+    expect(captured?.from).toBe('2026-07-01');
+    expect(captured?.through).toBe('2026-07-31');
+  });
+
   test('routes only exact parser-backed identities and rejects missing or repeated claims', () => {
     expect(routeFidelityArtifacts([
       artifact('remote-one', '1111', 'activity.json'),

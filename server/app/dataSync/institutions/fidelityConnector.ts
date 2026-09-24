@@ -82,7 +82,16 @@ export function createFidelityConnector(
       const accounts = fidelityAccounts(context);
       if (accounts.length === 0) throw new Error('No active Fidelity accounts are available');
 
-      const windows = accounts.map(account => goalWindowForCoverage(context.goal, account, context.today));
+      // Activity exports do not refresh statement balances. Catch up from the
+      // older source so recent transactions cannot hide months of missing statements.
+      const windows = accounts.map(account => goalWindowForCoverage(context.goal, {
+        ...account,
+        latestFactDate: context.goal.kind === 'current'
+          ? account.latestFactDate && account.latestBalanceDate
+            ? [account.latestFactDate, account.latestBalanceDate].sort()[0]!
+            : null
+          : account.latestFactDate,
+      }, context.today));
       const from = windows.map(window => window.startDate).sort()[0]!;
       const through = windows.map(window => window.endDate).sort().at(-1)!;
       context.report({
