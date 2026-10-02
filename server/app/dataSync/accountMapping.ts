@@ -1,6 +1,7 @@
 import type { SyncAccountClaim } from './types.ts';
 
 export function syncClaimRequiresExplicitMapping(claim: SyncAccountClaim): boolean {
+  if (claim.hasHolderConflict) return true;
   return claim.requiresExplicitMapping ?? claim.resolution !== 'connector';
 }
 
@@ -37,4 +38,14 @@ export function commonSafeSyncAccountDestination(claims: SyncAccountClaim[]): nu
   if (accountIds.some(accountId => accountId === null)) return null;
   const uniqueAccountIds = [...new Set(accountIds as number[])];
   return uniqueAccountIds.length === 1 ? uniqueAccountIds[0]! : null;
+}
+
+// Preselection is an editable review draft. Confirm import remains the approval.
+export function commonRecommendedSyncAccountDestination(claims: SyncAccountClaim[]): number | null {
+  if (claims.length === 0 || claims.some(claim =>
+    !claim.resolvedAccountId || claim.resolvedAccountStatus === 'archived' || claim.hasHolderConflict ||
+    !['linked', 'alias', 'exact', 'identifier', 'connector'].includes(claim.resolution)
+  )) return null;
+  const destinations = new Set(claims.map(claim => claim.resolvedAccountId));
+  return destinations.size === 1 ? claims[0]!.resolvedAccountId : null;
 }

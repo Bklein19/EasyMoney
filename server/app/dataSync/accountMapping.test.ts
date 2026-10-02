@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import {
   groupSyncAccountClaims,
   syncAccountGroupAutoDestination,
+  syncAccountGroupRecommendedDestination,
   syncAccountGroupClaim,
 } from '../../../src/components/import/syncAccountMapping.ts';
 import type { SyncAccountClaim } from './types.ts';
@@ -30,8 +31,22 @@ function routedClaim(sourceAccountId: number, resolvedAccountId: number | null):
 test('identifier recommendations stay explicit and conflicting grouped evidence is not recommended', () => {
   const claim: SyncAccountClaim = { ...routedClaim(1, 10), resolution: 'identifier', requiresExplicitMapping: true };
   expect(syncAccountGroupAutoDestination([claim])).toBeNull();
+  expect(syncAccountGroupRecommendedDestination([claim])).toBe(10);
   expect(syncAccountGroupClaim([claim])).toMatchObject({ resolvedAccountId: 10, requiresExplicitMapping: true });
   expect(syncAccountGroupClaim([claim, { ...claim, sourceAccountId: 2, resolvedAccountId: 20 }])).toMatchObject({ resolvedAccountId: null, resolution: 'ambiguous' });
+});
+
+test('review preselection accepts shared matches while blocking conflicts and archives', () => {
+  for (const resolution of ['identifier', 'alias', 'exact', 'linked', 'connector'] as const) {
+    const claim: SyncAccountClaim = { ...routedClaim(1, 10), resolution, requiresExplicitMapping: true };
+    expect(syncAccountGroupRecommendedDestination([claim, { ...claim, sourceAccountId: 2 }])).toBe(10);
+    expect(syncAccountGroupRecommendedDestination([claim, { ...claim, resolvedAccountId: 20 }])).toBeNull();
+    expect(syncAccountGroupRecommendedDestination([{ ...claim, hasHolderConflict: true }])).toBeNull();
+    expect(syncAccountGroupRecommendedDestination([{ ...claim, resolvedAccountStatus: 'archived' }])).toBeNull();
+    expect(syncAccountGroupRecommendedDestination([{ ...claim, resolution: 'ambiguous' }])).toBeNull();
+    expect(syncAccountGroupRecommendedDestination([{ ...claim, resolvedAccountId: null }])).toBeNull();
+  }
+  expect(syncAccountGroupRecommendedDestination([])).toBeNull();
 });
 
 test('sync review only offers auto mapping for one common safe group destination', () => {

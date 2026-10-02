@@ -97,6 +97,13 @@ function destinationAccount(accountId: number, options: { allowArchived?: boolea
   return account;
 }
 
+function holderConflict(source: string | null, destination: string | null): boolean {
+  const normalize = (value: string | null) => value?.trim().replace(/\s+/g, ' ').toLowerCase();
+  const left = normalize(source);
+  const right = normalize(destination);
+  return Boolean(left && right && left !== right);
+}
+
 interface StoredSyncAccountClaim {
   sourceAccountId: number;
   remoteAccountId: string;
@@ -198,7 +205,15 @@ export function hydrateSyncReviewEvidence(review: SyncRunReview): SyncRunReview 
       return { ...claim, resolvedAccountId: account.id, resolvedAccountName: account.name,
         resolvedAccountStatus: account.status, resolution: mapping.resolution, requiresExplicitMapping: true };
     });
-    artifact = { ...artifact, accountClaims: recommendedClaims };
+    const checkedClaims = recommendedClaims.map(claim => {
+      const account = claim.resolvedAccountId
+        ? destinationAccount(claim.resolvedAccountId, { allowArchived: true }) : null;
+      const hasHolderConflict = holderConflict(claim.accountHolder, account?.accountHolder ?? null);
+      if (claim.hasHolderConflict === hasHolderConflict) return claim;
+      reviewChanged = true;
+      return { ...claim, hasHolderConflict };
+    });
+    artifact = { ...artifact, accountClaims: checkedClaims };
     if (!artifact.accountClaims.some(claim =>
       syncAccountEvidenceFields.some(key => !hasOwnSyncAccountEvidence(claim, key))
     )) {
@@ -331,6 +346,7 @@ function resolveAccountClaims(
       resolvedAccountStatus: account?.status || (account ? 'active' : null),
       resolution: connectorAccountId === undefined ? imported.resolution : 'connector',
       requiresExplicitMapping,
+      hasHolderConflict: holderConflict(claim.accountHolder, account?.accountHolder ?? null),
     };
   });
 }

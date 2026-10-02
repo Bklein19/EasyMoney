@@ -24,6 +24,7 @@ import {
   groupSyncAccountClaims,
   syncAccountAggregateSummary,
   syncAccountGroupAutoDestination,
+  syncAccountGroupRecommendedDestination,
   syncAccountGroupClaim,
 } from './syncAccountMapping.ts';
 
@@ -113,6 +114,10 @@ function initialSyncMappingChoice(claim: SyncAccountClaim): SyncMappingChoice {
 
 function initialSyncGroupMappingChoice(claims: SyncAccountClaim[]): SyncMappingChoice {
   const representative = syncAccountGroupClaim(claims);
+  const recommended = syncAccountGroupRecommendedDestination(claims);
+  if (recommended !== null) {
+    return { mode: 'existing', accountId: String(recommended), account: syncAccountDraft(representative) };
+  }
   if (syncAccountGroupAutoDestination(claims) === null) {
     return { mode: 'needs-selection', accountId: '', account: syncAccountDraft(representative) };
   }
@@ -489,10 +494,15 @@ function SyncReviewPanel({
   const [mappingChoices, setMappingChoices] = useState<SyncMappingChoices>(() => Object.fromEntries(
     readyClaimGroups.map(group => [group.identityKey, initialSyncGroupMappingChoice(group.claims)]),
   ));
+  const mappingRunId = useRef(review.runId);
   useEffect(() => {
-    setMappingChoices(Object.fromEntries(
-      readyClaimGroups.map(group => [group.identityKey, initialSyncGroupMappingChoice(group.claims)]),
-    ));
+    const changedRun = mappingRunId.current !== review.runId;
+    mappingRunId.current = review.runId;
+    setMappingChoices(previous => Object.fromEntries(readyClaimGroups.map(group => [
+      group.identityKey,
+      !changedRun && previous[group.identityKey]
+        ? previous[group.identityKey] : initialSyncGroupMappingChoice(group.claims),
+    ])));
   }, [review.runId, readyClaimGroups]);
   const mappingsComplete = readyClaimGroups.every(group =>
     syncMappingChoiceComplete(mappingChoices[group.identityKey], syncAccountGroupClaim(group.claims))

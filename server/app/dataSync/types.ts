@@ -90,6 +90,8 @@ export interface SyncAccountClaim {
   resolution: ImportAccountMappingResolution | 'connector';
   /** True when the connector did not supply a concrete local destination. */
   requiresExplicitMapping: boolean;
+  /** Prevents preselection when source and destination holder evidence conflicts. */
+  hasHolderConflict?: boolean;
   transactionCount: number;
   balanceCount: number;
   latestBalanceDate: string | null;

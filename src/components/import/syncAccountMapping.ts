@@ -1,5 +1,6 @@
 import {
   commonSafeSyncAccountDestination,
+  commonRecommendedSyncAccountDestination,
 } from '../../../server/app/dataSync/accountMapping.ts';
 import type { SyncAccountClaim } from '../../../server/app/dataSync/types.ts';
 
@@ -62,6 +63,8 @@ export function groupSyncAccountClaims(claims: SyncAccountClaim[]): SyncAccountC
 export function syncAccountGroupAutoDestination(claims: SyncAccountClaim[]): number | null {
   return commonSafeSyncAccountDestination(claims);
 }
+
+export const syncAccountGroupRecommendedDestination = commonRecommendedSyncAccountDestination;
 
 // Only connector-verified identities with one safe destination share a control.
 export function syncAccountAggregateSummary(claims: SyncAccountClaim[]): SyncAccountClaimGroup | null {

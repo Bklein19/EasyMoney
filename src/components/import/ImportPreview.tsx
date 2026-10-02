@@ -88,7 +88,7 @@ function createDraftFromMapping(mapping: SourceAccountMapping): AccountDraft {
 }
 
 function initialDecision(mapping: SourceAccountMapping): MappingDecision {
-  if (mapping.resolution === 'archived-match' || mapping.resolution === 'identifier') {
+  if (mapping.resolution === 'archived-match') {
     return {
       mode: 'needs-selection',
       accountId: mapping.resolvedAccountId ? String(mapping.resolvedAccountId) : '',
