@@ -2141,7 +2141,21 @@ export function safeWellsFargoDiagnostic(error: unknown): string {
     ? [...(error.stack?.matchAll(/wellsFargo\.ts:(\d+):\d+/g) ?? [])]
     : [];
   const sourceLine = sourceLines[1]?.[1] ?? sourceLines[0]?.[1];
-  const message = String(error instanceof Error ? error.message : error);
+  const rawMessage = String(error instanceof Error ? error.message : error);
+  // Keep actionable copy and a bounded set of safe counters. DOM shapes and
+  // arbitrary operation/path names must not consume the diagnostic budget or
+  // become the import page's error message.
+  const message = rawMessage.startsWith('Wells Fargo statement API request was not observed')
+    ? 'Wells Fargo could not open a statement download. Try updating this connection again. ' +
+      'Your existing data has not changed. (statement-request-not-observed' +
+      [
+        'same-origin', 'other-wells-origin', 'pdf-responses', 'json-document-urls',
+        'download-events', 'direct-links', 'rejected-direct-links', 'new-pages',
+      ].flatMap(key => {
+        const match = rawMessage.match(new RegExp(`(?:[ (])${key}=(\\d{1,9})(?=[ )])`));
+        return match ? [`${key}=${Math.min(Number(match[1]), 999)}`] : [];
+      }).map(counter => ` ${counter}`).join('') + ')'
+    : rawMessage;
   return `${message}${sourceLine ? ` (source-line=${sourceLine})` : ''}`
     .split('\n')[0]!
     .replace(/https?:\/\/\S+/gi, '<redacted-url>')

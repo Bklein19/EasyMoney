@@ -102,6 +102,43 @@ test('Wells Fargo diagnostics redact URLs, account digits, email, amounts, and s
   expect(diagnostic).not.toContain('https://');
 });
 
+test('Wells Fargo statement failures show actionable copy and retain bounded counters after large DOM diagnostics', () => {
+  const diagnostic = safeWellsFargoDiagnostic(new Error(
+    'Wells Fargo statement API request was not observed ' +
+    `(activation=none post-click=${'a.DocumentDetails>div.container>'.repeat(50)} ` +
+    'control-shape=token=private operations=PrivateOperation ' +
+    'path-shapes=https://example.test/private same-origin=2 other-wells-origin=1 ' +
+    'pdf-responses=0 json-document-urls=0 download-events=0 direct-links=0 ' +
+    'rejected-direct-links=0 new-pages=1)',
+  ));
+
+  expect(diagnostic).toContain('could not open a statement download');
+  expect(diagnostic).toContain('Try updating this connection again');
+  expect(diagnostic).toContain('Your existing data has not changed');
+  expect(diagnostic).toContain('statement-request-not-observed');
+  expect(diagnostic).toContain('same-origin=2');
+  expect(diagnostic).toContain('new-pages=1');
+  expect(diagnostic).not.toContain('DocumentDetails');
+  expect(diagnostic).not.toContain('PrivateOperation');
+  expect(diagnostic).not.toContain('private');
+  expect(diagnostic.length).toBeLessThanOrEqual(500);
+});
+
+test('Wells Fargo statement failure diagnostics reject arbitrary counter contents and bound numeric values', () => {
+  const diagnostic = safeWellsFargoDiagnostic(new Error(
+    'Wells Fargo statement API request was not observed ' +
+    '(same-origin=999999999 other-wells-origin=secret pdf-responses=1234567890 ' +
+    'download-events=1secret direct-links=-1 new-pages=3)',
+  ));
+  expect(diagnostic).toContain('same-origin=999');
+  expect(diagnostic).toContain('new-pages=3');
+  expect(diagnostic).not.toContain('other-wells-origin=');
+  expect(diagnostic).not.toContain('pdf-responses=');
+  expect(diagnostic).not.toContain('download-events=');
+  expect(diagnostic).not.toContain('direct-links=');
+  expect(diagnostic).not.toContain('secret');
+});
+
 test('Wells Fargo forwards the shared headed-window proof through safe progress', () => {
   const message = 'Authentication browser delivered: headed=true nativeWindow=true windowState=normal onScreen=true activation=macos-requested';
   expect(wellsFargoBrowserWindowProgress(message)).toMatchObject({
