@@ -8,6 +8,33 @@ const { getNetWorthReport } = await import('./netWorth');
 const { getInvestmentNetWorthReport, getSavingsRateReport } = await import('./investmentReports');
 const { getAnalyticsReport } = await import('./analytics');
 
+test('net worth income source report reads current annotations without altering balances or choices', () => {
+  initDatabase();
+  const db = getDb();
+  const accountId = Number(insertRow('accounts', { name: `Income report ${crypto.randomUUID()}`, type: 'checking' }));
+  const incomeCategoryId = insertRow('categories', { name: `Gifts received ${crypto.randomUUID()}`, type: 'income' });
+  const transferCategoryId = insertRow('categories', { name: `Transfers ${crypto.randomUUID()}`, type: 'transfer' });
+  const ledgerTransactionId = crypto.randomUUID();
+  insertRow('ledgerTransactions', { accountId, ledgerTransactionId, date: '2026-09-01', amountCents: 100000, description: 'Online transfer from relative', transactionKind: 'internal_transfer' });
+  insertRow('transactionAnnotations', { ledgerTransactionId, categoryId: incomeCategoryId });
+  insertRow('ledgerBalances', { accountId, month: '2026-09', balanceCents: 250000 });
+  const changesBefore = db.prepare('SELECT total_changes() AS n').get()?.n;
+  const before = getInvestmentNetWorthReport();
+  expect(before.income_sources.filter(row => row.account_id === accountId)).toEqual([
+    expect.objectContaining({ account_id: accountId, amount_cents: 100000, month: '2026-09' }),
+  ]);
+  expect(db.prepare('SELECT total_changes() AS n').get()?.n).toBe(changesBefore);
+  db.prepare('UPDATE transactionAnnotations SET categoryId = ? WHERE ledgerTransactionId = ?').run(transferCategoryId, ledgerTransactionId);
+  const after = getInvestmentNetWorthReport();
+  expect(after.income_sources.filter(row => row.account_id === accountId)).toEqual([]);
+  expect(after.rows.filter(row => row.account_id === accountId)).toEqual(before.rows.filter(row => row.account_id === accountId));
+  db.prepare('DELETE FROM transactionAnnotations WHERE ledgerTransactionId = ?').run(ledgerTransactionId);
+  db.prepare('DELETE FROM ledgerTransactions WHERE accountId = ?').run(accountId);
+  db.prepare('DELETE FROM ledgerBalances WHERE accountId = ?').run(accountId);
+  db.prepare('DELETE FROM accounts WHERE id = ?').run(accountId);
+  db.prepare('DELETE FROM categories WHERE id IN (?, ?)').run(incomeCategoryId, transferCategoryId);
+});
+
 test('statement contribution evidence replaces overlapping activity totals without adding transactions', () => {
   initDatabase();
   const accountId = insertRow('accounts', {name:`Retirement ${crypto.randomUUID()}`,type:'investment'});

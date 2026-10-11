@@ -17,6 +17,8 @@ import "./ReportPages.css";
 import { trpc } from "../../api/trpc";
 import type { AccountType } from '../../domain/accountType';
 import { CalendarAxisTick, calendarTicks } from './calendarAxis';
+import { incomeSourceSeries } from './incomeSourceSeries';
+import type { ReportIncomeSource } from '../../../server/app/reportIncomeSources';
 
 interface AccountSummary {
   id: number;
@@ -40,6 +42,7 @@ interface NetWorthReport {
   accounts: AccountSummary[];
   rows: MonthlyRow[];
   returns: ReturnSummary[];
+  income_sources: ReportIncomeSource[];
 }
 
 type Period = "month" | "quarter" | "year";
@@ -137,6 +140,7 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
   const report = (reportQuery.data || null) as NetWorthReport | null;
   const [derivativePeriod, setDerivativePeriod] = useState<Period>("month");
   const [chartWidth, setChartWidth] = useState(960);
+  const [showIncomeSources, setShowIncomeSources] = useState(false);
 
   const allAccountIds = useMemo(
     () => new Set(report?.accounts.map((account) => account.id) ?? []),
@@ -381,6 +385,15 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
     return points;
   }, [data]);
 
+  const incomeOverlay = useMemo(() => incomeSourceSeries(report?.income_sources ?? [], selectedIds), [report, selectedIds]);
+  const incomeChartData = useMemo(() => data.map(point => ({ ...point, ...incomeOverlay.at(point.month, true) })), [data, incomeOverlay]);
+  const incomeDerivativeData = useMemo(() => derivativeData.map(point => ({ ...point, ...incomeOverlay.at(point.period, false) })), [derivativeData, incomeOverlay]);
+  const incomeLines = showIncomeSources ? incomeOverlay.series.map((source, index) => (
+    <Line key={source.key} dataKey={source.key} name={source.label}
+      stroke={accountColor(index + 2)} strokeWidth={2} strokeDasharray="5 3" dot={false}
+      type="linear" isAnimationActive={false} />
+  )) : null;
+
   if (reportQuery.error) return <div className="page"><div className="meta import-error">{String(reportQuery.error)}</div></div>;
   if (!report) return <div className="page"><div className="meta">Loading…</div></div>;
   if (report.rows.length === 0) {
@@ -450,8 +463,16 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
             </div>
 
             <div className="chart-container networth-primary-chart">
+              <div className="income-overlay-control">
+                <label><input type="checkbox" checked={showIncomeSources} onChange={event => setShowIncomeSources(event.target.checked)} /> Compare income sources</label>
+                {showIncomeSources && <p className="chart-subtitle">
+                  Dashed lines show cash received, not money retained or additional net worth. Payroll is deposited pay, not gross W-2 income.
+                  {' '}Only receipts categorized as income are included; unresolved transfers, loans and expense reimbursements are not inferred as gifts.
+                </p>}
+                {showIncomeSources && incomeOverlay.series.length === 0 && <p className="chart-subtitle">No categorized income for the selected accounts. Categorize gifts and payroll as income to see them here.</p>}
+              </div>
               <ResponsiveContainer width="100%" height={420} onResize={setChartWidth}>
-                <ComposedChart data={data} stackOffset="sign">
+                <ComposedChart data={showIncomeSources ? incomeChartData : data} stackOffset="sign">
                   <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
                   <XAxis dataKey="month" stroke={chartTheme.axis} ticks={monthlyTicks.map(tick => tick.value)}
                     interval={0} height={45} tickLine={false} tick={<CalendarAxisTick ticks={monthlyTicks} />} />
@@ -461,6 +482,7 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
                     tickFormatter={fmtUsdAxis}
                   />
                   <Tooltip
+                    isAnimationActive={false}
                     formatter={(value) => fmtUsd(Number(value))}
                     contentStyle={chartTheme.tooltipContent}
                     labelStyle={chartTheme.tooltipLabel}
@@ -476,6 +498,7 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
                     strokeWidth={1.5}
                     dot={false}
                   />
+                  {incomeLines}
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -490,7 +513,7 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
 
             <div className="chart-container derivative-chart">
               <ResponsiveContainer width="100%" height={340}>
-                <ComposedChart data={derivativeData} stackOffset="sign">
+                <ComposedChart data={showIncomeSources ? incomeDerivativeData : derivativeData} stackOffset="sign">
                   <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
                   <XAxis dataKey="period" stroke={chartTheme.axis} ticks={derivativeTicks.map(tick => tick.value)}
                     interval={0} height={45} tickLine={false} tick={<CalendarAxisTick ticks={derivativeTicks} />} />
@@ -500,6 +523,7 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
                     tickFormatter={fmtUsdAxis}
                   />
                   <Tooltip
+                    isAnimationActive={false}
                     formatter={(value) => fmtUsd(Number(value))}
                     contentStyle={chartTheme.tooltipContent}
                     labelStyle={chartTheme.tooltipLabel}
@@ -507,6 +531,7 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
                   <Legend wrapperStyle={{ fontSize: 12 }} />
                   <Bar dataKey="contributions" name="Contributions" fill={series.contributions} />
                   <Bar dataKey="marketGains" name="Market gains" fill={series.gains} />
+                  {incomeLines}
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
@@ -537,6 +562,7 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
                 tickFormatter={fmtUsdAxis}
               />
               <Tooltip
+                isAnimationActive={false}
                 formatter={(value) => fmtUsd(Number(value))}
                 labelFormatter={(value) => formatMonthTick(Number(value))}
                 contentStyle={chartTheme.tooltipContent}
@@ -578,6 +604,7 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
                 interval={0} height={45} tickLine={false} tick={<CalendarAxisTick ticks={returnTicks} />} />
               <YAxis stroke={chartTheme.axis} tick={{ fontSize: 11 }} tickFormatter={(value) => fmtPct(Number(value))} />
               <Tooltip
+                isAnimationActive={false}
                 formatter={(value, name) => [fmtPct(Number(value)), name]}
                 contentStyle={chartTheme.tooltipContent}
                 labelStyle={chartTheme.tooltipLabel}

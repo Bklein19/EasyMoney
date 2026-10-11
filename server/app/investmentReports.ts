@@ -5,6 +5,7 @@ import { summarizeReturns, type ReturnSummary } from './returns.ts';
 import { deriveTransferLinks, type TransferLink } from './transferLinks.ts';
 import { readConfirmedTransfers } from './transferRecords.ts';
 import { getStatementCashFlows } from './statementCashFlows';
+import { reportIncomeSources, type ReportIncomeSource } from './reportIncomeSources';
 
 export interface InvestmentAccountSummary {
   status?: string;
@@ -33,6 +34,7 @@ export interface InvestmentNetWorthReport {
   rows: InvestmentMonthlyRow[];
   transfer_links: TransferLink[];
   returns: ReturnSummary[];
+  income_sources: ReportIncomeSource[];
 }
 
 export interface SavingsRateMonthlyRow {
@@ -79,6 +81,9 @@ interface LedgerTransactionReportRow {
   description: string;
   raw: string | null;
   account_type: string;
+  category_id: number | null;
+  category_name: string | null;
+  category_type: string | null;
 }
 
 interface LedgerBalanceReportRow {
@@ -206,9 +211,14 @@ function getLedgerTransactions(): LedgerTransactionReportRow[] {
       lt.amountCents AS amount_cents,
       COALESCE(lt.description, '') AS description,
       lt.originalDescription AS raw,
-      a.type AS account_type
+      a.type AS account_type,
+      c.id AS category_id,
+      c.name AS category_name,
+      c.type AS category_type
     FROM ledgerTransactions lt
     JOIN accounts a ON a.id = lt.accountId
+    LEFT JOIN transactionAnnotations ta ON ta.ledgerTransactionId = lt.ledgerTransactionId
+    LEFT JOIN categories c ON c.id = ta.categoryId
     ORDER BY lt.date, lt.id
   `).all() as LedgerTransactionReportRow[];
 }
@@ -472,7 +482,7 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
     }
   }
 
-  return { accounts, rows, transfer_links: transferFacts.links, returns };
+  return { accounts, rows, transfer_links: transferFacts.links, returns, income_sources: reportIncomeSources(txs) };
 }
 
 export function getSavingsRateReport(): SavingsRateReport {
