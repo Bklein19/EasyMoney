@@ -16,6 +16,7 @@ import {
 import "./ReportPages.css";
 import { trpc } from "../../api/trpc";
 import type { AccountType } from '../../domain/accountType';
+import { CalendarAxisTick, calendarTicks } from './calendarAxis';
 
 interface AccountSummary {
   id: number;
@@ -135,6 +136,7 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
   const reportQuery = useQuery(trpc.reports.netWorth.queryOptions());
   const report = (reportQuery.data || null) as NetWorthReport | null;
   const [derivativePeriod, setDerivativePeriod] = useState<Period>("month");
+  const [chartWidth, setChartWidth] = useState(960);
 
   const allAccountIds = useMemo(
     () => new Set(report?.accounts.map((account) => account.id) ?? []),
@@ -390,6 +392,10 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
   }
 
   const hasGains = report.rows.some((r) => r.gains_cents !== null);
+  const monthlyTicks = calendarTicks(data.map(point => point.month), chartWidth);
+  const derivativeTicks = calendarTicks(derivativeData.map(point => point.period), chartWidth);
+  const returnTicks = calendarTicks(periodReturnData.map(point => point.period), chartWidth);
+  const timeTicks = monthlyTicks.map(tick => ({ ...tick, value: String(monthToTime(tick.value)) }));
   const latest = data[data.length - 1];
   const totalCards = (
     <div className="totals-row">
@@ -444,10 +450,11 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
             </div>
 
             <div className="chart-container networth-primary-chart">
-              <ResponsiveContainer width="100%" height={420}>
+              <ResponsiveContainer width="100%" height={420} onResize={setChartWidth}>
                 <ComposedChart data={data} stackOffset="sign">
                   <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
-                  <XAxis dataKey="month" stroke={chartTheme.axis} tick={{ fontSize: 11 }} />
+                  <XAxis dataKey="month" stroke={chartTheme.axis} ticks={monthlyTicks.map(tick => tick.value)}
+                    interval={0} height={45} tickLine={false} tick={<CalendarAxisTick ticks={monthlyTicks} />} />
                   <YAxis
                     stroke={chartTheme.axis}
                     tick={{ fontSize: 11 }}
@@ -485,7 +492,8 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
               <ResponsiveContainer width="100%" height={340}>
                 <ComposedChart data={derivativeData} stackOffset="sign">
                   <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
-                  <XAxis dataKey="period" stroke={chartTheme.axis} tick={{ fontSize: 11 }} />
+                  <XAxis dataKey="period" stroke={chartTheme.axis} ticks={derivativeTicks.map(tick => tick.value)}
+                    interval={0} height={45} tickLine={false} tick={<CalendarAxisTick ticks={derivativeTicks} />} />
                   <YAxis
                     stroke={chartTheme.axis}
                     tick={{ fontSize: 11 }}
@@ -508,7 +516,7 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
       <section className="returns-section performance-page">
         <div className="return-subsection-title">Investment Returns</div>
         <div className="chart-container returns-investment-chart">
-          <ResponsiveContainer width="100%" height={320}>
+          <ResponsiveContainer width="100%" height={320} onResize={setChartWidth}>
             <ComposedChart data={investmentReturnData} margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
               <XAxis
@@ -517,8 +525,11 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
                 scale="time"
                 domain={["dataMin", "dataMax"]}
                 stroke={chartTheme.axis}
-                tick={{ fontSize: 11 }}
-                tickFormatter={(value) => formatMonthTick(Number(value))}
+                ticks={timeTicks.map(tick => Number(tick.value))}
+                interval={0}
+                height={45}
+                tickLine={false}
+                tick={<CalendarAxisTick ticks={timeTicks} />}
               />
               <YAxis
                 stroke={chartTheme.axis}
@@ -563,7 +574,8 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
           <ResponsiveContainer width="100%" height={340}>
             <ComposedChart data={periodReturnData} margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
-              <XAxis dataKey="period" stroke={chartTheme.axis} tick={{ fontSize: 11 }} />
+              <XAxis dataKey="period" stroke={chartTheme.axis} ticks={returnTicks.map(tick => tick.value)}
+                interval={0} height={45} tickLine={false} tick={<CalendarAxisTick ticks={returnTicks} />} />
               <YAxis stroke={chartTheme.axis} tick={{ fontSize: 11 }} tickFormatter={(value) => fmtPct(Number(value))} />
               <Tooltip
                 formatter={(value, name) => [fmtPct(Number(value)), name]}
