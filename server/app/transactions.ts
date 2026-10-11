@@ -554,6 +554,48 @@ export function categorizeTransactions(input: {
   return { ok: true, count: uniqueIds.length, previousCategories };
 }
 
+/** Apply an explicitly reviewed plan, refusing stale evidence or partial writes. */
+export function applyReviewedCategoryChanges(input: {
+  label: string;
+  changes: Array<{
+    transactionId: string;
+    categoryId: number;
+    expected: {
+      categoryId: number | null;
+      accountId: number;
+      date: string;
+      amountCents: number;
+      description: string | null;
+    };
+  }>;
+}): CategoryUndoResult {
+  const db = getDb();
+  return db.transaction((): CategoryUndoResult => {
+    const seen = new Set<string>();
+    const validCategories = new Set((db.prepare('SELECT id FROM categories').all() as Array<{ id: number }>).map(row => row.id));
+    const changes = input.changes.filter(change => {
+      if (seen.has(change.transactionId)) throw new Error('Reviewed plan contains duplicate transaction identities.');
+      seen.add(change.transactionId);
+      if (!validCategories.has(change.categoryId)) throw new Error('Reviewed destination category no longer exists.');
+      const row = db.prepare(`SELECT t.accountId, t.date, t.amountCents, t.description, ta.categoryId
+        FROM ledgerTransactions t LEFT JOIN transactionAnnotations ta ON ta.ledgerTransactionId = t.ledgerTransactionId
+        WHERE t.ledgerTransactionId = ?`).get(change.transactionId) as typeof change.expected | undefined;
+      if (!row || row.categoryId !== change.expected.categoryId || row.accountId !== change.expected.accountId ||
+          row.date !== change.expected.date || row.amountCents !== change.expected.amountCents || row.description !== change.expected.description) {
+        throw new Error('Reviewed transaction changed. Refresh the plan before applying it.');
+      }
+      return row.categoryId !== change.categoryId;
+    });
+    if (!changes.length) return { ok: true, count: 0, undoOperation: null };
+    const undoOperation = createCategoryUndoOperation({
+      categoryName: input.label.trim() || 'Reviewed categorization',
+      previousCategories: changes.map(change => ({ transactionId: change.transactionId, categoryId: change.expected.categoryId })),
+    });
+    for (const change of changes) upsertTransactionAnnotation(change.transactionId, { categoryId: change.categoryId });
+    return { ok: true, count: changes.length, undoOperation };
+  })();
+}
+
 export function categorizeTransactionsByQuery(input: {
   query?: ListTransactionsOptions;
   categoryId?: number | string | null;

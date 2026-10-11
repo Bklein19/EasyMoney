@@ -2524,6 +2524,63 @@ test('history reuses confirmed income subcategories, not legacy broad income', (
   expect(matchHistoricalCategories(groups, categories, [payroll, { ...row, categoryId: 3 }]).questions).toHaveLength(1);
 });
 
+test('reviewed category changes are atomic, preserve notes and ledger facts, and undo as one operation', async () => {
+  const { applyReviewedCategoryChanges } = await import('./transactions');
+  const accountId = Number(insertRow('accounts', { name: 'Checking', type: 'checking' }));
+  const incomeId = Number(insertRow('categories', { name: 'Income', type: 'income' }));
+  const payrollId = Number(insertRow('categories', { name: 'Payroll', type: 'income' }));
+  const giftsId = Number(insertRow('categories', { name: 'Gifts Received', type: 'income' }));
+  const changes = ['reviewed-payroll', 'reviewed-gift'].map((transactionId, index) => {
+    const expected = { accountId, date: '2026-01-01', amountCents: 10000, description: `Receipt ${index}`, categoryId: incomeId };
+    insertRow('ledgerTransactions', { ledgerTransactionId: transactionId, ...expected });
+    upsertTransactionAnnotation(transactionId, { categoryId: incomeId, notes: `Note ${index}` });
+    return { transactionId, categoryId: index === 0 ? payrollId : giftsId, expected };
+  });
+  insertRow('ledgerBalances', { accountId, month: '2026-01', balanceCents: 90000 });
+  const db = getDb();
+  const before = db.prepare('SELECT * FROM ledgerTransactions ORDER BY ledgerTransactionId').all();
+  const result = applyReviewedCategoryChanges({ label: 'Historical income cleanup', changes });
+  expect(result.count).toBe(2);
+  expect(result.undoOperation).toMatchObject({ categoryName: 'Historical income cleanup', count: 2 });
+  expect(db.prepare('SELECT * FROM ledgerTransactions ORDER BY ledgerTransactionId').all()).toEqual(before);
+  expect(db.prepare('SELECT balanceCents FROM ledgerBalances WHERE accountId = ?').get(accountId)).toEqual({ balanceCents: 90000 });
+  expect(db.prepare('SELECT notes FROM transactionAnnotations ORDER BY ledgerTransactionId').all()).toEqual([{ notes: 'Note 1' }, { notes: 'Note 0' }]);
+  await caller.transactions.restoreCategories({ undoOperationId: result.undoOperation!.id });
+  expect(db.prepare('SELECT categoryId, notes FROM transactionAnnotations ORDER BY ledgerTransactionId').all()).toEqual([
+    { categoryId: incomeId, notes: 'Note 1' }, { categoryId: incomeId, notes: 'Note 0' },
+  ]);
+});
+
+test('reviewed category plans reject stale annotations, facts, destinations, missing rows and duplicates without any writes', async () => {
+  const { applyReviewedCategoryChanges } = await import('./transactions');
+  const accountId = Number(insertRow('accounts', { name: 'Checking', type: 'checking' }));
+  const incomeId = Number(insertRow('categories', { name: 'Income', type: 'income' }));
+  const payrollId = Number(insertRow('categories', { name: 'Payroll', type: 'income' }));
+  const expected = { accountId, date: '2026-01-01', amountCents: 10000, description: 'Receipt', categoryId: incomeId };
+  for (const transactionId of ['reviewed-first', 'reviewed-second']) {
+    insertRow('ledgerTransactions', { ledgerTransactionId: transactionId, ...expected });
+    upsertTransactionAnnotation(transactionId, { categoryId: incomeId, notes: 'Keep' });
+  }
+  const first = { transactionId: 'reviewed-first', categoryId: payrollId, expected };
+  const second = { transactionId: 'reviewed-second', categoryId: payrollId, expected };
+  const invalid = [
+    { ...second, expected: { ...expected, categoryId: null } },
+    { ...second, expected: { ...expected, accountId: 999 } },
+    { ...second, expected: { ...expected, amountCents: 12000 } },
+    { ...second, expected: { ...expected, date: '2026-02-01' } },
+    { ...second, expected: { ...expected, description: 'Different receipt' } },
+    { ...second, categoryId: 99999 },
+    { ...second, transactionId: 'missing' },
+    first,
+  ];
+  const db = getDb();
+  for (const bad of invalid) {
+    expect(() => applyReviewedCategoryChanges({ label: 'Reviewed', changes: [first, bad] })).toThrow();
+    expect(db.prepare('SELECT categoryId FROM transactionAnnotations ORDER BY ledgerTransactionId').all()).toEqual([{ categoryId: incomeId }, { categoryId: incomeId }]);
+    expect(db.prepare('SELECT COUNT(*) n FROM transactionCategoryUndoOperations').get()?.n).toBe(0);
+  }
+});
+
 test('ai categorization can sort merchant groups by money instead of count', () => {
   const baseRow = {
     accountName: 'Checking',
