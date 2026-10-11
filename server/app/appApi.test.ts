@@ -1039,6 +1039,65 @@ test('category editing supports income subcategories and rejects invalid names',
   await expect(caller.categories.update({ id: uncategorized.id, type: 'income' })).rejects.toThrow('cannot be renamed');
 });
 
+test('income defaults upgrade additively and preserve existing annotations and customized metadata', async () => {
+  const { seedDatabase } = await import('../seed');
+  const db = getDb();
+  db.prepare('DELETE FROM schemaMigrations WHERE name = ?').run('income-subcategories-v1');
+  const income = await caller.categories.create({ name: 'Income', type: 'income', categoryGroup: 'income' });
+  const gifts = await caller.categories.create({ name: 'Gifts received', type: 'income', description: 'Confirmed presents only' });
+  insertRow('transactionAnnotations', { ledgerTransactionId: 'preserve-income-category', categoryId: income.id, notes: 'Keep my note' });
+  seedDatabase();
+  const categories = (await caller.categories.list()).categories;
+  for (const name of ['Payroll', 'Bonuses', 'Interest', 'Other Income']) {
+    expect(categories.find(category => category.name === name)).toMatchObject({ parentId: income.id, type: 'income', categoryGroup: 'income', description: expect.any(String) });
+  }
+  expect(categories.find(category => category.id === gifts.id)).toMatchObject({ name: 'Gifts received', parentId: income.id, description: 'Confirmed presents only' });
+  expect(categories.filter(category => category.name.toLowerCase() === 'gifts received')).toHaveLength(1);
+  const payroll = categories.find(category => category.name === 'Payroll')!;
+  await caller.categories.update({ id: payroll.id, parentId: null, description: 'My custom payroll guidance' });
+  seedDatabase();
+  expect((await caller.categories.list()).categories).toHaveLength(categories.length);
+  expect(db.prepare('SELECT parentId, description FROM categories WHERE id = ?').get(payroll.id)).toEqual({ parentId: null, description: 'My custom payroll guidance' });
+  expect(db.prepare('SELECT categoryId, notes FROM transactionAnnotations WHERE ledgerTransactionId = ?').get('preserve-income-category')).toEqual({ categoryId: income.id, notes: 'Keep my note' });
+});
+
+test('income defaults preserve existing custom types and parents', async () => {
+  const { seedDatabase } = await import('../seed');
+  const db = getDb();
+  db.prepare('DELETE FROM schemaMigrations WHERE name = ?').run('income-subcategories-v1');
+  const custom = await caller.categories.create({ name: 'Custom', type: 'income' });
+  const gifts = await caller.categories.create({ name: 'Gifts Received', type: 'income', parentId: custom.id });
+  const payroll = await caller.categories.create({ name: 'Payroll', type: 'expense' });
+  seedDatabase();
+  expect(db.prepare('SELECT parentId FROM categories WHERE id = ?').get(gifts.id)).toEqual({ parentId: custom.id });
+  expect(db.prepare('SELECT type, parentId FROM categories WHERE id = ?').get(payroll.id)).toEqual({ type: 'expense', parentId: null });
+});
+
+test('income defaults do not create a cycle in older custom hierarchy metadata', async () => {
+  const { seedDatabase } = await import('../seed');
+  const db = getDb();
+  db.prepare('DELETE FROM schemaMigrations WHERE name = ?').run('income-subcategories-v1');
+  const gifts = await caller.categories.create({ name: 'Gifts Received', type: 'income' });
+  await caller.categories.create({ name: 'Income', type: 'income', parentId: gifts.id });
+  seedDatabase();
+  expect(db.prepare('SELECT parentId FROM categories WHERE id = ?').get(gifts.id)).toEqual({ parentId: null });
+});
+
+test('category parents reject missing parents and cycles; deleting a parent keeps children', async () => {
+  const income = await caller.categories.create({ name: 'Income', type: 'income' });
+  const payroll = await caller.categories.create({ name: 'Payroll', type: 'income', parentId: String(income.id) });
+  const child = await caller.categories.create({ name: 'Salary', type: 'income', parentId: payroll.id });
+  await expect(caller.categories.create({ name: 'Invalid', parentId: 99999 })).rejects.toThrow('Parent category not found');
+  await expect(caller.categories.update({ id: income.id, parentId: income.id })).rejects.toThrow('descendants');
+  await expect(caller.categories.update({ id: income.id, parentId: child.id })).rejects.toThrow('descendants');
+  await expect(caller.categories.update({ id: payroll.id, parentId: 99999 })).rejects.toThrow('Parent category not found');
+  await caller.categories.delete({ id: income.id });
+  expect((await caller.categories.list()).categories).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: payroll.id, parentId: null }),
+    expect.objectContaining({ id: child.id, parentId: payroll.id }),
+  ]));
+});
+
 test('trpc categories and categorization rules expose typed crud', async () => {
   const created = await caller.categories.create({
     name: 'TRPC Category',
@@ -2452,6 +2511,17 @@ test('historical categories never imply internal transfer pairs or generic proce
   expect(matchHistoricalCategories(groupTransactionsForAiCategorization([row]),categories,[{...row,categoryId:1}]).suggestions).toHaveLength(0);
   const merchant = {...row,merchant:'Specific merchant'};
   expect(matchHistoricalCategories(groupTransactionsForAiCategorization([merchant]),categories,[{...merchant,categoryId:2}]).suggestions).toHaveLength(0);
+});
+
+test('history reuses confirmed income subcategories, not legacy broad income', () => {
+  const row = { id: 1, ledgerTransactionId: 'new-pay', accountId: 1, accountName: 'Checking', accountInstitution: 'Bank', accountType: 'checking', date: '2026-06-01', amountCents: 150000, description: 'Example employer', merchant: 'Example employer', originalDescription: null, originalCategory: null, transactionKind: 'activity' };
+  const categories = [{ id: 1, name: 'Income', type: 'income', parentId: null }, { id: 2, name: 'Payroll', type: 'income', parentId: 1 }, { id: 3, name: 'Bonuses', type: 'income', parentId: 1 }] as Parameters<typeof matchHistoricalCategories>[1];
+  const groups = groupTransactionsForAiCategorization([row]);
+  const broad = { ...row, ledgerTransactionId: 'old-income', categoryId: 1 };
+  expect(matchHistoricalCategories(groups, categories, [broad])).toMatchObject({ suggestions: [], questions: [], unmatched: groups });
+  const payroll = { ...row, ledgerTransactionId: 'old-payroll', categoryId: 2 };
+  expect(matchHistoricalCategories(groups, categories, [broad, payroll]).suggestions[0]).toMatchObject({ source: 'history', categoryId: 2 });
+  expect(matchHistoricalCategories(groups, categories, [payroll, { ...row, categoryId: 3 }]).questions).toHaveLength(1);
 });
 
 test('ai categorization can sort merchant groups by money instead of count', () => {

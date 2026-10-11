@@ -1,10 +1,12 @@
 import type { CSSProperties, SelectHTMLAttributes } from 'react';
 import { Sparkles } from 'lucide-react';
 import { CATEGORY_GROUPS } from '../../utils/categoryGroups';
+import { categoryPathLabel, compareCategoryPaths } from '../../utils/categoryHierarchy';
 
 interface Category {
   id: number | string;
   name: string;
+  parentId?: number | string | null;
   categoryGroup?: string | null;
   color?: string | null;
 }
@@ -56,7 +58,8 @@ export default function GroupedCategorySelect({
   const excludedIds = new Set(excludeCategoryIds.map(normalizedId).filter(Boolean));
   if (suggestedValue) excludedIds.add(suggestedValue);
 
-  const availableCategories = categories.filter(category => !excludedIds.has(normalizedId(category.id)));
+  const availableCategories = categories.filter(category => !excludedIds.has(normalizedId(category.id)))
+    .sort((a, b) => compareCategoryPaths(a, b, categories));
   const knownGroupKeys = new Set<string>(CATEGORY_GROUPS.map(group => group.key).filter(key => key !== 'other'));
   const groupedCategories = CATEGORY_GROUPS
     .map(group => ({
@@ -99,14 +102,14 @@ export default function GroupedCategorySelect({
         ))}
         {suggestedCategory && (
           <optgroup label="Suggested">
-            <option value={suggestedValue}>{suggestedCategory.name}</option>
+            <option value={suggestedValue}>{categoryPathLabel(suggestedCategory, categories)}</option>
           </optgroup>
         )}
         {groupedCategories.map(group => (
           <optgroup key={group.key} label={group.label}>
             {group.categories.map(category => (
               <option key={category.id} value={category.id}>
-                {category.name}
+                {categoryPathLabel(category, categories)}
               </option>
             ))}
           </optgroup>

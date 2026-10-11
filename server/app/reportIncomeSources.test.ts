@@ -24,16 +24,23 @@ test('unresolved family transfers, internal moves, loans, reimbursements and tra
   ])).toEqual([]);
 });
 
-test('payroll splits broad income only with explicit evidence; other income stays separate', () => {
+test('reports aggregate saved categories without reinterpreting payroll or gift descriptions', () => {
   const rows = reportIncomeSources([
     transaction({ description: 'Example employer payroll' }),
     transaction({ description: 'Example employer payroll', amount_cents: 20000 }),
     transaction({ description: 'Online transfer from family' }),
-    transaction({ account_id: 2, description: 'Example employer payroll' }),
+    transaction({ account_id: 2, description: 'Example employer payroll', category_id: 4, category_name: 'Payroll' }),
     transaction({ month: '2026-02', category_id: 3, category_name: 'Wages' }),
   ]);
-  expect(rows).toContainEqual(expect.objectContaining({ account_id: 1, source: 'payroll', amount_cents: 30000 }));
-  expect(rows).toContainEqual(expect.objectContaining({ account_id: 1, source: 'other_income', amount_cents: 10000 }));
-  expect(rows).toContainEqual(expect.objectContaining({ account_id: 2, source: 'payroll', amount_cents: 10000 }));
+  expect(rows).toContainEqual(expect.objectContaining({ account_id: 1, source: 'category_1', label: 'Income', amount_cents: 40000 }));
+  expect(rows).toContainEqual(expect.objectContaining({ account_id: 2, source: 'category_4', label: 'Payroll', amount_cents: 10000 }));
   expect(rows).toContainEqual(expect.objectContaining({ month: '2026-02', label: 'Wages' }));
+  expect(rows).toHaveLength(3);
+});
+
+test('category changes and renames are reflected directly in income sources', () => {
+  const receipt = transaction({ description: 'PAYROLL123 GIFT transfer', category_id: 8, category_name: 'Other Income' });
+  expect(reportIncomeSources([receipt])[0]).toMatchObject({ source: 'category_8', label: 'Other Income' });
+  expect(reportIncomeSources([{ ...receipt, category_name: 'Contract work' }])[0]).toMatchObject({ source: 'category_8', label: 'Contract work' });
+  expect(reportIncomeSources([{ ...receipt, category_id: 9, category_name: 'Payroll' }])[0]).toMatchObject({ source: 'category_9', label: 'Payroll' });
 });

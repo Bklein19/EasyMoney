@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from 'react-router';
 import {
   ComposedChart,
   Area,
@@ -467,7 +468,8 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
                 <label><input type="checkbox" checked={showIncomeSources} onChange={event => setShowIncomeSources(event.target.checked)} /> Compare income sources</label>
                 {showIncomeSources && <p className="chart-subtitle">
                   Dashed lines show cash received, not money retained or additional net worth. Payroll is deposited pay, not gross W-2 income.
-                  {' '}Only receipts categorized as income are included; unresolved transfers, loans and expense reimbursements are not inferred as gifts.
+                  {' '}Lines use your saved income categories, with no extra classification. Existing broad Income assignments remain Income until recategorized; unresolved transfers, loans and expense reimbursements are not inferred as gifts.
+                  {' '}<Link to="/categories?group=income">Manage income categories</Link>
                 </p>}
                 {showIncomeSources && incomeOverlay.series.length === 0 && <p className="chart-subtitle">No categorized income for the selected accounts. Categorize gifts and payroll as income to see them here.</p>}
               </div>

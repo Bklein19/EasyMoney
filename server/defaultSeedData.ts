@@ -4,6 +4,8 @@ export interface SeedCategory {
   color: string;
   type: string;
   categoryGroup: string;
+  parentName?: string;
+  description?: string;
 }
 
 export type SeedRule = [pattern: string, categoryName: string, priority: number];
@@ -28,6 +30,11 @@ export const DEFAULT_CATEGORIES: SeedCategory[] = [
   { name: 'Internal Transfer', icon: 'shuffle', color: '#94a3b8', type: 'internal_transfer', categoryGroup: 'transfer' },
   { name: 'Investment', icon: 'trending-up', color: '#f59e0b', type: 'investment', categoryGroup: 'savings_investment' },
   { name: 'Uncategorized', icon: 'help-circle', color: '#94a3b8', type: 'expense', categoryGroup: 'other' },
+  { name: 'Payroll', parentName: 'Income', icon: 'banknote', color: '#10b981', type: 'income', categoryGroup: 'income', description: 'Regular pay from employment, including net salary and wages deposited into a bank account. Not gross W-2 compensation, reimbursements, or investment sales.' },
+  { name: 'Bonuses', parentName: 'Income', icon: 'banknote', color: '#10b981', type: 'income', categoryGroup: 'income', description: 'Employment bonuses explicitly identified as bonuses. Do not infer a bonus just from an unusually large paycheck.' },
+  { name: 'Gifts Received', parentName: 'Income', icon: 'gift', color: '#10b981', type: 'income', categoryGroup: 'income', description: 'Money received as a confirmed personal gift, including gifts from parents. A family remitter or transfer description alone does not establish a gift. Excludes loans and reimbursements.' },
+  { name: 'Interest', parentName: 'Income', icon: 'banknote', color: '#10b981', type: 'income', categoryGroup: 'income', description: 'Interest paid into cash, checking, or savings accounts. Not market appreciation, investment trades, or reinvestment activity.' },
+  { name: 'Other Income', parentName: 'Income', icon: 'banknote', color: '#10b981', type: 'income', categoryGroup: 'income', description: 'Known income receipts that do not fit a more specific income subcategory. Not unresolved transfers, loans, expense reimbursements, or proceeds from selling investments.' },
 ];
 
 export const DEFAULT_RULES: SeedRule[] = [

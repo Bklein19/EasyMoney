@@ -12,7 +12,7 @@ afterAll(() => {
   fs.rmSync(temporaryRoot, { recursive: true, force: true });
 });
 
-function createDefaultOnlyDatabase(databasePath: string) {
+function createDefaultOnlyDatabase(databasePath: string, legacySeed = false) {
   const database = new Database(databasePath, { create: true });
   database.exec(`
     CREATE TABLE schemaMigrations (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
@@ -38,12 +38,16 @@ function createDefaultOnlyDatabase(databasePath: string) {
   database.prepare('INSERT INTO schemaMigrations (id, name) VALUES (?, ?)').run(1, 'seed');
 
   const categoryIds = new Map<string, number>();
-  for (const category of DEFAULT_CATEGORIES) {
+  const defaults = legacySeed ? DEFAULT_CATEGORIES.filter(category => !category.parentName) : DEFAULT_CATEGORIES;
+  for (const category of defaults) {
     const result = database.prepare(`
       INSERT INTO categories (name, parentId, type, categoryGroup, description, color, icon)
-      VALUES (?, NULL, ?, ?, NULL, ?, ?)
-    `).run(category.name, category.type, category.categoryGroup, category.color, category.icon);
+      VALUES (?, NULL, ?, ?, ?, ?, ?)
+    `).run(category.name, category.type, category.categoryGroup, legacySeed ? null : category.description ?? null, category.color, category.icon);
     categoryIds.set(category.name, Number(result.lastInsertRowid));
+  }
+  for (const category of defaults) {
+    if (category.parentName) database.prepare('UPDATE categories SET parentId = ? WHERE name = ?').run(categoryIds.get(category.parentName)!, category.name);
   }
 
   for (const [pattern, categoryName, priority] of DEFAULT_RULES) {
@@ -67,6 +71,22 @@ function createLegacyDatabase(homeDirectory: string, marker: string) {
 }
 
 describe('desktop data migration', () => {
+  test('recognizes old empty seeds and current hierarchy independent of category ID allocation', () => {
+    for (const legacySeed of [true, false]) {
+      const homeDirectory = path.join(temporaryRoot, `income-defaults-${legacySeed}`);
+      const legacyDatabasePath = createLegacyDatabase(homeDirectory, 'legacy-account');
+      const destination = path.join(homeDirectory, 'desktop');
+      fs.mkdirSync(destination, { recursive: true });
+      const databasePath = path.join(destination, 'easymoney.sqlite');
+      createDefaultOnlyDatabase(databasePath, legacySeed);
+      const db = new Database(databasePath);
+      db.exec('UPDATE categories SET id = id + 1000; UPDATE categories SET parentId = parentId + 1000 WHERE parentId IS NOT NULL; UPDATE categorizationRules SET categoryId = categoryId + 1000;');
+      db.close();
+      expect(migrateLegacyData({ homeDirectory, databasePath, environmentPath: path.join(destination, '.env.local') }))
+        .toMatchObject({ recoveredEmptyDatabase: true, migratedDatabaseFrom: legacyDatabasePath });
+    }
+  });
+
   test('copies a consistent legacy database snapshot and local environment once', () => {
     const homeDirectory = path.join(temporaryRoot, 'initial-copy');
     const legacyRoot = path.join(homeDirectory, 'src', 'EasyMoney');

@@ -509,8 +509,12 @@ function historyKey(row: UncategorizedTransactionRow): string | null {
 }
 
 export function matchHistoricalCategories(groups: MerchantCategorizationGroup[], categories: CategorySummary[], history: Array<UncategorizedTransactionRow & { categoryId: number }>) {
+  const broadIncomeIds = new Set(categories.filter(category => category.type === 'income' && categories.some(child => child.parentId === category.id)).map(category => category.id));
   const byKey = new Map<string, Set<number>>();
   for (const row of history) {
+    // A legacy broad Income label says nothing about its subtype. It must neither
+    // propagate to new receipts nor conflict with a specific confirmed subtype.
+    if (broadIncomeIds.has(row.categoryId)) continue;
     const key = historyKey(row);
     if (!key) continue;
     if (!byKey.has(key)) byKey.set(key, new Set());
@@ -705,6 +709,8 @@ async function categorizeBatchWithOpenAi(input: {
       "kind must be exactly one of: 'category', 'transfer', or 'needs_review'.",
       "Use kind: 'category' for spending, income, or Investment activity. categoryName must exactly match the category list. Investment activity is not personal spending or income.",
       'Category descriptions are user-specific guidance. Prefer those descriptions over generic personal-finance assumptions when deciding between categories.',
+      'Categories with a parentName are subcategories. Prefer the most specific supported income subcategory over its broad Income parent: Payroll for employment pay, Bonuses only for identified bonuses, Gifts Received only for confirmed gifts, Interest for bank interest, and Other Income for known income without a more specific fit. Use the actual names supplied in the category list; do not invent a second reporting classification.',
+      'Employment deposits need not contain the literal word payroll. Consider employer/payee context and source descriptions, but do not assume every direct deposit is salary. A family name, round amount, Venmo cashout or transfer label alone is not evidence of a gift. Loans and expense reimbursements are not income; unclear purpose needs review.',
       "For kind: 'transfer' or kind: 'needs_review', set categoryName to an empty string.",
       "Use kind: 'transfer' only for explicit account-to-account movement visible from a cash, checking, savings, or credit-card account, including credit card payments, ACH transfers, cash sent to or from investments, and other account-to-account movement.",
       'Internal Transfer is reserved for an inflow and outflow on different owned accounts that the application has explicitly matched. A matching amount, merchant name, or description alone is not evidence of a confirmed pair. This request does not supply confirmed transfer-pair evidence, so never select Internal Transfer.',
@@ -730,6 +736,7 @@ async function categorizeBatchWithOpenAi(input: {
     JSON.stringify({
       categories: input.categories.map(category => ({
         name: category.name,
+        parentName: input.categories.find(parent => parent.id === category.parentId)?.name ?? null,
         type: category.type,
         categoryGroup: category.categoryGroup,
         description: category.description || '',

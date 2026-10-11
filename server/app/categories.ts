@@ -45,6 +45,23 @@ type CategoryMutationInput = Omit<Partial<CategorySummary>, 'parentId'> & {
   parentId?: number | string | null;
 };
 
+function validateParent(parentId: number | string | null | undefined, categoryId?: number | string) {
+  if (parentId == null) return parentId;
+  const id = Number(parentId);
+  if (!Number.isInteger(id) || id <= 0) throw new Error('Parent category not found.');
+  const parents = getDb().prepare('SELECT id, parentId FROM categories').all() as Array<{ id: number; parentId: number | null }>;
+  const byId = new Map(parents.map(parent => [parent.id, parent.parentId]));
+  if (!byId.has(id)) throw new Error('Parent category not found.');
+  const seen = new Set<number>(categoryId === undefined ? [] : [Number(categoryId)]);
+  let ancestor: number | null | undefined = id;
+  while (ancestor != null) {
+    if (seen.has(ancestor)) throw new Error('A category cannot be nested inside itself or its descendants.');
+    seen.add(ancestor);
+    ancestor = byId.get(ancestor);
+  }
+  return id;
+}
+
 export function createCategory(category: CategoryMutationInput) {
   const name = category.name?.trim();
   if (!name) throw new Error('Category name is required.');
@@ -53,7 +70,7 @@ export function createCategory(category: CategoryMutationInput) {
   }
   const id = Number(insertRow('categories', {
     name,
-    parentId: category.parentId ?? null,
+    parentId: validateParent(category.parentId) ?? null,
     type: category.type ?? null,
     categoryGroup: category.categoryGroup ?? null,
     description: category.description ?? null,
@@ -76,7 +93,7 @@ export function updateCategory(id: number | string, changes: CategoryMutationInp
   }
   updateRow('categories', id, definedFields({
     name,
-    parentId: changes.parentId,
+    parentId: validateParent(changes.parentId, id),
     type: changes.type,
     categoryGroup: changes.categoryGroup,
     description: changes.description,
@@ -94,6 +111,8 @@ export function deleteCategory(id: number | string) {
   }
 
   db.transaction(() => {
+    // Deleting a grouping category must not leave children pointing to a missing parent.
+    db.prepare('UPDATE categories SET parentId = NULL WHERE parentId = ?').run(id);
     if (uncategorized) {
       db.prepare('UPDATE transactionAnnotations SET categoryId = ? WHERE categoryId = ?').run(uncategorized.id, id);
     }

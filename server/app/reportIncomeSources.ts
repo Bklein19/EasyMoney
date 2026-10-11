@@ -24,15 +24,9 @@ export function reportIncomeSources(transactions: ReportIncomeTransaction[]): Re
     if (transaction.amount_cents <= 0 || transaction.category_type !== 'income') continue;
     // Security sales, reinvestments and card credits aren't new household cash income.
     if (!['checking', 'savings', 'cash'].includes(transaction.account_type)) continue;
-    let source = `category_${transaction.category_id}`;
-    let label = transaction.category_name ?? 'Other income';
-    // Split a broad Income category only for an explicit payroll fingerprint.
-    // Never infer gifts from a remitter, a transfer description, or a round amount.
-    if (/^income$/i.test(label)) {
-      const payroll = /\b(payroll|salary|wages)\b/i.test(transaction.description);
-      source = payroll ? 'payroll' : 'other_income';
-      label = payroll ? 'Payroll (net deposits)' : 'Other income';
-    }
+    if (transaction.category_id === null) continue;
+    const source = `category_${transaction.category_id}`;
+    const label = transaction.category_name ?? 'Income';
     const key = `${transaction.month}|${transaction.account_id}|${source}`;
     const row = sources.get(key) ?? {
       month: transaction.month, account_id: transaction.account_id, source, label, amount_cents: 0,

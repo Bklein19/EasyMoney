@@ -22,7 +22,7 @@ interface TableNameRow {
 
 interface CategoryRow {
   name: string;
-  parentId: number | null;
+  parentId: number | string | null;
   type: string | null;
   categoryGroup: string | null;
   description: string | null;
@@ -96,8 +96,9 @@ function seedStateFingerprintConnection(database: Database) {
   }
 
   const categories = database.query(`
-    SELECT name, parentId, type, categoryGroup, description, color, icon
-    FROM categories
+    SELECT c.name, COALESCE(parent.name, c.parentId) AS parentId,
+      c.type, c.categoryGroup, c.description, c.color, c.icon
+    FROM categories c LEFT JOIN categories parent ON parent.id = c.parentId
   `).all() as CategoryRow[];
   const rules = database.query(`
     SELECT
@@ -111,22 +112,28 @@ function seedStateFingerprintConnection(database: Database) {
   return seedStateFingerprint(categories, rules);
 }
 
-const DEFAULT_SEED_STATE_FINGERPRINT = seedStateFingerprint(
-  DEFAULT_CATEGORIES.map(category => ({
-    ...category,
-    parentId: null,
-    description: null,
+const defaultRules = DEFAULT_RULES.map(([pattern, categoryName, priority]) => ({
+  pattern, categoryName, priority, matchType: 'contains',
+}));
+const defaultCategoryRow = (category: typeof DEFAULT_CATEGORIES[number]): CategoryRow => ({
+  name: category.name, parentId: category.parentName ?? null, type: category.type,
+  categoryGroup: category.categoryGroup, description: category.description ?? null,
+  color: category.color, icon: category.icon,
+});
+
+// Recognize both the current hierarchy and the pre-subcategory empty seed.
+// Compare parent names rather than allocation-dependent SQLite IDs.
+const DEFAULT_SEED_STATE_FINGERPRINTS = new Set([
+  seedStateFingerprint(DEFAULT_CATEGORIES.map(defaultCategoryRow), defaultRules),
+  seedStateFingerprint(DEFAULT_CATEGORIES.filter(category => !category.parentName).map(category => ({
+    ...defaultCategoryRow(category), parentId: null, description: null,
   })),
-  DEFAULT_RULES.map(([pattern, categoryName, priority]) => ({
-    pattern,
-    categoryName,
-    priority,
-    matchType: 'contains',
-  })),
-);
+  defaultRules),
+]);
 
 function isDefaultOnlyDatabaseConnection(database: Database) {
-  return seedStateFingerprintConnection(database) === DEFAULT_SEED_STATE_FINGERPRINT;
+  const fingerprint = seedStateFingerprintConnection(database);
+  return fingerprint !== null && DEFAULT_SEED_STATE_FINGERPRINTS.has(fingerprint);
 }
 
 function isDefaultOnlyDatabase(databasePath: string) {
@@ -151,7 +158,7 @@ function defaultSeedFingerprint(databasePath: string) {
     const database = new Database(databasePath, { readonly: true });
     try {
       const fingerprint = seedStateFingerprintConnection(database);
-      return fingerprint === DEFAULT_SEED_STATE_FINGERPRINT ? fingerprint : null;
+      return fingerprint !== null && DEFAULT_SEED_STATE_FINGERPRINTS.has(fingerprint) ? fingerprint : null;
     } finally {
       database.close();
     }
