@@ -18,7 +18,7 @@ interface PeriodClickBand {
 }
 
 export function getPeriodClickBands(centers: number[], plotStart: number, plotWidth: number): PeriodClickBand[] {
-  if (centers.length === 0 || plotWidth <= 0) return [];
+  if (centers.length === 0 || !Number.isFinite(plotStart) || !Number.isFinite(plotWidth) || plotWidth <= 0 || centers.some(center => !Number.isFinite(center))) return [];
 
   const plotEnd = plotStart + plotWidth;
   return centers.map((center, index) => {
@@ -61,13 +61,16 @@ export default function PeriodClickOverlay({ data, onSelectPeriod }: PeriodClick
 
   const positionedPeriods = data.flatMap(period => {
     const center = xScale(period.displayLabel, { position: 'middle' });
-    return typeof center === 'number' ? [{ center, period }] : [];
+    return typeof center === 'number' && Number.isFinite(center) ? [{ center, period }] : [];
   });
   const bands = getPeriodClickBands(
     positionedPeriods.map(({ center }) => center),
     plotArea.x,
     plotArea.width
   );
+  // ResponsiveContainer can briefly have zero width while the grid is resizing.
+  // Never index an empty band array during that intermediate render.
+  if (bands.length !== positionedPeriods.length) return null;
 
   const selectPeriod = (
     period: AnalyticsPeriodRow,

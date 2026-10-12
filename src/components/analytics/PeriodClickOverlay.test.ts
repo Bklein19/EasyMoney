@@ -15,6 +15,14 @@ test('uses the full plot for a single period', () => {
   ]);
 });
 
+test('transient zero-width and nonfinite plot measurements have no click targets', () => {
+  expect(getPeriodClickBands([100, 200], 0, 0)).toEqual([]);
+  expect(getPeriodClickBands([100, 200], 0, -1)).toEqual([]);
+  expect(getPeriodClickBands([100, 200], 0, NaN)).toEqual([]);
+  expect(getPeriodClickBands([100, NaN], 0, 300)).toEqual([]);
+  expect(getPeriodClickBands([100, 200], Infinity, 300)).toEqual([]);
+});
+
 test('builds an inclusive period range in either drag direction', () => {
   const periods = [
     { timeKey: '2026-01', displayLabel: 'Jan 2026', startDate: '2026-01-01', endDate: '2026-01-31' },
