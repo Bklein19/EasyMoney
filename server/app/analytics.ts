@@ -14,6 +14,7 @@ import { listAccounts } from './accounts.ts';
 import { listCategories } from './categories.ts';
 import { listTransactions } from './transactions.ts';
 import { resolveAutoGrouping } from './analyticsGrouping.ts';
+import { buildSpendingTree } from './spendingExplorer.ts';
 import {
   buildAccountMap,
   buildCategoryMap,
@@ -119,7 +120,8 @@ export function getAnalyticsReport(input: AnalyticsReportInput = {}) {
   const transactionResponse = listTransactions(query);
   const categoryScopedTransactions = applyCategoryFilter(transactionResponse.transactions, input);
   const accountMap = buildAccountMap(listAccounts({ includeArchived: true }).accounts);
-  const categoryMap = buildCategoryMap(listCategories().categories);
+  const categories = listCategories().categories;
+  const categoryMap = buildCategoryMap(categories);
   const analysisTransactions = categoryScopedTransactions.filter(transaction => {
     const flow = getTransactionFlow(transaction, accountMap, categoryMap);
     return flow !== 'transfer' && flow !== 'card_payment' && flow !== 'internal_transfer' && flow !== 'investment';
@@ -271,6 +273,7 @@ export function getAnalyticsReport(input: AnalyticsReportInput = {}) {
     summary,
     cashFlow: [...cashFlowByPeriod.values()].sort((a, b) => a.key.localeCompare(b.key)),
     spendingByCategory: [...spendingByCategory.values()].sort((a, b) => b.amount - a.amount),
+    spendingExplorer: buildSpendingTree(categoryScopedTransactions.filter(transaction => isExpense(transaction, accountMap, categoryMap)), categories),
     topMerchants: [...merchants.values()].sort((a, b) => b.amount - a.amount).slice(0, 10),
     incomeStreams: [...incomeStreams.values()].sort((a, b) => b.amount - a.amount),
     investments: [...investmentsByPeriod.values()].sort((a, b) => a.key.localeCompare(b.key)),

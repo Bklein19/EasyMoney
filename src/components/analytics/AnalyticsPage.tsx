@@ -9,7 +9,8 @@ import { useAccounts } from '../../hooks/useAccounts';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import { formatCurrency, formatDate, getAmountClass } from '../../utils/formatters';
 
-import SpendingByCategory from './SpendingByCategory';
+import SpendingExplorer from './SpendingExplorer';
+import type { SpendingNode } from '../../../server/app/spendingExplorer';
 import SpendingTrends from './SpendingTrends';
 import IncomeVsExpense from './IncomeVsExpense';
 import TopMerchants from './TopMerchants';
@@ -79,14 +80,6 @@ interface CashFlowRow extends AnalyticsPeriodRow {
   transactionIds: number[];
 }
 
-interface SpendingCategoryRow {
-  id: string | number;
-  name: string;
-  amount: number;
-  color?: string | null;
-  transactionIds?: Array<string | number>;
-}
-
 interface MerchantAnalyticsRow {
   normalized: string;
   name: string;
@@ -106,7 +99,7 @@ interface InvestmentPeriodRow extends AnalyticsPeriodRow {
 interface AnalyticsReport {
   summary: AnalyticsSummary;
   cashFlow: CashFlowRow[];
-  spendingByCategory: SpendingCategoryRow[];
+  spendingExplorer: SpendingNode;
   topMerchants: MerchantAnalyticsRow[];
   incomeStreams: MerchantAnalyticsRow[];
   investments: InvestmentPeriodRow[];
@@ -241,7 +234,7 @@ export default function AnalyticsPage() {
   const deferredAccounts = useDeferredValue(accounts);
   const deferredCategories = useDeferredValue(categories);
   const deferredCashFlow = useDeferredValue(analyticsReport?.cashFlow ?? []);
-  const deferredSpendingByCategory = useDeferredValue(analyticsReport?.spendingByCategory ?? []);
+  const deferredSpendingExplorer = useDeferredValue(analyticsReport?.spendingExplorer);
   const deferredTopMerchants = useDeferredValue(analyticsReport?.topMerchants ?? []);
   const deferredIncomeStreams = useDeferredValue(analyticsReport?.incomeStreams ?? []);
   const deferredInvestments = useDeferredValue(analyticsReport?.investments ?? []);
@@ -253,7 +246,7 @@ export default function AnalyticsPage() {
     reportTransactions !== deferredTransactions ||
     reportAnalysisTransactions !== deferredAnalysisTransactions ||
     (analyticsReport?.cashFlow ?? []) !== deferredCashFlow ||
-    (analyticsReport?.spendingByCategory ?? []) !== deferredSpendingByCategory ||
+    analyticsReport?.spendingExplorer !== deferredSpendingExplorer ||
     (analyticsReport?.topMerchants ?? []) !== deferredTopMerchants ||
     (analyticsReport?.incomeStreams ?? []) !== deferredIncomeStreams ||
     (analyticsReport?.investments ?? []) !== deferredInvestments ||
@@ -485,22 +478,6 @@ export default function AnalyticsPage() {
     });
     setPendingCategoryFilterId('');
     if (options.resetSelection !== false) resetAnalyticsSelection();
-  };
-
-  const includeCategoryFromChart = (category: SpendingCategoryRow) => {
-    const categoryId = String(category.id);
-    addCategoryFilter(categoryId, CATEGORY_FILTER_MODES.INCLUDE, { resetSelection: false });
-    openDrilldown({
-      type: 'category',
-      id: categoryId,
-      ids: new Set(category.transactionIds),
-      title: `${category.name} Spending`,
-      scrollIntoView: true
-    });
-  };
-
-  const excludeCategoryFromChart = (categoryId: string) => {
-    addCategoryFilter(categoryId, CATEGORY_FILTER_MODES.EXCLUDE);
   };
 
   const removeCategoryFilter = (categoryId: string) => {
@@ -834,17 +811,22 @@ export default function AnalyticsPage() {
           />
         </div>
 
-        <div className="analytics-card glass-card">
+        <div className="analytics-card glass-card analytics-card--explorer">
           <div className="analytics-card__heading">
-            <h3 className="analytics-card__title">Spending by Category</h3>
+            <h3 className="analytics-card__title">Explore spending</h3>
             <p>
-              Click a category to include it. Hover and use X to exclude it.
+              Follow the money from categories to merchants and the transactions behind them.
             </p>
           </div>
-          <SpendingByCategory
-            rows={deferredSpendingByCategory}
-            onSelectCategory={(category) => includeCategoryFromChart(category)}
-            onExcludeCategory={(category) => excludeCategoryFromChart(String(category.id))}
+          <SpendingExplorer
+            root={deferredSpendingExplorer}
+            onViewTransactions={node => openDrilldown({
+              type: node.kind === 'merchant' ? 'merchant' : 'category',
+              id: node.id,
+              ids: new Set(node.transactionIds),
+              title: `${node.name} · Spending transactions`,
+              scrollIntoView: true,
+            })}
           />
         </div>
         

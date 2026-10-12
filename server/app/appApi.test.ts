@@ -1390,6 +1390,9 @@ test('account sets scope transaction pages, totals, analytics and bulk categoriz
   const second = await caller.transactions.list({ accountIds, limit: 1, offset: 1 });
   expect(new Set([...result.transactions, ...second.transactions].map(row => row.account?.id))).toEqual(new Set(accountIds));
   expect((await caller.analytics.report({ accountIds })).summary.expenses).toBe(40);
+  const selectedSpending = (await caller.analytics.report({ accountIds })).spendingExplorer;
+  expect(selectedSpending.amountCents).toBe(4000);
+  expect(selectedSpending.transactionIds).toHaveLength(2);
   expect((await caller.transactions.list({ accountIds: [] })).totalCount).toBe(0);
   expect((await caller.analytics.report({ accountIds: [] })).summary.transactionCount).toBe(0);
   expect((await caller.transactions.list()).totalCount).toBe(3);
@@ -1475,6 +1478,9 @@ test('trpc analytics report aggregates backend-owned cashflow semantics', async 
   expect(report.spendingByCategory).toEqual([
     expect.objectContaining({ id: String(diningId), name: 'Dining', amount: 25 }),
   ]);
+  expect(report.spendingExplorer).toMatchObject({ amountCents: 2500, transactionIds: [cafeId] });
+  expect(report.spendingExplorer.children[0]).toMatchObject({ name: 'Dining', amountCents: 2500, children: [expect.objectContaining({ name: 'Blue Cafe', transactionIds: [cafeId] })] });
+  expect((await caller.analytics.report({ startDate: '2026-07-01', endDate: '2026-07-31' })).spendingExplorer.amountCents).toBe(0);
   expect(report.topMerchants).toEqual([
     expect.objectContaining({ name: 'Blue Cafe', amount: 25, count: 1 }),
   ]);
@@ -1490,6 +1496,8 @@ test('trpc analytics report aggregates backend-owned cashflow semantics', async 
     categoryFilterMode: 'include',
   });
   expect(diningOnly.summary).toMatchObject({ income: 0, expenses: 25, net: -25 });
+  expect(diningOnly.spendingExplorer.amountCents).toBe(2500);
+  expect((await caller.analytics.report({ categoryFilterIds: [diningId], categoryFilterMode: 'exclude' })).spendingExplorer.amountCents).toBe(0);
 });
 
 test('app transactions endpoint supports column sort keys', async () => {
