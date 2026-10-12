@@ -114,6 +114,6 @@ export default function SpendingExplorer({ root, onViewTransactions }: Props) {
         </div>
       </div>
     </div>
-    <p className="spending-explorer__note">Gross spending before refunds. Transfers, card payments, and investment movements are excluded. Uncategorized remains visible.</p>
+    <p className="spending-explorer__note">Gross spending before refunds, using current classifications. Activity classified as transfers, card payments, or investment movements is excluded. Uncategorized remains visible.</p>
   </section>;
 }

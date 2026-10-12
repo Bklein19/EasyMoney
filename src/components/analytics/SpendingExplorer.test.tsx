@@ -22,6 +22,7 @@ test('explorer provides precise amounts, accessible ring controls and a complete
   expect(html).toContain('Uncategorized');
   expect(html).toContain('View transactions');
   expect(html).toContain('Gross spending before refunds');
+  expect(html).toContain('using current classifications');
   expect(html).not.toContain('NaN');
 });
 
