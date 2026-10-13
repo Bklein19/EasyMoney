@@ -2532,6 +2532,39 @@ test('history reuses confirmed income subcategories, not legacy broad income', (
   expect(matchHistoricalCategories(groups, categories, [payroll, { ...row, categoryId: 3 }]).questions).toHaveLength(1);
 });
 
+test('transaction detail and scoped review share active ledger rows; category edits are backed up and guarded', async () => {
+  const accountId = Number(insertRow('accounts', { name: 'Review checking', type: 'checking' }));
+  const foodId = Number(insertRow('categories', { name: 'Food', type: 'expense' }));
+  const shoppingId = Number(insertRow('categories', { name: 'Shopping', type: 'expense' }));
+  for (const [index, amountCents] of [-1000, -1000, 1000].entries()) {
+    insertRow('ledgerTransactions', { ledgerTransactionId: `related-${index}`, accountId, date: '2026-10-01', amountCents,
+      description: 'Coffee Shop', merchant: 'Coffee Shop', transactionKind: 'activity', originalDescription: 'Original evidence' });
+    upsertTransactionAnnotation(`related-${index}`, { categoryId: index === 0 ? foodId : shoppingId, notes: 'Keep note' });
+  }
+  const detail = await caller.transactions.details({ ledgerTransactionId: 'related-0' });
+  expect(detail.related.map(row => row.ledgerTransactionId)).toEqual(['related-1']);
+  expect(detail.categoryNames).toEqual(['Food', 'Shopping']);
+  expect(detail.transaction.originalDescription).toBe('Original evidence');
+  const report = await caller.analytics.report({ accountIds: [accountId], startDate: '2026-10-01', endDate: '2026-10-02' });
+  expect(report.worthReviewing.groups).toHaveLength(1);
+  expect(report.worthReviewing.groups[0]?.transactions).toHaveLength(2);
+  expect((await caller.analytics.report({ accountIds: [] })).worthReviewing.groups).toEqual([]);
+  expect((await caller.analytics.report({ startDate: '2026-11-01' })).worthReviewing.groups).toEqual([]);
+  const beforeLedger = getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all();
+  const result = await caller.transactions.applyReviewedCategories({ label: 'Reviewed coffee', changes: [{ ...detail.review, categoryId: shoppingId }] });
+  expect(result.count).toBe(1);
+  expect(result.undoOperation?.count).toBe(1);
+  expect((await caller.backups.list()).backups.length).toBeGreaterThan(0);
+  expect(getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all()).toEqual(beforeLedger);
+  expect(getDb().prepare('SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId = ?').get('related-0')?.notes).toBe('Keep note');
+  await expect(caller.transactions.applyReviewedCategories({ label: 'Stale', changes: [{ ...detail.review, categoryId: foodId }] })).rejects.toThrow('changed');
+  await caller.transactions.restoreCategories({ undoOperationId: result.undoOperation!.id });
+  expect((await caller.transactions.details({ ledgerTransactionId: 'related-0' })).selected.category?.id).toBe(foodId);
+  const cleared = await caller.transactions.applyReviewedCategories({ label: 'Clear category', changes: [{ ...detail.review, categoryId: null }] });
+  expect((await caller.transactions.details({ ledgerTransactionId: 'related-0' })).selected.category).toBeNull();
+  await caller.transactions.restoreCategories({ undoOperationId: cleared.undoOperation!.id });
+});
+
 test('reviewed category changes are atomic, preserve notes and ledger facts, and undo as one operation', async () => {
   const { applyReviewedCategoryChanges } = await import('./transactions');
   const accountId = Number(insertRow('accounts', { name: 'Checking', type: 'checking' }));

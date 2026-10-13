@@ -1,5 +1,7 @@
 import { getDb } from '../database.ts';
 import { buildLedgerFromSourceFacts } from './ledgerRebuild';
+import { listTransactions } from './transactions';
+import { relatedMerchantKey, reviewedTransaction } from './transactionReview';
 
 export function getTransactionDetails(ledgerTransactionId: string) {
   const db = getDb();
@@ -24,5 +26,10 @@ export function getTransactionDetails(ledgerTransactionId: string) {
         importFileId: number | null; sourceAccountName: string | null; mappedAccountName: string | null; rowIndex: number | null } | undefined;
     return source ? [{ ...source, reason: item.reason, selected: Boolean(item.selected) }] : [];
   });
-  return { transaction, sources };
+  const activeTransactions = listTransactions({ includeArchived: true }).transactions;
+  const selected = activeTransactions.find(row => row.ledgerTransactionId === ledgerTransactionId)!;
+  if (!selected) throw new Error('Transaction no longer exists in the active ledger. Refresh the list.');
+  const related = activeTransactions.filter(row => row.ledgerTransactionId !== ledgerTransactionId && relatedMerchantKey(row) === relatedMerchantKey(selected));
+  const categoryNames = [...new Set([selected, ...related].map(row => row.category?.name || 'Uncategorized'))].sort();
+  return { transaction, sources, selected, related, categoryNames, review: reviewedTransaction(selected) };
 }

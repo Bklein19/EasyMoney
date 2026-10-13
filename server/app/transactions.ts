@@ -559,7 +559,7 @@ export function applyReviewedCategoryChanges(input: {
   label: string;
   changes: Array<{
     transactionId: string;
-    categoryId: number;
+    categoryId: number | null;
     expected: {
       categoryId: number | null;
       accountId: number;
@@ -576,7 +576,7 @@ export function applyReviewedCategoryChanges(input: {
     const changes = input.changes.filter(change => {
       if (seen.has(change.transactionId)) throw new Error('Reviewed plan contains duplicate transaction identities.');
       seen.add(change.transactionId);
-      if (!validCategories.has(change.categoryId)) throw new Error('Reviewed destination category no longer exists.');
+      if (change.categoryId !== null && !validCategories.has(change.categoryId)) throw new Error('Reviewed destination category no longer exists.');
       const row = db.prepare(`SELECT t.accountId, t.date, t.amountCents, t.description, ta.categoryId
         FROM ledgerTransactions t LEFT JOIN transactionAnnotations ta ON ta.ledgerTransactionId = t.ledgerTransactionId
         WHERE t.ledgerTransactionId = ?`).get(change.transactionId) as typeof change.expected | undefined;

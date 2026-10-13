@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { MouseEvent, ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import Button from './Button';
 import './Modal.css';
@@ -43,7 +44,7 @@ const Modal = ({ isOpen, onClose, title, children, footer, maxWidth = '520px', c
     }
   };
 
-  return (
+  const content = (
     <div className="modal-overlay" onClick={handleOverlayClick} aria-modal="true" role="dialog">
       <div 
         className={`modal-container ${className}`}
@@ -69,6 +70,9 @@ const Modal = ({ isOpen, onClose, title, children, footer, maxWidth = '520px', c
       </div>
     </div>
   );
+  // Glass cards use backdrop-filter, which otherwise traps fixed descendants
+  // inside the card. Dialogs belong to the viewport, not their caller's layout.
+  return typeof document === 'undefined' ? content : createPortal(content, document.body);
 };
 
 export default Modal;

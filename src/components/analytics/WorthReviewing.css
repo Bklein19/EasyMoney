@@ -1,0 +1,14 @@
+.worth-reviewing__heading { display: flex; gap: 16px; justify-content: space-between; align-items: baseline; }
+.worth-reviewing h3 { margin: 0; font-size: 1.05rem; }
+.worth-reviewing__heading p, .worth-reviewing__more { margin-block: 8px; color: var(--text-secondary); font-size: .8rem; }
+.worth-reviewing__heading a { white-space: nowrap; font-size: .8rem; }
+.worth-reviewing__groups { list-style: none; padding: 0; margin: 12px 0 0; }
+.worth-reviewing__groups li { border-top: 1px solid var(--glass-border); }
+.worth-reviewing__groups button { display: flex; width: 100%; gap: 20px; align-items: center; justify-content: space-between; text-align: left; background: none; border: 0; color: inherit; cursor: pointer; padding: 12px 0; }
+.worth-reviewing__groups button:hover { color: var(--color-accent); }
+.worth-reviewing__groups button > span:first-child { min-width: 0; }
+.worth-reviewing__groups strong { display: block; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; font-weight: 500; }
+.worth-reviewing__groups small { display: block; margin-top: 4px; color: var(--text-secondary); font-size: .75rem; }
+.worth-reviewing__reason { display: block; font-size: .8rem; margin-top: 5px; color: var(--text-secondary); }
+.worth-reviewing__amount { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 550px) { .worth-reviewing__heading { flex-direction: column; gap: 4px; } }

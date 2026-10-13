@@ -15,6 +15,7 @@ import { listCategories } from './categories.ts';
 import { listTransactions } from './transactions.ts';
 import { resolveAutoGrouping } from './analyticsGrouping.ts';
 import { buildSpendingTree } from './spendingExplorer.ts';
+import { buildWorthReviewing } from './transactionReview';
 import {
   buildAccountMap,
   buildCategoryMap,
@@ -270,6 +271,7 @@ export function getAnalyticsReport(input: AnalyticsReportInput = {}) {
 
   return {
     input,
+    worthReviewing: buildWorthReviewing(categoryScopedTransactions),
     summary,
     cashFlow: [...cashFlowByPeriod.values()].sort((a, b) => a.key.localeCompare(b.key)),
     spendingByCategory: [...spendingByCategory.values()].sort((a, b) => b.amount - a.amount),

@@ -10,6 +10,9 @@ import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import { formatCurrency, formatDate, getAmountClass } from '../../utils/formatters';
 
 import SpendingExplorer from './SpendingExplorer';
+import WorthReviewing from './WorthReviewing';
+import TransactionDetails from '../transactions/TransactionDetails';
+import type { ReviewGroup } from '../../../server/app/transactionReview';
 import type { SpendingNode } from '../../../server/app/spendingExplorer';
 import SpendingTrends from './SpendingTrends';
 import IncomeVsExpense from './IncomeVsExpense';
@@ -97,6 +100,7 @@ interface InvestmentPeriodRow extends AnalyticsPeriodRow {
 }
 
 interface AnalyticsReport {
+  worthReviewing: { groups: ReviewGroup[]; totalGroups: number };
   summary: AnalyticsSummary;
   cashFlow: CashFlowRow[];
   spendingExplorer: SpendingNode;
@@ -150,6 +154,7 @@ function isDateRange(value: string): value is DateRange {
 
 
 export default function AnalyticsPage() {
+  const [inspectedId, setInspectedId] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<DateRange>(DATE_RANGES.ALL_TIME);
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
@@ -829,6 +834,9 @@ export default function AnalyticsPage() {
             })}
           />
         </div>
+        <div className="analytics-card glass-card analytics-card--explorer">
+          <WorthReviewing report={analyticsReport?.worthReviewing ?? { groups: [], totalGroups: 0 }} transactions={analyticsReport?.transactions ?? []} />
+        </div>
         
         <div className="analytics-card glass-card">
           <h3 className="analytics-card__title">Top Merchants</h3>
@@ -1015,7 +1023,7 @@ export default function AnalyticsPage() {
             {loadedDrilldownTransactions.map(transaction => (
               <div key={transaction.id} className="drilldown-row">
                 <span>{formatDate(transaction.date, 'medium')}</span>
-                <strong className="truncate">{transaction.merchant || transaction.description}</strong>
+                <button type="button" className="transaction-source-button truncate" onClick={() => setInspectedId(transaction.ledgerTransactionId)}>{transaction.merchant || transaction.description}</button>
                 <span>{transaction.categoryId ? categoryMap[String(transaction.categoryId)]?.name || 'Uncategorized' : 'Uncategorized'}</span>
                 <span className={`amount ${getAmountClass(transaction.amount)}`}>{formatCurrency(transaction.amount, true)}</span>
               </div>
@@ -1030,6 +1038,7 @@ export default function AnalyticsPage() {
         </div>
       )}
 
+      {inspectedId && <TransactionDetails key={inspectedId} ledgerTransactionId={inspectedId} onClose={() => setInspectedId(null)} />}
       <Modal
         isOpen={expandedChart === 'incomeExpense'}
         onClose={() => setExpandedChart(null)}

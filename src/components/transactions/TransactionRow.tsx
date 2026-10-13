@@ -32,7 +32,7 @@ export default function TransactionRow({ transaction, onUpdate, categories, addC
       <div className="tx-date">{formatDate(transaction.date, 'medium')}</div>
       <div className="tx-desc">
         {onInspect && transaction.ledgerTransactionId
-          ? <button type="button" className="transaction-source-button truncate" onClick={() => onInspect(transaction.ledgerTransactionId!)} aria-label={`View source details for ${transaction.merchant || transaction.description}`}>
+          ? <button type="button" className="transaction-source-button truncate" onClick={() => onInspect(transaction.ledgerTransactionId!)} aria-label={`View transaction details for ${transaction.merchant || transaction.description}`}>
             {transaction.merchant || transaction.description}
           </button>
           : <span className="truncate">{transaction.merchant || transaction.description}</span>}

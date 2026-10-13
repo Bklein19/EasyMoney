@@ -41,6 +41,7 @@ import { getNetWorthReport } from './netWorth.ts';
 import { getTransactionDetails } from './transactionDetails.ts';
 import {
   categorizeTransactions,
+  applyReviewedCategoryChanges,
   categorizeTransactionsByQuery,
   getTransactionCategorizationCoverage,
   getLatestTransactionCategoryUndoOperation,
@@ -372,6 +373,17 @@ export const appRouter = t.router({
   }),
 
   transactions: t.router({
+    applyReviewedCategories: t.procedure.input(z.object({
+      label: z.string().min(1).max(200),
+      changes: z.array(z.object({
+        transactionId: z.string().min(1), categoryId: z.number().int().positive().nullable(),
+        expected: z.object({ categoryId: z.number().int().nullable(), accountId: z.number().int(),
+          date: z.string(), amountCents: z.number().int(), description: z.string().nullable() }),
+      })).min(1).max(5000),
+    })).mutation(({ input }) => {
+      createBackup();
+      return applyReviewedCategoryChanges(input);
+    }),
     details: t.procedure.input(z.object({ ledgerTransactionId: z.string().min(1) }))
       .query(({ input }) => getTransactionDetails(input.ledgerTransactionId)),
     list: t.procedure
