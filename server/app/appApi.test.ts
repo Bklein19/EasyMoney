@@ -1479,6 +1479,14 @@ test('trpc analytics report aggregates backend-owned cashflow semantics', async 
     expect.objectContaining({ id: String(diningId), name: 'Dining', amount: 25 }),
   ]);
   expect(report.spendingExplorer).toMatchObject({ amountCents: 2500, transactionIds: [cafeId] });
+  expect(report.analysisTransactionIds.sort()).toEqual([Number(cafeId), Number(payrollId)].sort());
+  expect(report.transactions.find(row => row.id === cafeId)).toMatchObject({ label: 'Blue Cafe', amount: -25 });
+  expect(Object.keys(report.transactions.find(row => row.id === cafeId)!).sort()).toEqual([
+    'accountId', 'amount', 'categoryId', 'date', 'id', 'label', 'ledgerTransactionId', 'notes',
+  ]);
+  expect(report).not.toHaveProperty('analysisTransactions');
+  expect(report.analysisTransactionIds.every(id => report.transactions.some(row => row.id === id))).toBe(true);
+  expect(report.investments.flatMap(row => row.transactionIds).every(id => !report.analysisTransactionIds.includes(id))).toBe(true);
   expect(report.spendingExplorer.children[0]).toMatchObject({ name: 'Dining', amountCents: 2500, children: [expect.objectContaining({ name: 'Blue Cafe', transactionIds: [cafeId] })] });
   expect((await caller.analytics.report({ startDate: '2026-07-01', endDate: '2026-07-31' })).spendingExplorer.amountCents).toBe(0);
   expect(report.topMerchants).toEqual([

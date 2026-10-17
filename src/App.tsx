@@ -56,8 +56,11 @@ function App() {
   const [isSidebarPeekOpen, setIsSidebarPeekOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [selectedReportAccountIds, setSelectedReportAccountIds] = useState<Set<number> | null>(null);
-  const reportAccountsQuery = useQuery(trpc.reports.netWorth.queryOptions());
-  const reportAccounts: ReportAccount[] = reportAccountsQuery.data?.accounts || [];
+  // The navigation shell needs account metadata, not the entire investment report.
+  const reportAccountsQuery = useQuery(trpc.accounts.list.queryOptions({ includeArchived: true }));
+  const reportAccounts: ReportAccount[] = useMemo(() => (reportAccountsQuery.data?.accounts ?? []).map(account => ({
+    ...account, institution: account.institution ?? '', account_holder: account.accountHolder,
+  })), [reportAccountsQuery.data?.accounts]);
   const pickerAccounts = visibleReportAccounts(reportAccounts);
 
   const handleSidebarCollapsedChange = (nextValue: boolean) => {

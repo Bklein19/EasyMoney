@@ -23,8 +23,8 @@ import { sortAnalyticsPeriodsChronologically } from './periodOrder';
 import Tooltip from '../shared/Tooltip';
 import Modal from '../shared/Modal';
 import GroupedCategorySelect, { isUncategorized } from '../shared/GroupedCategorySelect';
-import type { AnalyticsGroupMode, CategoryFilterMode } from '../../../server/app/analytics.ts';
-import type { CategorySummary, TransactionListItem } from '../../../server/app/types.ts';
+import type { AnalyticsGroupMode, AnalyticsTransaction, CategoryFilterMode } from '../../../server/app/analytics.ts';
+import type { CategorySummary } from '../../../server/app/types.ts';
 import type { AnalyticsPeriodRow } from './PeriodClickOverlay';
 
 import './Analytics.css';
@@ -58,10 +58,6 @@ type CategoryFilterIdsByMode = Record<CategoryFilterModeValue, string[]>;
 type DrilldownSort = 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc';
 type ExpandedChart = 'incomeExpense' | 'spendingTrends' | null;
 
-interface UiTransaction extends TransactionListItem {
-  accountId: number | null;
-  categoryId: number | null;
-}
 
 interface AnalyticsSummary {
   income: number;
@@ -107,8 +103,8 @@ interface AnalyticsReport {
   topMerchants: MerchantAnalyticsRow[];
   incomeStreams: MerchantAnalyticsRow[];
   investments: InvestmentPeriodRow[];
-  transactions: TransactionListItem[];
-  analysisTransactions: TransactionListItem[];
+  transactions: AnalyticsTransaction[];
+  analysisTransactionIds: number[];
 }
 
 interface DrilldownState {
@@ -126,13 +122,6 @@ interface AddCategoryFilterOptions {
 
 const toDateInput = (date: Date) => format(date, 'yyyy-MM-dd');
 
-function toUiTransaction(transaction: TransactionListItem): UiTransaction {
-  return {
-    ...transaction,
-    accountId: transaction.account?.id ?? null,
-    categoryId: transaction.category?.id ?? null,
-  };
-}
 
 function getMonthSpan(startDate: string, endDate: string) {
   const start = parseISO(startDate);
@@ -220,12 +209,15 @@ export default function AnalyticsPage() {
   const analyticsReportQuery = useQuery(trpc.analytics.report.queryOptions(analyticsInput));
   const analyticsReport = analyticsReportQuery.data as AnalyticsReport | undefined;
   const reportTransactions = useMemo(
-    () => (analyticsReport?.transactions ?? []).map(toUiTransaction),
+    () => analyticsReport?.transactions ?? [],
     [analyticsReport?.transactions]
   );
   const reportAnalysisTransactions = useMemo(
-    () => (analyticsReport?.analysisTransactions ?? []).map(toUiTransaction),
-    [analyticsReport?.analysisTransactions]
+    () => {
+      const ids = new Set(analyticsReport?.analysisTransactionIds ?? []);
+      return reportTransactions.filter(transaction => ids.has(transaction.id));
+    },
+    [analyticsReport?.analysisTransactionIds, reportTransactions]
   );
   const reportSummary = analyticsReport?.summary ?? {
     income: 0,
@@ -309,8 +301,7 @@ export default function AnalyticsPage() {
       ? drilldownTransactions.filter(transaction => {
         const categoryName = transaction.categoryId ? categoryMap[String(transaction.categoryId)]?.name || 'Uncategorized' : 'Uncategorized';
         return [
-          transaction.merchant,
-          transaction.description,
+          transaction.label,
           transaction.notes,
           categoryName,
           String(transaction.amount)
@@ -835,7 +826,7 @@ export default function AnalyticsPage() {
           />
         </div>
         <div className="analytics-card glass-card analytics-card--explorer">
-          <WorthReviewing report={analyticsReport?.worthReviewing ?? { groups: [], totalGroups: 0 }} transactions={analyticsReport?.transactions ?? []} />
+          <WorthReviewing report={analyticsReport?.worthReviewing ?? { groups: [], totalGroups: 0 }} />
         </div>
         
         <div className="analytics-card glass-card">
@@ -1023,7 +1014,7 @@ export default function AnalyticsPage() {
             {loadedDrilldownTransactions.map(transaction => (
               <div key={transaction.id} className="drilldown-row">
                 <span>{formatDate(transaction.date, 'medium')}</span>
-                <button type="button" className="transaction-source-button truncate" onClick={() => setInspectedId(transaction.ledgerTransactionId)}>{transaction.merchant || transaction.description}</button>
+                <button type="button" className="transaction-source-button truncate" onClick={() => setInspectedId(transaction.ledgerTransactionId)}>{transaction.label}</button>
                 <span>{transaction.categoryId ? categoryMap[String(transaction.categoryId)]?.name || 'Uncategorized' : 'Uncategorized'}</span>
                 <span className={`amount ${getAmountClass(transaction.amount)}`}>{formatCurrency(transaction.amount, true)}</span>
               </div>

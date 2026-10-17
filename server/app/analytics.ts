@@ -39,6 +39,24 @@ export interface AnalyticsReportInput {
   groupMode?: AnalyticsGroupMode | null;
 }
 
+/** Display-only drilldown rows. Full evidence is loaded by transaction details. */
+export interface AnalyticsTransaction {
+  id: number;
+  ledgerTransactionId: string | null;
+  accountId: number | null;
+  categoryId: number | null;
+  date: string;
+  amount: number;
+  label: string;
+  notes: string | null;
+}
+
+export function analyticsTransaction(transaction: TransactionListItem): AnalyticsTransaction {
+  return { id: transaction.id, ledgerTransactionId: transaction.ledgerTransactionId,
+    accountId: transaction.account?.id ?? null, categoryId: transaction.category?.id ?? null,
+    date: transaction.date, amount: transaction.amount, label: merchantName(transaction), notes: transaction.notes };
+}
+
 function resolveGrouping(transactions: TransactionListItem[], groupMode: AnalyticsGroupMode) {
   if (groupMode === 'Daily') return { labelFormat: 'MMM d', keyFormat: 'yyyy-MM-dd' };
   if (groupMode === 'Weekly') return { labelFormat: 'week', keyFormat: 'week' };
@@ -279,7 +297,8 @@ export function getAnalyticsReport(input: AnalyticsReportInput = {}) {
     topMerchants: [...merchants.values()].sort((a, b) => b.amount - a.amount).slice(0, 10),
     incomeStreams: [...incomeStreams.values()].sort((a, b) => b.amount - a.amount),
     investments: [...investmentsByPeriod.values()].sort((a, b) => a.key.localeCompare(b.key)),
-    transactions: categoryScopedTransactions,
-    analysisTransactions,
+    transactions: categoryScopedTransactions.map(analyticsTransaction),
+    // Preserve backend flow decisions without sending the same rows a second time.
+    analysisTransactionIds: analysisTransactions.map(transaction => transaction.id),
   };
 }

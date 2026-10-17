@@ -9,7 +9,7 @@ const { default: WorthReviewing } = await import('./WorthReviewing');
 const { default: ReviewedTransactions } = await import('../transactions/ReviewedTransactions');
 
 test('review overview explains uncertainty, scope and impact without exposing an automatic apply action', () => {
-  const html = renderToStaticMarkup(<MemoryRouter><WorthReviewing transactions={[]} report={{ totalGroups: 8, groups: [{
+  const html = renderToStaticMarkup(<MemoryRouter><WorthReviewing report={{ totalGroups: 8, groups: [{
     id: 'coffee', name: 'Coffee shop', accountName: 'Checking', amountCents: 4001,
     reasons: ['Categories differ: Food, Shopping. This may be intentional.'], transactions: [],
   }] }} /></MemoryRouter>);

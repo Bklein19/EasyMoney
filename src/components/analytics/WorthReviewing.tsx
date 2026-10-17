@@ -1,20 +1,18 @@
 import { useState } from 'react';
 import { Link } from 'react-router';
 import type { ReviewGroup } from '../../../server/app/transactionReview';
-import type { TransactionListItem } from '../../../server/app/types';
 import { formatCurrency } from '../../utils/formatters';
 import Modal from '../shared/Modal';
 import ReviewedTransactions from '../transactions/ReviewedTransactions';
 import TransactionDetails from '../transactions/TransactionDetails';
 import './WorthReviewing.css';
 
-export default function WorthReviewing({ report, transactions }: {
-  report: { groups: ReviewGroup[]; totalGroups: number }; transactions: TransactionListItem[];
+export default function WorthReviewing({ report }: {
+  report: { groups: ReviewGroup[]; totalGroups: number };
 }) {
   const [selected, setSelected] = useState<ReviewGroup | null>(null);
   const [inspectedId, setInspectedId] = useState<string | null>(null);
-  const selectedIds = new Set(selected?.transactions.map(row => row.ledgerTransactionId));
-  const selectedRows = transactions.filter(row => selectedIds.has(row.ledgerTransactionId));
+  const selectedRows = report.groups.find(group => group.id === selected?.id)?.transactions ?? [];
   return <section className="worth-reviewing" aria-label="Worth reviewing">
     <div className="worth-reviewing__heading">
       <div><h3>Worth reviewing</h3><p>A few high-impact checks in this date and account selection. Flags aren’t verdicts.</p></div>
