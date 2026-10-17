@@ -18,6 +18,7 @@ import { resolveImportParser } from './importParsers/index.ts';
 import parserVersions from './importParsers/versions.json';
 import { buildLedgerFromSourceFacts, materializeLedger, rebuildLedgerForAccounts } from './ledgerRebuild.ts';
 import { assignLedgerTransactionIdentities, getLedgerTransactionBaseKey } from './transactionIdentity.ts';
+import { ledgerIdentitiesBeforeImport, queueImportedCategorization } from './automaticCategorization.ts';
 
 interface PreviewImportOptions {
   fileName: string;
@@ -364,6 +365,7 @@ export function reimportFile(importFileId: number | string) {
 
   const now = new Date().toISOString();
   const materialized = db.transaction(() => {
+    const previousIds = ledgerIdentitiesBeforeImport();
     const affectedAccountIds = getImportLedgerAccountIds([id]);
     db.prepare(`
       UPDATE importRows
@@ -389,7 +391,9 @@ export function reimportFile(importFileId: number | string) {
       importBatchId: `reimport-${id}-${hashContent(now).slice(0, 12)}`,
       committedAt: now,
     });
-    return rebuildLedgerReadModel(affectedAccountIds);
+    const result = rebuildLedgerReadModel(affectedAccountIds);
+    queueImportedCategorization(previousIds);
+    return result;
   })();
   return { ok: true, importFileId: id, ...materialized };
 }
@@ -479,6 +483,7 @@ export function reimportFiles(importFileIds: Array<number | string> | undefined 
 
   const now = new Date().toISOString();
   const materialized = db.transaction(() => {
+    const previousIds = ledgerIdentitiesBeforeImport();
     const affectedAccountIds = getImportLedgerAccountIds(ids);
     for (const id of ids) {
       db.prepare(`
@@ -506,7 +511,9 @@ export function reimportFiles(importFileIds: Array<number | string> | undefined 
         committedAt: now,
       });
     }
-    return rebuildLedgerReadModel(affectedAccountIds);
+    const result = rebuildLedgerReadModel(affectedAccountIds);
+    queueImportedCategorization(previousIds);
+    return result;
   })();
   return { ok: true, importFileIds: ids, count: ids.length, ...materialized };
 }
@@ -1950,7 +1957,12 @@ function commitImportUnsafe({
 }
 
 export function commitImport(options: CommitImportOptions) {
-  return getDb().transaction(() => commitImportUnsafe(options))();
+  return getDb().transaction(() => {
+    const previousIds = options.rebuildLedger === false ? null : ledgerIdentitiesBeforeImport();
+    const result = commitImportUnsafe(options);
+    if (previousIds && !('skippedArtifact' in result && result.skippedArtifact)) queueImportedCategorization(previousIds);
+    return result;
+  })();
 }
 
 export function rebuildLedgerReadModel(accountIds?: readonly number[]) {

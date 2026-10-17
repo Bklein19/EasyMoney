@@ -31,5 +31,9 @@ export function getTransactionDetails(ledgerTransactionId: string) {
   if (!selected) throw new Error('Transaction no longer exists in the active ledger. Refresh the list.');
   const related = activeTransactions.filter(row => row.ledgerTransactionId !== ledgerTransactionId && relatedMerchantKey(row) === relatedMerchantKey(selected));
   const categoryNames = [...new Set([selected, ...related].map(row => row.category?.name || 'Uncategorized'))].sort();
-  return { transaction, sources, selected, related, categoryNames, review: reviewedTransaction(selected) };
+  const automaticCategory = db.prepare(`SELECT q.reason FROM automaticCategorizationTasks q
+    JOIN transactionAnnotations ta ON ta.ledgerTransactionId = q.ledgerTransactionId
+    WHERE q.ledgerTransactionId = ? AND q.status = 'applied' AND q.categoryId = ta.categoryId
+      AND ta.updatedAt <= q.updatedAt`).get(ledgerTransactionId) as { reason: string | null } | null;
+  return { transaction, sources, selected, related, categoryNames, review: reviewedTransaction(selected), automaticCategory };
 }

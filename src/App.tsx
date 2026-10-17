@@ -19,6 +19,7 @@ import { trpc, queryClient } from './api/trpc';
 import './App.css';
 import BackupsPage from './components/settings/BackupsPage';
 import PalettePage from './components/settings/PalettePage';
+import AutomaticCategorizationStatus from './components/transactions/AutomaticCategorizationStatus';
 
 import { expandReportSelection, visibleReportAccounts } from './components/investments/reportAccountSelection';
 
@@ -135,6 +136,7 @@ function App() {
         </button>
         <div className="app-content">
           <main className="app-main">
+            <AutomaticCategorizationStatus />
             <AppRoutes reportSelectedIds={reportSelectedIds} />
           </main>
         </div>

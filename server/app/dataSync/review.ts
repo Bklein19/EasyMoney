@@ -20,6 +20,7 @@ import {
   syncClaimRequiresExplicitMapping,
 } from './accountMapping.ts';
 import type { SyncArtifactAccountRoute } from './connector.ts';
+import { ledgerIdentitiesBeforeImport, queueImportedCategorization } from '../automaticCategorization.ts';
 import type {
   SyncAccountMappingDecision,
   SyncAccountClaim,
@@ -767,6 +768,7 @@ export async function commitSyncReview(
 ): Promise<SyncRunResult> {
   const pendingReports: Array<Parameters<SyncReporter>[0]> = [];
   const imported = getDb().transaction(() => {
+    const previousIds = ledgerIdentitiesBeforeImport();
     if (!outcomeRevision) throw new Error('Calculate and review ledger changes before confirming the import.');
     assertSyncReviewConfirmation(previewSyncReviewOutcomes(review, accountMappings), outcomeRevision);
     const mappingsByImportFile = validatedSyncAccountMappings(review, accountMappings);
@@ -839,6 +841,7 @@ export async function commitSyncReview(
     if (committedArtifacts > 0) {
       pendingReports.push({ type: 'phase', message: 'Rebuilding ledger from imported source facts' });
       rebuildLedgerReadModel([...affectedAccountIds]);
+      queueImportedCategorization(previousIds);
     }
     return {
       recordedTransactionFacts,

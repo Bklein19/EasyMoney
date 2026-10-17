@@ -724,6 +724,19 @@ export function initDatabase() {
       consumedAt TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS automaticCategorizationTasks (
+      ledgerTransactionId TEXT PRIMARY KEY,
+      status TEXT NOT NULL DEFAULT 'queued',
+      evidenceJson TEXT NOT NULL,
+      categoryId INTEGER,
+      reason TEXT,
+      undoOperationId INTEGER,
+      createdAt TEXT NOT NULL,
+      updatedAt TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS automatic_categorization_status
+      ON automaticCategorizationTasks(status, createdAt);
+
     CREATE TABLE IF NOT EXISTS merchantGroupingRules (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       sourceMerchantKey TEXT NOT NULL UNIQUE,

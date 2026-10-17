@@ -142,7 +142,11 @@ You can also create an untracked `.env.local` file:
 OPENAI_API_KEY=sk-...
 ```
 
-The Transactions page can save the key to `.env.local` from the local UI if the server starts without one. The app loads `.env.local` on startup and also updates the running local server when you save the key in the UI. It only applies suggestions after you confirm them. Set `OPENAI_CATEGORIZATION_MODEL` to override the default model.
+The Transactions page can save the key to `.env.local` from the local UI if the server starts without one. The app loads `.env.local` on startup and also updates the running local server when you save the key in the UI. Set `OPENAI_CATEGORIZATION_MODEL` to override the default model.
+
+After a manual upload or connector import commits, new transactions are automatically categorized in a separate background workflow. Saved merchant history is reused first; with an API key configured, unmatched merchant groups are sent to OpenAI with transaction descriptions, dates, amounts, account labels, and the category definitions. Clear guesses populate categories without a second confirmation. Ambiguous personal payments remain for review. The app shows progress or a retry action if categorization fails; the imported facts remain saved regardless.
+
+Categorization tasks persist across restarts and apply only to unchanged, unannotated transactions. Your edits (including clearing a category) win over pending guesses. Automatic category changes are annotation-only and undoable from transaction review; transaction details explain an automatic guess until you override it. Importing an overlapping file does not categorize the same identity again. Existing history is not silently reclassified on startup; use transaction review to categorize a backlog.
 
 ## Checks
 

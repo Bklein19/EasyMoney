@@ -30,6 +30,7 @@ export default function TransactionDetails({ ledgerTransactionId, onClose }: { l
           aria-label="Transaction category" leadingOptions={[{ value: '', label: 'Uncategorized' }]} disabled={changes.pending}
           onChange={value => void changes.apply([detail.selected], value ? Number(value) : null, 'Transaction category')} />
       </label>
+      {detail.automaticCategory && <p className="transaction-detail__hint">Automatically guessed · {detail.automaticCategory.reason} You can change this category above.</p>}
       <CategoryChangeFeedback state={changes} />
       {detail.transaction.notes && <p>Notes: {detail.transaction.notes}</p>}
       <section>

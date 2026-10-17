@@ -5,6 +5,7 @@ import { initDatabase } from './database.ts';
 import { seedDatabase } from './seed.ts';
 import { loadLocalEnv } from './app/localEnv.ts';
 import { appRouter } from './app/router.ts';
+import { startAutomaticCategorizationWorker } from './app/automaticCategorization.ts';
 import index from '../index.html';
 
 type RouteParams = Record<string, string>;
@@ -19,6 +20,7 @@ loadLocalEnv();
 initDatabase();
 seedDatabase();
 void (await import('./app/parserRefresh')).refreshChangedParsers();
+startAutomaticCategorizationWorker();
 
 const defaultPort = Number(process.env.PORT || 4177);
 

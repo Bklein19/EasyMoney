@@ -3,6 +3,7 @@ import { databaseBackupStatus } from '../database.ts';
 import { createBackup, inspectBackup, listBackups, restoreBackup } from './backups.ts';
 import { hasActiveSyncJobs } from './dataSync/jobs.ts';
 import { hasActiveCategorizationJobs } from './aiCategorization.ts';
+import { automaticCategorizationStatus, retryAutomaticCategorization } from './automaticCategorization.ts';
 import { z } from 'zod';
 import { archiveAccount, closeAccount, listAccounts, unarchiveAccount, updateAccountMetadata } from './accounts.ts';
 import { getAnalyticsReport } from './analytics.ts';
@@ -148,7 +149,7 @@ export const appRouter = t.router({
     create: t.procedure.mutation(() => createBackup()),
     inspect: t.procedure.input(z.object({ id: z.string() })).query(({ input }) => inspectBackup(input.id)),
     restore: t.procedure.input(z.object({ id: z.string() })).mutation(({ input }) => {
-      if (activeMutations > 1 || hasActiveSyncJobs() || hasActiveCategorizationJobs()) {
+      if (activeMutations > 1 || hasActiveSyncJobs() || hasActiveCategorizationJobs() || automaticCategorizationStatus().pending > 0) {
         throw new Error('Wait for imports, sync, and categorization to finish before restoring.');
       }
       return restoreBackup(input.id);
@@ -441,6 +442,9 @@ export const appRouter = t.router({
 
     categorizationCoverage: t.procedure
       .query(() => getTransactionCategorizationCoverage()),
+
+    automaticCategorizationStatus: t.procedure.query(() => automaticCategorizationStatus()),
+    retryAutomaticCategorization: t.procedure.mutation(() => retryAutomaticCategorization()),
 
     aiCategorizationPreview: t.procedure
       .input(z.object({

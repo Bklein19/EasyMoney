@@ -28,8 +28,150 @@ const {
   matchHistoricalCategories,
   shouldTreatInvestmentCategoryAsTransfer,
   shouldReviewInvestmentAccountTransferDecision,
+  categorizeModelDecisions,
 } = await import('./aiCategorization.ts');
 const caller = appRouter.createCaller({});
+
+const { ledgerIdentitiesBeforeImport, queueImportedCategorization, processAutomaticCategorizationBatch,
+  automaticCategorizationStatus, retryAutomaticCategorization, resumeInterruptedCategorization } = await import('./automaticCategorization.ts');
+
+function automaticFixture(count = 2) {
+  const accountId = Number(insertRow('accounts', { name: 'Card', type: 'credit_card' }));
+  const categoryId = Number(insertRow('categories', { name: 'Food & Dining', type: 'expense' }));
+  const previous = ledgerIdentitiesBeforeImport();
+  const ids = Array.from({ length: count }, (_, index) => `automatic-${index}`);
+  for (const id of ids) insertRow('ledgerTransactions', {
+    ledgerTransactionId: id, accountId, date: '2026-09-21', amountCents: -1575,
+    description: 'SQ *THE ICE CREAM BAR San FranciscoCA', merchant: 'THE ICE CREAM BAR', transactionKind: 'activity',
+  });
+  queueImportedCategorization(previous);
+  return { accountId, categoryId, ids, previous };
+}
+
+function fakeAutomaticPreview(categoryId: number, ids: string[]): Parameters<typeof processAutomaticCategorizationBatch>[0] {
+  return async () => ({ configured: true, model: 'fixture', scanned: ids.length, groupCount: 1,
+    reviewedGroupCount: 1, sort: 'count', suggestions: [{
+      id: 'ice-cream', groupId: 'ice-cream', merchantName: 'THE ICE CREAM BAR', sourceMerchantKey: 'THE ICE CREAM BAR',
+      canSplitMerchantGroup: false, recommendedSplitStrategy: null, decisionKind: 'category', aliases: [], accountNames: ['Card'],
+      transactionIds: ids, transactionCount: ids.length, totalAmount: -15.75 * ids.length, categoryId,
+      categoryName: 'Food & Dining', confidence: 'high', reason: 'An ice cream shop is dining.', transactions: [],
+    }], questions: [], ignoredDecisionCount: 0 });
+}
+
+test('post-import categorization queues only new identities, preserves identical purchases and supports one Undo', async () => {
+  const { categoryId, ids, previous } = automaticFixture();
+  expect(automaticCategorizationStatus().pending).toBe(2);
+  expect(queueImportedCategorization(previous)).toBe(0);
+  const facts = getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY ledgerTransactionId').all();
+  await processAutomaticCategorizationBatch(fakeAutomaticPreview(categoryId, ids));
+  expect(automaticCategorizationStatus()).toMatchObject({ pending: 0, applied: 2, failed: 0 });
+  expect(getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY ledgerTransactionId').all()).toEqual(facts);
+  expect(getDb().prepare('SELECT categoryId FROM transactionAnnotations').all()).toEqual([{ categoryId }, { categoryId }]);
+  const detail = await caller.transactions.details({ ledgerTransactionId: ids[0]! });
+  expect(detail.automaticCategory?.reason).toContain('ice cream');
+  const undo = await caller.transactions.latestCategoryUndo();
+  expect(undo?.count).toBe(2);
+  await caller.transactions.restoreCategories({ undoOperationId: undo!.id });
+  expect(getDb().prepare('SELECT categoryId FROM transactionAnnotations').all()).toEqual([{ categoryId: null }, { categoryId: null }]);
+  // Importing another overlapping file cannot reapply an undone guess.
+  expect(queueImportedCategorization(new Set())).toBe(0);
+  expect(await processAutomaticCategorizationBatch(fakeAutomaticPreview(categoryId, ids))).toBe(false);
+});
+
+test('a manual edit, even explicitly clearing a category, wins over in-flight categorization', async () => {
+  const { categoryId, ids } = automaticFixture(3);
+  const otherCategory = Number(insertRow('categories', { name: 'Shopping', type: 'expense' }));
+  const fixture = fakeAutomaticPreview(categoryId, ids)!;
+  await processAutomaticCategorizationBatch(async options => {
+    upsertTransactionAnnotation(ids[0]!, { categoryId: otherCategory, notes: 'Keep my choice' });
+    upsertTransactionAnnotation(ids[1]!, { categoryId: null, notes: 'Leave unknown' });
+    getDb().prepare('UPDATE ledgerTransactions SET amountCents = -2000 WHERE ledgerTransactionId = ?').run(ids[2]!);
+    return fixture(options);
+  });
+  expect(automaticCategorizationStatus()).toMatchObject({ skipped: 3, applied: 0, pending: 0 });
+  expect(getDb().prepare('SELECT categoryId, notes FROM transactionAnnotations ORDER BY ledgerTransactionId').all())
+    .toEqual([{ categoryId: otherCategory, notes: 'Keep my choice' }, { categoryId: null, notes: 'Leave unknown' }]);
+});
+
+test('automatic categorization isolates failures from imports and retries failed work only', async () => {
+  const { categoryId, ids } = automaticFixture();
+  await processAutomaticCategorizationBatch(async () => { throw new Error('Private provider response'); });
+  expect(automaticCategorizationStatus()).toMatchObject({ failed: 2, pending: 0 });
+  expect(getDb().prepare('SELECT * FROM transactionAnnotations').all()).toEqual([]);
+  expect(JSON.stringify(getDb().prepare('SELECT * FROM automaticCategorizationTasks').all())).not.toContain('Private provider');
+  retryAutomaticCategorization();
+  await processAutomaticCategorizationBatch(fakeAutomaticPreview(categoryId, ids));
+  expect(automaticCategorizationStatus()).toMatchObject({ applied: 2, failed: 0 });
+});
+
+test('post-import work rolls back with its import and skips disappeared or archived transactions', async () => {
+  expect(() => getDb().transaction(() => { automaticFixture(); throw new Error('Import failed'); })()).toThrow();
+  expect(automaticCategorizationStatus().pending).toBe(0);
+  const { categoryId, ids, accountId } = automaticFixture();
+  getDb().prepare('DELETE FROM ledgerTransactions WHERE ledgerTransactionId = ?').run(ids[0]!);
+  getDb().prepare("UPDATE accounts SET status = 'archived' WHERE id = ?").run(accountId);
+  let called = false;
+  await processAutomaticCategorizationBatch(async options => { called = true; return fakeAutomaticPreview(categoryId, ids)!(options); });
+  expect(called).toBe(false);
+  expect(automaticCategorizationStatus()).toMatchObject({ skipped: 2, applied: 0, pending: 0 });
+});
+
+test('changing category definitions during a model request requires retry rather than stale application', async () => {
+  const { categoryId, ids } = automaticFixture();
+  await processAutomaticCategorizationBatch(async options => {
+    getDb().prepare("UPDATE categories SET description = 'User changed the meaning' WHERE id = ?").run(categoryId);
+    return fakeAutomaticPreview(categoryId, ids)!(options);
+  });
+  expect(automaticCategorizationStatus()).toMatchObject({ failed: 2, applied: 0 });
+});
+
+test('automatic categorization drains beyond one page without expanding the queued scope', async () => {
+  const { categoryId, ids } = automaticFixture(129);
+  const seen: string[][] = [];
+  const fixture = fakeAutomaticPreview(categoryId, ids)!;
+  const preview: NonNullable<Parameters<typeof processAutomaticCategorizationBatch>[0]> = async options => {
+    seen.push([...options?.transactionIds ?? []]);
+    return fixture(options);
+  };
+  await processAutomaticCategorizationBatch(preview);
+  expect(automaticCategorizationStatus()).toMatchObject({ applied: 128, pending: 1 });
+  await processAutomaticCategorizationBatch(preview);
+  expect(automaticCategorizationStatus()).toMatchObject({ applied: 129, pending: 0 });
+  expect(seen.map(batch => batch.length)).toEqual([128, 1]);
+  expect(await processAutomaticCategorizationBatch(preview)).toBe(false);
+});
+
+test('restart resumes only interrupted jobs and retains completed results', async () => {
+  const { categoryId, ids } = automaticFixture();
+  getDb().prepare("UPDATE automaticCategorizationTasks SET status = 'running' WHERE ledgerTransactionId = ?").run(ids[0]!);
+  getDb().prepare("UPDATE automaticCategorizationTasks SET status = 'review' WHERE ledgerTransactionId = ?").run(ids[1]!);
+  initDatabase();
+  resumeInterruptedCategorization();
+  expect(automaticCategorizationStatus()).toMatchObject({ pending: 1, needsReview: 1 });
+  await processAutomaticCategorizationBatch(fakeAutomaticPreview(categoryId, [ids[0]!]));
+  expect(automaticCategorizationStatus()).toMatchObject({ pending: 0, needsReview: 1, applied: 1 });
+});
+
+test('model decisions cannot manufacture gift or internal-transfer evidence or resolve conflicting guesses', () => {
+  const { accountId } = automaticFixture(1);
+  const row = { id: 1, ledgerTransactionId: 'test', accountId, accountName: 'Card', accountInstitution: 'Bank',
+    accountType: 'credit_card', date: '2026-09-21', amountCents: -1575, description: 'ICE CREAM BAR',
+    merchant: 'ICE CREAM BAR', originalDescription: null, originalCategory: null, transactionKind: 'activity' };
+  const categories = [{ id: 1, name: 'Gifts Received', type: 'income' }, { id: 2, name: 'Internal Transfer', type: 'transfer' },
+    { id: 3, name: 'Food & Dining', type: 'expense' }] as Parameters<typeof categorizeModelDecisions>[0]['categories'];
+  for (const text of ['ICE CREAM BAR', 'Zelle payment from Test']) {
+    const groups = groupTransactionsForAiCategorization([{ ...row, description: text, merchant: text }]);
+    for (const categoryName of ['Gifts Received', 'Internal Transfer']) {
+      const result = categorizeModelDecisions({ groups, categories, decisions: [{ groupId: groups[0]!.id, kind: 'category', categoryName, reason: 'Model guessed' }] });
+      expect(result.suggestions).toHaveLength(0);
+      expect(result.questions).toHaveLength(1);
+    }
+  }
+  const groups = groupTransactionsForAiCategorization([row]);
+  const decision = { groupId: groups[0]!.id, kind: 'category' as const, categoryName: 'Food & Dining', reason: 'Dining merchant' };
+  expect(categorizeModelDecisions({ groups, categories, decisions: [decision] }).suggestions).toHaveLength(1);
+  expect(categorizeModelDecisions({ groups, categories, decisions: [decision, decision] }).suggestions).toHaveLength(0);
+});
 
 test('shared account resolver recommends institution + suffix with conservative conflict handling', async () => {
   const { getImportAccountResolution: resolve } = await import('./imports.ts');
@@ -112,6 +254,7 @@ function resetAppTables() {
       'ledgerTransactions',
       'ledgerBalances',
       'transactionCategoryUndoOperations',
+      'automaticCategorizationTasks',
       'transactionAnnotations',
       'merchantGroupingRules',
       'transactions',
@@ -3652,6 +3795,8 @@ test('app imports commit inserts unique transactions and updates account balance
   expect(firstCommit.importedCount).toBe(10);
   expect(firstCommit.skippedDuplicateCount).toBe(0);
   expect(firstCommit.insertedFingerprints).toHaveLength(10);
+  expect(automaticCategorizationStatus().pending).toBe(10);
+  expect(getDb().prepare('SELECT * FROM transactionAnnotations').all()).toEqual([]);
 
   const importFile = getDb().prepare('SELECT * FROM importFiles WHERE id = ?').get(preview.importFileId) as {
     status: string;
@@ -5092,6 +5237,8 @@ test('catch-up commits two consolidated source-account claims to independent loc
     { accountId: firstAccountId, count: 1 },
     { accountId: secondAccountId, count: 1 },
   ]);
+  expect(automaticCategorizationStatus().pending).toBe(2);
+  expect(getDb().prepare('SELECT * FROM transactionAnnotations').all()).toEqual([]);
 });
 
 test('catch-up requires explicit choices for partial and destinationless connector routes', async () => {

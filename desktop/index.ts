@@ -50,6 +50,8 @@ envModule.loadLocalEnv();
 databaseModule.initDatabase();
 seedModule.seedDatabase();
 void (await import('../server/app/parserRefresh')).refreshChangedParsers();
+const { startAutomaticCategorizationWorker } = await import('../server/app/automaticCategorization.ts');
+startAutomaticCategorizationWorker();
 
 const { appRouter } = routerModule;
 

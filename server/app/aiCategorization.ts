@@ -767,7 +767,7 @@ async function categorizeBatchWithOpenAi(input: {
   return result.finalOutput as ModelResponse;
 }
 
-function categorizeModelDecisions(input: {
+export function categorizeModelDecisions(input: {
   decisions: ModelGroupDecision[];
   groups: MerchantCategorizationGroup[];
   categories: CategorySummary[];
@@ -783,6 +783,22 @@ function categorizeModelDecisions(input: {
     const group = groupById.get(item.groupId);
     if (!group) {
       ignoredCount += 1;
+      continue;
+    }
+
+    // Model output is advice, not authority to infer personal payment purposes or
+    // confirmed transfer pairs. Reject conflicting/duplicate decisions as well.
+    if (input.decisions.filter(decision => decision.groupId === item.groupId).length !== 1) {
+      if (!questions.some(question => question.groupId === group.id)) {
+        questions.push(reviewQuestion({ group, reason: 'Conflicting model decisions need review.' }));
+      }
+      continue;
+    }
+    if (group.transactions.some(requiresPersonalCategoryReview) ||
+        categoryByName.get(item.categoryName)?.type === 'internal_transfer' ||
+        item.categoryName.toLowerCase() === 'internal transfer' ||
+        item.categoryName.toLowerCase() === 'gifts received') {
+      questions.push(reviewQuestion({ group, reason: 'This payment needs personal context before assigning a category.' }));
       continue;
     }
 
@@ -843,13 +859,17 @@ function categorizeModelDecisions(input: {
   return { suggestions, questions, ignoredCount };
 }
 
-export async function previewAiCategorization(options: { limit?: unknown; sort?: unknown } = {}) {
+export async function previewAiCategorization(
+  options: { limit?: unknown; sort?: unknown; transactionIds?: readonly string[] } = {},
+  onProgress?: (progress: { reviewedGroupCount: number; groupCount: number }) => void,
+) {
   const apiKey = getOpenAiKey();
   const model = getOpenAiModel();
   const groupLimit = clampGroupLimit(options.limit);
   const sort = normalizeAiCategorizationSort(options.sort);
   const categories = listCategorizationCategories();
-  const transactions = listUncategorizedTransactions();
+  const scope = options.transactionIds === undefined ? null : new Set(options.transactionIds);
+  const transactions = listUncategorizedTransactions().filter(row => scope === null || scope.has(row.ledgerTransactionId));
   const groups = groupTransactionsForAiCategorization(transactions, { sort });
   const reviewGroups = groups.slice(0, groupLimit);
   const historical = historicalCategories(reviewGroups, categories);
@@ -884,6 +904,8 @@ export async function previewAiCategorization(options: { limit?: unknown; sort?:
   const suggestions: AiCategorySuggestion[] = [...historical.suggestions];
   const questions: AiCategoryQuestion[] = [...historical.questions];
   let ignoredDecisionCount = 0;
+  let reviewedGroupCount = historical.suggestions.length + historical.questions.length;
+  onProgress?.({ reviewedGroupCount, groupCount: reviewGroups.length });
 
   for (const batch of chunk(historical.unmatched, BATCH_SIZE)) {
     const result = await categorizeBatchWithOpenAi({
@@ -900,6 +922,8 @@ export async function previewAiCategorization(options: { limit?: unknown; sort?:
     suggestions.push(...categorized.suggestions);
     questions.push(...categorized.questions);
     ignoredDecisionCount += categorized.ignoredCount;
+    reviewedGroupCount += batch.length;
+    onProgress?.({ reviewedGroupCount, groupCount: reviewGroups.length });
   }
 
   return {

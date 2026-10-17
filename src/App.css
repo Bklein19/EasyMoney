@@ -78,6 +78,21 @@ body.sidebar-resizing .app-content {
   overscroll-behavior: contain;
 }
 
+.automatic-categorization-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 16px 24px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.automatic-categorization-status > span:first-child { flex: 1; }
+
 @media (max-width: 768px) {
   .sidebar-peek-zone {
     display: none;
