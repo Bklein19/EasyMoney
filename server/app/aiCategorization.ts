@@ -213,8 +213,9 @@ function listUncategorizedTransactions() {
        FROM ledgerTransactions t
        LEFT JOIN accounts a ON a.id = t.accountId
        LEFT JOIN transactionAnnotations ta ON ta.ledgerTransactionId = t.ledgerTransactionId
+       LEFT JOIN categories c ON c.id = ta.categoryId
        WHERE t.ledgerTransactionId IS NOT NULL
-         AND ta.categoryId IS NULL
+         AND (ta.categoryId IS NULL OR lower(c.name) = 'uncategorized')
          AND COALESCE(a.status, 'active') != 'archived'
        ORDER BY t.date DESC, t.id DESC`
     )
@@ -499,10 +500,19 @@ function compactMerchantGroup(group: MerchantCategorizationGroup) {
   };
 }
 
+export function requiresPersonalCategoryReview(row: Pick<UncategorizedTransactionRow, 'merchant' | 'description' | 'originalDescription'>) {
+  const text = (row.merchant || row.description || row.originalDescription || '').trim();
+  // Repeated processors, check amounts and bank-generated IDs are not evidence
+  // of the payment's purpose. Keep them out of historical auto-application.
+  const evidence = [text, row.description, row.originalDescription].filter(Boolean).join(' ');
+  return /\b(?:venmo|zelle|paypal|cash\s?app)\b/i.test(evidence) ||
+    /^check(?:\s+#?\d+\*?)?$/i.test(text) ||
+    /\b(?:atm|mobile|cash|check|cheque)\s+(?:deposit|withdrawal)\b/i.test(evidence);
+}
+
 function historyKey(row: UncategorizedTransactionRow): string | null {
-  if (row.accountId === undefined) return null;
+  if (row.accountId === undefined || requiresPersonalCategoryReview(row)) return null;
   const text = transactionMerchantText(row).trim();
-  if (/^check(?:\s+#?\d+\*?)?$/i.test(text)) return JSON.stringify([row.accountId, 'check', row.amountCents]);
   const key = normalizeMerchantText(text).key;
   if (['UNKNOWN', 'PAYPAL', 'VENMO', 'ZELLE', 'CASH APP', 'CHECK'].includes(key)) return null;
   return JSON.stringify([row.accountId, key, Math.sign(row.amountCents)]);
@@ -522,6 +532,10 @@ export function matchHistoricalCategories(groups: MerchantCategorizationGroup[],
   }
   const suggestions: AiCategorySuggestion[] = [], questions: AiCategoryQuestion[] = [], unmatched: MerchantCategorizationGroup[] = [];
   for (const group of groups) {
+    if (group.transactions.some(row => historyKey(row) === null)) {
+      questions.push(reviewQuestion({ group, reason: 'Payment purpose cannot be inferred from a processor, check amount, or deposit label. Review the counterparty and purpose before choosing a category.' }));
+      continue;
+    }
     const matches = group.transactions.map(row => byKey.get(historyKey(row) ?? ''));
     const ids = new Set(matches.flatMap(match => [...(match ?? [])]));
     if (ids.size > 1) {

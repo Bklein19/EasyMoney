@@ -2252,7 +2252,7 @@ test('ai categorization apply reports skipped already categorized transactions',
   ).toMatchObject({ categoryId: oldCategoryId });
 });
 
-test('ai categorization preview excludes explicitly uncategorized transactions', async () => {
+test('ai categorization preview includes both forms of uncategorized transactions', async () => {
   const previousOpenAiKey = process.env.OPENAI_API_KEY;
   process.env.OPENAI_API_KEY = '';
   const uncategorizedId = Number(insertRow('categories', { name: 'Uncategorized', type: 'expense' }));
@@ -2295,9 +2295,9 @@ test('ai categorization preview excludes explicitly uncategorized transactions',
 
     expect(result).toMatchObject({
       configured: false,
-      scanned: 1,
-      groupCount: 1,
-      reviewedGroupCount: 1,
+      scanned: 2,
+      groupCount: 2,
+      reviewedGroupCount: 2,
     });
   } finally {
     if (previousOpenAiKey === undefined) {
@@ -2504,13 +2504,14 @@ test('history works without an AI key and automatic application remains undoable
   } finally { if(previous === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY=previous; }
 });
 
-test('historical categorization requires unanimous saved categories scoped to account and check amount', () => {
+test('a repeated check amount is not sufficient evidence to inherit its purpose', () => {
   const row = { id: 1, ledgerTransactionId: 'new-check', accountId: 1, accountName: 'Checking', accountInstitution: 'Bank', accountType: 'checking', date: '2026-06-01', amountCents: -7500, description: 'Check 123', merchant: 'Check 123', originalDescription: null, originalCategory: null, transactionKind: 'activity' };
   const categories = [{ id: 1, name: 'Education', type: 'expense' }, { id: 2, name: 'Housing', type: 'expense' }] as Parameters<typeof matchHistoricalCategories>[1];
   const groups = groupTransactionsForAiCategorization([row]);
   const history = [{ ...row, ledgerTransactionId: 'old-check', merchant: 'Check 122', categoryId: 1 }];
   const matched = matchHistoricalCategories(groups, categories, history);
-  expect(matched.suggestions[0]).toMatchObject({ source: 'history', categoryId: 1, transactionIds: ['new-check'] });
+  expect(matched.suggestions).toHaveLength(0);
+  expect(matched.questions).toHaveLength(1);
   expect(matched.unmatched).toHaveLength(0);
   for (const different of [{accountId:2}, {amountCents:-7501}, {amountCents:7500}]) {
     expect(matchHistoricalCategories(groups, categories, history.map(r=>({...r,...different}))).suggestions).toHaveLength(0);
@@ -2519,6 +2520,41 @@ test('historical categorization requires unanimous saved categories scoped to ac
   expect(conflict.questions).toHaveLength(1);
   expect(conflict.unmatched).toHaveLength(0);
   expect(conflict.suggestions).toHaveLength(0);
+});
+
+test('bank-decorated processors cannot inherit rent or gift labels from history', () => {
+  for (const text of ['Venmo Payment Annie Weng', 'VENMO DES:PAYMENT ID:123 INDN:TEST WEB', 'Zelle payment from Test', 'PAYPAL DES:INST XFER ID:123', 'Cash App transfer', 'Mobile deposit']) {
+    const row = { id:1, ledgerTransactionId:'new', accountId:1, accountName:'Checking', accountInstitution:'Bank', accountType:'checking', date:'2026-06-01', amountCents:-1000, description:text, merchant:text, originalDescription:null, originalCategory:null, transactionKind:'activity' };
+    const categories = [{id:1,name:'Housing',type:'expense'}] as Parameters<typeof matchHistoricalCategories>[1];
+    const result = matchHistoricalCategories(groupTransactionsForAiCategorization([row]), categories, [{...row,categoryId:1}]);
+    expect(result.suggestions).toHaveLength(0);
+    expect(result.questions).toHaveLength(1);
+    expect(result.unmatched).toHaveLength(0);
+  }
+});
+
+test('AI review includes explicit Uncategorized while preserving saved categories and notes', async () => {
+  const previous = process.env.OPENAI_API_KEY;
+  delete process.env.OPENAI_API_KEY;
+  try {
+    const accountId = Number(insertRow('accounts', {name:'Checking',type:'checking'}));
+    const categoryId = Number(insertRow('categories', {name:'Food',type:'expense'}));
+    const unknownId = Number(insertRow('categories', {name:'Uncategorized',type:'expense'}));
+    for (const id of ['known','explicit','missing']) insertRow('ledgerTransactions', {ledgerTransactionId:id,accountId,date:'2026-06-01',amountCents:-1000,description:'Specific Coffee',merchant:'Specific Coffee',transactionKind:'activity'});
+    upsertTransactionAnnotation('known', {categoryId});
+    upsertTransactionAnnotation('explicit', {categoryId:unknownId,notes:'Keep note'});
+    const before = getDb().prepare('SELECT * FROM transactionAnnotations ORDER BY ledgerTransactionId').all();
+    const preview = await caller.transactions.aiCategorizationPreview();
+    expect(preview.scanned).toBe(2);
+    expect(preview.suggestions[0]?.transactionIds.sort()).toEqual(['explicit','missing']);
+    expect(getDb().prepare('SELECT * FROM transactionAnnotations ORDER BY ledgerTransactionId').all()).toEqual(before);
+    const applied = await caller.transactions.autoApplyAiCategorization({});
+    expect(applied.appliedCount).toBe(2);
+    expect(getDb().prepare("SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId='explicit'").get()?.notes).toBe('Keep note');
+    await caller.transactions.restoreCategories({undoOperationId:applied.undoOperation!.id});
+    expect(getDb().prepare("SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='explicit'").get()?.categoryId).toBe(unknownId);
+    expect(getDb().prepare("SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='missing'").get()?.categoryId ?? null).toBeNull();
+  } finally { if (previous === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previous; }
 });
 
 test('historical categories never imply internal transfer pairs or generic processor payees', () => {
@@ -2571,6 +2607,54 @@ test('transaction detail and scoped review share active ledger rows; category ed
   const cleared = await caller.transactions.applyReviewedCategories({ label: 'Clear category', changes: [{ ...detail.review, categoryId: null }] });
   expect((await caller.transactions.details({ ledgerTransactionId: 'related-0' })).selected.category).toBeNull();
   await caller.transactions.restoreCategories({ undoOperationId: cleared.undoOperation!.id });
+});
+
+test('conservative category cleanup previews only evidenced unknowns and applies as one reversible annotation batch', async () => {
+  const { previewConservativeCategoryCleanup } = await import('./categoryCleanup');
+  const checking = Number(insertRow('accounts', {name:'Checking',type:'checking',last4:'1111'}));
+  const savings = Number(insertRow('accounts', {name:'Savings',type:'savings',last4:'2222'}));
+  const brokerage = Number(insertRow('accounts', {name:'Brokerage',type:'investment'}));
+  const food = Number(insertRow('categories', {name:'Food',type:'expense'}));
+  const unknown = Number(insertRow('categories', {name:'Uncategorized',type:'expense'}));
+  const investment = Number(insertRow('categories', {name:'Investment',type:'investment'}));
+  const payroll = Number(insertRow('categories', {name:'Payroll',type:'income'}));
+  const transfer = Number(insertRow('categories', {name:'Transfer',type:'transfer'}));
+  const put = (id: string, description: string, amountCents: number, accountId = checking, categoryId: number | null = null) => {
+    insertRow('ledgerTransactions', {ledgerTransactionId:id,accountId,date:'2026-10-01',amountCents,description,merchant:description,transactionKind:'activity'});
+    if (categoryId !== null) upsertTransactionAnnotation(id, {categoryId,notes:'Keep note'});
+  };
+  put('buy-one','VTSAX Buy Cash 1.000 100.00',-10000,brokerage);
+  put('buy-two','VTSAX Buy Cash 1.000 100.00',-10000,brokerage,unknown);
+  put('buy-saved','VTSAX Buy Cash 1.000 100.00',-10000,brokerage,food);
+  put('tax','JOURNALED RSU US FEDERAL (Cash)',-1000,brokerage);
+  put('fee','Service fee',-100,brokerage);
+  put('fee-old','Service fee',-100,brokerage,investment);
+  put('coffee-old','Specific Coffee',-500,checking,food);
+  put('coffee','Specific Coffee',-500);
+  put('venmo-old','Venmo Payment Test',-500,checking,food);
+  put('venmo','Venmo Payment Test',-500,checking,unknown);
+  put('check-old','Check 123',-7500,checking,food);
+  put('check','Check 124',-7500);
+  put('payroll','Employer PAYROLL123',90000);
+  put('p2p-payroll','Zelle payroll reimbursement',90000);
+  put('transfer-out','Online Banking transfer to CHK 1111 Confirmation# ABC123',-10000,savings);
+  put('transfer-in','Online Banking transfer from SAV 2222 Confirmation# ABC123',10000);
+  put('unpaired-transfer','Online Banking transfer to CHK 1111 Confirmation# OTHER123',-10000,savings);
+  const facts = getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all();
+  const annotations = getDb().prepare('SELECT ledgerTransactionId,categoryId,notes FROM transactionAnnotations ORDER BY ledgerTransactionId').all();
+  const preview = previewConservativeCategoryCleanup();
+  expect(preview.changes.map(row=>row.transactionId).sort()).toEqual(['buy-one','buy-two','coffee','payroll','transfer-in','transfer-out']);
+  expect(preview.candidates.find(row=>row.transaction.ledgerTransactionId==='payroll')?.categoryId).toBe(payroll);
+  expect(preview.candidates.find(row=>row.transaction.ledgerTransactionId==='transfer-out')?.categoryId).toBe(transfer);
+  expect(getDb().prepare('SELECT ledgerTransactionId,categoryId,notes FROM transactionAnnotations ORDER BY ledgerTransactionId').all()).toEqual(annotations);
+  const result = await caller.transactions.applyReviewedCategories({label:'Conservative cleanup',changes:preview.changes});
+  expect(result.count).toBe(6);
+  expect(result.undoOperation?.count).toBe(6);
+  expect(getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all()).toEqual(facts);
+  expect(getDb().prepare("SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId='buy-two'").get()?.notes).toBe('Keep note');
+  await caller.transactions.restoreCategories({undoOperationId:result.undoOperation!.id});
+  for (const before of annotations) expect(getDb().prepare('SELECT ledgerTransactionId,categoryId,notes FROM transactionAnnotations WHERE ledgerTransactionId=?').get(before.ledgerTransactionId)).toEqual(before);
+  expect(getDb().prepare("SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='coffee'").get()?.categoryId ?? null).toBeNull();
 });
 
 test('reviewed category changes are atomic, preserve notes and ledger facts, and undo as one operation', async () => {
