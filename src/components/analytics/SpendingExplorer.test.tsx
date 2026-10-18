@@ -26,6 +26,12 @@ test('explorer provides precise amounts, accessible ring controls and a complete
   expect(html).not.toContain('NaN');
 });
 
+test('the center is a native navigation button, disabled at the top level', () => {
+  const html = renderToStaticMarkup(createElement(SpendingExplorer, { root, onViewTransactions: () => {} }));
+  expect(html).toMatch(/<button[^>]*class="spending-explorer__center-control"[^>]*disabled=""[^>]*aria-label="All spending\. Top level"/);
+  expect(html).not.toContain('spending-explorer__center" aria-hidden');
+});
+
 test('segments preserve proportional angles and ancestor family colors on zoom', () => {
   const segments = spendingSegments(root);
   const dining = segments.find(segment => segment.node.name === 'Dining')!;

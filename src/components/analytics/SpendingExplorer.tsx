@@ -20,6 +20,7 @@ export default function SpendingExplorer({ root, onViewTransactions }: Props) {
   const [search, setSearch] = useState('');
   const path = useMemo(() => root ? resolveSpendingPath(root, selectedIds) : [], [root, selectedIds]);
   const selected = path[path.length - 1];
+  const parent = path[path.length - 2];
   const familyId = path[1]?.id ?? root?.id ?? 'spending';
   const segments = useMemo(() => selected ? spendingSegments(selected, familyId) : [], [selected, familyId]);
   const ringCount = segments.reduce((count, segment) => Math.max(count, segment.depth + 1), 1);
@@ -83,13 +84,18 @@ export default function SpendingExplorer({ root, onViewTransactions }: Props) {
             onBlur={() => setHoverId(null)}
           ><title>{`${segment.node.name} · ${money(segment.node)}`}</title></path>)}
         </svg>
-        <div className="spending-explorer__center" aria-hidden="true">
-          <span>{center.name}</span>
-          <strong className={money(center).length > 12 ? 'spending-explorer__large-amount' : undefined}>{money(center)}</strong>
-          <small>{center.transactionIds.length.toLocaleString()} transaction{center.transactionIds.length === 1 ? '' : 's'}</small>
-          <small>{center.id === root.id ? 'Selected period' : `${percent(center.amountCents, root.amountCents)} of all spending`}</small>
+        <div className="spending-explorer__center">
+          <button type="button" className="spending-explorer__center-control"
+            disabled={!parent} aria-label={parent ? `Go up to ${parent.name}` : 'All spending. Top level'}
+            title={parent ? `Go up to ${parent.name}` : 'All spending. Top level'}
+            onClick={() => goTo(path.length - 2)} onMouseEnter={() => setHoverId(null)} onFocus={() => setHoverId(null)}>
+            <span>{center.name}</span>
+            <strong className={money(center).length > 12 ? 'spending-explorer__large-amount' : undefined}>{money(center)}</strong>
+            <small>{center.transactionIds.length.toLocaleString()} transaction{center.transactionIds.length === 1 ? '' : 's'}</small>
+            <small>{center.id === root.id ? 'Selected period' : `${percent(center.amountCents, root.amountCents)} of all spending`}</small>
+          </button>
         </div>
-        <p className="spending-explorer__hint">Click a ring to explore. Small segments are also in the list.</p>
+        <p className="spending-explorer__hint">Click a ring to explore.{parent && ' Click the center to go up one level.'} Small segments are also in the list.</p>
       </div>
       <div className="spending-explorer__breakdown">
         <div className="spending-explorer__summary">

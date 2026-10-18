@@ -9,7 +9,11 @@
 .spending-explorer__visual path { cursor: pointer; }
 .spending-explorer__visual path:focus-visible { outline: none; stroke: var(--text-primary); stroke-width: 2; }
 .spending-explorer__center { position: absolute; top: 0; left: 0; width: 100%; aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; pointer-events: none; }
-.spending-explorer__center > span { max-width: 32%; max-height: 3em; overflow: hidden; text-align: center; font-size: var(--text-sm); line-height: 1.4; color: var(--text-secondary); }
+.spending-explorer__center-control { width: 40%; aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; padding: 0; border: 0; border-radius: 50%; background: transparent; font: inherit; color: inherit; opacity: 1; pointer-events: auto; }
+.spending-explorer__center-control:not(:disabled) { cursor: pointer; }
+.spending-explorer__center-control:not(:disabled):hover { background: var(--bg-elevated); }
+.spending-explorer .spending-explorer__center-control:focus-visible { border-radius: 50%; }
+.spending-explorer__center-control > span { max-width: 80%; max-height: 3em; overflow: hidden; text-align: center; font-size: var(--text-sm); line-height: 1.4; color: var(--text-secondary); }
 .spending-explorer__center strong { font-size: clamp(17px, 2.1vw, 28px); font-variant-numeric: tabular-nums; color: var(--text-primary); letter-spacing: -0.04em; }
 .spending-explorer__center .spending-explorer__large-amount { font-size: clamp(15px, 1.5vw, 21px); }
 .spending-explorer__center small { font-size: 11px; color: var(--text-muted); }
