@@ -49,9 +49,8 @@ const [databaseModule, seedModule, envModule, routerModule] = await Promise.all(
 envModule.loadLocalEnv();
 databaseModule.initDatabase();
 seedModule.seedDatabase();
-void (await import('../server/app/parserRefresh')).refreshChangedParsers();
 const { startAutomaticCategorizationWorker } = await import('../server/app/automaticCategorization.ts');
-startAutomaticCategorizationWorker();
+void (await import('../server/app/parserRefresh')).refreshChangedParsers().finally(startAutomaticCategorizationWorker);
 
 const { appRouter } = routerModule;
 

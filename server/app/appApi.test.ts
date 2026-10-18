@@ -32,20 +32,19 @@ const {
 } = await import('./aiCategorization.ts');
 const caller = appRouter.createCaller({});
 
-const { ledgerIdentitiesBeforeImport, queueImportedCategorization, processAutomaticCategorizationBatch,
+const { queueUncategorizedTransactions, processAutomaticCategorizationBatch,
   automaticCategorizationStatus, retryAutomaticCategorization, resumeInterruptedCategorization } = await import('./automaticCategorization.ts');
 
 function automaticFixture(count = 2) {
   const accountId = Number(insertRow('accounts', { name: 'Card', type: 'credit_card' }));
   const categoryId = Number(insertRow('categories', { name: 'Food & Dining', type: 'expense' }));
-  const previous = ledgerIdentitiesBeforeImport();
   const ids = Array.from({ length: count }, (_, index) => `automatic-${index}`);
   for (const id of ids) insertRow('ledgerTransactions', {
     ledgerTransactionId: id, accountId, date: '2026-09-21', amountCents: -1575,
     description: 'SQ *THE ICE CREAM BAR San FranciscoCA', merchant: 'THE ICE CREAM BAR', transactionKind: 'activity',
   });
-  queueImportedCategorization(previous);
-  return { accountId, categoryId, ids, previous };
+  queueUncategorizedTransactions();
+  return { accountId, categoryId, ids };
 }
 
 function fakeAutomaticPreview(categoryId: number, ids: string[]): Parameters<typeof processAutomaticCategorizationBatch>[0] {
@@ -59,9 +58,9 @@ function fakeAutomaticPreview(categoryId: number, ids: string[]): Parameters<typ
 }
 
 test('post-import categorization queues only new identities, preserves identical purchases and supports one Undo', async () => {
-  const { categoryId, ids, previous } = automaticFixture();
+  const { categoryId, ids } = automaticFixture();
   expect(automaticCategorizationStatus().pending).toBe(2);
-  expect(queueImportedCategorization(previous)).toBe(0);
+  expect(queueUncategorizedTransactions()).toBe(0);
   const facts = getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY ledgerTransactionId').all();
   await processAutomaticCategorizationBatch(fakeAutomaticPreview(categoryId, ids));
   expect(automaticCategorizationStatus()).toMatchObject({ pending: 0, applied: 2, failed: 0 });
@@ -74,7 +73,7 @@ test('post-import categorization queues only new identities, preserves identical
   await caller.transactions.restoreCategories({ undoOperationId: undo!.id });
   expect(getDb().prepare('SELECT categoryId FROM transactionAnnotations').all()).toEqual([{ categoryId: null }, { categoryId: null }]);
   // Importing another overlapping file cannot reapply an undone guess.
-  expect(queueImportedCategorization(new Set())).toBe(0);
+  expect(queueUncategorizedTransactions()).toBe(0);
   expect(await processAutomaticCategorizationBatch(fakeAutomaticPreview(categoryId, ids))).toBe(false);
 });
 
@@ -123,6 +122,56 @@ test('changing category definitions during a model request requires retry rather
     return fakeAutomaticPreview(categoryId, ids)!(options);
   });
   expect(automaticCategorizationStatus()).toMatchObject({ failed: 2, applied: 0 });
+});
+
+test('automatic discovery covers the old backlog, explicit Uncategorized and note-only annotations', async () => {
+  const { categoryId, accountId, ids } = automaticFixture(0);
+  const unknown = Number(insertRow('categories', { name: 'Uncategorized', type: 'expense' }));
+  for (const id of ['legacy-null', 'legacy-explicit', 'legacy-note', 'manual-clear', 'manual-unknown', 'saved']) {
+    insertRow('ledgerTransactions', { ledgerTransactionId: id, accountId, date: '2024-01-01', amountCents: -1575,
+      description: 'THE ICE CREAM BAR', merchant: 'THE ICE CREAM BAR', transactionKind: 'activity' });
+  }
+  // Existing rows predate origin tracking; a note is not a category choice.
+  getDb().prepare('INSERT INTO transactionAnnotations (ledgerTransactionId,categoryId,notes) VALUES (?,?,?)')
+    .run('legacy-explicit', unknown, 'Keep the bank note');
+  upsertTransactionAnnotation('legacy-note', { notes: 'User note, no category choice' });
+  upsertTransactionAnnotation('manual-clear', { categoryId: null });
+  upsertTransactionAnnotation('manual-unknown', { categoryId: unknown });
+  upsertTransactionAnnotation('saved', { categoryId });
+  expect(ids).toEqual([]);
+  expect(queueUncategorizedTransactions()).toBe(3);
+  const targets = ['legacy-null', 'legacy-explicit', 'legacy-note'];
+  await processAutomaticCategorizationBatch(fakeAutomaticPreview(categoryId, targets));
+  expect(automaticCategorizationStatus()).toMatchObject({ applied: 3, pending: 0 });
+  expect(getDb().prepare("SELECT notes,categoryOrigin FROM transactionAnnotations WHERE ledgerTransactionId='legacy-explicit'").get())
+    .toEqual({ notes: 'Keep the bank note', categoryOrigin: 'automatic' });
+  expect(getDb().prepare("SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='manual-clear'").get()?.categoryId).toBeNull();
+  expect(getDb().prepare("SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='manual-unknown'").get()?.categoryId).toBe(unknown);
+  expect(queueUncategorizedTransactions()).toBe(0);
+});
+
+test('ambiguous first-pass results are not sent to the model repeatedly on discovery', async () => {
+  const { categoryId, ids } = automaticFixture(1);
+  await processAutomaticCategorizationBatch(async options => ({
+    ...await fakeAutomaticPreview(categoryId, ids)!(options), suggestions: [], questions: [],
+  }));
+  expect(automaticCategorizationStatus()).toMatchObject({ needsReview: 1, pending: 0 });
+  for (let index = 0; index < 3; index++) expect(queueUncategorizedTransactions()).toBe(0);
+  expect(await processAutomaticCategorizationBatch()).toBe(false);
+});
+
+test('stale facts get a fresh automatic pass while deliberate clearing remains protected', async () => {
+  const { categoryId, ids } = automaticFixture(2);
+  await processAutomaticCategorizationBatch(async options => {
+    getDb().prepare("UPDATE ledgerTransactions SET description='Corrected source description' WHERE ledgerTransactionId=?").run(ids[0]!);
+    upsertTransactionAnnotation(ids[1]!, { categoryId: null });
+    return fakeAutomaticPreview(categoryId, ids)!(options);
+  });
+  expect(automaticCategorizationStatus()).toMatchObject({ skipped: 2 });
+  expect(queueUncategorizedTransactions()).toBe(1);
+  await processAutomaticCategorizationBatch(fakeAutomaticPreview(categoryId, [ids[0]!]));
+  expect(automaticCategorizationStatus()).toMatchObject({ applied: 1, skipped: 1, pending: 0 });
+  expect(queueUncategorizedTransactions()).toBe(0);
 });
 
 test('automatic categorization drains beyond one page without expanding the queued scope', async () => {

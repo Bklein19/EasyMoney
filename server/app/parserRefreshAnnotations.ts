@@ -6,7 +6,7 @@ interface Evidence {
   id: number; sourceFileId: number; accountId: number; rowIndex: number | null;
   date: string; amountCents: number; description: string; rawJson: string | null;
 }
-interface Annotation { ledgerTransactionId: string; categoryId: number | null; notes: string | null; createdAt: string | null; updatedAt: string | null }
+interface Annotation { ledgerTransactionId: string; categoryId: number | null; categoryOrigin?: string | null; notes: string | null; createdAt: string | null; updatedAt: string | null }
 export interface AnnotationSnapshot { annotation: Annotation; categoryName: string | null; transaction: Record<string, unknown>; sources: Evidence[]; excluded: boolean }
 export interface AnnotationDisposition {
   ledgerTransactionId: string; disposition: 'unchanged' | 'transferred' | 'retained-history' | 'recategorization-needed' | 'review-required';
@@ -129,10 +129,12 @@ export function applyAnnotationRefresh(db: Db, dispositions: AnnotationDispositi
       VALUES(?,?,?,?,?,?)`).run(inputRevision,row.ledgerTransactionId,row.targetId,row.disposition,JSON.stringify(row),new Date().toISOString());
     if(row.disposition==='transferred') {
       const a=row.evidence.annotation;
-      db.prepare(`INSERT INTO transactionAnnotations(ledgerTransactionId,categoryId,notes,createdAt,updatedAt) VALUES(?,?,?,?,?)
+      db.prepare(`INSERT INTO transactionAnnotations(ledgerTransactionId,categoryId,categoryOrigin,notes,createdAt,updatedAt) VALUES(?,?,?,?,?,?)
         ON CONFLICT(ledgerTransactionId) DO UPDATE SET categoryId=COALESCE(transactionAnnotations.categoryId,excluded.categoryId),
+        categoryOrigin=CASE WHEN transactionAnnotations.categoryOrigin='manual' OR excluded.categoryOrigin='manual' THEN 'manual'
+          ELSE COALESCE(transactionAnnotations.categoryOrigin,excluded.categoryOrigin) END,
         notes=CASE WHEN trim(COALESCE(transactionAnnotations.notes,''))='' THEN excluded.notes ELSE transactionAnnotations.notes END`)
-        .run(row.targetId,a.categoryId,a.notes,a.createdAt,a.updatedAt);
+        .run(row.targetId,a.categoryId,a.categoryOrigin ?? null,a.notes,a.createdAt,a.updatedAt);
     }
     // Original annotations remain durable, including excluded summaries.
   }

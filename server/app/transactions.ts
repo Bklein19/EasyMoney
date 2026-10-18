@@ -557,6 +557,7 @@ export function categorizeTransactions(input: {
 /** Apply an explicitly reviewed plan, refusing stale evidence or partial writes. */
 export function applyReviewedCategoryChanges(input: {
   label: string;
+  categoryOrigin?: 'manual' | 'automatic';
   changes: Array<{
     transactionId: string;
     categoryId: number | null;
@@ -591,7 +592,7 @@ export function applyReviewedCategoryChanges(input: {
       categoryName: input.label.trim() || 'Reviewed categorization',
       previousCategories: changes.map(change => ({ transactionId: change.transactionId, categoryId: change.expected.categoryId })),
     });
-    for (const change of changes) upsertTransactionAnnotation(change.transactionId, { categoryId: change.categoryId });
+    for (const change of changes) upsertTransactionAnnotation(change.transactionId, { categoryId: change.categoryId }, input.categoryOrigin);
     return { ok: true, count: changes.length, undoOperation };
   })();
 }

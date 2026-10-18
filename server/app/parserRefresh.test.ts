@@ -251,10 +251,11 @@ test('changed description transfers annotations only with matching original occu
   try {
     const raw={referenceNumber:'synthetic-reference'};
     f.db.prepare('UPDATE sourceTransactions SET rawJson=?').run(JSON.stringify(raw));
-    f.db.exec("INSERT INTO transactionAnnotations(ledgerTransactionId,notes) SELECT ledgerTransactionId,'Keep my note' FROM ledgerTransactions");
+    f.db.exec("INSERT INTO transactionAnnotations(ledgerTransactionId,notes,categoryOrigin) SELECT ledgerTransactionId,'Keep my note','manual' FROM ledgerTransactions");
     const parse=f.parser.parse;f.parser.parse=async input=>{const result=await parse(input);result.transactions[0]!.raw=raw;return result;};
     expect((await f.run()).refreshed).toBe(1);
     expect(f.db.prepare('SELECT notes FROM transactionAnnotations JOIN ledgerTransactions USING(ledgerTransactionId)').get()?.notes).toBe('Keep my note');
+    expect(f.db.prepare('SELECT categoryOrigin FROM transactionAnnotations JOIN ledgerTransactions USING(ledgerTransactionId)').get()?.categoryOrigin).toBe('manual');
     expect(readAnnotationHistory(f.db)[0]?.disposition).toBe('transferred');
   }finally{f.memory.close();}
 });

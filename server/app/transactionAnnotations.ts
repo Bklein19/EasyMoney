@@ -18,21 +18,23 @@ export function ensureLedgerTransactionId(transactionId: number | string) {
   return row.ledgerTransactionId;
 }
 
-export function upsertTransactionAnnotation(transactionId: number | string, changes: AnnotationChanges) {
+export function upsertTransactionAnnotation(transactionId: number | string, changes: AnnotationChanges, categoryOrigin: 'manual' | 'automatic' = 'manual') {
   const ledgerTransactionId = ensureLedgerTransactionId(transactionId);
   const now = new Date().toISOString();
   const db = getDb();
 
   db.prepare(`
-    INSERT INTO transactionAnnotations (ledgerTransactionId, categoryId, notes, createdAt, updatedAt)
-    VALUES (@ledgerTransactionId, @categoryId, @notes, @createdAt, @updatedAt)
+    INSERT INTO transactionAnnotations (ledgerTransactionId, categoryId, categoryOrigin, notes, createdAt, updatedAt)
+    VALUES (@ledgerTransactionId, @categoryId, @categoryOrigin, @notes, @createdAt, @updatedAt)
     ON CONFLICT(ledgerTransactionId) DO UPDATE SET
       categoryId = CASE WHEN @hasCategoryId THEN excluded.categoryId ELSE transactionAnnotations.categoryId END,
+      categoryOrigin = CASE WHEN @hasCategoryId THEN excluded.categoryOrigin ELSE transactionAnnotations.categoryOrigin END,
       notes = CASE WHEN @hasNotes THEN excluded.notes ELSE transactionAnnotations.notes END,
       updatedAt = excluded.updatedAt
   `).run({
     ledgerTransactionId,
     categoryId: changes.categoryId === undefined ? null : changes.categoryId,
+    categoryOrigin: changes.categoryId === undefined ? null : categoryOrigin,
     notes: changes.notes === undefined ? null : changes.notes,
     hasCategoryId: changes.categoryId === undefined ? 0 : 1,
     hasNotes: changes.notes === undefined ? 0 : 1,

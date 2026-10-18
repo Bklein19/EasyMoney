@@ -709,6 +709,7 @@ export function initDatabase() {
     CREATE TABLE IF NOT EXISTS transactionAnnotations (
       ledgerTransactionId TEXT PRIMARY KEY,
       categoryId INTEGER,
+      categoryOrigin TEXT,
       notes TEXT,
       createdAt TEXT,
       updatedAt TEXT
@@ -1019,6 +1020,12 @@ export function initDatabase() {
 
   runSchemaMigration('2026-09-24-ledger-rebuild-state', () => {
     db.exec('CREATE TABLE ledgerRebuildState (id INTEGER PRIMARY KEY CHECK (id = 1), policyVersion TEXT NOT NULL)');
+  });
+
+  runSchemaMigration('2026-10-18-category-choice-origin', () => {
+    if (!tableColumnNames('transactionAnnotations').includes('categoryOrigin')) {
+      db.exec('ALTER TABLE transactionAnnotations ADD COLUMN categoryOrigin TEXT');
+    }
   });
 
   runSchemaMigration('2026-08-27-account-last4', () => {

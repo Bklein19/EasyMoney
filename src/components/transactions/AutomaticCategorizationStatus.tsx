@@ -24,7 +24,7 @@ export default function AutomaticCategorizationStatus() {
   if (!data || (!data.pending && !data.failed && !completed)) return null;
   return <div className="automatic-categorization-status" role="status">
     <span>{data.pending > 0
-      ? `Guessing categories for ${data.pending.toLocaleString()} imported transaction${data.pending === 1 ? '' : 's'}… You can keep using the app.`
+      ? `Guessing categories for ${data.pending.toLocaleString()} uncategorized transaction${data.pending === 1 ? '' : 's'}… You can keep using the app.`
       : data.failed > 0
         ? `${data.failed.toLocaleString()} transaction${data.failed === 1 ? '' : 's'} couldn’t be categorized automatically. Imports are saved.${data.configured ? '' : ' AI is not configured.'}`
         : 'Categories updated automatically. You can change any guess; ambiguous payments remain for review.'}</span>

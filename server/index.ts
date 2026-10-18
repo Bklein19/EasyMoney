@@ -19,8 +19,7 @@ fs.mkdirSync(path.resolve(import.meta.dir, '..', 'data'), { recursive: true });
 loadLocalEnv();
 initDatabase();
 seedDatabase();
-void (await import('./app/parserRefresh')).refreshChangedParsers();
-startAutomaticCategorizationWorker();
+void (await import('./app/parserRefresh')).refreshChangedParsers().finally(startAutomaticCategorizationWorker);
 
 const defaultPort = Number(process.env.PORT || 4177);
 

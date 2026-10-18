@@ -2,13 +2,16 @@ import { getDb } from '../database.ts';
 import { previewAiCategorization } from './aiCategorization.ts';
 import { applyReviewedCategoryChanges } from './transactions.ts';
 
-// The import transaction only queues work. No parser or import confirmation waits
-// for a model, and restarting the app resumes unfinished categorization.
+// Categorization is a standing workflow over the ledger, not an import phase.
+// Startup and periodic discovery cover historical and newly uncategorized rows.
 let enabled = false;
 let running = false;
 let scheduled: ReturnType<typeof setTimeout> | undefined;
 
 interface Evidence {
+  categoryId: number | null;
+  annotationUpdatedAt: string | null;
+  notes: string | null;
   accountId: number;
   date: string;
   amountCents: number;
@@ -23,12 +26,16 @@ interface Evidence {
 }
 
 function eligibleRows() {
-  return getDb().prepare(`SELECT t.ledgerTransactionId, t.accountId, t.date, t.amountCents,
+  return getDb().prepare(`SELECT t.ledgerTransactionId, ta.categoryId, ta.updatedAt AS annotationUpdatedAt,
+      ta.notes, t.accountId, t.date, t.amountCents,
       t.description, t.merchant, t.originalDescription, t.originalCategory,
       t.transactionKind, t.sourceRole, a.type AS accountType, a.institution AS accountInstitution
     FROM ledgerTransactions t JOIN accounts a ON a.id = t.accountId
     LEFT JOIN transactionAnnotations ta ON ta.ledgerTransactionId = t.ledgerTransactionId
-    WHERE ta.ledgerTransactionId IS NULL AND COALESCE(a.status, 'active') != 'archived'
+    LEFT JOIN categories c ON c.id = ta.categoryId
+    WHERE (ta.categoryId IS NULL OR lower(c.name) = 'uncategorized')
+      AND COALESCE(ta.categoryOrigin, '') != 'manual'
+      AND COALESCE(a.status, 'active') != 'archived'
     ORDER BY t.ledgerTransactionId`).all() as Array<Evidence & { ledgerTransactionId: string }>;
 }
 
@@ -44,19 +51,17 @@ function categoryContext() {
   ]);
 }
 
-export function ledgerIdentitiesBeforeImport() {
-  return new Set((getDb().prepare('SELECT ledgerTransactionId FROM ledgerTransactions').all() as
-    Array<{ ledgerTransactionId: string }>).map(row => row.ledgerTransactionId));
-}
-
-/** Called after materialization, inside the same DB transaction as import. */
-export function queueImportedCategorization(previousIds: ReadonlySet<string>) {
+/** Give every eligible uncategorized identity one automatic first pass. */
+export function queueUncategorizedTransactions() {
   const now = new Date().toISOString();
-  const insert = getDb().prepare(`INSERT OR IGNORE INTO automaticCategorizationTasks
-    (ledgerTransactionId, evidenceJson, status, createdAt, updatedAt) VALUES (?, ?, 'queued', ?, ?)`);
+  const insert = getDb().prepare(`INSERT INTO automaticCategorizationTasks
+    (ledgerTransactionId, evidenceJson, status, createdAt, updatedAt) VALUES (?, ?, 'queued', ?, ?)
+    ON CONFLICT(ledgerTransactionId) DO UPDATE SET evidenceJson = excluded.evidenceJson,
+      status = 'queued', reason = NULL, categoryId = NULL, undoOperationId = NULL, updatedAt = excluded.updatedAt
+    WHERE automaticCategorizationTasks.status IN ('skipped', 'applied')
+      OR (automaticCategorizationTasks.status = 'review' AND automaticCategorizationTasks.evidenceJson != excluded.evidenceJson)`);
   let queued = 0;
   for (const row of eligibleRows()) {
-    if (previousIds.has(row.ledgerTransactionId)) continue;
     queued += insert.run(row.ledgerTransactionId, evidenceJson(row), now, now).changes;
   }
   schedule();
@@ -128,14 +133,14 @@ export async function processAutomaticCategorizationBatch(preview: Preview = pre
         if (!question && guesses.length === 1 && guesses[0]!.confidence === 'high') {
           const evidence = JSON.parse(task.evidenceJson) as Evidence;
           changes.push({ transactionId: id, categoryId: guesses[0]!.categoryId,
-            expected: { ...evidence, categoryId: null } });
+            expected: evidence });
         } else {
           mark(id, !result.configured && !question ? 'failed' : 'review', question?.reason ??
             (!result.configured ? 'AI is not configured. Historical matching found no category.' : 'No unambiguous category was returned.'));
         }
       }
       // Category-only annotation changes, stable identities, notes untouched, one Undo per batch.
-      const applied = applyReviewedCategoryChanges({ label: 'Automatic import categorization', changes });
+      const applied = applyReviewedCategoryChanges({ label: 'Automatic categorization', categoryOrigin: 'automatic', changes });
       for (const change of changes) {
         const suggestion = result.suggestions.find(suggestion => suggestion.transactionIds.includes(change.transactionId))!;
         mark(change.transactionId, 'applied', suggestion.reason, change.categoryId, applied.undoOperation?.id ?? null);
@@ -173,7 +178,11 @@ export function startAutomaticCategorizationWorker() {
   if (enabled) return;
   enabled = true;
   resumeInterruptedCategorization();
-  schedule();
+  queueUncategorizedTransactions();
+  // Also catches category deletion, parser refresh, and account unarchival.
+  // Reads and React renders never initiate a model request.
+  const discovery = setInterval(queueUncategorizedTransactions, 15_000);
+  discovery.unref();
 }
 
 export function resumeInterruptedCategorization() {

@@ -21,7 +21,7 @@ function renderStatus(input: { pending?: number; failed?: number; configured?: b
 
 test('background categorization status does not block navigation or require per-transaction approval', () => {
   const html = renderStatus({ pending: 3 });
-  expect(html).toContain('Guessing categories for 3 imported transactions');
+  expect(html).toContain('Guessing categories for 3 uncategorized transactions');
   expect(html).toContain('You can keep using the app');
   expect(html).toContain('/transactions/review');
   expect(html).not.toContain('Confirm');
