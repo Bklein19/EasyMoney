@@ -510,6 +510,21 @@ export function requiresPersonalCategoryReview(row: Pick<UncategorizedTransactio
     /\b(?:atm|mobile|cash|check|cheque)\s+(?:deposit|withdrawal)\b/i.test(evidence);
 }
 
+/** A model or inherited label cannot settle tax treatment or prove a transfer. */
+export function financialCategoryConcern(
+  row: Pick<UncategorizedTransactionRow, 'merchant' | 'description' | 'originalDescription' | 'amountCents'>,
+  category: Pick<CategorySummary, 'type' | 'name'>,
+) {
+  const text = `${row.merchant ?? ''} ${row.description ?? ''} ${row.originalDescription ?? ''}`;
+  if (/\b(?:tax|irs|medicare|withholding|social securi)|\bjournaled rsu\b/i.test(text)) return 'Tax and RSU withholding treatment needs review.';
+  if (category.type === 'income' && row.amountCents < 0) return 'An outgoing payment should not be guessed as income.';
+  if ((category.type === 'transfer' || category.name.toLowerCase() === 'transfer') &&
+      !/\b(?:payment|pmt|autopay|transfer|ach|moneyline|investment|vanguard buy)\b/i.test(text)) {
+    return 'A merchant credit may be a refund, not an account transfer. Check the source.';
+  }
+  return null;
+}
+
 function historyKey(row: UncategorizedTransactionRow): string | null {
   if (row.accountId === undefined || requiresPersonalCategoryReview(row)) return null;
   const text = transactionMerchantText(row).trim();
@@ -518,13 +533,15 @@ function historyKey(row: UncategorizedTransactionRow): string | null {
   return JSON.stringify([row.accountId, key, Math.sign(row.amountCents)]);
 }
 
-export function matchHistoricalCategories(groups: MerchantCategorizationGroup[], categories: CategorySummary[], history: Array<UncategorizedTransactionRow & { categoryId: number }>) {
+export function matchHistoricalCategories(groups: MerchantCategorizationGroup[], categories: CategorySummary[], history: Array<UncategorizedTransactionRow & { categoryId: number; categoryOrigin?: string | null }>) {
   const broadIncomeIds = new Set(categories.filter(category => category.type === 'income' && categories.some(child => child.parentId === category.id)).map(category => category.id));
   const byKey = new Map<string, Set<number>>();
   for (const row of history) {
     // A legacy broad Income label says nothing about its subtype. It must neither
     // propagate to new receipts nor conflict with a specific confirmed subtype.
     if (broadIncomeIds.has(row.categoryId)) continue;
+    if (row.categoryOrigin !== 'manual' && categories.find(category => category.id === row.categoryId)?.name === 'Entertainment' &&
+        /\b(?:openai|anthropic|claude)\b/i.test(`${row.merchant} ${row.description}`)) continue;
     const key = historyKey(row);
     if (!key) continue;
     if (!byKey.has(key)) byKey.set(key, new Set());
@@ -555,7 +572,7 @@ export function matchHistoricalCategories(groups: MerchantCategorizationGroup[],
 
 function historicalCategories(groups: MerchantCategorizationGroup[], categories: CategorySummary[]) {
   const history = getDb().prepare(`SELECT t.*, a.name AS accountName, a.institution AS accountInstitution,
-    a.type AS accountType, ta.categoryId FROM ledgerTransactions t
+    a.type AS accountType, ta.categoryId, ta.categoryOrigin FROM ledgerTransactions t
     JOIN transactionAnnotations ta ON ta.ledgerTransactionId=t.ledgerTransactionId
     JOIN categories c ON c.id=ta.categoryId JOIN accounts a ON a.id=t.accountId
     WHERE lower(c.name)!='uncategorized' AND COALESCE(a.status,'active')!='archived'`).all() as Array<UncategorizedTransactionRow & { categoryId: number }>;
@@ -723,6 +740,7 @@ async function categorizeBatchWithOpenAi(input: {
       "kind must be exactly one of: 'category', 'transfer', or 'needs_review'.",
       "Use kind: 'category' for spending, income, or Investment activity. categoryName must exactly match the category list. Investment activity is not personal spending or income.",
       'Category descriptions are user-specific guidance. Prefer those descriptions over generic personal-finance assumptions when deciding between categories.',
+      'Recurring software and AI-service charges belong in a software/subscriptions category when available, not Entertainment merely because of older broad labels. Tax payments and RSU withholding require review unless an appropriate tax category and treatment are explicit. A merchant credit can be a refund; a parser payment flag alone does not prove an account transfer.',
       'Categories with a parentName are subcategories. Prefer the most specific supported income subcategory over its broad Income parent: Payroll for employment pay, Bonuses only for identified bonuses, Gifts Received only for confirmed gifts, Interest for bank interest, and Other Income for known income without a more specific fit. Use the actual names supplied in the category list; do not invent a second reporting classification.',
       'Employment deposits need not contain the literal word payroll. Consider employer/payee context and source descriptions, but do not assume every direct deposit is salary. A family name, round amount, Venmo cashout or transfer label alone is not evidence of a gift. Loans and expense reimbursements are not income; unclear purpose needs review.',
       "For kind: 'transfer' or kind: 'needs_review', set categoryName to an empty string.",

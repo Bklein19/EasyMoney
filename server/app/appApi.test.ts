@@ -29,6 +29,7 @@ const {
   shouldTreatInvestmentCategoryAsTransfer,
   shouldReviewInvestmentAccountTransferDecision,
   categorizeModelDecisions,
+  financialCategoryConcern,
 } = await import('./aiCategorization.ts');
 const caller = appRouter.createCaller({});
 
@@ -220,6 +221,25 @@ test('model decisions cannot manufacture gift or internal-transfer evidence or r
   const decision = { groupId: groups[0]!.id, kind: 'category' as const, categoryName: 'Food & Dining', reason: 'Dining merchant' };
   expect(categorizeModelDecisions({ groups, categories, decisions: [decision] }).suggestions).toHaveLength(1);
   expect(categorizeModelDecisions({ groups, categories, decisions: [decision, decision] }).suggestions).toHaveLength(0);
+});
+
+test('automatic category safety checks reject tax guesses, negative income, and unsupported merchant transfers', () => {
+  const row = { description: 'AIRLINE CREDIT', merchant: 'Airline', originalDescription: null, amountCents: 96078 };
+  expect(financialCategoryConcern(row, {name:'Transfer',type:'transfer'})).toContain('refund');
+  expect(financialCategoryConcern({...row,description:'Payment from checking'}, {name:'Transfer',type:'transfer'})).toBeNull();
+  expect(financialCategoryConcern({...row,amountCents:-1000}, {name:'Payroll',type:'income'})).toContain('outgoing');
+  expect(financialCategoryConcern({...row,description:'Journaled RSU US Federal'}, {name:'Investment',type:'investment'})).toContain('withholding');
+  expect(financialCategoryConcern({...row,description:'ICE CREAM BAR',amountCents:-1575}, {name:'Food & Dining',type:'expense'})).toBeNull();
+});
+
+test('legacy software entertainment labels yield to AI or a deliberate user category', () => {
+  const row = { id:1,ledgerTransactionId:'software-new',accountId:1,accountName:'Card',accountInstitution:'Bank',accountType:'credit',
+    date:'2026-01-01',amountCents:-2000,description:'OPENAI',merchant:'OPENAI',originalDescription:null,originalCategory:null,transactionKind:'activity' };
+  const categories = [{id:1,name:'Entertainment',type:'expense'},{id:2,name:'Subscriptions',type:'expense'}] as Parameters<typeof matchHistoricalCategories>[1];
+  const groups = groupTransactionsForAiCategorization([row]);
+  expect(matchHistoricalCategories(groups,categories,[{...row,categoryId:1}]).unmatched).toHaveLength(1);
+  expect(matchHistoricalCategories(groups,categories,[{...row,categoryId:1},{...row,categoryId:2,categoryOrigin:'automatic'}]).suggestions[0]?.categoryId).toBe(2);
+  expect(matchHistoricalCategories(groups,categories,[{...row,categoryId:1,categoryOrigin:'manual'}]).suggestions[0]?.categoryId).toBe(1);
 });
 
 test('shared account resolver recommends institution + suffix with conservative conflict handling', async () => {

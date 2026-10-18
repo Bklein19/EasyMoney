@@ -1,5 +1,5 @@
 import { getDb } from '../database.ts';
-import { previewAiCategorization } from './aiCategorization.ts';
+import { financialCategoryConcern, previewAiCategorization } from './aiCategorization.ts';
 import { applyReviewedCategoryChanges } from './transactions.ts';
 
 // Categorization is a standing workflow over the ledger, not an import phase.
@@ -130,8 +130,11 @@ export async function processAutomaticCategorizationBatch(preview: Preview = pre
         }
         const guesses = result.suggestions.filter(suggestion => suggestion.transactionIds.includes(id));
         const question = result.questions.find(question => question.transactionIds.includes(id));
+        const evidence = JSON.parse(task.evidenceJson) as Evidence;
+        const destination = guesses.length === 1 ? db.prepare('SELECT type, name FROM categories WHERE id=?').get(guesses[0]!.categoryId) as {type:string;name:string} | null : null;
+        const concern = destination ? financialCategoryConcern(evidence, destination) : null;
+        if (concern) { mark(id, 'review', concern); continue; }
         if (!question && guesses.length === 1 && guesses[0]!.confidence === 'high') {
-          const evidence = JSON.parse(task.evidenceJson) as Evidence;
           changes.push({ transactionId: id, categoryId: guesses[0]!.categoryId,
             expected: evidence });
         } else {
