@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import electrobunConfig from '../electrobun.config.ts';
 import packageJson from '../package.json';
+import { packagedBunVersion } from './packaged-bun-version';
 
 type BuildManifest = {
   mainProcess?: string;
@@ -95,21 +96,12 @@ try {
     fs.readFileSync(path.join(resources, 'build.json'), 'utf8'),
   ) as BuildManifest;
   const expectedElectrobunVersion = packageJson.devDependencies.electrobun;
-  const expectedBunVersion = packageJson.packageManager.replace(/^bun@/, '');
+  const expectedBunVersion = packagedBunVersion(manifest.runtimeVersions);
 
   assert(manifest.mainProcess === 'bun', 'Packaged main process is not Bun');
   assert(
     manifest.electrobunVersion === expectedElectrobunVersion,
     `Expected Electrobun ${expectedElectrobunVersion}, found ${manifest.electrobunVersion ?? 'unknown'}`,
-  );
-  const runtimeNames = Object.keys(manifest.runtimeVersions ?? {}).sort();
-  assert(
-    runtimeNames.length === 1 && runtimeNames[0] === 'bun',
-    `Unexpected packaged runtimes: ${JSON.stringify(manifest.runtimeVersions)}`,
-  );
-  assert(
-    manifest.runtimeVersions?.bun === expectedBunVersion,
-    `Expected Bun runtime ${expectedBunVersion}, found ${manifest.runtimeVersions?.bun ?? 'unknown'}`,
   );
 
   const packagedBun = path.join(innerBundle, 'Contents', 'MacOS', 'bun');

@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "packageManager": "bun@1.4.0",
+  "packageManager": "bun@1.4.3",
   "scripts": {
     "dev": "bun scripts/electrobun.ts dev",
     "dev:watch": "bun scripts/electrobun.ts dev --watch",
@@ -20,7 +20,7 @@
     "lint": "eslint .",
     "test": "bun test",
     "preview:web": "bun run build:client && bun run api",
-    "typecheck": "bun scripts/electrobun.ts prepare --env=stable && bunx tsc --noEmit"
+    "typecheck": "bun scripts/electrobun.ts prepare --env=stable && bun check"
   },
   "dependencies": {
     "@openai/agents": "^0.11.8",
@@ -48,7 +48,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/three": "^0.165.0",
     "@types/ws": "^8.18.1",
-    "bun-types": "^1.4.0",
+    "bun-types": "^1.4.3",
     "electrobun": "2.0.1",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
