@@ -4,7 +4,7 @@ EasyMoney is a local-first personal finance app for importing bank, credit card,
 
 ## Desktop App
 
-EasyMoney is packaged with Electrobun `2.0.1`. Electrobun RPC is used only as the transport between the webview and Bun main process: the existing tRPC router, validation, error shapes, and React Query integration remain unchanged. Browser development keeps the HTTP tRPC transport as a fallback.
+EasyMoney is packaged with Electrobun `2.0.4`. Electrobun RPC is used only as the transport between the webview and Bun main process: the existing tRPC router, validation, error shapes, and React Query integration remain unchanged. Browser development keeps the HTTP tRPC transport as a fallback.
 
 The repository uses Bun for installation, scripts, tests, frontend bundling, the Electrobun CLI bootstrap, and the packaged main process. Do not invoke the Electrobun package's `node` shebang directly; the checked-in launcher runs it explicitly with Bun.
 
@@ -98,7 +98,7 @@ The `data/` directory is ignored by Git. Do not commit personal financial export
 
 EasyMoney uses Bun as its single runtime and package runner. Use `bun`/`bunx` for development, checks, scripts, and server execution. Do not add Python helper scripts, npm/yarn/pnpm workflows, or standalone Node commands for project tasks; `node:` imports are used only as runtime APIs inside code executed by Bun.
 
-Development and CI use Bun `1.4.3` for its built-in `bun check` TypeScript checker. Electrobun `2.0.1` independently pins the packaged application's Bun runtime to `1.4.0`; upgrading development tools does not replace the bundled runtime.
+Development and CI use Bun `1.4.3` for its built-in `bun check` TypeScript checker. Electrobun `2.0.4` independently pins the packaged application's Bun runtime to `1.4.0`; upgrading development tools does not replace the bundled runtime.
 
 Install dependencies:
 

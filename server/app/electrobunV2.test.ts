@@ -8,7 +8,7 @@ const projectRoot = path.resolve(import.meta.dir, '../..');
 
 describe('Electrobun 2 packaging contract', () => {
   test('selects Bun without Carrot or Cottontail application runtimes', () => {
-    expect(packageJson.devDependencies.electrobun).toBe('2.0.1');
+    expect(packageJson.devDependencies.electrobun).toBe('2.0.4');
     expect(electrobunConfig.build?.mainProcess).toBe('bun');
     expect('cottontail' in electrobunConfig.build).toBeFalse();
     expect('carrot' in electrobunConfig.build).toBeFalse();

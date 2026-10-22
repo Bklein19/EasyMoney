@@ -49,7 +49,7 @@
     "@types/three": "^0.165.0",
     "@types/ws": "^8.18.1",
     "bun-types": "^1.4.3",
-    "electrobun": "2.0.1",
+    "electrobun": "2.0.4",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.6.0",
