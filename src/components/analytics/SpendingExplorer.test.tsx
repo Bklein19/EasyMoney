@@ -15,19 +15,19 @@ const root: SpendingNode = {
 };
 
 test('explorer provides precise amounts, accessible ring controls and a complete companion list', () => {
-  const html = renderToStaticMarkup(createElement(SpendingExplorer, { root, onViewTransactions: () => {} }));
+  const html = renderToStaticMarkup(createElement(SpendingExplorer, { root, renderTransactions: () => null }));
   expect(html).toContain('aria-label="Spending path"');
   expect(html).toContain('aria-label="All spending breakdown"');
   expect(html).toContain('Dining: $90.00, 90%');
   expect(html).toContain('Uncategorized');
-  expect(html).toContain('View transactions');
+  expect(html).toContain('View &amp; categorize');
   expect(html).toContain('Gross spending before refunds');
   expect(html).toContain('using current classifications');
   expect(html).not.toContain('NaN');
 });
 
 test('the center is a native navigation button, disabled at the top level', () => {
-  const html = renderToStaticMarkup(createElement(SpendingExplorer, { root, onViewTransactions: () => {} }));
+  const html = renderToStaticMarkup(createElement(SpendingExplorer, { root, renderTransactions: () => null }));
   expect(html).toMatch(/<button[^>]*class="spending-explorer__center-control"[^>]*disabled=""[^>]*aria-label="All spending\. Top level"/);
   expect(html).not.toContain('spending-explorer__center" aria-hidden');
 });
@@ -57,7 +57,7 @@ test('one-child and tiny annular segments remain finite and use two arcs per edg
 });
 
 test('empty period explains how to recover instead of drawing misleading rings', () => {
-  const html = renderToStaticMarkup(createElement(SpendingExplorer, { root: { ...root, amountCents: 0, children: [] }, onViewTransactions: () => {} }));
+  const html = renderToStaticMarkup(createElement(SpendingExplorer, { root: { ...root, amountCents: 0, children: [] }, renderTransactions: () => null }));
   expect(html).toContain('No spending in this period');
   expect(html).not.toContain('<svg');
 });

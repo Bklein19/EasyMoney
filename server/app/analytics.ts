@@ -129,7 +129,7 @@ function applyCategoryFilter(transactions: TransactionListItem[], input: Analyti
   });
 }
 
-export function getAnalyticsReport(input: AnalyticsReportInput = {}) {
+function analyticsContext(input: AnalyticsReportInput) {
   const query: ListTransactionsOptions = {
     startDate: input.startDate,
     endDate: input.endDate,
@@ -141,6 +141,45 @@ export function getAnalyticsReport(input: AnalyticsReportInput = {}) {
   const accountMap = buildAccountMap(listAccounts({ includeArchived: true }).accounts);
   const categories = listCategories().categories;
   const categoryMap = buildCategoryMap(categories);
+  return { categoryScopedTransactions, accountMap, categories, categoryMap };
+}
+
+/** Lazy explorer detail: the backend resolves membership, search, ordering and totals.
+ * A removed node is empty, never a fallback to all transactions.
+ */
+export function getSpendingExplorerTransactions(input: {
+  scope?: AnalyticsReportInput;
+  nodeId: string;
+  search?: string;
+  sortBy?: 'date_desc' | 'date_asc' | 'absolute_desc' | 'absolute_asc';
+  offset?: number;
+}) {
+  const scope = input.scope ?? {};
+  const { categoryScopedTransactions, accountMap, categories, categoryMap } = analyticsContext(scope);
+  const expenses = categoryScopedTransactions.filter(transaction => isExpense(transaction, accountMap, categoryMap));
+  // Legacy display IDs can overlap newer read-model row IDs. Use private indexes
+  // only to resolve the tree, then query by stable ledger identity, never display ID.
+  const root = buildSpendingTree(expenses.map((transaction, index) => ({ ...transaction, id: index + 1 })), categories);
+  const pending = [root];
+  let ledgerTransactionIds: string[] = [];
+  while (pending.length) {
+    const node = pending.pop()!;
+    if (node.id === input.nodeId) {
+      ledgerTransactionIds = node.transactionIds.map(index => expenses[index - 1]!.ledgerTransactionId).filter((id): id is string => Boolean(id));
+      break;
+    }
+    pending.push(...node.children);
+  }
+  return listTransactions({
+    accountId: scope.accountId, accountIds: scope.accountIds,
+    startDate: scope.startDate, endDate: scope.endDate,
+    ledgerTransactionIds, search: input.search, sortBy: input.sortBy ?? 'date_desc',
+    limit: 50, offset: input.offset,
+  });
+}
+
+export function getAnalyticsReport(input: AnalyticsReportInput = {}) {
+  const { categoryScopedTransactions, accountMap, categories, categoryMap } = analyticsContext(input);
   const analysisTransactions = categoryScopedTransactions.filter(transaction => {
     const flow = getTransactionFlow(transaction, accountMap, categoryMap);
     return flow !== 'transfer' && flow !== 'card_payment' && flow !== 'internal_transfer' && flow !== 'investment';

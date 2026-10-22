@@ -24,6 +24,21 @@
 .spending-explorer__summary span { font-size: var(--text-xs); color: var(--text-muted); }
 .spending-explorer__summary > strong { font-size: var(--text-lg); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .spending-explorer__tools { display: flex; gap: var(--space-2); margin: var(--space-3) 0; }
+.spending-explorer__transaction-panel > h4 { font-size: var(--text-lg); margin: var(--space-3) 0 var(--space-2); overflow-wrap: anywhere; }
+.spending-transactions__hint { color: var(--text-muted); font-size: var(--text-xs); line-height: 1.5; margin: var(--space-2) 0; }
+.spending-transactions__filters, .spending-transactions__selection, .spending-transactions__pagination { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-block: var(--space-2); }
+.spending-transactions__filters .spending-explorer__search { flex: 1; min-width: 180px; }
+.spending-transactions__selection .grouped-category-select-control { flex: 1; min-width: 150px; }
+.spending-transactions__selection select { width: 100%; }
+.spending-transactions__rows { max-height: 350px; overflow-y: auto; scrollbar-width: thin; list-style: none; padding: 0; margin: 0; }
+.spending-transactions__rows > li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; padding: 12px 4px; border-bottom: 1px solid var(--glass-border); }
+.spending-transactions__identity { display: grid; min-width: 0; gap: 4px; }
+.spending-transactions__identity button { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+.spending-transactions__identity > span { color: var(--text-muted); font-size: var(--text-xs); }
+.spending-transactions__rows > li > strong { font-size: var(--text-sm); font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.spending-transactions__rows > li > .grouped-category-select-control { grid-column: 2 / -1; width: 100%; }
+.spending-transactions__rows select { width: 100%; }
+.spending-transactions__pagination > span { flex: 1; color: var(--text-muted); font-size: var(--text-xs); }
 .spending-explorer__search { display: flex; align-items: center; gap: var(--space-2); color: var(--text-muted); border-bottom: 1px solid var(--glass-border); padding: 8px 4px; }
 .spending-explorer__search input { background: transparent; border: 0; outline: none; color: var(--text-primary); width: 100%; min-width: 0; font: inherit; font-size: var(--text-sm); }
 .spending-explorer__search:focus-within { border-color: var(--color-accent); }

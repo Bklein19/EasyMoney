@@ -81,6 +81,8 @@ export interface TransactionListItem {
 }
 
 export interface ListTransactionsOptions {
+  /** Internal read-model scope, never a fuzzy merchant match. Empty means none. */
+  ledgerTransactionIds?: string[];
   accountIds?: number[];
   accountId?: string | number | null;
   categoryId?: string | number | null;

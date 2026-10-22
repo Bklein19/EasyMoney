@@ -10,6 +10,8 @@ import { queryClient, trpc, trpcClient } from '../../api/trpc';
 import { formatCurrency, formatDate, getAmountClass } from '../../utils/formatters';
 
 import SpendingExplorer from './SpendingExplorer';
+import SpendingTransactions from './SpendingTransactions';
+import { CategoryChangeFeedback, useReviewedCategories } from '../transactions/ReviewedTransactions';
 import WorthReviewing from './WorthReviewing';
 import TransactionDetails from '../transactions/TransactionDetails';
 import type { ReviewGroup } from '../../../server/app/transactionReview';
@@ -143,6 +145,7 @@ function isDateRange(value: string): value is DateRange {
 
 
 export default function AnalyticsPage() {
+  const explorerChanges = useReviewedCategories();
   const [inspectedId, setInspectedId] = useState<string | null>(null);
   const [dateRange, setDateRange] = useState<DateRange>(DATE_RANGES.ALL_TIME);
   const [customStartDate, setCustomStartDate] = useState('');
@@ -815,15 +818,12 @@ export default function AnalyticsPage() {
             </p>
           </div>
           <SpendingExplorer
+            key={JSON.stringify(analyticsInput)}
             root={deferredSpendingExplorer}
-            onViewTransactions={node => openDrilldown({
-              type: node.kind === 'merchant' ? 'merchant' : 'category',
-              id: node.id,
-              ids: new Set(node.transactionIds),
-              title: `${node.name} · Spending transactions`,
-              scrollIntoView: true,
-            })}
+            saving={explorerChanges.pending}
+            renderTransactions={node => <SpendingTransactions key={node.id} scope={analyticsInput} nodeId={node.id} changes={explorerChanges} onInspect={setInspectedId} />}
           />
+          <CategoryChangeFeedback state={explorerChanges} />
         </div>
         <div className="analytics-card glass-card analytics-card--explorer">
           <WorthReviewing report={analyticsReport?.worthReviewing ?? { groups: [], totalGroups: 0 }} />

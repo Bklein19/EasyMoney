@@ -6,7 +6,7 @@ import { hasActiveCategorizationJobs } from './aiCategorization.ts';
 import { automaticCategorizationStatus, retryAutomaticCategorization } from './automaticCategorization.ts';
 import { z } from 'zod';
 import { archiveAccount, closeAccount, listAccounts, unarchiveAccount, updateAccountMetadata } from './accounts.ts';
-import { getAnalyticsReport } from './analytics.ts';
+import { getAnalyticsReport, getSpendingExplorerTransactions } from './analytics.ts';
 import { getBudgetingReport } from './budgetingReport.ts';
 import {
   autoApplyAiCategorization,
@@ -60,6 +60,15 @@ const t = { ...base, procedure: base.procedure.use(async ({ type, next }) => {
 }) };
 
 const optionalId = z.union([z.string(), z.number()]).nullish();
+const analyticsInput = z.object({
+  startDate: z.string().nullish(),
+  endDate: z.string().nullish(),
+  accountId: optionalId,
+  accountIds: z.array(z.number().int().positive()).optional(),
+  categoryFilterIds: z.array(z.union([z.string(), z.number()])).optional(),
+  categoryFilterMode: z.enum(['include', 'exclude']).nullish(),
+  groupMode: z.enum(['Auto', 'Daily', 'Weekly', 'Monthly', 'Yearly']).nullish(),
+});
 const categoryInput = z.object({
   name: z.string().min(1),
   parentId: optionalId,
@@ -517,16 +526,15 @@ export const appRouter = t.router({
   }),
 
   analytics: t.router({
+    spendingTransactions: t.procedure.input(z.object({
+      scope: analyticsInput.optional(),
+      nodeId: z.string().min(1).max(10000),
+      search: z.string().max(1000).optional(),
+      sortBy: z.enum(['date_desc', 'date_asc', 'absolute_desc', 'absolute_asc']).optional(),
+      offset: z.number().int().nonnegative().optional(),
+    })).query(({ input }) => getSpendingExplorerTransactions(input)),
     report: t.procedure
-      .input(z.object({
-        startDate: z.string().nullish(),
-        endDate: z.string().nullish(),
-        accountId: optionalId,
-        accountIds: z.array(z.number().int().positive()).optional(),
-        categoryFilterIds: z.array(z.union([z.string(), z.number()])).optional(),
-        categoryFilterMode: z.enum(['include', 'exclude']).nullish(),
-        groupMode: z.enum(['Auto', 'Daily', 'Weekly', 'Monthly', 'Yearly']).nullish(),
-      }).optional())
+      .input(analyticsInput.optional())
       .query(({ input }) => getAnalyticsReport(input ?? {})),
   }),
 });

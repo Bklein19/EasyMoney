@@ -33,6 +33,76 @@ const {
 } = await import('./aiCategorization.ts');
 const caller = appRouter.createCaller({});
 
+test('spending detail resolves exact backend scope, paginates occurrences, searches and never widens missing nodes', async () => {
+  const accountId = Number(insertRow('accounts', { name: 'Scoped card', type: 'credit_card' }));
+  const otherAccount = Number(insertRow('accounts', { name: 'Other card', type: 'credit_card' }));
+  const parentId = Number(insertRow('categories', { name: 'Dining', type: 'expense' }));
+  const childId = Number(insertRow('categories', { name: 'Coffee', type: 'expense', parentId }));
+  const put = (id: string, changes: Record<string, unknown> = {}) => insertRow('ledgerTransactions', {
+    ledgerTransactionId: id, accountId, date: '2026-10-03', amountCents: -1000,
+    description: 'Original coffee description', merchant: 'Cafe', transactionKind: 'activity', ...changes,
+  });
+  for (let index = 0; index < 53; index++) {
+    const id = `explore-${String(index).padStart(2, '0')}`;
+    put(id); upsertTransactionAnnotation(id, { categoryId: childId, notes: index === 52 ? 'Special note' : '' });
+  }
+  put('other-account', { accountId: otherAccount });
+  put('other-date', { date: '2025-01-01' });
+  put('other-category');
+  put('income', { amountCents: 5000 });
+  put('internal', { amountCents: -5000, transactionKind: 'internal_transfer' });
+  const scope = { accountIds: [accountId], startDate: '2026-10-01', endDate: '2026-10-31' };
+  const nodeId = `spending/category:${parentId}/category:${childId}/merchant:cafe`;
+  const before = getDb().prepare('SELECT total_changes() n').get()?.n;
+  const page = await caller.analytics.spendingTransactions({ scope, nodeId });
+  expect((await caller.analytics.spendingTransactions({ scope, nodeId: 'spending' })).totalCount).toBe(54);
+  expect((await caller.analytics.spendingTransactions({ scope, nodeId: `spending/category:${parentId}` })).totalCount).toBe(53);
+  expect(page.totalCount).toBe(53);
+  expect(page.transactions).toHaveLength(50);
+  expect(page.hasMore).toBe(true);
+  expect(page.nextOffset).toBe(50);
+  expect(page.totals.expenses).toBe(530);
+  const next = await caller.analytics.spendingTransactions({ scope, nodeId, offset: 50 });
+  expect(next.transactions).toHaveLength(3);
+  expect(new Set([...page.transactions, ...next.transactions].map(row => row.ledgerTransactionId)).size).toBe(53);
+  expect(next.hasMore).toBe(false);
+  const searched = await caller.analytics.spendingTransactions({ scope, nodeId, search: 'Special note' });
+  expect(searched.transactions.map(row => row.ledgerTransactionId)).toEqual(['explore-52']);
+  expect(searched.totals.expenses).toBe(10);
+  expect((await caller.analytics.spendingTransactions({ scope, nodeId: 'spending/removed' })).totalCount).toBe(0);
+  expect((await caller.analytics.spendingTransactions({ scope: { ...scope, categoryFilterIds: [childId], categoryFilterMode: 'exclude' }, nodeId })).transactions).toEqual([]);
+  expect((await caller.analytics.spendingTransactions({ scope: { ...scope, accountIds: [] }, nodeId: 'spending' })).totalCount).toBe(0);
+  expect(getDb().prepare('SELECT total_changes() n').get()?.n).toBe(before);
+});
+
+test('spending selection uses stable identities despite legacy display-ID collisions; edits preserve evidence and Undo', async () => {
+  const accountId = Number(insertRow('accounts', { name: 'Checking', type: 'checking' }));
+  const categoryId = Number(insertRow('categories', { name: 'Housing', type: 'expense' }));
+  const legacyId = Number(insertRow('transactions', { accountId, date: '2024-01-03', amount: -1800, description: 'Old row' }));
+  insertRow('ledgerTransactions', { id: legacyId, ledgerTransactionId: 'unrelated-same-display-id', accountId, date: '2024-01-03', amountCents: -2000, description: 'Different merchant', merchant: 'Other' });
+  insertRow('ledgerTransactions', { ledgerTransactionId: 'rent-check', legacyTransactionId: legacyId, accountId, date: '2024-01-03', amountCents: -180000, description: 'Check 254', merchant: 'Check 254' });
+  upsertTransactionAnnotation('rent-check', { notes: 'Keep this note' });
+  const scope = { accountIds: [accountId] };
+  const nodeId = 'spending/category:uncategorized/merchant:check%20254';
+  const rows = (await caller.analytics.spendingTransactions({ scope, nodeId })).transactions;
+  expect(rows.map(row => row.ledgerTransactionId)).toEqual(['rent-check']);
+  const { reviewedTransaction } = await import('./transactionReview');
+  const changes = rows.map(row => ({ ...reviewedTransaction(row), categoryId }));
+  const facts = getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all();
+  const result = await caller.transactions.applyReviewedCategories({ label: 'Explore spending categories', changes });
+  expect(result.count).toBe(1);
+  expect(result.undoOperation?.count).toBe(1);
+  expect(getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all()).toEqual(facts);
+  expect(getDb().prepare('SELECT categoryId,notes,categoryOrigin FROM transactionAnnotations WHERE ledgerTransactionId=?').get('rent-check'))
+    .toEqual({ categoryId, notes: 'Keep this note', categoryOrigin: 'manual' });
+  expect((await caller.analytics.spendingTransactions({ scope, nodeId })).transactions).toEqual([]);
+  await expect(caller.transactions.applyReviewedCategories({ label: 'Stale explorer edit', changes })).rejects.toThrow('changed');
+  await caller.transactions.restoreCategories({ undoOperationId: result.undoOperation!.id });
+  expect((await caller.analytics.spendingTransactions({ scope, nodeId })).transactions).toHaveLength(1);
+  expect(getDb().prepare('SELECT categoryId,notes FROM transactionAnnotations WHERE ledgerTransactionId=?').get('rent-check'))
+    .toEqual({ categoryId: null, notes: 'Keep this note' });
+});
+
 const { queueUncategorizedTransactions, processAutomaticCategorizationBatch,
   automaticCategorizationStatus, retryAutomaticCategorization, resumeInterruptedCategorization } = await import('./automaticCategorization.ts');
 

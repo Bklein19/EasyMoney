@@ -166,6 +166,14 @@ function buildTransactionFilter(options: ListTransactionsOptions = {}) {
   const params: SqlParams = {};
   const includeArchived = options.includeArchived === true || options.includeArchived === 'true';
 
+  if (options.ledgerTransactionIds !== undefined) {
+    const ids = [...new Set(options.ledgerTransactionIds)];
+    if (ids.some(id => typeof id !== 'string' || !id)) throw new Error('Invalid transaction selection');
+    // One binding keeps large explorer scopes below SQLite's variable limit.
+    clauses.push('t.ledgerTransactionId IN (SELECT value FROM json_each($selectedLedgerTransactions))');
+    params.selectedLedgerTransactions = JSON.stringify(ids);
+  }
+
   const accountId = optionalNumber(options.accountId);
   if (options.accountIds !== undefined) {
     const ids = [...new Set(options.accountIds)];
