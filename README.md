@@ -52,25 +52,25 @@ This model is meant to handle overlapping activity exports without dropping real
 
 Parsers try to extract durable source facts plus account context when the file format exposes it. Account number or suffix means the parser can infer a source-account identifier such as a full account number, masked number, or last four digits for account matching. Today that identifier is usually folded into the parsed account name; the import model is being extended toward first-class account-number metadata.
 
-| Institution / source | File types | Transactions | Balances | Account name | Account holder | Account number / suffix |
-| --- | --- | --- | --- | --- | --- | --- |
-| American Express | CSV activity | Yes | No | No | No | No |
-| Apple Card | CSV activity | Yes | No | No | No | No |
-| Bank of America | CSV activity, PDF statements | Yes | Yes | Yes | No | Last four from filename or statement |
-| Capital One | CSV activity | Yes | No | No | No | No |
-| Chase | CSV activity | Yes | No | No | No | No |
-| Citi | CSV activity | Yes | No | No | No | No |
-| Fidelity 401(k) / NetBenefits | HTML/PDF statements | Yes | Yes | Yes | No | No |
-| Fidelity portfolio / investment reports | PDF statements | Yes | Yes | Yes | Limited, format-specific | Full or formatted account number |
-| Marcus | PDF statements | Yes | Yes | Yes | No | Last four from filename or statement |
-| Merrill | CSV activity, PDF CMA statements | Yes | Yes | Yes | No | CSV account number or statement account number |
-| Morgan Stanley | PDF activity, PDF statements | Yes | Yes | Yes | Yes for activity exports | Full or last-four statement/account number |
-| Robinhood | CSV banking, PDF statements | Yes | Yes for statements | Yes | Yes for personal statement headings | Last four from statement account number |
-| Sequoia Fund | CSV activity, PDF statements | Yes | Yes | Fixed fund account | No | Selector suffix when present |
-| TIAA | CSV activity, PDF statements | Yes | Yes | Fixed retirement account | No | No |
-| Vanguard | PDF activity, PDF statements | Yes | Yes | Yes | No | Masked suffix when present |
-| Wells Fargo | CSV activity, PDF statements | Yes | Yes for statements | Yes when filename/statement identifies it | No | Last four from filename or statement |
-| Custom CSV mapping | CSV activity | Yes | No | User-selected or mapped | No | No |
+| Institution / source                    | File types                       | Transactions | Balances           | Account name                              | Account holder                      | Account number / suffix                        |
+| --------------------------------------- | -------------------------------- | ------------ | ------------------ | ----------------------------------------- | ----------------------------------- | ---------------------------------------------- |
+| American Express                        | CSV activity                     | Yes          | No                 | No                                        | No                                  | No                                             |
+| Apple Card                              | CSV activity                     | Yes          | No                 | No                                        | No                                  | No                                             |
+| Bank of America                         | CSV activity, PDF statements     | Yes          | Yes                | Yes                                       | No                                  | Last four from filename or statement           |
+| Capital One                             | CSV activity                     | Yes          | No                 | No                                        | No                                  | No                                             |
+| Chase                                   | CSV activity                     | Yes          | No                 | No                                        | No                                  | No                                             |
+| Citi                                    | CSV activity                     | Yes          | No                 | No                                        | No                                  | No                                             |
+| Fidelity 401(k) / NetBenefits           | HTML/PDF statements              | Yes          | Yes                | Yes                                       | No                                  | No                                             |
+| Fidelity portfolio / investment reports | PDF statements                   | Yes          | Yes                | Yes                                       | Limited, format-specific            | Full or formatted account number               |
+| Marcus                                  | PDF statements                   | Yes          | Yes                | Yes                                       | No                                  | Last four from filename or statement           |
+| Merrill                                 | CSV activity, PDF CMA statements | Yes          | Yes                | Yes                                       | No                                  | CSV account number or statement account number |
+| Morgan Stanley                          | PDF activity, PDF statements     | Yes          | Yes                | Yes                                       | Yes for activity exports            | Full or last-four statement/account number     |
+| Robinhood                               | CSV banking, PDF statements      | Yes          | Yes for statements | Yes                                       | Yes for personal statement headings | Last four from statement account number        |
+| Sequoia Fund                            | CSV activity, PDF statements     | Yes          | Yes                | Fixed fund account                        | No                                  | Selector suffix when present                   |
+| TIAA                                    | CSV activity, PDF statements     | Yes          | Yes                | Fixed retirement account                  | No                                  | No                                             |
+| Vanguard                                | PDF activity, PDF statements     | Yes          | Yes                | Yes                                       | No                                  | Masked suffix when present                     |
+| Wells Fargo                             | CSV activity, PDF statements     | Yes          | Yes for statements | Yes when filename/statement identifies it | No                                  | Last four from filename or statement           |
+| Custom CSV mapping                      | CSV activity                     | Yes          | No                 | User-selected or mapped                   | No                                  | No                                             |
 
 ## Local Data
 
@@ -99,6 +99,8 @@ The `data/` directory is ignored by Git. Do not commit personal financial export
 EasyMoney uses Bun as its single runtime and package runner. Use `bun`/`bunx` for development, checks, scripts, and server execution. Do not add Python helper scripts, npm/yarn/pnpm workflows, or standalone Node commands for project tasks; `node:` imports are used only as runtime APIs inside code executed by Bun.
 
 Development and CI use Bun `1.4.4` for its built-in `bun check` TypeScript checker. Electrobun `2.0.4` independently pins the packaged application's Bun runtime to `1.4.0`; upgrading development tools does not replace the bundled runtime.
+
+Use `bun run format` to format code with Bun's built-in formatter, or `bun run format:check` for a read-only check. Formatting options live in `bunfig.toml`. Generated files and local build artifacts are excluded. Linting remains on ESLint while `bun lint` requires a canary Bun release.
 
 Install dependencies:
 

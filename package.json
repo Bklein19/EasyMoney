@@ -18,6 +18,8 @@
     "build:client": "bun scripts/build-client.ts",
     "start": "bun scripts/electrobun.ts dev",
     "lint": "eslint .",
+    "format": "bun fmt",
+    "format:check": "bun fmt --check",
     "test": "bun test",
     "preview:web": "bun run build:client && bun run api",
     "typecheck": "bun scripts/electrobun.ts prepare --env=stable && bun check"
