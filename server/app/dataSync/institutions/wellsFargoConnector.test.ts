@@ -1,14 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
-import type {
-  SyncAccountCoverage,
-  SyncConnectorRunContext,
-} from '../connector.ts';
+import type { SyncAccountCoverage, SyncConnectorRunContext } from '../connector.ts';
 import type { SyncEvent } from '../protocol.ts';
-import type {
-  WellsFargoDownloadedArtifact,
-  WellsFargoSyncConfig,
-} from './wellsFargo.ts';
+import type { WellsFargoDownloadedArtifact, WellsFargoSyncConfig } from './wellsFargo.ts';
 import {
   createWellsFargoConnector,
   inferWellsFargoAccountKind,
@@ -83,10 +77,10 @@ describe('Wells Fargo connector', () => {
 
     expect(matchesWellsFargoAccount(wells)).toBe(true);
     expect(matchesWellsFargoAccount(other)).toBe(false);
-    expect(wellsFargoConnector.listTargets({ today: '2026-08-20', accounts: [wells, other] }))
-      .toEqual([{ label: 'Wells Fargo' }]);
-    expect(wellsFargoConnector.listTargets({ today: '2026-08-20', accounts: [other] }))
-      .toEqual([]);
+    expect(
+      wellsFargoConnector.listTargets({ today: '2026-08-20', accounts: [wells, other] }),
+    ).toEqual([{ label: 'Wells Fargo' }]);
+    expect(wellsFargoConnector.listTargets({ today: '2026-08-20', accounts: [other] })).toEqual([]);
   });
 
   test('infers supported account kinds and exact account identity without fixed product names', () => {
@@ -114,25 +108,29 @@ describe('Wells Fargo connector', () => {
   });
 
   test('plans account-specific activity and statement windows', () => {
-    expect(planWellsFargoAccounts(runContext([
-      account({ id: 10 }),
-      account({
-        id: 20,
-        name: 'Goal Savings 2222',
-        type: 'savings',
-        latestFactDate: '2026-07-15',
-        latestBalanceDate: '2026-06-30',
-        sourceAccountName: 'Goal Savings account ending in 2222',
-      }),
-      account({
-        id: 30,
-        name: 'Autograph Visa 3333',
-        type: 'credit',
-        latestFactDate: null,
-        latestBalanceDate: null,
-        sourceAccountName: 'Autograph Visa account ending in 3333',
-      }),
-    ]))).toEqual([
+    expect(
+      planWellsFargoAccounts(
+        runContext([
+          account({ id: 10 }),
+          account({
+            id: 20,
+            name: 'Goal Savings 2222',
+            type: 'savings',
+            latestFactDate: '2026-07-15',
+            latestBalanceDate: '2026-06-30',
+            sourceAccountName: 'Goal Savings account ending in 2222',
+          }),
+          account({
+            id: 30,
+            name: 'Autograph Visa 3333',
+            type: 'credit',
+            latestFactDate: null,
+            latestBalanceDate: null,
+            sourceAccountName: 'Autograph Visa account ending in 3333',
+          }),
+        ]),
+      ),
+    ).toEqual([
       {
         accountId: 10,
         kind: 'checking',
@@ -165,24 +163,32 @@ describe('Wells Fargo connector', () => {
 
   test('warns and skips local accounts with incomplete or ambiguous routing identity', () => {
     const events: Array<Omit<SyncEvent, 'runId' | 'timestamp'>> = [];
-    expect(planWellsFargoAccounts(runContext([
-      account({
-        id: 1,
-        name: 'Account without product kind 1111',
-        type: 'asset',
-        sourceAccountName: 'Account ending in 1111',
-      }),
-      account({
-        id: 2,
-        accountAliases: ['Checking ending in 9999'],
-      }),
-    ], event => events.push(event)))).toEqual([]);
+    expect(
+      planWellsFargoAccounts(
+        runContext(
+          [
+            account({
+              id: 1,
+              name: 'Account without product kind 1111',
+              type: 'asset',
+              sourceAccountName: 'Account ending in 1111',
+            }),
+            account({
+              id: 2,
+              accountAliases: ['Checking ending in 9999'],
+            }),
+          ],
+          (event) => events.push(event),
+        ),
+      ),
+    ).toEqual([]);
 
     expect(events).toHaveLength(2);
-    expect(events.every(event =>
-      event.type === 'warning' &&
-      typeof event.data?.accountId === 'number'
-    )).toBe(true);
+    expect(
+      events.every(
+        (event) => event.type === 'warning' && typeof event.data?.accountId === 'number',
+      ),
+    ).toBe(true);
   });
 
   test('rejects duplicate local routing identities before opening the browser', async () => {
@@ -192,10 +198,11 @@ describe('Wells Fargo connector', () => {
       return { accounts: [], artifacts: [], unavailable: [] };
     });
 
-    await expect(connector.run(runContext([
-      account({ id: 10 }),
-      account({ id: 20, name: 'Second Checking 1111' }),
-    ]))).rejects.toThrow('ambiguous routing identity');
+    await expect(
+      connector.run(
+        runContext([account({ id: 10 }), account({ id: 20, name: 'Second Checking 1111' })]),
+      ),
+    ).rejects.toThrow('ambiguous routing identity');
     expect(called).toBe(false);
   });
 
@@ -221,24 +228,28 @@ describe('Wells Fargo connector', () => {
       };
     });
 
-    await expect(connector.run(runContext([
-      account({ id: 10 }),
-    ], event => events.push(event)))).resolves.toEqual([{
-      fileName: 'wells-fargo-checking-1111-2026-07-25-to-2026-08-20.csv',
-      routing: 'source',
-    }]);
+    await expect(
+      connector.run(runContext([account({ id: 10 })], (event) => events.push(event))),
+    ).resolves.toEqual([
+      {
+        fileName: 'wells-fargo-checking-1111-2026-07-25-to-2026-08-20.csv',
+        routing: 'source',
+      },
+    ]);
 
     expect(capturedConfig).toEqual({
       outputDir: '/tmp/easymoney-wells-fargo-connector-test',
-      accounts: [{
-        accountId: 10,
-        kind: 'checking',
-        last4: '1111',
-        activityFrom: '2026-07-25',
-        activityThrough: '2026-08-20',
-        statementFrom: '2026-07-24',
-        statementThrough: '2026-08-20',
-      }],
+      accounts: [
+        {
+          accountId: 10,
+          kind: 'checking',
+          last4: '1111',
+          activityFrom: '2026-07-25',
+          activityThrough: '2026-08-20',
+          statementFrom: '2026-07-24',
+          statementThrough: '2026-08-20',
+        },
+      ],
       session: 'wells-fargo-catchup',
     });
     expect(events).toContainEqual({
@@ -257,16 +268,21 @@ describe('Wells Fargo connector', () => {
   });
 
   test('rejects an artifact whose validated identity changed before staging', () => {
-    expect(() => routeWellsFargoArtifacts([
-      artifact({ account: { kind: 'credit-card', last4: '1111' } }),
-    ], [{
-      accountId: 10,
-      kind: 'checking',
-      last4: '1111',
-      activityFrom: '2026-07-25',
-      activityThrough: '2026-08-20',
-      statementFrom: '2026-07-24',
-      statementThrough: '2026-08-20',
-    }])).toThrow('did not match');
+    expect(() =>
+      routeWellsFargoArtifacts(
+        [artifact({ account: { kind: 'credit-card', last4: '1111' } })],
+        [
+          {
+            accountId: 10,
+            kind: 'checking',
+            last4: '1111',
+            activityFrom: '2026-07-25',
+            activityThrough: '2026-08-20',
+            statementFrom: '2026-07-24',
+            statementThrough: '2026-08-20',
+          },
+        ],
+      ),
+    ).toThrow('did not match');
   });
 });

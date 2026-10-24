@@ -17,7 +17,7 @@ const AI_SORT_OPTIONS = [
   { value: 'money', label: 'Money' },
 ] as const;
 
-type AiReviewSort = typeof AI_SORT_OPTIONS[number]['value'];
+type AiReviewSort = (typeof AI_SORT_OPTIONS)[number]['value'];
 type SplitStrategy = 'bank_description_counterparty' | 'individual_transactions';
 
 interface AiReviewTransaction {
@@ -167,25 +167,43 @@ export default function TransactionReviewPage() {
   const { categories } = useCategories();
   const categorizationCoverage = useQuery(trpc.transactions.categorizationCoverage.queryOptions());
 
-  const getSuggestionTransaction = (suggestion: AiSuggestion) => suggestion.transactions?.[0] || suggestion.transaction || null;
+  const getSuggestionTransaction = (suggestion: AiSuggestion) =>
+    suggestion.transactions?.[0] || suggestion.transaction || null;
   const getQuestionTransactions = (question: AiQuestion) => question.transactions ?? [];
-  const getAiTransactionTitle = (transaction?: AiReviewTransaction | null) => transaction?.merchant || transaction?.description || 'Transaction';
+  const getAiTransactionTitle = (transaction?: AiReviewTransaction | null) =>
+    transaction?.merchant || transaction?.description || 'Transaction';
   const getSourceRoleLabel = (sourceRole?: string | null) => {
     if (sourceRole === 'statement-summary') return 'Statement summary';
     if (sourceRole === 'statement-only') return 'Statement only';
     return '';
   };
-  const aiSuggestions = useMemo(() => aiCategorization?.suggestions ?? [], [aiCategorization?.suggestions]);
-  const aiQuestions = useMemo(() => aiCategorization?.questions ?? [], [aiCategorization?.questions]);
-  const activeAiQuestions = useMemo<ReviewQuestion[]>(() => aiQuestions
-    .map((question, index) => ({ ...question, key: `${question.groupId || question.pattern}-${index}` }))
-    .filter(question => !ignoredAiQuestionKeys.has(question.key)), [aiQuestions, ignoredAiQuestionKeys]);
-  const suggestionSelectionId = (suggestion: AiSuggestion) => suggestion.id ?? suggestion.transactionId ?? '';
-  const suggestionTransactionIds = (suggestion: AiSuggestion) => suggestion.transactionIds ?? [suggestion.transactionId].filter((id): id is string => Boolean(id));
+  const aiSuggestions = useMemo(
+    () => aiCategorization?.suggestions ?? [],
+    [aiCategorization?.suggestions],
+  );
+  const aiQuestions = useMemo(
+    () => aiCategorization?.questions ?? [],
+    [aiCategorization?.questions],
+  );
+  const activeAiQuestions = useMemo<ReviewQuestion[]>(
+    () =>
+      aiQuestions
+        .map((question, index) => ({
+          ...question,
+          key: `${question.groupId || question.pattern}-${index}`,
+        }))
+        .filter((question) => !ignoredAiQuestionKeys.has(question.key)),
+    [aiQuestions, ignoredAiQuestionKeys],
+  );
+  const suggestionSelectionId = (suggestion: AiSuggestion) =>
+    suggestion.id ?? suggestion.transactionId ?? '';
+  const suggestionTransactionIds = (suggestion: AiSuggestion) =>
+    suggestion.transactionIds ??
+    [suggestion.transactionId].filter((id): id is string => Boolean(id));
   const reviewRows = useMemo<ReviewRow[]>(() => {
     const suggestionRows: ReviewRow[] = aiSuggestions
-      .filter(suggestion => !suggestion.applied)
-      .map(suggestion => {
+      .filter((suggestion) => !suggestion.applied)
+      .map((suggestion) => {
         const transaction = getSuggestionTransaction(suggestion);
         const transactionIds = suggestionTransactionIds(suggestion);
         return {
@@ -203,11 +221,12 @@ export default function TransactionReviewPage() {
           recommendedSplitStrategy: suggestion.recommendedSplitStrategy,
           accountName: suggestion.accountNames?.length === 1 ? suggestion.accountNames[0] : '',
           suggestedCategoryId: String(suggestion.categoryId),
-          categoryId: categoryByReviewKey[suggestionSelectionId(suggestion)] ?? String(suggestion.categoryId),
+          categoryId:
+            categoryByReviewKey[suggestionSelectionId(suggestion)] ?? String(suggestion.categoryId),
           transactions: suggestion.transactions ?? (transaction ? [transaction] : []),
         };
       });
-    const questionRows: ReviewRow[] = activeAiQuestions.map(question => ({
+    const questionRows: ReviewRow[] = activeAiQuestions.map((question) => ({
       type: 'question',
       key: question.key,
       merchantName: question.pattern,
@@ -228,19 +247,28 @@ export default function TransactionReviewPage() {
 
     return rows.sort((a, b) => {
       if (aiReviewSort === 'money') {
-        return Math.abs(b.totalAmount ?? 0) - Math.abs(a.totalAmount ?? 0) ||
+        return (
+          Math.abs(b.totalAmount ?? 0) - Math.abs(a.totalAmount ?? 0) ||
           b.transactionCount - a.transactionCount ||
-          a.merchantName.localeCompare(b.merchantName);
+          a.merchantName.localeCompare(b.merchantName)
+        );
       }
 
-      return b.transactionCount - a.transactionCount ||
+      return (
+        b.transactionCount - a.transactionCount ||
         Math.abs(b.totalAmount ?? 0) - Math.abs(a.totalAmount ?? 0) ||
-        a.merchantName.localeCompare(b.merchantName);
+        a.merchantName.localeCompare(b.merchantName)
+      );
     });
   }, [activeAiQuestions, aiReviewSort, aiSuggestions, categoryByReviewKey]);
-  const selectedReviewRows = reviewRows.filter(row => row.categoryId && row.transactionIds.length);
-  const splitReviewRows = reviewRows.filter((row): row is ReviewRow & { sourceMerchantKey: string } => Boolean(splitByReviewKey[row.key] && row.sourceMerchantKey));
-  const categoryReviewRows = selectedReviewRows.filter(row => !splitByReviewKey[row.key]);
+  const selectedReviewRows = reviewRows.filter(
+    (row) => row.categoryId && row.transactionIds.length,
+  );
+  const splitReviewRows = reviewRows.filter(
+    (row): row is ReviewRow & { sourceMerchantKey: string } =>
+      Boolean(splitByReviewKey[row.key] && row.sourceMerchantKey),
+  );
+  const categoryReviewRows = selectedReviewRows.filter((row) => !splitByReviewKey[row.key]);
   const actionableReviewRowCount = categoryReviewRows.length + splitReviewRows.length;
 
   useEffect(() => {
@@ -259,7 +287,7 @@ export default function TransactionReviewPage() {
 
     return (
       <div className="transaction-review-card__transactions">
-        {rows.map(transaction => (
+        {rows.map((transaction) => (
           <div className="transaction-review-card__transaction" key={transaction.transactionId}>
             <div>
               <strong>{getAiTransactionTitle(transaction)}</strong>
@@ -284,49 +312,52 @@ export default function TransactionReviewPage() {
     );
   };
 
-  const handlePreviewAiCategorization = useCallback(async (sortOverride: AiReviewSort = aiReviewSort) => {
-    const sort = sortOverride === 'money' ? 'money' : 'count';
-    const requestId = aiPreviewRequestId.current + 1;
-    aiPreviewRequestId.current = requestId;
-    setIsAiCategorizing(true);
-    setAiReviewStartedAt(Date.now());
-    setAiReviewElapsedSeconds(0);
-    setAiCategorizationError('');
-    setAiCategorization({
-      configured: true,
-      model: null,
-      scanned: 0,
-      groupCount: 0,
-      suggestions: [],
-      questions: [],
-      message: `Reviewing ${AI_CATEGORIZATION_GROUP_LIMIT} merchant groups by ${sort === 'money' ? 'money' : 'count'}...`,
-    });
-    try {
-      const result = await withTimeout(
-        trpcClient.transactions.aiCategorizationPreview.mutate({
-          limit: AI_CATEGORIZATION_GROUP_LIMIT,
-          sort,
-        }),
-        AI_CATEGORIZATION_TIMEOUT_MS,
-        `AI categorization took longer than ${Math.round(AI_CATEGORIZATION_TIMEOUT_MS / 1000)} seconds. Try again with fewer uncategorized transactions or check the server logs.`
-      );
-      if (aiPreviewRequestId.current !== requestId) return;
-      setAiCategorization(result as AiCategorizationPreview);
-      setCategoryByReviewKey({});
-      setSplitByReviewKey({});
-      setIgnoredAiQuestionKeys(new Set());
-      setExpandedReviewKey(null);
-    } catch (error) {
-      if (aiPreviewRequestId.current !== requestId) return;
-      setAiCategorization(null);
-      setAiCategorizationError(error instanceof Error ? error.message : String(error));
-    } finally {
-      if (aiPreviewRequestId.current === requestId) {
-        setIsAiCategorizing(false);
-        setAiReviewStartedAt(null);
+  const handlePreviewAiCategorization = useCallback(
+    async (sortOverride: AiReviewSort = aiReviewSort) => {
+      const sort = sortOverride === 'money' ? 'money' : 'count';
+      const requestId = aiPreviewRequestId.current + 1;
+      aiPreviewRequestId.current = requestId;
+      setIsAiCategorizing(true);
+      setAiReviewStartedAt(Date.now());
+      setAiReviewElapsedSeconds(0);
+      setAiCategorizationError('');
+      setAiCategorization({
+        configured: true,
+        model: null,
+        scanned: 0,
+        groupCount: 0,
+        suggestions: [],
+        questions: [],
+        message: `Reviewing ${AI_CATEGORIZATION_GROUP_LIMIT} merchant groups by ${sort === 'money' ? 'money' : 'count'}...`,
+      });
+      try {
+        const result = await withTimeout(
+          trpcClient.transactions.aiCategorizationPreview.mutate({
+            limit: AI_CATEGORIZATION_GROUP_LIMIT,
+            sort,
+          }),
+          AI_CATEGORIZATION_TIMEOUT_MS,
+          `AI categorization took longer than ${Math.round(AI_CATEGORIZATION_TIMEOUT_MS / 1000)} seconds. Try again with fewer uncategorized transactions or check the server logs.`,
+        );
+        if (aiPreviewRequestId.current !== requestId) return;
+        setAiCategorization(result as AiCategorizationPreview);
+        setCategoryByReviewKey({});
+        setSplitByReviewKey({});
+        setIgnoredAiQuestionKeys(new Set());
+        setExpandedReviewKey(null);
+      } catch (error) {
+        if (aiPreviewRequestId.current !== requestId) return;
+        setAiCategorization(null);
+        setAiCategorizationError(error instanceof Error ? error.message : String(error));
+      } finally {
+        if (aiPreviewRequestId.current === requestId) {
+          setIsAiCategorizing(false);
+          setAiReviewStartedAt(null);
+        }
       }
-    }
-  }, [aiReviewSort]);
+    },
+    [aiReviewSort],
+  );
 
   useEffect(() => {
     if (!autoApplyJob?.id || !['queued', 'running'].includes(autoApplyJob.status)) return undefined;
@@ -334,9 +365,9 @@ export default function TransactionReviewPage() {
     let cancelled = false;
     const pollJob = async () => {
       try {
-        const nextJob = await trpcClient.transactions.autoApplyAiCategorizationJob.query({
+        const nextJob = (await trpcClient.transactions.autoApplyAiCategorizationJob.query({
           jobId: autoApplyJob.id,
-        }) as AutoApplyJob;
+        })) as AutoApplyJob;
         if (cancelled) return;
         setAutoApplyJob(nextJob);
 
@@ -345,17 +376,23 @@ export default function TransactionReviewPage() {
           setAiCategoryUndo(nextJob.undoOperation ?? null);
           await Promise.all([
             queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() }),
-            queryClient.invalidateQueries({ queryKey: trpc.transactions.categorizationCoverage.queryKey() }),
+            queryClient.invalidateQueries({
+              queryKey: trpc.transactions.categorizationCoverage.queryKey(),
+            }),
             queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] }),
           ]);
           await handlePreviewAiCategorization();
           if (!cancelled) {
-            setAiCategorization(previous => previous ? {
-              ...previous,
-              appliedCount: nextJob.appliedCount,
-              skippedCount: nextJob.skippedCount,
-              message: nextJob.message,
-            } : previous);
+            setAiCategorization((previous) =>
+              previous
+                ? {
+                    ...previous,
+                    appliedCount: nextJob.appliedCount,
+                    skippedCount: nextJob.skippedCount,
+                    message: nextJob.message,
+                  }
+                : previous,
+            );
           }
         } else if (nextJob.status === 'failed') {
           setIsAutoApplyingAiCategories(false);
@@ -399,14 +436,14 @@ export default function TransactionReviewPage() {
   }, [handlePreviewAiCategorization]);
 
   const setReviewCategory = (reviewKey: string, categoryId: string) => {
-    setCategoryByReviewKey(previous => ({
+    setCategoryByReviewKey((previous) => ({
       ...previous,
       [reviewKey]: categoryId,
     }));
   };
 
   const setReviewSplit = (reviewKey: string, shouldSplit: boolean) => {
-    setSplitByReviewKey(previous => {
+    setSplitByReviewKey((previous) => {
       const next = { ...previous };
       if (shouldSplit) {
         next[reviewKey] = true;
@@ -423,53 +460,71 @@ export default function TransactionReviewPage() {
     setIsApplyingAiCategories(true);
     setAiCategorizationError('');
     try {
-      await Promise.all(splitReviewRows.map(row =>
-        trpcClient.transactions.createMerchantGroupingRule.mutate({
-          sourceMerchantKey: row.sourceMerchantKey,
-          strategy: row.recommendedSplitStrategy || 'individual_transactions',
-        })
-      ));
+      await Promise.all(
+        splitReviewRows.map((row) =>
+          trpcClient.transactions.createMerchantGroupingRule.mutate({
+            sourceMerchantKey: row.sourceMerchantKey,
+            strategy: row.recommendedSplitStrategy || 'individual_transactions',
+          }),
+        ),
+      );
 
       const result = categoryReviewRows.length
         ? await trpcClient.transactions.applyAiCategorization.mutate({
-          suggestions: categoryReviewRows.flatMap(row => row.transactionIds.map(transactionId => ({
-            transactionId,
-            categoryId: row.categoryId,
-          }))),
-        })
-        : {
-          count: 0,
-          appliedTransactionIds: [],
-          skipped: [],
-          undoOperation: null,
-        } as {
-          count: number;
-          appliedTransactionIds: string[];
-          skipped: unknown[];
-          undoOperation: AiCategoryUndo | null;
-        };
+            suggestions: categoryReviewRows.flatMap((row) =>
+              row.transactionIds.map((transactionId) => ({
+                transactionId,
+                categoryId: row.categoryId,
+              })),
+            ),
+          })
+        : ({
+            count: 0,
+            appliedTransactionIds: [],
+            skipped: [],
+            undoOperation: null,
+          } as {
+            count: number;
+            appliedTransactionIds: string[];
+            skipped: unknown[];
+            undoOperation: AiCategoryUndo | null;
+          });
       const appliedIds = new Set(result.appliedTransactionIds ?? []);
       const appliedQuestionKeys = new Set(
         categoryReviewRows
-          .filter(row => row.type === 'question' && row.transactionIds.some(transactionId => appliedIds.has(transactionId)))
-          .map(row => row.key)
+          .filter(
+            (row) =>
+              row.type === 'question' &&
+              row.transactionIds.some((transactionId) => appliedIds.has(transactionId)),
+          )
+          .map((row) => row.key),
       );
-      setAiCategorization(previous => previous ? {
-        ...previous,
-        suggestions: previous.suggestions.map(suggestion => suggestionTransactionIds(suggestion).some(transactionId => appliedIds.has(transactionId))
-          ? { ...suggestion, applied: true }
-          : suggestion),
-        appliedCount: (previous.appliedCount ?? 0) + result.count,
-        skippedCount: (previous.skippedCount ?? 0) + (result.skipped?.length ?? 0),
-      } : previous);
+      setAiCategorization((previous) =>
+        previous
+          ? {
+              ...previous,
+              suggestions: previous.suggestions.map((suggestion) =>
+                suggestionTransactionIds(suggestion).some((transactionId) =>
+                  appliedIds.has(transactionId),
+                )
+                  ? { ...suggestion, applied: true }
+                  : suggestion,
+              ),
+              appliedCount: (previous.appliedCount ?? 0) + result.count,
+              skippedCount: (previous.skippedCount ?? 0) + (result.skipped?.length ?? 0),
+            }
+          : previous,
+      );
       setAiCategoryUndo(result.undoOperation ?? null);
       if (appliedQuestionKeys.size > 0) {
-        setIgnoredAiQuestionKeys(previous => new Set([...previous, ...appliedQuestionKeys]));
+        setIgnoredAiQuestionKeys((previous) => new Set([...previous, ...appliedQuestionKeys]));
       }
       setSplitByReviewKey({});
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() }),
-        queryClient.invalidateQueries({ queryKey: trpc.transactions.categorizationCoverage.queryKey() }),
+        queryClient.invalidateQueries({
+          queryKey: trpc.transactions.categorizationCoverage.queryKey(),
+        }),
         queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] }),
       ]);
       await handlePreviewAiCategorization();
@@ -485,12 +540,18 @@ export default function TransactionReviewPage() {
     setAiCategorizationError('');
     setAutoApplyJob(null);
     try {
-      const job = await trpcClient.transactions.startAutoApplyAiCategorization.mutate({ sort: aiReviewSort }) as AutoApplyJob;
+      const job = (await trpcClient.transactions.startAutoApplyAiCategorization.mutate({
+        sort: aiReviewSort,
+      })) as AutoApplyJob;
       setAutoApplyJob(job);
-      setAiCategorization(previous => previous ? {
-        ...previous,
-        message: job.message,
-      } : previous);
+      setAiCategorization((previous) =>
+        previous
+          ? {
+              ...previous,
+              message: job.message,
+            }
+          : previous,
+      );
     } catch (error) {
       setIsAutoApplyingAiCategories(false);
       setAiCategorizationError(error instanceof Error ? error.message : String(error));
@@ -508,7 +569,9 @@ export default function TransactionReviewPage() {
       setAiCategoryUndo(null);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() }),
-        queryClient.invalidateQueries({ queryKey: trpc.transactions.categorizationCoverage.queryKey() }),
+        queryClient.invalidateQueries({
+          queryKey: trpc.transactions.categorizationCoverage.queryKey(),
+        }),
         queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] }),
       ]);
       await handlePreviewAiCategorization();
@@ -529,17 +592,21 @@ export default function TransactionReviewPage() {
     try {
       await trpcClient.transactions.saveOpenAiCategorizationSettings.mutate({ apiKey });
       setOpenAiApiKeyDraft('');
-      setAiCategorization(previous => previous ? {
-        ...previous,
-        configured: true,
-        message: 'Saved OPENAI_API_KEY to .env.local.',
-      } : {
-        configured: true,
-        message: 'Saved OPENAI_API_KEY to .env.local.',
-        scanned: 0,
-        suggestions: [],
-        questions: [],
-      });
+      setAiCategorization((previous) =>
+        previous
+          ? {
+              ...previous,
+              configured: true,
+              message: 'Saved OPENAI_API_KEY to .env.local.',
+            }
+          : {
+              configured: true,
+              message: 'Saved OPENAI_API_KEY to .env.local.',
+              scanned: 0,
+              suggestions: [],
+              questions: [],
+            },
+      );
     } catch (error) {
       setAiCategorizationError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -547,11 +614,12 @@ export default function TransactionReviewPage() {
     }
   };
 
-  const formatPercent = (value: number) => value.toLocaleString('en-US', {
-    style: 'percent',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: value > 0 && value < 0.01 ? 1 : 0,
-  });
+  const formatPercent = (value: number) =>
+    value.toLocaleString('en-US', {
+      style: 'percent',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: value > 0 && value < 0.01 ? 1 : 0,
+    });
   const coverage = categorizationCoverage.data as CategorizationCoverage | undefined;
   const aiAppliedCount = aiCategorization?.appliedCount ?? 0;
   const aiSkippedCount = aiCategorization?.skippedCount ?? 0;
@@ -569,7 +637,7 @@ export default function TransactionReviewPage() {
         <div className="transaction-review-page__actions">
           <div className="transaction-review-header-actions">
             <div className="transaction-review-sort" aria-label="AI review sort">
-              {AI_SORT_OPTIONS.map(option => (
+              {AI_SORT_OPTIONS.map((option) => (
                 <button
                   key={option.value}
                   className={`transaction-review-sort__button ${aiReviewSort === option.value ? 'is-active' : ''}`}
@@ -619,7 +687,7 @@ export default function TransactionReviewPage() {
       </div>
 
       <div className="transaction-review-shell stagger-in">
-        {(isAiCategorizing || aiCategorization || aiCategorizationError) ? (
+        {isAiCategorizing || aiCategorization || aiCategorizationError ? (
           <>
             <div className="ai-category-status transaction-review-status">
               {isAiCategorizing && (
@@ -632,12 +700,11 @@ export default function TransactionReviewPage() {
                 <div className="ai-category-action__progress" role="status" aria-live="polite">
                   <div className="ai-category-action__progress-bar" aria-hidden="true" />
                   <span>
-                    {autoApplyJob.message || 'Auto-applying confident categories...'}
-                    {' '}
+                    {autoApplyJob.message || 'Auto-applying confident categories...'}{' '}
                     {autoApplyJob.groupCount > 0 && (
                       <>
-                        {autoApplyJob.reviewedGroupCount.toLocaleString()} / {autoApplyJob.groupCount.toLocaleString()} groups reviewed,
-                        {' '}
+                        {autoApplyJob.reviewedGroupCount.toLocaleString()} /{' '}
+                        {autoApplyJob.groupCount.toLocaleString()} groups reviewed,{' '}
                         {autoApplyJob.suggestedGroupCount.toLocaleString()} confident
                       </>
                     )}
@@ -666,19 +733,24 @@ export default function TransactionReviewPage() {
                   </form>
                 </>
               )}
-              {!isAiCategorizing && aiCategorization?.message && aiCategorization.configured !== false && (
-                <p className="ai-category-action__message">{aiCategorization.message}</p>
-              )}
+              {!isAiCategorizing &&
+                aiCategorization?.message &&
+                aiCategorization.configured !== false && (
+                  <p className="ai-category-action__message">{aiCategorization.message}</p>
+                )}
               {aiAppliedCount > 0 && (
                 <p className="ai-category-action__message">
                   Applied {aiAppliedCount} category updates.
-                  {aiSkippedCount > 0 ? ` Skipped ${aiSkippedCount} already-categorized or missing transactions.` : ''}
+                  {aiSkippedCount > 0
+                    ? ` Skipped ${aiSkippedCount} already-categorized or missing transactions.`
+                    : ''}
                 </p>
               )}
               {aiCategoryUndo && (
                 <div className="ai-category-action__undo" role="status" aria-live="polite">
                   <span>
-                    Applied {aiCategoryUndo.count.toLocaleString()} update{aiCategoryUndo.count === 1 ? '' : 's'}.
+                    Applied {aiCategoryUndo.count.toLocaleString()} update
+                    {aiCategoryUndo.count === 1 ? '' : 's'}.
                   </span>
                   <button
                     className="btn btn--secondary btn--sm"
@@ -713,23 +785,31 @@ export default function TransactionReviewPage() {
                         <strong>{reviewRows.length} merchants</strong>
                         <span>
                           {categoryReviewRows.length} with categories selected
-                          {splitReviewRows.length > 0 ? ` · ${splitReviewRows.length} to split` : ''}
+                          {splitReviewRows.length > 0
+                            ? ` · ${splitReviewRows.length} to split`
+                            : ''}
                         </span>
                       </div>
-                  <button
-                    className="btn btn--secondary btn--sm"
-                    type="button"
-                    disabled={isApplyingAiCategories || isAutoApplyingAiCategories || isAiCategorizing}
-                    onClick={autoApplyConfidentAiCategories}
-                  >
-                    {isAutoApplyingAiCategories ? 'Auto-applying...' : 'Do the rest with AI'}
-                  </button>
-                  <button
-                    className="btn btn--primary btn--sm"
-                    type="button"
-                    disabled={isApplyingAiCategories || isAutoApplyingAiCategories || actionableReviewRowCount === 0}
-                    onClick={applySelectedReviewRows}
-                  >
+                      <button
+                        className="btn btn--secondary btn--sm"
+                        type="button"
+                        disabled={
+                          isApplyingAiCategories || isAutoApplyingAiCategories || isAiCategorizing
+                        }
+                        onClick={autoApplyConfidentAiCategories}
+                      >
+                        {isAutoApplyingAiCategories ? 'Auto-applying...' : 'Do the rest with AI'}
+                      </button>
+                      <button
+                        className="btn btn--primary btn--sm"
+                        type="button"
+                        disabled={
+                          isApplyingAiCategories ||
+                          isAutoApplyingAiCategories ||
+                          actionableReviewRowCount === 0
+                        }
+                        onClick={applySelectedReviewRows}
+                      >
                         {isApplyingAiCategories ? 'Applying...' : 'Apply batch'}
                       </button>
                     </div>
@@ -751,9 +831,12 @@ export default function TransactionReviewPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {reviewRows.map(row => {
+                        {reviewRows.map((row) => {
                           const isExpanded = expandedReviewKey === row.key;
-                          const isUsingAiSuggestion = row.type === 'suggestion' && row.source !== 'history' && row.categoryId === row.suggestedCategoryId;
+                          const isUsingAiSuggestion =
+                            row.type === 'suggestion' &&
+                            row.source !== 'history' &&
+                            row.categoryId === row.suggestedCategoryId;
                           return (
                             <Fragment key={row.key}>
                               <tr
@@ -773,19 +856,34 @@ export default function TransactionReviewPage() {
                                   />
                                 </td>
                                 <td>
-                                  <div className="merchant-review-row__name" title={row.merchantName}>
+                                  <div
+                                    className="merchant-review-row__name"
+                                    title={row.merchantName}
+                                  >
                                     <span>{row.merchantName}</span>
-                                    {row.accountName && <span className="merchant-review-account-badge">{row.accountName}</span>}
+                                    {row.accountName && (
+                                      <span className="merchant-review-account-badge">
+                                        {row.accountName}
+                                      </span>
+                                    )}
                                   </div>
                                   <div className="merchant-review-row__reason">{row.reason}</div>
                                 </td>
                                 <td className="num">{row.transactionCount.toLocaleString()}</td>
-                                <td className="num">{typeof row.totalAmount === 'number' ? formatCurrency(row.totalAmount, true) : '—'}</td>
+                                <td className="num">
+                                  {typeof row.totalAmount === 'number'
+                                    ? formatCurrency(row.totalAmount, true)
+                                    : '—'}
+                                </td>
                                 <td className="merchant-review-row__disclosure">
                                   <button
                                     className="merchant-review-expand-btn"
                                     type="button"
-                                    aria-label={isExpanded ? 'Close merchant transactions' : 'Open merchant transactions'}
+                                    aria-label={
+                                      isExpanded
+                                        ? 'Close merchant transactions'
+                                        : 'Open merchant transactions'
+                                    }
                                     aria-expanded={isExpanded}
                                     onClick={(event) => {
                                       event.stopPropagation();
@@ -806,16 +904,22 @@ export default function TransactionReviewPage() {
                                             type="checkbox"
                                             checked={Boolean(splitByReviewKey[row.key])}
                                             disabled={isAiCategorizing || isApplyingAiCategories}
-                                            onChange={(event) => setReviewSplit(row.key, event.target.checked)}
+                                            onChange={(event) =>
+                                              setReviewSplit(row.key, event.target.checked)
+                                            }
                                           />
                                           <span>
-                                            {row.recommendedSplitStrategy === 'bank_description_counterparty'
+                                            {row.recommendedSplitStrategy ===
+                                            'bank_description_counterparty'
                                               ? 'Split by counterparty'
                                               : 'Handle separately'}
                                           </span>
                                         </label>
                                       )}
-                                      {renderTransactionPreview(row.transactions, row.transactionCount)}
+                                      {renderTransactionPreview(
+                                        row.transactions,
+                                        row.transactionCount,
+                                      )}
                                     </div>
                                   </td>
                                 </tr>
@@ -841,7 +945,6 @@ export default function TransactionReviewPage() {
           </div>
         )}
       </div>
-
     </div>
   );
 }

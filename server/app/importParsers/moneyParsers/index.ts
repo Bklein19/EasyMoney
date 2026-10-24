@@ -1,28 +1,52 @@
 // Parser registry: the single source of truth for which committed parser handles
 // which file. This replaces the old mutable `parsers` DB table.
-import type { ParserModule, ParseResult } from "./types.ts";
+import type { ParserModule, ParseResult } from './types.ts';
 
-import { meta as msStmtMeta, default as msStmtParse } from "./morgan-stanley-pdf";
-import { meta as msActMeta, default as msActParse } from "./morgan-stanley-activity-pdf";
-import { meta as vgStmtMeta, default as vgStmtParse } from "./vanguard-statement-pdf";
-import { meta as vgActMeta, default as vgActParse } from "./vanguard-activity-pdf";
-import { meta as fidInvMeta, default as fidInvParse } from "./fidelity-investment-report-pdf";
-import { meta as fid401kMeta, default as fid401kParse } from "./fidelity-401k-html";
-import { meta as fidNetBenefitsMeta, default as fidNetBenefitsParse } from "./fidelity-netbenefits-statement-pdf";
-import { meta as fidPortfolioMeta, default as fidPortfolioParse } from "./fidelity-portfolio-statement-pdf";
-import { meta as seqMeta, default as seqParse } from "./sequoia-fund-pdf";
-import { meta as merrillActMeta, default as merrillActParse } from "./merrill-activity-csv";
-import { meta as merrillStmtMeta, default as merrillStmtParse } from "./merrill-cma-statement-pdf";
-import { meta as bofaActivityMeta, default as bofaActivityParse } from "./bofa-activity-csv";
-import { meta as bofaStatementMeta, default as bofaStatementParse } from "./bofa-statement-pdf";
-import { meta as wellsFargoActivityMeta, default as wellsFargoActivityParse } from "./wells-fargo-activity-csv";
-import { meta as wellsFargoStatementMeta, default as wellsFargoStatementParse } from "./wells-fargo-statement-pdf";
-import { meta as tiaaActivityMeta, default as tiaaActivityParse } from "./tiaa-activity-csv";
-import { meta as tiaaStatementMeta, default as tiaaStatementParse } from "./tiaa-statement-pdf";
-import { meta as marcusStatementMeta, default as marcusStatementParse } from "./marcus-statement-pdf";
-import { meta as robinhoodStatementMeta, default as robinhoodStatementParse } from "./robinhood-statement-pdf";
-import { meta as robinhoodBankingStatementMeta, default as robinhoodBankingStatementParse } from "./robinhood-banking-statement-pdf";
-import { meta as robinhoodCreditCardStatementMeta, default as robinhoodCreditCardStatementParse } from "./robinhood-credit-card-statement-pdf";
+import { meta as msStmtMeta, default as msStmtParse } from './morgan-stanley-pdf';
+import { meta as msActMeta, default as msActParse } from './morgan-stanley-activity-pdf';
+import { meta as vgStmtMeta, default as vgStmtParse } from './vanguard-statement-pdf';
+import { meta as vgActMeta, default as vgActParse } from './vanguard-activity-pdf';
+import { meta as fidInvMeta, default as fidInvParse } from './fidelity-investment-report-pdf';
+import { meta as fid401kMeta, default as fid401kParse } from './fidelity-401k-html';
+import {
+  meta as fidNetBenefitsMeta,
+  default as fidNetBenefitsParse,
+} from './fidelity-netbenefits-statement-pdf';
+import {
+  meta as fidPortfolioMeta,
+  default as fidPortfolioParse,
+} from './fidelity-portfolio-statement-pdf';
+import { meta as seqMeta, default as seqParse } from './sequoia-fund-pdf';
+import { meta as merrillActMeta, default as merrillActParse } from './merrill-activity-csv';
+import { meta as merrillStmtMeta, default as merrillStmtParse } from './merrill-cma-statement-pdf';
+import { meta as bofaActivityMeta, default as bofaActivityParse } from './bofa-activity-csv';
+import { meta as bofaStatementMeta, default as bofaStatementParse } from './bofa-statement-pdf';
+import {
+  meta as wellsFargoActivityMeta,
+  default as wellsFargoActivityParse,
+} from './wells-fargo-activity-csv';
+import {
+  meta as wellsFargoStatementMeta,
+  default as wellsFargoStatementParse,
+} from './wells-fargo-statement-pdf';
+import { meta as tiaaActivityMeta, default as tiaaActivityParse } from './tiaa-activity-csv';
+import { meta as tiaaStatementMeta, default as tiaaStatementParse } from './tiaa-statement-pdf';
+import {
+  meta as marcusStatementMeta,
+  default as marcusStatementParse,
+} from './marcus-statement-pdf';
+import {
+  meta as robinhoodStatementMeta,
+  default as robinhoodStatementParse,
+} from './robinhood-statement-pdf';
+import {
+  meta as robinhoodBankingStatementMeta,
+  default as robinhoodBankingStatementParse,
+} from './robinhood-banking-statement-pdf';
+import {
+  meta as robinhoodCreditCardStatementMeta,
+  default as robinhoodCreditCardStatementParse,
+} from './robinhood-credit-card-statement-pdf';
 
 export const PARSERS: ParserModule[] = [
   { meta: msStmtMeta, parse: msStmtParse },
@@ -58,20 +82,21 @@ export function getParserById(id: string): ParserModule | undefined {
 export async function resolveParser(filePath: string): Promise<ParserModule> {
   // Raw files are stored as "<sha256>-<original-filename>"; matchers expect the
   // original filename, so strip a leading 64-hex-char content-hash prefix if present.
-  const stored = filePath.split("/").pop() ?? filePath;
-  const filename = stored.replace(/^[0-9a-f]{64}-/, "");
+  const stored = filePath.split('/').pop() ?? filePath;
+  const filename = stored.replace(/^[0-9a-f]{64}-/, '');
 
   // Content sample for disambiguating generically-named files. Only computed when
   // the filename alone isn't decisive — extracting PDF text is comparatively costly.
-  let sample = "";
-  const filenameDecisive = PARSERS.filter((p) => p.meta.matches({ filename, sample: "" })).length === 1;
+  let sample = '';
+  const filenameDecisive =
+    PARSERS.filter((p) => p.meta.matches({ filename, sample: '' })).length === 1;
   if (!filenameDecisive) {
     try {
-      if (filename.endsWith(".pdf")) {
-        const { getDocumentProxy, extractText } = await import("unpdf");
+      if (filename.endsWith('.pdf')) {
+        const { getDocumentProxy, extractText } = await import('unpdf');
         const pdf = await getDocumentProxy(new Uint8Array(await Bun.file(filePath).arrayBuffer()));
         const { text } = await extractText(pdf);
-        sample = text.join("\n").slice(0, 4096);
+        sample = text.join('\n').slice(0, 4096);
       } else {
         sample = (await Bun.file(filePath).text()).slice(0, 4096);
       }
@@ -81,7 +106,7 @@ export async function resolveParser(filePath: string): Promise<ParserModule> {
   const hits = PARSERS.filter((p) => p.meta.matches({ filename, sample }));
   if (hits.length === 1) return hits[0]!;
   if (hits.length === 0) throw new Error(`No parser matches file: ${filename}`);
-  throw new Error(`Multiple parsers match ${filename}: ${hits.map((h) => h.meta.id).join(", ")}`);
+  throw new Error(`Multiple parsers match ${filename}: ${hits.map((h) => h.meta.id).join(', ')}`);
 }
 
 export function executeParser(parserId: string, filePath: string): Promise<ParseResult> {

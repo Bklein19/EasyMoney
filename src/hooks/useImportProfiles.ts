@@ -12,7 +12,13 @@ interface SaveImportProfileInput {
 export function useImportProfiles() {
   const importProfilesQuery = useQuery(trpc.importProfiles.list.queryOptions());
 
-  async function saveImportProfile({ headerSignature, profileName, profile, mapping, lastAccountId }: SaveImportProfileInput) {
+  async function saveImportProfile({
+    headerSignature,
+    profileName,
+    profile,
+    mapping,
+    lastAccountId,
+  }: SaveImportProfileInput) {
     const result = await trpcClient.importProfiles.upsert.mutate({
       headerSignature,
       profileName,

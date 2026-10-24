@@ -77,9 +77,11 @@ function cleanLabel(value: string | null | undefined) {
 }
 
 function placementForImport(item: ImportHistoryItem): ImportPlacement {
-  const accountHolders = item.accounts.map(account => cleanLabel(account.accountHolder));
-  const knownHolders = [...new Set(accountHolders.filter((holder): holder is string => holder !== null))];
-  const hasUnknownHolder = accountHolders.some(holder => holder === null);
+  const accountHolders = item.accounts.map((account) => cleanLabel(account.accountHolder));
+  const knownHolders = [
+    ...new Set(accountHolders.filter((holder): holder is string => holder !== null)),
+  ];
+  const hasUnknownHolder = accountHolders.some((holder) => holder === null);
 
   let holderId: string;
   let holderLabel: string;
@@ -141,14 +143,14 @@ export function summarizeImportHistory(imports: ImportHistoryItem[]): ImportHist
     fileCount: imports.length,
     transactionCount: imports.reduce((total, item) => total + (item.transactionCount || 0), 0),
     balanceCount: imports.reduce((total, item) => total + (item.balanceCount || 0), 0),
-    importedCount: imports.filter(item => item.status === 'committed').length,
-    unimportedCount: imports.filter(item => item.status === 'unimported').length,
+    importedCount: imports.filter((item) => item.status === 'committed').length,
+    unimportedCount: imports.filter((item) => item.status === 'unimported').length,
     latestAt,
   };
 }
 
 function importsForAccount(group: MutableAccountGroup) {
-  return [...group.sources.values()].flatMap(source => source.imports);
+  return [...group.sources.values()].flatMap((source) => source.imports);
 }
 
 function importsForHolder(group: MutableHolderGroup) {
@@ -195,15 +197,18 @@ export function groupImportHistory(imports: ImportHistoryItem[]): ImportHistoryH
 
   return [...holderGroups.values()]
     .sort((left, right) => left.label.localeCompare(right.label))
-    .map(holder => {
+    .map((holder) => {
       const accounts = [...holder.accounts.values()]
         .sort((left, right) => left.label.localeCompare(right.label))
-        .map(account => ({
+        .map((account) => ({
           id: account.id,
           label: account.label,
           sources: [...account.sources.values()]
-            .sort((left, right) => SOURCE_ORDER.indexOf(left.sourceKind) - SOURCE_ORDER.indexOf(right.sourceKind))
-            .map(source => ({
+            .sort(
+              (left, right) =>
+                SOURCE_ORDER.indexOf(left.sourceKind) - SOURCE_ORDER.indexOf(right.sourceKind),
+            )
+            .map((source) => ({
               ...source,
               summary: summarizeImportHistory(source.imports),
             })),
@@ -223,15 +228,20 @@ export function filterImportHistory(imports: ImportHistoryItem[], searchTerm: st
   const normalizedSearch = searchTerm.trim().toLowerCase();
   if (!normalizedSearch) return imports;
 
-  return imports.filter(item => [
-    item.fileName,
-    item.institution,
-    item.parserName,
-    item.sourceType,
-    item.status,
-    item.createdAt,
-    item.committedAt,
-    ...item.accounts.flatMap(account => [account.name, account.accountHolder]),
-  ].filter(Boolean).join(' ').toLowerCase().includes(normalizedSearch));
+  return imports.filter((item) =>
+    [
+      item.fileName,
+      item.institution,
+      item.parserName,
+      item.sourceType,
+      item.status,
+      item.createdAt,
+      item.committedAt,
+      ...item.accounts.flatMap((account) => [account.name, account.accountHolder]),
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+      .includes(normalizedSearch),
+  );
 }
-

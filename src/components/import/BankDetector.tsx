@@ -7,7 +7,11 @@ interface BankDetectorProps {
   onReviewMapping?: () => void;
 }
 
-export default function BankDetector({ profileUsed, requiresMapping, onReviewMapping }: BankDetectorProps) {
+export default function BankDetector({
+  profileUsed,
+  requiresMapping,
+  onReviewMapping,
+}: BankDetectorProps) {
   if (requiresMapping) {
     return (
       <div className="bank-detector warning glass-card">
@@ -32,7 +36,11 @@ export default function BankDetector({ profileUsed, requiresMapping, onReviewMap
         <p>We automatically mapped your columns based on this profile.</p>
       </div>
       {onReviewMapping && (
-        <button type="button" className="btn btn-secondary btn--sm detector-action" onClick={onReviewMapping}>
+        <button
+          type="button"
+          className="btn btn-secondary btn--sm detector-action"
+          onClick={onReviewMapping}
+        >
           <Settings size={16} />
           Review Mapping
         </button>

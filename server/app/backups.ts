@@ -10,12 +10,16 @@ function backupPath(id: string) {
 
 export function listBackups() {
   const status = databaseBackupStatus();
-  const backups = fs.existsSync(status.backupDirectory) ? fs.readdirSync(status.backupDirectory)
-    .filter(id => id.endsWith('.sqlite'))
-    .map(id => {
-      const stat = fs.statSync(backupPath(id));
-      return { id, size: stat.size, createdAt: stat.mtime.toISOString() };
-    }).sort((a, b) => b.createdAt.localeCompare(a.createdAt)) : [];
+  const backups = fs.existsSync(status.backupDirectory)
+    ? fs
+        .readdirSync(status.backupDirectory)
+        .filter((id) => id.endsWith('.sqlite'))
+        .map((id) => {
+          const stat = fs.statSync(backupPath(id));
+          return { id, size: stat.size, createdAt: stat.mtime.toISOString() };
+        })
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    : [];
   return { ...status, backups };
 }
 
@@ -27,4 +31,6 @@ export function restoreBackup(id: string) {
   return stageDatabaseRestore(backupPath(id));
 }
 
-export function createBackup() { return createDatabaseBackup(); }
+export function createBackup() {
+  return createDatabaseBackup();
+}

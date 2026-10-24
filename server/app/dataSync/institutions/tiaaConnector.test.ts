@@ -61,12 +61,12 @@ function artifact(
 function result(artifacts: TiaaDownloadedArtifact[]): TiaaSyncResult {
   return {
     artifacts,
-    accountsDiscovered: new Set(artifacts.flatMap(item =>
-      item.account.remoteAccounts.map(remote => remote.claimKey)
-    )).size,
+    accountsDiscovered: new Set(
+      artifacts.flatMap((item) => item.account.remoteAccounts.map((remote) => remote.claimKey)),
+    ).size,
     accountSelectionsDiscovered: 1,
     activityPeriodsDiscovered: 2,
-    statementsDiscovered: artifacts.filter(item => item.artifactType === 'statement').length,
+    statementsDiscovered: artifacts.filter((item) => item.artifactType === 'statement').length,
     emptyActivityExports: 1,
     timingsMs: { authentication: 10, validation: 30 },
   };
@@ -87,46 +87,59 @@ function runContext(
 
 describe('TIAA connector targeting', () => {
   test('exposes one login action when any active TIAA account exists', () => {
-    const accounts = [
-      account(1),
-      account(2),
-      account(3, { institution: 'Different Institution' }),
-    ];
+    const accounts = [account(1), account(2), account(3, { institution: 'Different Institution' })];
     expect(accounts.map(matchesTiaaAccount)).toEqual([true, true, false]);
-    expect(tiaaConnector.listTargets({ today: '2026-08-24', accounts })).toEqual([{ label: 'TIAA' }]);
-    expect(tiaaConnector.listTargets({ today: '2026-08-24', accounts: [accounts[2]!] })).toEqual([]);
+    expect(tiaaConnector.listTargets({ today: '2026-08-24', accounts })).toEqual([
+      { label: 'TIAA' },
+    ]);
+    expect(tiaaConnector.listTargets({ today: '2026-08-24', accounts: [accounts[2]!] })).toEqual(
+      [],
+    );
   });
 });
 
 describe('TIAA artifact routing', () => {
   test('leaves CSV and aggregate statement destinations to shared matching', () => {
     const statementClaim: TiaaRemoteAccountIdentity = {
-      routingKey: 'bbbbbbbbbbbb', remoteAccountId: 'Retirement Annuity',
-      sourceAccountName: 'Retirement Annuity', claimKey: 'TIAA||Retirement Annuity',
+      routingKey: 'bbbbbbbbbbbb',
+      remoteAccountId: 'Retirement Annuity',
+      sourceAccountName: 'Retirement Annuity',
+      claimKey: 'TIAA||Retirement Annuity',
     };
     const artifacts = [
-      artifact('activity.csv', [tiaaActivityRemoteAccount('RET123'), tiaaActivityRemoteAccount('RET456')]),
+      artifact('activity.csv', [
+        tiaaActivityRemoteAccount('RET123'),
+        tiaaActivityRemoteAccount('RET456'),
+      ]),
       artifact('statement.pdf', [statementClaim], 'statement'),
     ];
-    const routes = routeTiaaArtifacts(artifacts).flatMap(item => item.accountRoutes);
-    expect(routes.map(route => route.accountId)).toEqual([undefined, undefined, undefined]);
-    expect(new Set(routes.map(route => route.remoteAccountId)).size).toBe(3);
+    const routes = routeTiaaArtifacts(artifacts).flatMap((item) => item.accountRoutes);
+    expect(routes.map((route) => route.accountId)).toEqual([undefined, undefined, undefined]);
+    expect(new Set(routes.map((route) => route.remoteAccountId)).size).toBe(3);
   });
 
   test('routes every consolidated parser claim independently without forcing a destination', () => {
     const claims = [tiaaActivityRemoteAccount('RET123'), tiaaActivityRemoteAccount('RET456')];
-    expect(routeTiaaArtifacts([artifact('activity.csv', claims)])).toEqual([{
-      fileName: 'activity.csv',
-      accountRoutes: [
-        { remoteAccountId: 'TIAA||Retirement Annuity RET123' },
-        { remoteAccountId: 'TIAA||Retirement Annuity RET456' },
-      ],
-    }]);
+    expect(routeTiaaArtifacts([artifact('activity.csv', claims)])).toEqual([
+      {
+        fileName: 'activity.csv',
+        accountRoutes: [
+          { remoteAccountId: 'TIAA||Retirement Annuity RET123' },
+          { remoteAccountId: 'TIAA||Retirement Annuity RET456' },
+        ],
+      },
+    ]);
   });
 
   test('keeps six activity identities separate from the aggregate statement identity', () => {
-    const activityClaims = ['SYNTH001', 'SYNTH002', 'SYNTH003', 'SYNTH004', 'SYNTH005', 'SYNTH006']
-      .map(tiaaActivityRemoteAccount);
+    const activityClaims = [
+      'SYNTH001',
+      'SYNTH002',
+      'SYNTH003',
+      'SYNTH004',
+      'SYNTH005',
+      'SYNTH006',
+    ].map(tiaaActivityRemoteAccount);
     const statementClaim: TiaaRemoteAccountIdentity = {
       routingKey: 'bbbbbbbbbbbb',
       remoteAccountId: 'Retirement Annuity',
@@ -137,7 +150,9 @@ describe('TIAA artifact routing', () => {
       artifact('activity.csv', activityClaims),
       artifact('statement.pdf', [statementClaim], 'statement'),
     ]);
-    const identities = routed.flatMap(item => item.accountRoutes.map(route => route.remoteAccountId));
+    const identities = routed.flatMap((item) =>
+      item.accountRoutes.map((route) => route.remoteAccountId),
+    );
 
     expect(identities).toHaveLength(7);
     expect(new Set(identities).size).toBe(7);
@@ -145,11 +160,13 @@ describe('TIAA artifact routing', () => {
   });
 
   test('fails closed for missing or ambiguous parser claim keys', () => {
-    expect(() => routeTiaaArtifacts([artifact('empty.csv', [])]))
-      .toThrow('no parser-backed account claims');
+    expect(() => routeTiaaArtifacts([artifact('empty.csv', [])])).toThrow(
+      'no parser-backed account claims',
+    );
     const claim = tiaaActivityRemoteAccount('RET123');
-    expect(() => routeTiaaArtifacts([artifact('duplicate.csv', [claim, claim])]))
-      .toThrow('ambiguous parser-backed account claims');
+    expect(() => routeTiaaArtifacts([artifact('duplicate.csv', [claim, claim])])).toThrow(
+      'ambiguous parser-backed account claims',
+    );
   });
 });
 
@@ -157,54 +174,67 @@ describe('TIAA connector execution', () => {
   test('combines activity and balance windows, translates PII-free progress, and preserves claim routes', async () => {
     const calls: TiaaSyncConfig[] = [];
     const events: Array<Omit<SyncEvent, 'runId' | 'timestamp'>> = [];
-    const connector = createTiaaConnector(async (
-      config: TiaaSyncConfig,
-      progress: (event: TiaaProgressEvent) => void = () => {},
-    ) => {
-      calls.push(config);
-      progress({
-        phase: 'account-discovery',
-        state: 'completed',
-        message: 'TIAA account discovery is complete',
-        elapsedMs: 125,
-        phaseElapsedMs: 25,
-        data: { accountSelections: 1, sourceAccounts: 2 },
-      });
-      return result([artifact('activity.csv', [
-        tiaaActivityRemoteAccount('RET123'),
-        tiaaActivityRemoteAccount('RET456'),
-      ])]);
-    });
-    const accounts = [account(10, {
-      latestFactDate: '2026-08-10',
-      latestBalanceDate: '2026-06-30',
-    })];
-
-    await expect(connector.run(runContext(accounts, event => events.push(event)))).resolves.toEqual([{
-      fileName: 'activity.csv',
-      accountRoutes: [
-        { remoteAccountId: 'TIAA||Retirement Annuity RET123' },
-        { remoteAccountId: 'TIAA||Retirement Annuity RET456' },
-      ],
-    }]);
-    expect(calls).toEqual([{
-      outputDir: '/tmp/tiaa-connector-test',
-      from: '2026-06-23',
-      through: '2026-08-24',
-      session: 'tiaa-catchup',
-    }]);
-    expect(calls[0]).not.toHaveProperty('headless');
-    expect(events.find(event => event.data?.step === 'account-discovery')?.data?.status).toBe('completed');
-    expect(events.filter(event => event.type === 'artifact')).toEqual([{
-      type: 'artifact',
-      message: 'TIAA artifact passed production parser validation',
-      data: {
-        artifactKind: 'activity',
-        parserValidated: true,
-        transactionCount: 2,
-        balanceCount: 0,
+    const connector = createTiaaConnector(
+      async (config: TiaaSyncConfig, progress: (event: TiaaProgressEvent) => void = () => {}) => {
+        calls.push(config);
+        progress({
+          phase: 'account-discovery',
+          state: 'completed',
+          message: 'TIAA account discovery is complete',
+          elapsedMs: 125,
+          phaseElapsedMs: 25,
+          data: { accountSelections: 1, sourceAccounts: 2 },
+        });
+        return result([
+          artifact('activity.csv', [
+            tiaaActivityRemoteAccount('RET123'),
+            tiaaActivityRemoteAccount('RET456'),
+          ]),
+        ]);
       },
-    }]);
+    );
+    const accounts = [
+      account(10, {
+        latestFactDate: '2026-08-10',
+        latestBalanceDate: '2026-06-30',
+      }),
+    ];
+
+    await expect(
+      connector.run(runContext(accounts, (event) => events.push(event))),
+    ).resolves.toEqual([
+      {
+        fileName: 'activity.csv',
+        accountRoutes: [
+          { remoteAccountId: 'TIAA||Retirement Annuity RET123' },
+          { remoteAccountId: 'TIAA||Retirement Annuity RET456' },
+        ],
+      },
+    ]);
+    expect(calls).toEqual([
+      {
+        outputDir: '/tmp/tiaa-connector-test',
+        from: '2026-06-23',
+        through: '2026-08-24',
+        session: 'tiaa-catchup',
+      },
+    ]);
+    expect(calls[0]).not.toHaveProperty('headless');
+    expect(events.find((event) => event.data?.step === 'account-discovery')?.data?.status).toBe(
+      'completed',
+    );
+    expect(events.filter((event) => event.type === 'artifact')).toEqual([
+      {
+        type: 'artifact',
+        message: 'TIAA artifact passed production parser validation',
+        data: {
+          artifactKind: 'activity',
+          parserValidated: true,
+          transactionCount: 2,
+          balanceCount: 0,
+        },
+      },
+    ]);
     expect(events.at(-1)).toEqual({
       type: 'phase',
       message: 'Validated 1 TIAA artifact',
@@ -227,8 +257,9 @@ describe('TIAA connector execution', () => {
       invoked = true;
       return result([]);
     });
-    await expect(connector.run(runContext([account(1, { institution: 'Different Institution' })])))
-      .rejects.toThrow('No active TIAA accounts are available');
+    await expect(
+      connector.run(runContext([account(1, { institution: 'Different Institution' })])),
+    ).rejects.toThrow('No active TIAA accounts are available');
     expect(invoked).toBe(false);
   });
 });

@@ -31,7 +31,6 @@ try {
     path.join(outdir, 'sync.js'),
     fs.readFileSync(path.join(temporaryOutdir, 'sync.js')),
   );
-
 } finally {
   fs.rmSync(temporaryOutdir, { recursive: true, force: true });
 }

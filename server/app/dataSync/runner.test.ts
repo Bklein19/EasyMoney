@@ -6,14 +6,11 @@ import { join } from 'node:path';
 import type { SyncConnector } from './connector.ts';
 import { runSyncExecutionPlan } from './runner.ts';
 import { validateSyncArtifactManifestForPlan } from './workerProtocol.ts';
-import {
-  SYNC_WORKER_PROTOCOL_VERSION,
-  type SyncExecutionPlan,
-} from './types.ts';
+import { SYNC_WORKER_PROTOCOL_VERSION, type SyncExecutionPlan } from './types.ts';
 
 test.each(['complete', 'review', 'import'] as const)(
   'development and app runner both reject connector-owned %s transitions',
-  async type => {
+  async (type) => {
     const root = await mkdtemp(join(tmpdir(), 'easymoney-worker-events-'));
     const events: unknown[] = [];
     const connector: SyncConnector<'bank-of-america'> = {
@@ -27,8 +24,13 @@ test.each(['complete', 'review', 'import'] as const)(
       },
     };
     try {
-      await expect(runSyncExecutionPlan(plan('invalid-event', root), event => events.push(event), () => connector))
-        .rejects.toThrow('parent-owned job transition');
+      await expect(
+        runSyncExecutionPlan(
+          plan('invalid-event', root),
+          (event) => events.push(event),
+          () => connector,
+        ),
+      ).rejects.toThrow('parent-owned job transition');
       expect(events).toEqual([]);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -42,22 +44,24 @@ function plan(runId: string, outputDir: string): SyncExecutionPlan {
     runId,
     institutionId: 'bank-of-america',
     today: '2026-08-24',
-    accounts: [{
-      id: 1,
-      name: 'Synthetic Checking 1234',
-      institution: 'Bank of America',
-      type: 'checking',
-      latestFactDate: null,
-      earliestFactDate: null,
-      latestBalanceDate: null,
-      earliestBalanceDate: null,
-      balanceDates: [],
-      sourceAccountName: null,
-      sourceAccountNames: [],
-      accountAliases: [],
-      accountHolder: null,
-      artifactFileNames: [],
-    }],
+    accounts: [
+      {
+        id: 1,
+        name: 'Synthetic Checking 1234',
+        institution: 'Bank of America',
+        type: 'checking',
+        latestFactDate: null,
+        earliestFactDate: null,
+        latestBalanceDate: null,
+        earliestBalanceDate: null,
+        balanceDates: [],
+        sourceAccountName: null,
+        sourceAccountNames: [],
+        accountAliases: [],
+        accountHolder: null,
+        artifactFileNames: [],
+      },
+    ],
     goal: { kind: 'current', overlapDays: 7 },
     outputDir,
   };
@@ -68,8 +72,12 @@ test('two DB-free connector downloads can overlap and emit independent manifests
   let started = 0;
   let releaseDownloads!: () => void;
   let bothStarted!: () => void;
-  const released = new Promise<void>(resolve => { releaseDownloads = resolve; });
-  const runningTogether = new Promise<void>(resolve => { bothStarted = resolve; });
+  const released = new Promise<void>((resolve) => {
+    releaseDownloads = resolve;
+  });
+  const runningTogether = new Promise<void>((resolve) => {
+    bothStarted = resolve;
+  });
   const connector: SyncConnector<'bank-of-america'> = {
     id: 'bank-of-america',
     label: 'Synthetic Bank of America',
@@ -87,19 +95,31 @@ test('two DB-free connector downloads can overlap and emit independent manifests
   const resolveConnector = () => connector;
 
   try {
-    const first = runSyncExecutionPlan(plan('sync-first', join(root, 'first')), () => {}, resolveConnector);
-    const second = runSyncExecutionPlan(plan('sync-second', join(root, 'second')), () => {}, resolveConnector);
+    const first = runSyncExecutionPlan(
+      plan('sync-first', join(root, 'first')),
+      () => {},
+      resolveConnector,
+    );
+    const second = runSyncExecutionPlan(
+      plan('sync-second', join(root, 'second')),
+      () => {},
+      resolveConnector,
+    );
     await runningTogether;
     expect(started).toBe(2);
     releaseDownloads();
     const manifests = await Promise.all([first, second]);
-    expect(manifests.map(manifest => manifest.runId)).toEqual(['sync-first', 'sync-second']);
-    expect(manifests.every(manifest => manifest.artifacts[0]?.sha256.length === 64)).toBe(true);
+    expect(manifests.map((manifest) => manifest.runId)).toEqual(['sync-first', 'sync-second']);
+    expect(manifests.every((manifest) => manifest.artifacts[0]?.sha256.length === 64)).toBe(true);
     for (const [index, manifest] of manifests.entries()) {
       expect(manifest.artifacts[0]).toMatchObject({ routing: 'source' });
       expect(manifest.artifacts[0]?.accountId).toBeUndefined();
-      expect(() => validateSyncArtifactManifestForPlan(manifest,
-        plan(manifest.runId, join(root, index === 0 ? 'first' : 'second')))).not.toThrow();
+      expect(() =>
+        validateSyncArtifactManifestForPlan(
+          manifest,
+          plan(manifest.runId, join(root, index === 0 ? 'first' : 'second')),
+        ),
+      ).not.toThrow();
     }
   } finally {
     releaseDownloads();
@@ -121,11 +141,13 @@ test('a connector cannot manifest an artifact routed outside its account plan', 
   };
 
   try {
-    await expect(runSyncExecutionPlan(
-      plan('sync-invalid-route', root),
-      () => {},
-      () => connector,
-    )).rejects.toThrow('outside its execution plan');
+    await expect(
+      runSyncExecutionPlan(
+        plan('sync-invalid-route', root),
+        () => {},
+        () => connector,
+      ),
+    ).rejects.toThrow('outside its execution plan');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -140,22 +162,26 @@ test('a connector cannot manifest a multi-account route outside its account plan
     listTargets: () => [],
     async run(context) {
       await writeFile(join(context.outputDir, 'artifact.csv'), 'synthetic');
-      return [{
-        fileName: 'artifact.csv',
-        accountRoutes: [
-          { remoteAccountId: 'remote:new' },
-          { remoteAccountId: 'remote:routed', accountId: 99 },
-        ],
-      }];
+      return [
+        {
+          fileName: 'artifact.csv',
+          accountRoutes: [
+            { remoteAccountId: 'remote:new' },
+            { remoteAccountId: 'remote:routed', accountId: 99 },
+          ],
+        },
+      ];
     },
   };
 
   try {
-    await expect(runSyncExecutionPlan(
-      plan('sync-invalid-multi-route', root),
-      () => {},
-      () => connector,
-    )).rejects.toThrow('outside its execution plan');
+    await expect(
+      runSyncExecutionPlan(
+        plan('sync-invalid-multi-route', root),
+        () => {},
+        () => connector,
+      ),
+    ).rejects.toThrow('outside its execution plan');
   } finally {
     await rm(root, { recursive: true, force: true });
   }

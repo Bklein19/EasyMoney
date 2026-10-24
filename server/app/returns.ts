@@ -45,7 +45,8 @@ export function calculateXirr(flows: CashFlow[]): number | null {
     .filter((flow) => flow.amount_cents !== 0)
     .sort((a, b) => a.date.localeCompare(b.date));
   if (dated.length < 2) return null;
-  if (!dated.some((flow) => flow.amount_cents < 0) || !dated.some((flow) => flow.amount_cents > 0)) return null;
+  if (!dated.some((flow) => flow.amount_cents < 0) || !dated.some((flow) => flow.amount_cents > 0))
+    return null;
 
   const start = dated[0]!.date;
   const npv = (rate: number) => {
@@ -78,7 +79,10 @@ export function calculateXirr(flows: CashFlow[]): number | null {
   return (lo + hi) / 2;
 }
 
-export function calculateTimeWeightedReturn(balances: BalanceSnapshot[], contributionFlows: CashFlow[]): number | null {
+export function calculateTimeWeightedReturn(
+  balances: BalanceSnapshot[],
+  contributionFlows: CashFlow[],
+): number | null {
   const snapshots = compactBalances(balances);
   if (snapshots.length < 2) return null;
 

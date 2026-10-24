@@ -17,7 +17,10 @@ interface CategoryOption {
   disabled?: boolean;
 }
 
-interface GroupedCategorySelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, 'value' | 'onChange'> {
+interface GroupedCategorySelectProps extends Omit<
+  SelectHTMLAttributes<HTMLSelectElement>,
+  'value' | 'onChange'
+> {
   value: number | string | null | undefined;
   categories: Category[];
   onChange: (value: string) => void;
@@ -53,36 +56,46 @@ export default function GroupedCategorySelect({
 }: GroupedCategorySelectProps) {
   const selectedValue = normalizedId(value);
   const suggestedValue = normalizedId(suggestedCategoryId);
-  const selectedCategory = categories.find(category => normalizedId(category.id) === selectedValue) ?? null;
-  const suggestedCategory = categories.find(category => normalizedId(category.id) === suggestedValue) ?? null;
+  const selectedCategory =
+    categories.find((category) => normalizedId(category.id) === selectedValue) ?? null;
+  const suggestedCategory =
+    categories.find((category) => normalizedId(category.id) === suggestedValue) ?? null;
   const excludedIds = new Set(excludeCategoryIds.map(normalizedId).filter(Boolean));
   if (suggestedValue) excludedIds.add(suggestedValue);
 
-  const availableCategories = categories.filter(category => !excludedIds.has(normalizedId(category.id)))
+  const availableCategories = categories
+    .filter((category) => !excludedIds.has(normalizedId(category.id)))
     .sort((a, b) => compareCategoryPaths(a, b, categories));
-  const knownGroupKeys = new Set<string>(CATEGORY_GROUPS.map(group => group.key).filter(key => key !== 'other'));
-  const groupedCategories = CATEGORY_GROUPS
-    .map(group => ({
-      ...group,
-      categories: group.key === 'other'
-        ? availableCategories.filter(category => !knownGroupKeys.has(category.categoryGroup ?? ''))
-        : availableCategories.filter(category => category.categoryGroup === group.key),
-    }))
-    .filter(group => group.categories.length > 0);
+  const knownGroupKeys = new Set<string>(
+    CATEGORY_GROUPS.map((group) => group.key).filter((key) => key !== 'other'),
+  );
+  const groupedCategories = CATEGORY_GROUPS.map((group) => ({
+    ...group,
+    categories:
+      group.key === 'other'
+        ? availableCategories.filter(
+            (category) => !knownGroupKeys.has(category.categoryGroup ?? ''),
+          )
+        : availableCategories.filter((category) => category.categoryGroup === group.key),
+  })).filter((group) => group.categories.length > 0);
   const controlClasses = [
     'grouped-category-select-control',
     selectedCategory ? 'has-category' : '',
     showSuggestionIcon ? 'has-suggestion' : '',
     controlClassName,
-  ].filter(Boolean).join(' ');
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <div
       className={controlClasses}
-      style={{
-        '--grouped-category-color': selectedCategory?.color || 'transparent',
-        ...style,
-      } as CSSProperties}
+      style={
+        {
+          '--grouped-category-color': selectedCategory?.color || 'transparent',
+          ...style,
+        } as CSSProperties
+      }
     >
       {showSuggestionIcon && (
         <span className="grouped-category-select-control__icon" title="AI suggestion">
@@ -95,26 +108,28 @@ export default function GroupedCategorySelect({
         value={selectedValue}
         onChange={(event) => onChange(event.target.value)}
       >
-        {leadingOptions.map(option => (
+        {leadingOptions.map((option) => (
           <option key={`leading-${option.value}`} value={option.value} disabled={option.disabled}>
             {option.label}
           </option>
         ))}
         {suggestedCategory && (
           <optgroup label="Suggested">
-            <option value={suggestedValue}>{categoryPathLabel(suggestedCategory, categories)}</option>
+            <option value={suggestedValue}>
+              {categoryPathLabel(suggestedCategory, categories)}
+            </option>
           </optgroup>
         )}
-        {groupedCategories.map(group => (
+        {groupedCategories.map((group) => (
           <optgroup key={group.key} label={group.label}>
-            {group.categories.map(category => (
+            {group.categories.map((category) => (
               <option key={category.id} value={category.id}>
                 {categoryPathLabel(category, categories)}
               </option>
             ))}
           </optgroup>
         ))}
-        {trailingOptions.map(option => (
+        {trailingOptions.map((option) => (
           <option key={`trailing-${option.value}`} value={option.value} disabled={option.disabled}>
             {option.label}
           </option>

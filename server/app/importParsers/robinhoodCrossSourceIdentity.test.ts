@@ -7,7 +7,18 @@ import {
 } from './robinhoodCrossSourceIdentity.ts';
 
 test('Robinhood credit CSV imports only posted transactions', async () => {
-  const headers = ['Date', 'Time', 'Cardholder', 'Amount', 'Points', 'Balance', 'Status', 'Type', 'Merchant', 'Description'];
+  const headers = [
+    'Date',
+    'Time',
+    'Cardholder',
+    'Amount',
+    'Points',
+    'Balance',
+    'Status',
+    'Type',
+    'Merchant',
+    'Description',
+  ];
   const row = (status: string, description: string) => ({
     Date: '2026-09-05',
     Time: '12:00:00',
@@ -23,11 +34,15 @@ test('Robinhood credit CSV imports only posted transactions', async () => {
   const parsed = await robinhoodCreditCardCsvParser.parse({
     fileName: 'robinhood.csv',
     headers,
-    rows: [row('Posted', 'POSTED SHOP CA'), row('Pending', 'PENDING SHOP CA'), row('Declined', 'DECLINED SHOP CA')],
+    rows: [
+      row('Posted', 'POSTED SHOP CA'),
+      row('Pending', 'PENDING SHOP CA'),
+      row('Declined', 'DECLINED SHOP CA'),
+    ],
     text: '',
   });
 
-  expect(parsed.transactions.map(transaction => transaction?.description ?? null)).toEqual([
+  expect(parsed.transactions.map((transaction) => transaction?.description ?? null)).toEqual([
     'POSTED SHOP CA',
     null,
     null,
@@ -36,12 +51,16 @@ test('Robinhood credit CSV imports only posted transactions', async () => {
 });
 
 test('Robinhood cross-source identities reconcile export formatting differences', () => {
-  expect(robinhoodCreditCrossSourceIdentity('INSTACART.COM CA'))
-    .toBe(robinhoodCreditCrossSourceIdentity('INSTACART.COMCA'));
-  expect(robinhoodCreditCrossSourceIdentity('WL *STEAM PURCHASE 425-889- CREDIT'))
-    .toBe(robinhoodCreditCrossSourceIdentity('WL *STEAM PURCHASE 425-889-9642 WA'));
-  expect(robinhoodBankingCrossSourceIdentity('Internal Transfer from Checking'))
-    .toBe(robinhoodBankingCrossSourceIdentity('Internal Transfer from Personal Checking'));
-  expect(robinhoodBankingCrossSourceIdentity('Internal Transfer to Savings'))
-    .toBe(robinhoodBankingCrossSourceIdentity('Internal Transfer to Joint Savings with Example'));
+  expect(robinhoodCreditCrossSourceIdentity('INSTACART.COM CA')).toBe(
+    robinhoodCreditCrossSourceIdentity('INSTACART.COMCA'),
+  );
+  expect(robinhoodCreditCrossSourceIdentity('WL *STEAM PURCHASE 425-889- CREDIT')).toBe(
+    robinhoodCreditCrossSourceIdentity('WL *STEAM PURCHASE 425-889-9642 WA'),
+  );
+  expect(robinhoodBankingCrossSourceIdentity('Internal Transfer from Checking')).toBe(
+    robinhoodBankingCrossSourceIdentity('Internal Transfer from Personal Checking'),
+  );
+  expect(robinhoodBankingCrossSourceIdentity('Internal Transfer to Savings')).toBe(
+    robinhoodBankingCrossSourceIdentity('Internal Transfer to Joint Savings with Example'),
+  );
 });

@@ -50,7 +50,8 @@ function sortToken(value: number | string | null | undefined) {
 }
 
 export function getLedgerTransactionBaseKey(transaction: TransactionIdentityInput) {
-  const description = transaction.originalDescription || transaction.description || transaction.merchant || '';
+  const description =
+    transaction.originalDescription || transaction.description || transaction.merchant || '';
   const sourceRole = transaction.sourceRole || transaction.transactionKind || 'activity';
   return [
     transaction.accountId || '',
@@ -82,11 +83,15 @@ export function getTransactionOccurrenceSortKey(transaction: TransactionIdentity
     sortToken(transaction.id),
     normalizeDate(transaction.date),
     normalizeAmount(transaction.amount),
-    normalizeText(transaction.originalDescription || transaction.description || transaction.merchant || ''),
+    normalizeText(
+      transaction.originalDescription || transaction.description || transaction.merchant || '',
+    ),
   ].join('|');
 }
 
-export function assignLedgerTransactionIdentities<T extends TransactionIdentityInput>(transactions: T[]) {
+export function assignLedgerTransactionIdentities<T extends TransactionIdentityInput>(
+  transactions: T[],
+) {
   const groups = new Map<string, T[]>();
   for (const transaction of transactions) {
     const key = getLedgerTransactionBaseKey(transaction);
@@ -101,7 +106,9 @@ export function assignLedgerTransactionIdentities<T extends TransactionIdentityI
   const assigned = new Map<T, { occurrenceIndex: number; ledgerTransactionId: string }>();
   for (const group of groups.values()) {
     [...group]
-      .sort((a, b) => getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b)))
+      .sort((a, b) =>
+        getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b)),
+      )
       .forEach((transaction, occurrenceIndex) => {
         assigned.set(transaction, {
           occurrenceIndex,
@@ -110,9 +117,11 @@ export function assignLedgerTransactionIdentities<T extends TransactionIdentityI
       });
   }
 
-  return transactions.map(transaction => ({
+  return transactions.map((transaction) => ({
     transaction,
-    occurrenceIndex: assigned.get(transaction)?.occurrenceIndex ?? normalizeInteger(transaction.occurrenceIndex),
-    ledgerTransactionId: assigned.get(transaction)?.ledgerTransactionId ?? getLedgerTransactionId(transaction),
+    occurrenceIndex:
+      assigned.get(transaction)?.occurrenceIndex ?? normalizeInteger(transaction.occurrenceIndex),
+    ledgerTransactionId:
+      assigned.get(transaction)?.ledgerTransactionId ?? getLedgerTransactionId(transaction),
   }));
 }

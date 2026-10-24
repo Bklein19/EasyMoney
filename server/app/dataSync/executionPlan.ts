@@ -16,13 +16,19 @@ export function listSyncTargets(): SyncTarget[] {
     accounts: loadSyncAccountCoverage(),
   };
   const connectors: readonly SyncConnector<SyncInstitutionId>[] = syncConnectors;
-  return connectors.flatMap(connector => connector.listTargets(context).map(target => ({
-    id: target.connectionId ? `${connector.id}:${target.connectionId}` : connector.id,
-    institutionId: connector.id,
-    ...(target.connectionId ? { connectionId: target.connectionId } : {}),
-    label: target.label,
-    accountIds: target.accountIds ?? context.accounts.filter(account => connector.matchesAccount(account)).map(account => account.id),
-  })));
+  return connectors.flatMap((connector) =>
+    connector.listTargets(context).map((target) => ({
+      id: target.connectionId ? `${connector.id}:${target.connectionId}` : connector.id,
+      institutionId: connector.id,
+      ...(target.connectionId ? { connectionId: target.connectionId } : {}),
+      label: target.label,
+      accountIds:
+        target.accountIds ??
+        context.accounts
+          .filter((account) => connector.matchesAccount(account))
+          .map((account) => account.id),
+    })),
+  );
 }
 
 export function createSyncExecutionPlan(

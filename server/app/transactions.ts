@@ -1,5 +1,8 @@
 import { getDb } from '../database.ts';
-import { ensureLedgerTransactionId, upsertTransactionAnnotation } from './transactionAnnotations.ts';
+import {
+  ensureLedgerTransactionId,
+  upsertTransactionAnnotation,
+} from './transactionAnnotations.ts';
 import { buildAccountMap, buildCategoryMap, getTransactionFlow } from './transactionSemantics.ts';
 import type {
   AccountSummary,
@@ -73,9 +76,7 @@ function parseSearchAmountCents(value: string): { cents: number; isSigned: boole
   if (!trimmed) return null;
 
   const isParenthesized = /^\(.*\)$/.test(trimmed);
-  const normalized = trimmed
-    .replace(/^\((.*)\)$/, '-$1')
-    .replace(/[$,\s]/g, '');
+  const normalized = trimmed.replace(/^\((.*)\)$/, '-$1').replace(/[$,\s]/g, '');
 
   if (!/^[+-]?\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
 
@@ -91,8 +92,8 @@ function parseSearchAmountCents(value: string): { cents: number; isSigned: boole
 
 function parseSearchTerms(value: string): string[] {
   return [...value.matchAll(/"([^"]+)"|'([^']+)'|(\S+)/g)]
-    .map(match => match[1] ?? match[2] ?? match[3] ?? '')
-    .map(term => term.trim())
+    .map((match) => match[1] ?? match[2] ?? match[3] ?? '')
+    .map((term) => term.trim())
     .filter(Boolean);
 }
 
@@ -168,20 +169,30 @@ function buildTransactionFilter(options: ListTransactionsOptions = {}) {
 
   if (options.ledgerTransactionIds !== undefined) {
     const ids = [...new Set(options.ledgerTransactionIds)];
-    if (ids.some(id => typeof id !== 'string' || !id)) throw new Error('Invalid transaction selection');
+    if (ids.some((id) => typeof id !== 'string' || !id))
+      throw new Error('Invalid transaction selection');
     // One binding keeps large explorer scopes below SQLite's variable limit.
-    clauses.push('t.ledgerTransactionId IN (SELECT value FROM json_each($selectedLedgerTransactions))');
+    clauses.push(
+      't.ledgerTransactionId IN (SELECT value FROM json_each($selectedLedgerTransactions))',
+    );
     params.selectedLedgerTransactions = JSON.stringify(ids);
   }
 
   const accountId = optionalNumber(options.accountId);
   if (options.accountIds !== undefined) {
     const ids = [...new Set(options.accountIds)];
-    if (ids.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new Error('Invalid account selection');
-    clauses.push(ids.length ? `t.accountId IN (${ids.map((id, index) => {
-      params[`selectedAccount${index}`] = id;
-      return `$selectedAccount${index}`;
-    }).join(', ')})` : '0 = 1');
+    if (ids.some((id) => !Number.isSafeInteger(id) || id <= 0))
+      throw new Error('Invalid account selection');
+    clauses.push(
+      ids.length
+        ? `t.accountId IN (${ids
+            .map((id, index) => {
+              params[`selectedAccount${index}`] = id;
+              return `$selectedAccount${index}`;
+            })
+            .join(', ')})`
+        : '0 = 1',
+    );
   } else if (accountId !== null) {
     clauses.push('t.accountId = $accountId');
     params.accountId = accountId;
@@ -250,7 +261,10 @@ function buildTransactionFilter(options: ListTransactionsOptions = {}) {
         ${amountSearchClause}
       )`);
       params[searchParam] = `%${term}%`;
-      if (amountSearch) params[amountParam] = amountSearch.isSigned ? amountSearch.cents : Math.abs(amountSearch.cents);
+      if (amountSearch)
+        params[amountParam] = amountSearch.isSigned
+          ? amountSearch.cents
+          : Math.abs(amountSearch.cents);
     });
   }
 
@@ -266,21 +280,27 @@ function toTransactionListItem(row: LedgerTransactionRow): TransactionListItem {
   return {
     id: row.id,
     ledgerTransactionId: row.ledgerTransactionId,
-    account: row.accountId === null ? null : {
-      id: row.accountId,
-      name: row.accountName ?? 'Unknown account',
-      institution: row.accountInstitution,
-      type: normalizeAccountType(row.accountType ?? 'other'),
-    },
-    category: row.categoryId === null ? null : {
-      id: row.categoryId,
-      name: row.categoryName ?? 'Uncategorized',
-      type: row.categoryType,
-      categoryGroup: row.categoryGroup,
-      description: row.categoryDescription,
-      color: row.categoryColor,
-      icon: row.categoryIcon,
-    },
+    account:
+      row.accountId === null
+        ? null
+        : {
+            id: row.accountId,
+            name: row.accountName ?? 'Unknown account',
+            institution: row.accountInstitution,
+            type: normalizeAccountType(row.accountType ?? 'other'),
+          },
+    category:
+      row.categoryId === null
+        ? null
+        : {
+            id: row.categoryId,
+            name: row.categoryName ?? 'Uncategorized',
+            type: row.categoryType,
+            categoryGroup: row.categoryGroup,
+            description: row.categoryDescription,
+            color: row.categoryColor,
+            icon: row.categoryIcon,
+          },
     date: row.date,
     amount: row.amount,
     description: row.description,
@@ -330,18 +350,26 @@ const transactionSelect = `SELECT
  ${fromAndJoins}`;
 
 function getAllAccountsForSemantics() {
-  const rows = getDb().prepare(`
+  const rows = getDb()
+    .prepare(
+      `
     SELECT id, name, institution, type
     FROM accounts
-  `).all() as Array<Pick<AccountSummary, 'id' | 'name' | 'institution' | 'type'>>;
+  `,
+    )
+    .all() as Array<Pick<AccountSummary, 'id' | 'name' | 'institution' | 'type'>>;
   return buildAccountMap(rows);
 }
 
 function getAllCategoriesForSemantics() {
-  const rows = getDb().prepare(`
+  const rows = getDb()
+    .prepare(
+      `
     SELECT id, name, type, parentId, categoryGroup, description, color, icon
     FROM categories
-  `).all() as CategorySummary[];
+  `,
+    )
+    .all() as CategorySummary[];
   return buildCategoryMap(rows);
 }
 
@@ -375,9 +403,8 @@ function getCategoryName(categoryId: string | number | null | undefined): string
   const id = optionalNumber(categoryId);
   if (id === null) return 'Uncategorized';
 
-  const row = getDb()
-    .prepare('SELECT name FROM categories WHERE id = ?')
-    .get(id) as { name: string } | undefined;
+  const row = getDb().prepare('SELECT name FROM categories WHERE id = ?').get(id) as
+    { name: string } | undefined;
   return row?.name ?? 'selected category';
 }
 
@@ -387,16 +414,18 @@ function createCategoryUndoOperation(input: {
 }): CategoryUndoOperation {
   const now = new Date().toISOString();
   const result = getDb()
-    .prepare(`
+    .prepare(
+      `
       INSERT INTO transactionCategoryUndoOperations
         (categoryName, transactionCount, payloadJson, status, createdAt)
       VALUES (?, ?, ?, 'pending', ?)
-    `)
+    `,
+    )
     .run(
       input.categoryName,
       input.previousCategories.length,
       JSON.stringify(input.previousCategories),
-      now
+      now,
     );
 
   return {
@@ -408,13 +437,15 @@ function createCategoryUndoOperation(input: {
 
 export function getLatestTransactionCategoryUndoOperation(): CategoryUndoOperation | null {
   const row = getDb()
-    .prepare(`
+    .prepare(
+      `
       SELECT id, categoryName, transactionCount
       FROM transactionCategoryUndoOperations
       WHERE status = 'pending'
       ORDER BY id DESC
       LIMIT 1
-    `)
+    `,
+    )
     .get() as { id: number; categoryName: string; transactionCount: number } | undefined;
 
   if (!row) return null;
@@ -427,11 +458,13 @@ export function getLatestTransactionCategoryUndoOperation(): CategoryUndoOperati
 
 function getTransactionCategoryUndoChanges(undoOperationId: string | number): CategoryUndoChange[] {
   const row = getDb()
-    .prepare(`
+    .prepare(
+      `
       SELECT payloadJson
       FROM transactionCategoryUndoOperations
       WHERE id = ? AND status = 'pending'
-    `)
+    `,
+    )
     .get(undoOperationId) as { payloadJson: string } | undefined;
 
   if (!row) return [];
@@ -442,11 +475,11 @@ function getTransactionCategoryUndoChanges(undoOperationId: string | number): Ca
   }>;
 
   return parsed
-    .map(change => ({
+    .map((change) => ({
       transactionId: String(change.transactionId || ''),
       categoryId: change.categoryId ?? null,
     }))
-    .filter(change => change.transactionId);
+    .filter((change) => change.transactionId);
 }
 
 export function listTransactions(options: ListTransactionsOptions = {}): TransactionListResponse {
@@ -461,9 +494,9 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
 
   const orderBy = orderByFor(optionalString(options.sortBy));
   const db = getDb();
-  const totalCount = (db
-    .prepare(`SELECT COUNT(*) AS count ${fromAndJoins} ${where}`)
-    .get(params) as { count: number }).count;
+  const totalCount = (
+    db.prepare(`SELECT COUNT(*) AS count ${fromAndJoins} ${where}`).get(params) as { count: number }
+  ).count;
   const allMatchingRows = db
     .prepare(`${transactionSelect} ${where}`)
     .all(params) as LedgerTransactionRow[];
@@ -472,7 +505,7 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
       `${transactionSelect}
        ${where}
        ORDER BY ${orderBy}
-       ${limitClause}`
+       ${limitClause}`,
     )
     .all(params) as LedgerTransactionRow[];
 
@@ -489,7 +522,9 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
 }
 
 export function getTransactionCategorizationCoverage() {
-  const row = getDb().prepare(`
+  const row = getDb()
+    .prepare(
+      `
     SELECT
       COUNT(*) AS totalCount,
       COALESCE(SUM(ABS(t.amountCents)), 0) AS totalAmountCents,
@@ -507,7 +542,9 @@ export function getTransactionCategorizationCoverage() {
     LEFT JOIN categories c ON c.id = ta.categoryId
     WHERE t.ledgerTransactionId IS NOT NULL
       AND COALESCE(a.status, 'active') != 'archived'
-  `).get() as {
+  `,
+    )
+    .get() as {
     totalCount: number;
     totalAmountCents: number;
     categorizedCount: number;
@@ -535,17 +572,21 @@ export function categorizeTransactions(input: {
   transactionIds: Array<number | string>;
   categoryId?: number | string | null;
 }) {
-  const uniqueIds = [...new Set(input.transactionIds.map(id => String(id)).filter(Boolean))];
+  const uniqueIds = [...new Set(input.transactionIds.map((id) => String(id)).filter(Boolean))];
   if (!uniqueIds.length) return { ok: true, count: 0, previousCategories: [] };
 
   const db = getDb();
-  const previousCategories = uniqueIds.map(id => {
+  const previousCategories = uniqueIds.map((id) => {
     const ledgerTransactionId = ensureLedgerTransactionId(id);
-    const row = db.prepare(`
+    const row = db
+      .prepare(
+        `
       SELECT categoryId
       FROM transactionAnnotations
       WHERE ledgerTransactionId = ?
-    `).get(ledgerTransactionId) as { categoryId: number | string | null } | undefined;
+    `,
+      )
+      .get(ledgerTransactionId) as { categoryId: number | string | null } | undefined;
     return {
       transactionId: ledgerTransactionId,
       categoryId: row?.categoryId ?? null,
@@ -581,16 +622,30 @@ export function applyReviewedCategoryChanges(input: {
   const db = getDb();
   return db.transaction((): CategoryUndoResult => {
     const seen = new Set<string>();
-    const validCategories = new Set((db.prepare('SELECT id FROM categories').all() as Array<{ id: number }>).map(row => row.id));
-    const changes = input.changes.filter(change => {
-      if (seen.has(change.transactionId)) throw new Error('Reviewed plan contains duplicate transaction identities.');
+    const validCategories = new Set(
+      (db.prepare('SELECT id FROM categories').all() as Array<{ id: number }>).map((row) => row.id),
+    );
+    const changes = input.changes.filter((change) => {
+      if (seen.has(change.transactionId))
+        throw new Error('Reviewed plan contains duplicate transaction identities.');
       seen.add(change.transactionId);
-      if (change.categoryId !== null && !validCategories.has(change.categoryId)) throw new Error('Reviewed destination category no longer exists.');
-      const row = db.prepare(`SELECT t.accountId, t.date, t.amountCents, t.description, ta.categoryId
+      if (change.categoryId !== null && !validCategories.has(change.categoryId))
+        throw new Error('Reviewed destination category no longer exists.');
+      const row = db
+        .prepare(
+          `SELECT t.accountId, t.date, t.amountCents, t.description, ta.categoryId
         FROM ledgerTransactions t LEFT JOIN transactionAnnotations ta ON ta.ledgerTransactionId = t.ledgerTransactionId
-        WHERE t.ledgerTransactionId = ?`).get(change.transactionId) as typeof change.expected | undefined;
-      if (!row || row.categoryId !== change.expected.categoryId || row.accountId !== change.expected.accountId ||
-          row.date !== change.expected.date || row.amountCents !== change.expected.amountCents || row.description !== change.expected.description) {
+        WHERE t.ledgerTransactionId = ?`,
+        )
+        .get(change.transactionId) as typeof change.expected | undefined;
+      if (
+        !row ||
+        row.categoryId !== change.expected.categoryId ||
+        row.accountId !== change.expected.accountId ||
+        row.date !== change.expected.date ||
+        row.amountCents !== change.expected.amountCents ||
+        row.description !== change.expected.description
+      ) {
         throw new Error('Reviewed transaction changed. Refresh the plan before applying it.');
       }
       return row.categoryId !== change.categoryId;
@@ -598,9 +653,17 @@ export function applyReviewedCategoryChanges(input: {
     if (!changes.length) return { ok: true, count: 0, undoOperation: null };
     const undoOperation = createCategoryUndoOperation({
       categoryName: input.label.trim() || 'Reviewed categorization',
-      previousCategories: changes.map(change => ({ transactionId: change.transactionId, categoryId: change.expected.categoryId })),
+      previousCategories: changes.map((change) => ({
+        transactionId: change.transactionId,
+        categoryId: change.expected.categoryId,
+      })),
     });
-    for (const change of changes) upsertTransactionAnnotation(change.transactionId, { categoryId: change.categoryId }, input.categoryOrigin);
+    for (const change of changes)
+      upsertTransactionAnnotation(
+        change.transactionId,
+        { categoryId: change.categoryId },
+        input.categoryOrigin,
+      );
     return { ok: true, count: changes.length, undoOperation };
   })();
 }
@@ -611,26 +674,41 @@ export function categorizeTransactionsByQuery(input: {
 }): CategoryUndoResult {
   const { where, params } = buildTransactionFilter(input.query ?? {});
   const db = getDb();
-  const rows = db.prepare(`
+  const rows = db
+    .prepare(
+      `
     SELECT t.ledgerTransactionId
     ${fromAndJoins}
     ${where}
-  `).all(params) as Array<{ ledgerTransactionId: string | null }>;
-  const ledgerTransactionIds = [...new Set(rows
-    .map(row => row.ledgerTransactionId)
-    .filter((id): id is string => Boolean(id)))];
+  `,
+    )
+    .all(params) as Array<{ ledgerTransactionId: string | null }>;
+  const ledgerTransactionIds = [
+    ...new Set(
+      rows.map((row) => row.ledgerTransactionId).filter((id): id is string => Boolean(id)),
+    ),
+  ];
 
   if (!ledgerTransactionIds.length) return { ok: true, count: 0, undoOperation: null };
 
   const previousRows = ledgerTransactionIds.length
-    ? db.prepare(`
+    ? (db
+        .prepare(
+          `
       SELECT ledgerTransactionId, categoryId
       FROM transactionAnnotations
       WHERE ledgerTransactionId IN (${ledgerTransactionIds.map(() => '?').join(',')})
-    `).all(...ledgerTransactionIds) as Array<{ ledgerTransactionId: string; categoryId: number | string | null }>
+    `,
+        )
+        .all(...ledgerTransactionIds) as Array<{
+        ledgerTransactionId: string;
+        categoryId: number | string | null;
+      }>)
     : [];
-  const previousCategoryById = new Map(previousRows.map(row => [row.ledgerTransactionId, row.categoryId]));
-  const previousCategories = ledgerTransactionIds.map(id => ({
+  const previousCategoryById = new Map(
+    previousRows.map((row) => [row.ledgerTransactionId, row.categoryId]),
+  );
+  const previousCategories = ledgerTransactionIds.map((id) => ({
     transactionId: id,
     categoryId: previousCategoryById.get(id) ?? null,
   }));
@@ -648,9 +726,7 @@ export function categorizeTransactionsByQuery(input: {
   return { ok: true, count: ledgerTransactionIds.length, undoOperation };
 }
 
-export function restoreTransactionCategories(input: {
-  undoOperationId: number | string;
-}) {
+export function restoreTransactionCategories(input: { undoOperationId: number | string }) {
   const changes = getTransactionCategoryUndoChanges(input.undoOperationId);
   if (!changes.length) return { ok: true, count: 0 };
 
@@ -659,11 +735,13 @@ export function restoreTransactionCategories(input: {
     for (const change of changes) {
       upsertTransactionAnnotation(change.transactionId, { categoryId: change.categoryId });
     }
-    db.prepare(`
+    db.prepare(
+      `
       UPDATE transactionCategoryUndoOperations
       SET status = 'consumed', consumedAt = ?
       WHERE id = ? AND status = 'pending'
-    `).run(new Date().toISOString(), input.undoOperationId);
+    `,
+    ).run(new Date().toISOString(), input.undoOperationId);
   });
   apply();
 

@@ -1,4 +1,9 @@
-import type { CategorySummary, TransactionAccount, TransactionCategory, TransactionListItem } from './types';
+import type {
+  CategorySummary,
+  TransactionAccount,
+  TransactionCategory,
+  TransactionListItem,
+} from './types';
 
 type AccountLike = Pick<TransactionAccount, 'id' | 'name' | 'institution' | 'type'>;
 type CategoryLike = Pick<CategorySummary | TransactionCategory, 'id' | 'name' | 'type'>;
@@ -86,11 +91,14 @@ const INTERNAL_TRANSFER_WORDS = [
 ];
 
 function normalizeText(value = '') {
-  return String(value).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return String(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }
 
 function hasAny(text: string, words: string[]) {
-  return words.some(word => text.includes(word));
+  return words.some((word) => text.includes(word));
 }
 
 function isInvestmentCategory(category: Pick<CategoryLike, 'name' | 'type'> | null | undefined) {
@@ -102,22 +110,28 @@ function isInvestmentCategory(category: Pick<CategoryLike, 'name' | 'type'> | nu
 function issuerTokensFromAccounts(accountMap: Record<string, AccountLike>) {
   return Object.values(accountMap)
     .filter(isCreditAccount)
-    .flatMap(account => [account.name, account.institution])
+    .flatMap((account) => [account.name, account.institution])
     .filter((value): value is string => Boolean(value))
-    .flatMap(value => normalizeText(value).split(' '))
-    .filter(token => token.length > 2 && !GENERIC_ACCOUNT_WORDS.has(token));
+    .flatMap((value) => normalizeText(value).split(' '))
+    .filter((token) => token.length > 2 && !GENERIC_ACCOUNT_WORDS.has(token));
 }
 
-function accountTokensByType(accountMap: Record<string, AccountLike>, predicate: (account: AccountLike) => boolean) {
+function accountTokensByType(
+  accountMap: Record<string, AccountLike>,
+  predicate: (account: AccountLike) => boolean,
+) {
   return Object.values(accountMap)
     .filter(predicate)
-    .flatMap(account => [account.name, account.institution])
+    .flatMap((account) => [account.name, account.institution])
     .filter((value): value is string => Boolean(value))
-    .flatMap(value => normalizeText(value).split(' '))
-    .filter(token => token.length > 2 && !GENERIC_ACCOUNT_WORDS.has(token));
+    .flatMap((value) => normalizeText(value).split(' '))
+    .filter((token) => token.length > 2 && !GENERIC_ACCOUNT_WORDS.has(token));
 }
 
-export function isLikelyBankSideCardPayment(transaction: TransactionListItem, accountMap: Record<string, AccountLike> = {}) {
+export function isLikelyBankSideCardPayment(
+  transaction: TransactionListItem,
+  accountMap: Record<string, AccountLike> = {},
+) {
   const account = transaction.account ? accountMap[String(transaction.account.id)] : null;
   if (isCreditAccount(account) || transaction.amount >= 0) return false;
 
@@ -127,27 +141,32 @@ export function isLikelyBankSideCardPayment(transaction: TransactionListItem, ac
   if (hasAny(text, CARD_ISSUER_WORDS)) return true;
 
   const issuerTokens = issuerTokensFromAccounts(accountMap);
-  return issuerTokens.some(token => text.includes(token));
+  return issuerTokens.some((token) => text.includes(token));
 }
 
-export function isLikelyInvestmentTransfer(transaction: TransactionListItem, accountMap: Record<string, AccountLike> = {}) {
+export function isLikelyInvestmentTransfer(
+  transaction: TransactionListItem,
+  accountMap: Record<string, AccountLike> = {},
+) {
   const account = transaction.account ? accountMap[String(transaction.account.id)] : null;
-  if (isCreditAccount(account) || isInvestmentAccount(account) || transaction.amount >= 0) return false;
+  if (isCreditAccount(account) || isInvestmentAccount(account) || transaction.amount >= 0)
+    return false;
 
   const text = normalizeText(`${transaction.merchant || ''} ${transaction.description || ''}`);
   const investmentTokens = accountTokensByType(accountMap, isInvestmentAccount);
-  const mentionsInvestmentAccount = investmentTokens.some(token => text.includes(token));
+  const mentionsInvestmentAccount = investmentTokens.some((token) => text.includes(token));
 
-  return mentionsInvestmentAccount && (
-    hasAny(text, INTERNAL_TRANSFER_WORDS) ||
-    investmentTokens.some(token => token.length >= 5 && text.includes(token))
+  return (
+    mentionsInvestmentAccount &&
+    (hasAny(text, INTERNAL_TRANSFER_WORDS) ||
+      investmentTokens.some((token) => token.length >= 5 && text.includes(token)))
   );
 }
 
 export function getTransactionFlow(
   transaction: TransactionListItem,
   accountMap: Record<string, AccountLike> = {},
-  categoryMap: Record<string, CategoryLike> = {}
+  categoryMap: Record<string, CategoryLike> = {},
 ): TransactionFlow {
   const category = transaction.category ? categoryMap[String(transaction.category.id)] : null;
   if (isInvestmentCategory(category)) return 'investment';
@@ -174,19 +193,40 @@ export function getTransactionFlow(
   return 'neutral';
 }
 
-export function isIncome(transaction: TransactionListItem, accountMap: Record<string, AccountLike>, categoryMap: Record<string, CategoryLike>) {
+export function isIncome(
+  transaction: TransactionListItem,
+  accountMap: Record<string, AccountLike>,
+  categoryMap: Record<string, CategoryLike>,
+) {
   return getTransactionFlow(transaction, accountMap, categoryMap) === 'income';
 }
 
-export function isExpense(transaction: TransactionListItem, accountMap: Record<string, AccountLike>, categoryMap: Record<string, CategoryLike>) {
+export function isExpense(
+  transaction: TransactionListItem,
+  accountMap: Record<string, AccountLike>,
+  categoryMap: Record<string, CategoryLike>,
+) {
   return getTransactionFlow(transaction, accountMap, categoryMap) === 'expense';
 }
 
-export function isInvestmentMovement(transaction: TransactionListItem, accountMap: Record<string, AccountLike>, categoryMap: Record<string, CategoryLike>) {
+export function isInvestmentMovement(
+  transaction: TransactionListItem,
+  accountMap: Record<string, AccountLike>,
+  categoryMap: Record<string, CategoryLike>,
+) {
   return getTransactionFlow(transaction, accountMap, categoryMap) === 'investment';
 }
 
-export function isExcludedFromCashFlow(transaction: TransactionListItem, accountMap: Record<string, AccountLike>, categoryMap: Record<string, CategoryLike>) {
+export function isExcludedFromCashFlow(
+  transaction: TransactionListItem,
+  accountMap: Record<string, AccountLike>,
+  categoryMap: Record<string, CategoryLike>,
+) {
   const flow = getTransactionFlow(transaction, accountMap, categoryMap);
-  return flow === 'transfer' || flow === 'card_payment' || flow === 'internal_transfer' || flow === 'investment';
+  return (
+    flow === 'transfer' ||
+    flow === 'card_payment' ||
+    flow === 'internal_transfer' ||
+    flow === 'investment'
+  );
 }

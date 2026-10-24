@@ -11,9 +11,9 @@ export function setBudget(input: { categoryId: number | string; month: string; a
   if (!input.month) throw new Error('Budget month is required');
   if (!Number.isFinite(amount)) throw new Error('Invalid budget amount');
 
-  const existing = getDb().prepare('SELECT id FROM budgets WHERE categoryId = ? AND month = ?').get(categoryId, input.month) as
-    | { id: number }
-    | undefined;
+  const existing = getDb()
+    .prepare('SELECT id FROM budgets WHERE categoryId = ? AND month = ?')
+    .get(categoryId, input.month) as { id: number } | undefined;
 
   if (existing && amount <= 0) {
     deleteRow('budgets', existing.id);

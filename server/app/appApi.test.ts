@@ -12,13 +12,18 @@ process.env.EASYMONEY_DB_PATH = path.join(os.tmpdir(), `easymoney-app-api-${proc
 process.env.EASYMONEY_SYNC_ROOT = path.join(os.tmpdir(), `easymoney-sync-runs-${process.pid}`);
 
 const { appRouter } = await import('./router.ts');
-const { getDb, initDatabase, insertRow, syncLedgerReadModelFromLegacyTables, databaseBackupStatus } = await import('../database.ts');
-const { hashImportContent, retainImportOriginal } = await import('./imports.ts');
 const {
-  findCommittedImportArtifactFactDuplicate,
-  importArtifactFactFingerprint,
-} = await import('./importArtifactIdentity.ts');
-const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } = await import('./ledgerRebuild.ts');
+  getDb,
+  initDatabase,
+  insertRow,
+  syncLedgerReadModelFromLegacyTables,
+  databaseBackupStatus,
+} = await import('../database.ts');
+const { hashImportContent, retainImportOriginal } = await import('./imports.ts');
+const { findCommittedImportArtifactFactDuplicate, importArtifactFactFingerprint } =
+  await import('./importArtifactIdentity.ts');
+const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger } =
+  await import('./ledgerRebuild.ts');
 const { buildSyncArtifactReview, stageSyncArtifact } = await import('./dataSync/review.ts');
 const { stageSyncArtifactManifest } = await import('./dataSync/staging.ts');
 const { SYNC_WORKER_PROTOCOL_VERSION } = await import('./dataSync/types.ts');
@@ -38,13 +43,24 @@ test('spending detail resolves exact backend scope, paginates occurrences, searc
   const otherAccount = Number(insertRow('accounts', { name: 'Other card', type: 'credit_card' }));
   const parentId = Number(insertRow('categories', { name: 'Dining', type: 'expense' }));
   const childId = Number(insertRow('categories', { name: 'Coffee', type: 'expense', parentId }));
-  const put = (id: string, changes: Record<string, unknown> = {}) => insertRow('ledgerTransactions', {
-    ledgerTransactionId: id, accountId, date: '2026-10-03', amountCents: -1000,
-    description: 'Original coffee description', merchant: 'Cafe', transactionKind: 'activity', ...changes,
-  });
+  const put = (id: string, changes: Record<string, unknown> = {}) =>
+    insertRow('ledgerTransactions', {
+      ledgerTransactionId: id,
+      accountId,
+      date: '2026-10-03',
+      amountCents: -1000,
+      description: 'Original coffee description',
+      merchant: 'Cafe',
+      transactionKind: 'activity',
+      ...changes,
+    });
   for (let index = 0; index < 53; index++) {
     const id = `explore-${String(index).padStart(2, '0')}`;
-    put(id); upsertTransactionAnnotation(id, { categoryId: childId, notes: index === 52 ? 'Special note' : '' });
+    put(id);
+    upsertTransactionAnnotation(id, {
+      categoryId: childId,
+      notes: index === 52 ? 'Special note' : '',
+    });
   }
   put('other-account', { accountId: otherAccount });
   put('other-date', { date: '2025-01-01' });
@@ -55,8 +71,17 @@ test('spending detail resolves exact backend scope, paginates occurrences, searc
   const nodeId = `spending/category:${parentId}/category:${childId}/merchant:cafe`;
   const before = getDb().prepare('SELECT total_changes() n').get()?.n;
   const page = await caller.analytics.spendingTransactions({ scope, nodeId });
-  expect((await caller.analytics.spendingTransactions({ scope, nodeId: 'spending' })).totalCount).toBe(54);
-  expect((await caller.analytics.spendingTransactions({ scope, nodeId: `spending/category:${parentId}` })).totalCount).toBe(53);
+  expect(
+    (await caller.analytics.spendingTransactions({ scope, nodeId: 'spending' })).totalCount,
+  ).toBe(54);
+  expect(
+    (
+      await caller.analytics.spendingTransactions({
+        scope,
+        nodeId: `spending/category:${parentId}`,
+      })
+    ).totalCount,
+  ).toBe(53);
   expect(page.totalCount).toBe(53);
   expect(page.transactions).toHaveLength(50);
   expect(page.hasMore).toBe(true);
@@ -64,132 +89,265 @@ test('spending detail resolves exact backend scope, paginates occurrences, searc
   expect(page.totals.expenses).toBe(530);
   const next = await caller.analytics.spendingTransactions({ scope, nodeId, offset: 50 });
   expect(next.transactions).toHaveLength(3);
-  expect(new Set([...page.transactions, ...next.transactions].map(row => row.ledgerTransactionId)).size).toBe(53);
+  expect(
+    new Set([...page.transactions, ...next.transactions].map((row) => row.ledgerTransactionId))
+      .size,
+  ).toBe(53);
   expect(next.hasMore).toBe(false);
-  const searched = await caller.analytics.spendingTransactions({ scope, nodeId, search: 'Special note' });
-  expect(searched.transactions.map(row => row.ledgerTransactionId)).toEqual(['explore-52']);
+  const searched = await caller.analytics.spendingTransactions({
+    scope,
+    nodeId,
+    search: 'Special note',
+  });
+  expect(searched.transactions.map((row) => row.ledgerTransactionId)).toEqual(['explore-52']);
   expect(searched.totals.expenses).toBe(10);
-  expect((await caller.analytics.spendingTransactions({ scope, nodeId: 'spending/removed' })).totalCount).toBe(0);
-  expect((await caller.analytics.spendingTransactions({ scope: { ...scope, categoryFilterIds: [childId], categoryFilterMode: 'exclude' }, nodeId })).transactions).toEqual([]);
-  expect((await caller.analytics.spendingTransactions({ scope: { ...scope, accountIds: [] }, nodeId: 'spending' })).totalCount).toBe(0);
+  expect(
+    (await caller.analytics.spendingTransactions({ scope, nodeId: 'spending/removed' })).totalCount,
+  ).toBe(0);
+  expect(
+    (
+      await caller.analytics.spendingTransactions({
+        scope: { ...scope, categoryFilterIds: [childId], categoryFilterMode: 'exclude' },
+        nodeId,
+      })
+    ).transactions,
+  ).toEqual([]);
+  expect(
+    (
+      await caller.analytics.spendingTransactions({
+        scope: { ...scope, accountIds: [] },
+        nodeId: 'spending',
+      })
+    ).totalCount,
+  ).toBe(0);
   expect(getDb().prepare('SELECT total_changes() n').get()?.n).toBe(before);
 });
 
 test('spending selection uses stable identities despite legacy display-ID collisions; edits preserve evidence and Undo', async () => {
   const accountId = Number(insertRow('accounts', { name: 'Checking', type: 'checking' }));
   const categoryId = Number(insertRow('categories', { name: 'Housing', type: 'expense' }));
-  const legacyId = Number(insertRow('transactions', { accountId, date: '2024-01-03', amount: -1800, description: 'Old row' }));
-  insertRow('ledgerTransactions', { id: legacyId, ledgerTransactionId: 'unrelated-same-display-id', accountId, date: '2024-01-03', amountCents: -2000, description: 'Different merchant', merchant: 'Other' });
-  insertRow('ledgerTransactions', { ledgerTransactionId: 'rent-check', legacyTransactionId: legacyId, accountId, date: '2024-01-03', amountCents: -180000, description: 'Check 254', merchant: 'Check 254' });
+  const legacyId = Number(
+    insertRow('transactions', {
+      accountId,
+      date: '2024-01-03',
+      amount: -1800,
+      description: 'Old row',
+    }),
+  );
+  insertRow('ledgerTransactions', {
+    id: legacyId,
+    ledgerTransactionId: 'unrelated-same-display-id',
+    accountId,
+    date: '2024-01-03',
+    amountCents: -2000,
+    description: 'Different merchant',
+    merchant: 'Other',
+  });
+  insertRow('ledgerTransactions', {
+    ledgerTransactionId: 'rent-check',
+    legacyTransactionId: legacyId,
+    accountId,
+    date: '2024-01-03',
+    amountCents: -180000,
+    description: 'Check 254',
+    merchant: 'Check 254',
+  });
   upsertTransactionAnnotation('rent-check', { notes: 'Keep this note' });
   const scope = { accountIds: [accountId] };
   const nodeId = 'spending/category:uncategorized/merchant:check%20254';
   const rows = (await caller.analytics.spendingTransactions({ scope, nodeId })).transactions;
-  expect(rows.map(row => row.ledgerTransactionId)).toEqual(['rent-check']);
+  expect(rows.map((row) => row.ledgerTransactionId)).toEqual(['rent-check']);
   const { reviewedTransaction } = await import('./transactionReview');
-  const changes = rows.map(row => ({ ...reviewedTransaction(row), categoryId }));
+  const changes = rows.map((row) => ({ ...reviewedTransaction(row), categoryId }));
   const facts = getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all();
-  const result = await caller.transactions.applyReviewedCategories({ label: 'Explore spending categories', changes });
+  const result = await caller.transactions.applyReviewedCategories({
+    label: 'Explore spending categories',
+    changes,
+  });
   expect(result.count).toBe(1);
   expect(result.undoOperation?.count).toBe(1);
   expect(getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all()).toEqual(facts);
-  expect(getDb().prepare('SELECT categoryId,notes,categoryOrigin FROM transactionAnnotations WHERE ledgerTransactionId=?').get('rent-check'))
-    .toEqual({ categoryId, notes: 'Keep this note', categoryOrigin: 'manual' });
+  expect(
+    getDb()
+      .prepare(
+        'SELECT categoryId,notes,categoryOrigin FROM transactionAnnotations WHERE ledgerTransactionId=?',
+      )
+      .get('rent-check'),
+  ).toEqual({ categoryId, notes: 'Keep this note', categoryOrigin: 'manual' });
   expect((await caller.analytics.spendingTransactions({ scope, nodeId })).transactions).toEqual([]);
-  await expect(caller.transactions.applyReviewedCategories({ label: 'Stale explorer edit', changes })).rejects.toThrow('changed');
+  await expect(
+    caller.transactions.applyReviewedCategories({ label: 'Stale explorer edit', changes }),
+  ).rejects.toThrow('changed');
   await caller.transactions.restoreCategories({ undoOperationId: result.undoOperation!.id });
-  expect((await caller.analytics.spendingTransactions({ scope, nodeId })).transactions).toHaveLength(1);
-  expect(getDb().prepare('SELECT categoryId,notes FROM transactionAnnotations WHERE ledgerTransactionId=?').get('rent-check'))
-    .toEqual({ categoryId: null, notes: 'Keep this note' });
+  expect(
+    (await caller.analytics.spendingTransactions({ scope, nodeId })).transactions,
+  ).toHaveLength(1);
+  expect(
+    getDb()
+      .prepare('SELECT categoryId,notes FROM transactionAnnotations WHERE ledgerTransactionId=?')
+      .get('rent-check'),
+  ).toEqual({ categoryId: null, notes: 'Keep this note' });
 });
 
-const { queueUncategorizedTransactions, processAutomaticCategorizationBatch,
-  automaticCategorizationStatus, retryAutomaticCategorization, resumeInterruptedCategorization } = await import('./automaticCategorization.ts');
+const {
+  queueUncategorizedTransactions,
+  processAutomaticCategorizationBatch,
+  automaticCategorizationStatus,
+  retryAutomaticCategorization,
+  resumeInterruptedCategorization,
+} = await import('./automaticCategorization.ts');
 
 function automaticFixture(count = 2) {
   const accountId = Number(insertRow('accounts', { name: 'Card', type: 'credit_card' }));
   const categoryId = Number(insertRow('categories', { name: 'Food & Dining', type: 'expense' }));
   const ids = Array.from({ length: count }, (_, index) => `automatic-${index}`);
-  for (const id of ids) insertRow('ledgerTransactions', {
-    ledgerTransactionId: id, accountId, date: '2026-09-21', amountCents: -1575,
-    description: 'SQ *THE ICE CREAM BAR San FranciscoCA', merchant: 'THE ICE CREAM BAR', transactionKind: 'activity',
-  });
+  for (const id of ids)
+    insertRow('ledgerTransactions', {
+      ledgerTransactionId: id,
+      accountId,
+      date: '2026-09-21',
+      amountCents: -1575,
+      description: 'SQ *THE ICE CREAM BAR San FranciscoCA',
+      merchant: 'THE ICE CREAM BAR',
+      transactionKind: 'activity',
+    });
   queueUncategorizedTransactions();
   return { accountId, categoryId, ids };
 }
 
-function fakeAutomaticPreview(categoryId: number, ids: string[]): Parameters<typeof processAutomaticCategorizationBatch>[0] {
-  return async () => ({ configured: true, model: 'fixture', scanned: ids.length, groupCount: 1,
-    reviewedGroupCount: 1, sort: 'count', suggestions: [{
-      id: 'ice-cream', groupId: 'ice-cream', merchantName: 'THE ICE CREAM BAR', sourceMerchantKey: 'THE ICE CREAM BAR',
-      canSplitMerchantGroup: false, recommendedSplitStrategy: null, decisionKind: 'category', aliases: [], accountNames: ['Card'],
-      transactionIds: ids, transactionCount: ids.length, totalAmount: -15.75 * ids.length, categoryId,
-      categoryName: 'Food & Dining', confidence: 'high', reason: 'An ice cream shop is dining.', transactions: [],
-    }], questions: [], ignoredDecisionCount: 0 });
+function fakeAutomaticPreview(
+  categoryId: number,
+  ids: string[],
+): Parameters<typeof processAutomaticCategorizationBatch>[0] {
+  return async () => ({
+    configured: true,
+    model: 'fixture',
+    scanned: ids.length,
+    groupCount: 1,
+    reviewedGroupCount: 1,
+    sort: 'count',
+    suggestions: [
+      {
+        id: 'ice-cream',
+        groupId: 'ice-cream',
+        merchantName: 'THE ICE CREAM BAR',
+        sourceMerchantKey: 'THE ICE CREAM BAR',
+        canSplitMerchantGroup: false,
+        recommendedSplitStrategy: null,
+        decisionKind: 'category',
+        aliases: [],
+        accountNames: ['Card'],
+        transactionIds: ids,
+        transactionCount: ids.length,
+        totalAmount: -15.75 * ids.length,
+        categoryId,
+        categoryName: 'Food & Dining',
+        confidence: 'high',
+        reason: 'An ice cream shop is dining.',
+        transactions: [],
+      },
+    ],
+    questions: [],
+    ignoredDecisionCount: 0,
+  });
 }
 
 test('post-import categorization queues only new identities, preserves identical purchases and supports one Undo', async () => {
   const { categoryId, ids } = automaticFixture();
   expect(automaticCategorizationStatus().pending).toBe(2);
   expect(queueUncategorizedTransactions()).toBe(0);
-  const facts = getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY ledgerTransactionId').all();
+  const facts = getDb()
+    .prepare('SELECT * FROM ledgerTransactions ORDER BY ledgerTransactionId')
+    .all();
   await processAutomaticCategorizationBatch(fakeAutomaticPreview(categoryId, ids));
   expect(automaticCategorizationStatus()).toMatchObject({ pending: 0, applied: 2, failed: 0 });
-  expect(getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY ledgerTransactionId').all()).toEqual(facts);
-  expect(getDb().prepare('SELECT categoryId FROM transactionAnnotations').all()).toEqual([{ categoryId }, { categoryId }]);
+  expect(
+    getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY ledgerTransactionId').all(),
+  ).toEqual(facts);
+  expect(getDb().prepare('SELECT categoryId FROM transactionAnnotations').all()).toEqual([
+    { categoryId },
+    { categoryId },
+  ]);
   const detail = await caller.transactions.details({ ledgerTransactionId: ids[0]! });
   expect(detail.automaticCategory?.reason).toContain('ice cream');
   const undo = await caller.transactions.latestCategoryUndo();
   expect(undo?.count).toBe(2);
   await caller.transactions.restoreCategories({ undoOperationId: undo!.id });
-  expect(getDb().prepare('SELECT categoryId FROM transactionAnnotations').all()).toEqual([{ categoryId: null }, { categoryId: null }]);
+  expect(getDb().prepare('SELECT categoryId FROM transactionAnnotations').all()).toEqual([
+    { categoryId: null },
+    { categoryId: null },
+  ]);
   // Importing another overlapping file cannot reapply an undone guess.
   expect(queueUncategorizedTransactions()).toBe(0);
-  expect(await processAutomaticCategorizationBatch(fakeAutomaticPreview(categoryId, ids))).toBe(false);
+  expect(await processAutomaticCategorizationBatch(fakeAutomaticPreview(categoryId, ids))).toBe(
+    false,
+  );
 });
 
 test('a manual edit, even explicitly clearing a category, wins over in-flight categorization', async () => {
   const { categoryId, ids } = automaticFixture(3);
   const otherCategory = Number(insertRow('categories', { name: 'Shopping', type: 'expense' }));
   const fixture = fakeAutomaticPreview(categoryId, ids)!;
-  await processAutomaticCategorizationBatch(async options => {
+  await processAutomaticCategorizationBatch(async (options) => {
     upsertTransactionAnnotation(ids[0]!, { categoryId: otherCategory, notes: 'Keep my choice' });
     upsertTransactionAnnotation(ids[1]!, { categoryId: null, notes: 'Leave unknown' });
-    getDb().prepare('UPDATE ledgerTransactions SET amountCents = -2000 WHERE ledgerTransactionId = ?').run(ids[2]!);
+    getDb()
+      .prepare('UPDATE ledgerTransactions SET amountCents = -2000 WHERE ledgerTransactionId = ?')
+      .run(ids[2]!);
     return fixture(options);
   });
   expect(automaticCategorizationStatus()).toMatchObject({ skipped: 3, applied: 0, pending: 0 });
-  expect(getDb().prepare('SELECT categoryId, notes FROM transactionAnnotations ORDER BY ledgerTransactionId').all())
-    .toEqual([{ categoryId: otherCategory, notes: 'Keep my choice' }, { categoryId: null, notes: 'Leave unknown' }]);
+  expect(
+    getDb()
+      .prepare('SELECT categoryId, notes FROM transactionAnnotations ORDER BY ledgerTransactionId')
+      .all(),
+  ).toEqual([
+    { categoryId: otherCategory, notes: 'Keep my choice' },
+    { categoryId: null, notes: 'Leave unknown' },
+  ]);
 });
 
 test('automatic categorization isolates failures from imports and retries failed work only', async () => {
   const { categoryId, ids } = automaticFixture();
-  await processAutomaticCategorizationBatch(async () => { throw new Error('Private provider response'); });
+  await processAutomaticCategorizationBatch(async () => {
+    throw new Error('Private provider response');
+  });
   expect(automaticCategorizationStatus()).toMatchObject({ failed: 2, pending: 0 });
   expect(getDb().prepare('SELECT * FROM transactionAnnotations').all()).toEqual([]);
-  expect(JSON.stringify(getDb().prepare('SELECT * FROM automaticCategorizationTasks').all())).not.toContain('Private provider');
+  expect(
+    JSON.stringify(getDb().prepare('SELECT * FROM automaticCategorizationTasks').all()),
+  ).not.toContain('Private provider');
   retryAutomaticCategorization();
   await processAutomaticCategorizationBatch(fakeAutomaticPreview(categoryId, ids));
   expect(automaticCategorizationStatus()).toMatchObject({ applied: 2, failed: 0 });
 });
 
 test('post-import work rolls back with its import and skips disappeared or archived transactions', async () => {
-  expect(() => getDb().transaction(() => { automaticFixture(); throw new Error('Import failed'); })()).toThrow();
+  expect(() =>
+    getDb().transaction(() => {
+      automaticFixture();
+      throw new Error('Import failed');
+    })(),
+  ).toThrow();
   expect(automaticCategorizationStatus().pending).toBe(0);
   const { categoryId, ids, accountId } = automaticFixture();
   getDb().prepare('DELETE FROM ledgerTransactions WHERE ledgerTransactionId = ?').run(ids[0]!);
   getDb().prepare("UPDATE accounts SET status = 'archived' WHERE id = ?").run(accountId);
   let called = false;
-  await processAutomaticCategorizationBatch(async options => { called = true; return fakeAutomaticPreview(categoryId, ids)!(options); });
+  await processAutomaticCategorizationBatch(async (options) => {
+    called = true;
+    return fakeAutomaticPreview(categoryId, ids)!(options);
+  });
   expect(called).toBe(false);
   expect(automaticCategorizationStatus()).toMatchObject({ skipped: 2, applied: 0, pending: 0 });
 });
 
 test('changing category definitions during a model request requires retry rather than stale application', async () => {
   const { categoryId, ids } = automaticFixture();
-  await processAutomaticCategorizationBatch(async options => {
-    getDb().prepare("UPDATE categories SET description = 'User changed the meaning' WHERE id = ?").run(categoryId);
+  await processAutomaticCategorizationBatch(async (options) => {
+    getDb()
+      .prepare("UPDATE categories SET description = 'User changed the meaning' WHERE id = ?")
+      .run(categoryId);
     return fakeAutomaticPreview(categoryId, ids)!(options);
   });
   expect(automaticCategorizationStatus()).toMatchObject({ failed: 2, applied: 0 });
@@ -198,12 +356,29 @@ test('changing category definitions during a model request requires retry rather
 test('automatic discovery covers the old backlog, explicit Uncategorized and note-only annotations', async () => {
   const { categoryId, accountId, ids } = automaticFixture(0);
   const unknown = Number(insertRow('categories', { name: 'Uncategorized', type: 'expense' }));
-  for (const id of ['legacy-null', 'legacy-explicit', 'legacy-note', 'manual-clear', 'manual-unknown', 'saved']) {
-    insertRow('ledgerTransactions', { ledgerTransactionId: id, accountId, date: '2024-01-01', amountCents: -1575,
-      description: 'THE ICE CREAM BAR', merchant: 'THE ICE CREAM BAR', transactionKind: 'activity' });
+  for (const id of [
+    'legacy-null',
+    'legacy-explicit',
+    'legacy-note',
+    'manual-clear',
+    'manual-unknown',
+    'saved',
+  ]) {
+    insertRow('ledgerTransactions', {
+      ledgerTransactionId: id,
+      accountId,
+      date: '2024-01-01',
+      amountCents: -1575,
+      description: 'THE ICE CREAM BAR',
+      merchant: 'THE ICE CREAM BAR',
+      transactionKind: 'activity',
+    });
   }
   // Existing rows predate origin tracking; a note is not a category choice.
-  getDb().prepare('INSERT INTO transactionAnnotations (ledgerTransactionId,categoryId,notes) VALUES (?,?,?)')
+  getDb()
+    .prepare(
+      'INSERT INTO transactionAnnotations (ledgerTransactionId,categoryId,notes) VALUES (?,?,?)',
+    )
     .run('legacy-explicit', unknown, 'Keep the bank note');
   upsertTransactionAnnotation('legacy-note', { notes: 'User note, no category choice' });
   upsertTransactionAnnotation('manual-clear', { categoryId: null });
@@ -214,17 +389,36 @@ test('automatic discovery covers the old backlog, explicit Uncategorized and not
   const targets = ['legacy-null', 'legacy-explicit', 'legacy-note'];
   await processAutomaticCategorizationBatch(fakeAutomaticPreview(categoryId, targets));
   expect(automaticCategorizationStatus()).toMatchObject({ applied: 3, pending: 0 });
-  expect(getDb().prepare("SELECT notes,categoryOrigin FROM transactionAnnotations WHERE ledgerTransactionId='legacy-explicit'").get())
-    .toEqual({ notes: 'Keep the bank note', categoryOrigin: 'automatic' });
-  expect(getDb().prepare("SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='manual-clear'").get()?.categoryId).toBeNull();
-  expect(getDb().prepare("SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='manual-unknown'").get()?.categoryId).toBe(unknown);
+  expect(
+    getDb()
+      .prepare(
+        "SELECT notes,categoryOrigin FROM transactionAnnotations WHERE ledgerTransactionId='legacy-explicit'",
+      )
+      .get(),
+  ).toEqual({ notes: 'Keep the bank note', categoryOrigin: 'automatic' });
+  expect(
+    getDb()
+      .prepare(
+        "SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='manual-clear'",
+      )
+      .get()?.categoryId,
+  ).toBeNull();
+  expect(
+    getDb()
+      .prepare(
+        "SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='manual-unknown'",
+      )
+      .get()?.categoryId,
+  ).toBe(unknown);
   expect(queueUncategorizedTransactions()).toBe(0);
 });
 
 test('ambiguous first-pass results are not sent to the model repeatedly on discovery', async () => {
   const { categoryId, ids } = automaticFixture(1);
-  await processAutomaticCategorizationBatch(async options => ({
-    ...await fakeAutomaticPreview(categoryId, ids)!(options), suggestions: [], questions: [],
+  await processAutomaticCategorizationBatch(async (options) => ({
+    ...(await fakeAutomaticPreview(categoryId, ids)!(options)),
+    suggestions: [],
+    questions: [],
   }));
   expect(automaticCategorizationStatus()).toMatchObject({ needsReview: 1, pending: 0 });
   for (let index = 0; index < 3; index++) expect(queueUncategorizedTransactions()).toBe(0);
@@ -233,8 +427,12 @@ test('ambiguous first-pass results are not sent to the model repeatedly on disco
 
 test('stale facts get a fresh automatic pass while deliberate clearing remains protected', async () => {
   const { categoryId, ids } = automaticFixture(2);
-  await processAutomaticCategorizationBatch(async options => {
-    getDb().prepare("UPDATE ledgerTransactions SET description='Corrected source description' WHERE ledgerTransactionId=?").run(ids[0]!);
+  await processAutomaticCategorizationBatch(async (options) => {
+    getDb()
+      .prepare(
+        "UPDATE ledgerTransactions SET description='Corrected source description' WHERE ledgerTransactionId=?",
+      )
+      .run(ids[0]!);
     upsertTransactionAnnotation(ids[1]!, { categoryId: null });
     return fakeAutomaticPreview(categoryId, ids)!(options);
   });
@@ -249,22 +447,32 @@ test('automatic categorization drains beyond one page without expanding the queu
   const { categoryId, ids } = automaticFixture(129);
   const seen: string[][] = [];
   const fixture = fakeAutomaticPreview(categoryId, ids)!;
-  const preview: NonNullable<Parameters<typeof processAutomaticCategorizationBatch>[0]> = async options => {
-    seen.push([...options?.transactionIds ?? []]);
+  const preview: NonNullable<Parameters<typeof processAutomaticCategorizationBatch>[0]> = async (
+    options,
+  ) => {
+    seen.push([...(options?.transactionIds ?? [])]);
     return fixture(options);
   };
   await processAutomaticCategorizationBatch(preview);
   expect(automaticCategorizationStatus()).toMatchObject({ applied: 128, pending: 1 });
   await processAutomaticCategorizationBatch(preview);
   expect(automaticCategorizationStatus()).toMatchObject({ applied: 129, pending: 0 });
-  expect(seen.map(batch => batch.length)).toEqual([128, 1]);
+  expect(seen.map((batch) => batch.length)).toEqual([128, 1]);
   expect(await processAutomaticCategorizationBatch(preview)).toBe(false);
 });
 
 test('restart resumes only interrupted jobs and retains completed results', async () => {
   const { categoryId, ids } = automaticFixture();
-  getDb().prepare("UPDATE automaticCategorizationTasks SET status = 'running' WHERE ledgerTransactionId = ?").run(ids[0]!);
-  getDb().prepare("UPDATE automaticCategorizationTasks SET status = 'review' WHERE ledgerTransactionId = ?").run(ids[1]!);
+  getDb()
+    .prepare(
+      "UPDATE automaticCategorizationTasks SET status = 'running' WHERE ledgerTransactionId = ?",
+    )
+    .run(ids[0]!);
+  getDb()
+    .prepare(
+      "UPDATE automaticCategorizationTasks SET status = 'review' WHERE ledgerTransactionId = ?",
+    )
+    .run(ids[1]!);
   initDatabase();
   resumeInterruptedCategorization();
   expect(automaticCategorizationStatus()).toMatchObject({ pending: 1, needsReview: 1 });
@@ -274,90 +482,268 @@ test('restart resumes only interrupted jobs and retains completed results', asyn
 
 test('model decisions cannot manufacture gift or internal-transfer evidence or resolve conflicting guesses', () => {
   const { accountId } = automaticFixture(1);
-  const row = { id: 1, ledgerTransactionId: 'test', accountId, accountName: 'Card', accountInstitution: 'Bank',
-    accountType: 'credit_card', date: '2026-09-21', amountCents: -1575, description: 'ICE CREAM BAR',
-    merchant: 'ICE CREAM BAR', originalDescription: null, originalCategory: null, transactionKind: 'activity' };
-  const categories = [{ id: 1, name: 'Gifts Received', type: 'income' }, { id: 2, name: 'Internal Transfer', type: 'transfer' },
-    { id: 3, name: 'Food & Dining', type: 'expense' }] as Parameters<typeof categorizeModelDecisions>[0]['categories'];
+  const row = {
+    id: 1,
+    ledgerTransactionId: 'test',
+    accountId,
+    accountName: 'Card',
+    accountInstitution: 'Bank',
+    accountType: 'credit_card',
+    date: '2026-09-21',
+    amountCents: -1575,
+    description: 'ICE CREAM BAR',
+    merchant: 'ICE CREAM BAR',
+    originalDescription: null,
+    originalCategory: null,
+    transactionKind: 'activity',
+  };
+  const categories = [
+    { id: 1, name: 'Gifts Received', type: 'income' },
+    { id: 2, name: 'Internal Transfer', type: 'transfer' },
+    { id: 3, name: 'Food & Dining', type: 'expense' },
+  ] as Parameters<typeof categorizeModelDecisions>[0]['categories'];
   for (const text of ['ICE CREAM BAR', 'Zelle payment from Test']) {
-    const groups = groupTransactionsForAiCategorization([{ ...row, description: text, merchant: text }]);
+    const groups = groupTransactionsForAiCategorization([
+      { ...row, description: text, merchant: text },
+    ]);
     for (const categoryName of ['Gifts Received', 'Internal Transfer']) {
-      const result = categorizeModelDecisions({ groups, categories, decisions: [{ groupId: groups[0]!.id, kind: 'category', categoryName, reason: 'Model guessed' }] });
+      const result = categorizeModelDecisions({
+        groups,
+        categories,
+        decisions: [
+          { groupId: groups[0]!.id, kind: 'category', categoryName, reason: 'Model guessed' },
+        ],
+      });
       expect(result.suggestions).toHaveLength(0);
       expect(result.questions).toHaveLength(1);
     }
   }
   const groups = groupTransactionsForAiCategorization([row]);
-  const decision = { groupId: groups[0]!.id, kind: 'category' as const, categoryName: 'Food & Dining', reason: 'Dining merchant' };
-  expect(categorizeModelDecisions({ groups, categories, decisions: [decision] }).suggestions).toHaveLength(1);
-  expect(categorizeModelDecisions({ groups, categories, decisions: [decision, decision] }).suggestions).toHaveLength(0);
+  const decision = {
+    groupId: groups[0]!.id,
+    kind: 'category' as const,
+    categoryName: 'Food & Dining',
+    reason: 'Dining merchant',
+  };
+  expect(
+    categorizeModelDecisions({ groups, categories, decisions: [decision] }).suggestions,
+  ).toHaveLength(1);
+  expect(
+    categorizeModelDecisions({ groups, categories, decisions: [decision, decision] }).suggestions,
+  ).toHaveLength(0);
 });
 
 test('automatic category safety checks reject tax guesses, negative income, and unsupported merchant transfers', () => {
-  const row = { description: 'AIRLINE CREDIT', merchant: 'Airline', originalDescription: null, amountCents: 96078 };
-  expect(financialCategoryConcern(row, {name:'Transfer',type:'transfer'})).toContain('refund');
-  expect(financialCategoryConcern({...row,description:'Payment from checking'}, {name:'Transfer',type:'transfer'})).toBeNull();
-  expect(financialCategoryConcern({...row,amountCents:-1000}, {name:'Payroll',type:'income'})).toContain('outgoing');
-  expect(financialCategoryConcern({...row,description:'Journaled RSU US Federal'}, {name:'Investment',type:'investment'})).toContain('withholding');
-  expect(financialCategoryConcern({...row,description:'ICE CREAM BAR',amountCents:-1575}, {name:'Food & Dining',type:'expense'})).toBeNull();
+  const row = {
+    description: 'AIRLINE CREDIT',
+    merchant: 'Airline',
+    originalDescription: null,
+    amountCents: 96078,
+  };
+  expect(financialCategoryConcern(row, { name: 'Transfer', type: 'transfer' })).toContain('refund');
+  expect(
+    financialCategoryConcern(
+      { ...row, description: 'Payment from checking' },
+      { name: 'Transfer', type: 'transfer' },
+    ),
+  ).toBeNull();
+  expect(
+    financialCategoryConcern({ ...row, amountCents: -1000 }, { name: 'Payroll', type: 'income' }),
+  ).toContain('outgoing');
+  expect(
+    financialCategoryConcern(
+      { ...row, description: 'Journaled RSU US Federal' },
+      { name: 'Investment', type: 'investment' },
+    ),
+  ).toContain('withholding');
+  expect(
+    financialCategoryConcern(
+      { ...row, description: 'ICE CREAM BAR', amountCents: -1575 },
+      { name: 'Food & Dining', type: 'expense' },
+    ),
+  ).toBeNull();
 });
 
 test('legacy software entertainment labels yield to AI or a deliberate user category', () => {
-  const row = { id:1,ledgerTransactionId:'software-new',accountId:1,accountName:'Card',accountInstitution:'Bank',accountType:'credit',
-    date:'2026-01-01',amountCents:-2000,description:'OPENAI',merchant:'OPENAI',originalDescription:null,originalCategory:null,transactionKind:'activity' };
-  const categories = [{id:1,name:'Entertainment',type:'expense'},{id:2,name:'Subscriptions',type:'expense'}] as Parameters<typeof matchHistoricalCategories>[1];
+  const row = {
+    id: 1,
+    ledgerTransactionId: 'software-new',
+    accountId: 1,
+    accountName: 'Card',
+    accountInstitution: 'Bank',
+    accountType: 'credit',
+    date: '2026-01-01',
+    amountCents: -2000,
+    description: 'OPENAI',
+    merchant: 'OPENAI',
+    originalDescription: null,
+    originalCategory: null,
+    transactionKind: 'activity',
+  };
+  const categories = [
+    { id: 1, name: 'Entertainment', type: 'expense' },
+    { id: 2, name: 'Subscriptions', type: 'expense' },
+  ] as Parameters<typeof matchHistoricalCategories>[1];
   const groups = groupTransactionsForAiCategorization([row]);
-  expect(matchHistoricalCategories(groups,categories,[{...row,categoryId:1}]).unmatched).toHaveLength(1);
-  expect(matchHistoricalCategories(groups,categories,[{...row,categoryId:1},{...row,categoryId:2,categoryOrigin:'automatic'}]).suggestions[0]?.categoryId).toBe(2);
-  expect(matchHistoricalCategories(groups,categories,[{...row,categoryId:1,categoryOrigin:'manual'}]).suggestions[0]?.categoryId).toBe(1);
+  expect(
+    matchHistoricalCategories(groups, categories, [{ ...row, categoryId: 1 }]).unmatched,
+  ).toHaveLength(1);
+  expect(
+    matchHistoricalCategories(groups, categories, [
+      { ...row, categoryId: 1 },
+      { ...row, categoryId: 2, categoryOrigin: 'automatic' },
+    ]).suggestions[0]?.categoryId,
+  ).toBe(2);
+  expect(
+    matchHistoricalCategories(groups, categories, [
+      { ...row, categoryId: 1, categoryOrigin: 'manual' },
+    ]).suggestions[0]?.categoryId,
+  ).toBe(1);
 });
 
 test('shared account resolver recommends institution + suffix with conservative conflict handling', async () => {
   const { getImportAccountResolution: resolve } = await import('./imports.ts');
-  const id = Number(insertRow('accounts', { name: 'Brokerage', institution: 'Fidelity', last4: '1234', accountHolder: 'Test Owner', status: 'active', type: 'investment' }));
-  const source = { id: 0, accountId: null, institution: ' fidelity ', sourceAccountName: 'Account ending in 1234', accountHolder: ' test  owner ' };
+  const id = Number(
+    insertRow('accounts', {
+      name: 'Brokerage',
+      institution: 'Fidelity',
+      last4: '1234',
+      accountHolder: 'Test Owner',
+      status: 'active',
+      type: 'investment',
+    }),
+  );
+  const source = {
+    id: 0,
+    accountId: null,
+    institution: ' fidelity ',
+    sourceAccountName: 'Account ending in 1234',
+    accountHolder: ' test  owner ',
+  };
   expect(resolve(source)).toMatchObject({ resolvedAccountId: id, resolution: 'identifier' });
-  expect(resolve({ ...source, sourceAccountName: null, sourceAccountKey: 'account:1234' })).toMatchObject({ resolvedAccountId: id, resolution: 'identifier' });
+  expect(
+    resolve({ ...source, sourceAccountName: null, sourceAccountKey: 'account:1234' }),
+  ).toMatchObject({ resolvedAccountId: id, resolution: 'identifier' });
   expect(resolve({ ...source, accountHolder: null })).toMatchObject({ resolvedAccountId: id });
-  expect(resolve({ ...source, accountHolder: 'Other Owner' })).toMatchObject({ resolvedAccountId: null, resolution: 'unresolved' });
+  expect(resolve({ ...source, accountHolder: 'Other Owner' })).toMatchObject({
+    resolvedAccountId: null,
+    resolution: 'unresolved',
+  });
   expect(resolve({ ...source, institution: 'Other Bank' }).resolvedAccountId).toBeNull();
   expect(resolve({ ...source, sourceAccountName: 'Statement 2026' }).resolvedAccountId).toBeNull();
   expect(resolve({ ...source, sourceAccountKey: 'fidelity:9999' }).resolvedAccountId).toBeNull();
   getDb().prepare('UPDATE accounts SET status = ? WHERE id = ?').run('archived', id);
   expect(resolve(source)).toMatchObject({ resolvedAccountId: id, resolution: 'archived-match' });
-  insertRow('accounts', { name: 'Other brokerage', institution: 'Fidelity', last4: '1234', accountHolder: 'Other Owner', type: 'investment' });
+  insertRow('accounts', {
+    name: 'Other brokerage',
+    institution: 'Fidelity',
+    last4: '1234',
+    accountHolder: 'Other Owner',
+    type: 'investment',
+  });
   expect(resolve(source)).toMatchObject({ resolvedAccountId: null, resolution: 'ambiguous' });
-  expect(resolve({ ...source, accountId: id })).toMatchObject({ resolvedAccountId: id, resolution: 'archived-match' });
+  expect(resolve({ ...source, accountId: id })).toMatchObject({
+    resolvedAccountId: id,
+    resolution: 'archived-match',
+  });
 });
 
 test('shared resolver preserves confirmed aliases and supports retirement identity suffixes', async () => {
   const { getImportAccountResolution: resolve } = await import('./imports.ts');
-  const id = Number(insertRow('accounts', { name: 'Retirement', institution: 'Example Retirement', last4: '5678', type: 'investment' }));
-  const source = { id: 0, accountId: null, institution: 'Example Retirement', sourceAccountName: 'Retirement plan 45678', sourceAccountKey: 'retirement:45678' };
+  const id = Number(
+    insertRow('accounts', {
+      name: 'Retirement',
+      institution: 'Example Retirement',
+      last4: '5678',
+      type: 'investment',
+    }),
+  );
+  const source = {
+    id: 0,
+    accountId: null,
+    institution: 'Example Retirement',
+    sourceAccountName: 'Retirement plan 45678',
+    sourceAccountKey: 'retirement:45678',
+  };
   expect(resolve(source)).toMatchObject({ resolvedAccountId: id, resolution: 'identifier' });
-  const confirmed = Number(insertRow('accounts', { name: 'Confirmed', institution: 'Example Retirement', type: 'investment' }));
-  insertRow('accountAliases', { institution: source.institution, alias: source.sourceAccountName, accountId: confirmed });
+  const confirmed = Number(
+    insertRow('accounts', {
+      name: 'Confirmed',
+      institution: 'Example Retirement',
+      type: 'investment',
+    }),
+  );
+  insertRow('accountAliases', {
+    institution: source.institution,
+    alias: source.sourceAccountName,
+    accountId: confirmed,
+  });
   expect(resolve(source)).toMatchObject({ resolvedAccountId: confirmed, resolution: 'alias' });
 });
 
 test('uploaded and sync review share identifier recommendations without auto-confirming sync mapping', async () => {
   const { getImportAccountMappings } = await import('./imports.ts');
   const { hydrateSyncReviewEvidence } = await import('./dataSync/review.ts');
-  const id = Number(insertRow('accounts', { name: 'Checking', institution: 'Bank of America', last4: '1234', type: 'checking' }));
-  const preview = await postImportPreview('bofa-checking-1234-2026-01-01-to-2026-01-31.csv', [
-    'Description,,Summary Amt.', 'Opening Balance,,"1,000.00"',
-    'Date,Description,Amount,Running Bal.', '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
-  ].join('\n'));
-  expect(getImportAccountMappings(preview.importFileId)[0]).toMatchObject({ resolvedAccountId: id, resolution: 'identifier' });
+  const id = Number(
+    insertRow('accounts', {
+      name: 'Checking',
+      institution: 'Bank of America',
+      last4: '1234',
+      type: 'checking',
+    }),
+  );
+  const preview = await postImportPreview(
+    'bofa-checking-1234-2026-01-01-to-2026-01-31.csv',
+    [
+      'Description,,Summary Amt.',
+      'Opening Balance,,"1,000.00"',
+      'Date,Description,Amount,Running Bal.',
+      '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+    ].join('\n'),
+  );
+  expect(getImportAccountMappings(preview.importFileId)[0]).toMatchObject({
+    resolvedAccountId: id,
+    resolution: 'identifier',
+  });
   const artifact = buildSyncArtifactReview({ importFileId: preview.importFileId, status: 'ready' });
-  expect(artifact.accountClaims[0]).toMatchObject({ resolvedAccountId: id, resolution: 'identifier', requiresExplicitMapping: true });
-  const pending = { runId: 'test', institutionId: 'bank-of-america' as const, downloaded: 1, readyToImport: 1, alreadyImported: 0,
-    artifacts: [{ ...artifact, accountClaims: artifact.accountClaims.map(claim => ({ ...claim, resolvedAccountId: null, resolvedAccountName: null, resolution: 'auto-create' as const })) }] };
-  expect(hydrateSyncReviewEvidence(pending).artifacts[0]!.accountClaims[0]).toMatchObject({ resolvedAccountId: id, resolution: 'identifier', requiresExplicitMapping: true });
-  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(artifact.accountClaims[0]!.sourceAccountId)).toEqual({ accountId: null });
+  expect(artifact.accountClaims[0]).toMatchObject({
+    resolvedAccountId: id,
+    resolution: 'identifier',
+    requiresExplicitMapping: true,
+  });
+  const pending = {
+    runId: 'test',
+    institutionId: 'bank-of-america' as const,
+    downloaded: 1,
+    readyToImport: 1,
+    alreadyImported: 0,
+    artifacts: [
+      {
+        ...artifact,
+        accountClaims: artifact.accountClaims.map((claim) => ({
+          ...claim,
+          resolvedAccountId: null,
+          resolvedAccountName: null,
+          resolution: 'auto-create' as const,
+        })),
+      },
+    ],
+  };
+  expect(hydrateSyncReviewEvidence(pending).artifacts[0]!.accountClaims[0]).toMatchObject({
+    resolvedAccountId: id,
+    resolution: 'identifier',
+    requiresExplicitMapping: true,
+  });
+  expect(
+    getDb()
+      .prepare('SELECT accountId FROM sourceAccounts WHERE id = ?')
+      .get(artifact.accountClaims[0]!.sourceAccountId),
+  ).toEqual({ accountId: null });
 });
 
-async function confirmReviewedSync(input: Omit<Parameters<typeof caller.dataSync.confirm>[0], 'outcomeRevision'>) {
+async function confirmReviewedSync(
+  input: Omit<Parameters<typeof caller.dataSync.confirm>[0], 'outcomeRevision'>,
+) {
   const outcomes = await caller.dataSync.outcomes(input);
   return caller.dataSync.confirm({ ...input, outcomeRevision: outcomes.revision });
 }
@@ -411,7 +797,11 @@ function resetAppTables() {
   })();
 }
 
-async function postImportPreview(fileName: string, text: string, profile: unknown = null): Promise<any> {
+async function postImportPreview(
+  fileName: string,
+  text: string,
+  profile: unknown = null,
+): Promise<any> {
   const fileBytes = new TextEncoder().encode(text);
   const fileBase64 = Buffer.from(fileBytes).toString('base64');
   return caller.imports.preview({
@@ -424,42 +814,61 @@ async function postImportPreview(fileName: string, text: string, profile: unknow
 
 async function updateTransactionForTest(
   transactionId: number | string,
-  changes: { categoryId?: number | string | null; notes?: string | null }
+  changes: { categoryId?: number | string | null; notes?: string | null },
 ) {
   upsertTransactionAnnotation(transactionId, changes);
   return { ok: true };
 }
 
-const listAccountsForTest = (input?: { includeArchived?: boolean }): Promise<any> => caller.accounts.list(input);
+const listAccountsForTest = (input?: { includeArchived?: boolean }): Promise<any> =>
+  caller.accounts.list(input);
 const listCategoriesForTest = (): Promise<any> => caller.categories.list();
-const listTransactionsForTest = (input?: Parameters<typeof caller.transactions.list>[0]): Promise<any> =>
-  caller.transactions.list(input);
+const listTransactionsForTest = (
+  input?: Parameters<typeof caller.transactions.list>[0],
+): Promise<any> => caller.transactions.list(input);
 const netWorthReportForTest = (): Promise<any> => caller.reports.netWorth();
 const savingsRateReportForTest = (): Promise<any> => caller.reports.savingsRate();
 const listImportHistoryForTest = (): Promise<any> => caller.imports.history();
-const dataFreshnessForTest = (today?: string): Promise<any> => caller.dataFreshness.report(today ? { today } : undefined);
-const dataCatchUpForTest = (today?: string): Promise<any> => caller.dataFreshness.catchUp(today ? { today } : undefined);
+const dataFreshnessForTest = (today?: string): Promise<any> =>
+  caller.dataFreshness.report(today ? { today } : undefined);
+const dataCatchUpForTest = (today?: string): Promise<any> =>
+  caller.dataFreshness.catchUp(today ? { today } : undefined);
 const commitImportForTest = (input: Parameters<typeof caller.imports.commit>[0]): Promise<any> =>
   caller.imports.commit(input);
 
 function csvFromRows(rows: string[]) {
-  return [
-    'Transaction Date,Post Date,Description,Category,Type,Amount',
-    ...rows,
-  ].join('\n');
+  return ['Transaction Date,Post Date,Description,Category,Type,Amount', ...rows].join('\n');
 }
 
 test('import commit refuses absent or corrupt original bytes without changing the ledger', async () => {
-  await expect(caller.imports.commit({ accountId: null, transactions: [] })).rejects.toThrow('original');
-  const preview = await postImportPreview('retention.csv', csvFromRows(['01/05/2026,01/05/2026,COFFEE,Food,Sale,-5.00']));
-  const original = getDb().prepare('SELECT * FROM importOriginals WHERE importFileId=?').get(preview.importFileId)!;
+  await expect(caller.imports.commit({ accountId: null, transactions: [] })).rejects.toThrow(
+    'original',
+  );
+  const preview = await postImportPreview(
+    'retention.csv',
+    csvFromRows(['01/05/2026,01/05/2026,COFFEE,Food,Sale,-5.00']),
+  );
+  const original = getDb()
+    .prepare('SELECT * FROM importOriginals WHERE importFileId=?')
+    .get(preview.importFileId)!;
   getDb().prepare('DELETE FROM importOriginals WHERE importFileId=?').run(preview.importFileId);
-  await expect(caller.imports.commit({ accountId: null, importFileId: preview.importFileId })).rejects.toThrow('not retained');
-  getDb().prepare('INSERT INTO importOriginals(importFileId,contentHash,bytesHash,bytes) VALUES(?,?,?,?)')
+  await expect(
+    caller.imports.commit({ accountId: null, importFileId: preview.importFileId }),
+  ).rejects.toThrow('not retained');
+  getDb()
+    .prepare(
+      'INSERT INTO importOriginals(importFileId,contentHash,bytesHash,bytes) VALUES(?,?,?,?)',
+    )
     .run(preview.importFileId, original.contentHash, 'corrupt', original.bytes);
-  await expect(caller.imports.commit({ accountId: null, importFileId: preview.importFileId })).rejects.toThrow('integrity');
-  expect(getDb().prepare('SELECT status FROM importFiles WHERE id=?').get(preview.importFileId)).toEqual({ status: 'previewed' });
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
+  await expect(
+    caller.imports.commit({ accountId: null, importFileId: preview.importFileId }),
+  ).rejects.toThrow('integrity');
+  expect(
+    getDb().prepare('SELECT status FROM importFiles WHERE id=?').get(preview.importFileId),
+  ).toEqual({ status: 'previewed' });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({
+    count: 0,
+  });
 });
 
 async function saveAwaitingSyncReview(review: {
@@ -472,47 +881,89 @@ async function saveAwaitingSyncReview(review: {
 }) {
   const directory = path.join(process.env.EASYMONEY_SYNC_ROOT!, review.runId);
   await fs.promises.mkdir(directory, { recursive: true });
-  await fs.promises.writeFile(path.join(directory, 'run.json'), `${JSON.stringify({
-    databasePath: databaseBackupStatus().databasePath,
-    runId: review.runId,
-    institutionId: review.institutionId,
-    goal: { kind: 'current', overlapDays: 7 },
-    status: 'awaiting-confirmation',
-    message: 'Downloads are ready to review',
-    startedAt: '2026-08-19T00:00:00.000Z',
-    completedAt: null,
-    events: [],
-    review,
-    result: null,
-    error: null,
-  }, null, 2)}\n`);
+  await fs.promises.writeFile(
+    path.join(directory, 'run.json'),
+    `${JSON.stringify(
+      {
+        databasePath: databaseBackupStatus().databasePath,
+        runId: review.runId,
+        institutionId: review.institutionId,
+        goal: { kind: 'current', overlapDays: 7 },
+        status: 'awaiting-confirmation',
+        message: 'Downloads are ready to review',
+        startedAt: '2026-08-19T00:00:00.000Z',
+        completedAt: null,
+        events: [],
+        review,
+        result: null,
+        error: null,
+      },
+      null,
+      2,
+    )}\n`,
+  );
 }
 
 test('discovers multiple saved reviews and discards only the selected connection batch', async () => {
   const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'multi-review-'));
-  const accountId = Number(insertRow('accounts', { name: 'Checking', institution: 'Bank of America', type: 'checking', currentBalance: 0 }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Checking',
+      institution: 'Bank of America',
+      type: 'checking',
+      currentBalance: 0,
+    }),
+  );
   const reviews: SyncRunReview[] = [];
   try {
     for (const index of [1, 2]) {
-      const filePath = path.join(directory, `bofa-checking-1234-2026-01-0${index}-to-2026-01-0${index}.csv`);
-      await fs.promises.writeFile(filePath, `Description,,Summary Amt.\nOpening Balance,,100.00\nDate,Description,Amount,Running Bal.\n01/0${index}/2026,EXAMPLE ${index},10.00,110.00`);
+      const filePath = path.join(
+        directory,
+        `bofa-checking-1234-2026-01-0${index}-to-2026-01-0${index}.csv`,
+      );
+      await fs.promises.writeFile(
+        filePath,
+        `Description,,Summary Amt.\nOpening Balance,,100.00\nDate,Description,Amount,Running Bal.\n01/0${index}/2026,EXAMPLE ${index},10.00,110.00`,
+      );
       const artifact = await stageSyncArtifact({ path: filePath, accountId });
-      const review = { runId: `sync-multiple-${index}`, institutionId: 'bank-of-america' as const, downloaded: 1, readyToImport: 1, alreadyImported: 0, artifacts: [artifact] };
+      const review = {
+        runId: `sync-multiple-${index}`,
+        institutionId: 'bank-of-america' as const,
+        downloaded: 1,
+        readyToImport: 1,
+        alreadyImported: 0,
+        artifacts: [artifact],
+      };
       await saveAwaitingSyncReview(review);
       reviews.push(review);
     }
     const recovered = await caller.dataSync.jobs();
-    expect(recovered.filter(job => job.runId.startsWith('sync-multiple-'))).toHaveLength(2);
-    expect(recovered.find(job => job.runId === reviews[1]!.runId)?.status).toBe('awaiting-confirmation');
-    const duplicateStart = await caller.dataSync.start({ institutionId: 'bank-of-america', goal: { kind: 'current', overlapDays: 7 } });
-    expect(reviews.map(review => review.runId)).toContain(duplicateStart.runId);
+    expect(recovered.filter((job) => job.runId.startsWith('sync-multiple-'))).toHaveLength(2);
+    expect(recovered.find((job) => job.runId === reviews[1]!.runId)?.status).toBe(
+      'awaiting-confirmation',
+    );
+    const duplicateStart = await caller.dataSync.start({
+      institutionId: 'bank-of-america',
+      goal: { kind: 'current', overlapDays: 7 },
+    });
+    expect(reviews.map((review) => review.runId)).toContain(duplicateStart.runId);
     expect(duplicateStart.status).toBe('awaiting-confirmation');
     await caller.dataSync.discard({ runId: reviews[0]!.runId });
-    expect((await caller.dataSync.status({ runId: reviews[1]!.runId }))?.status).toBe('awaiting-confirmation');
-    expect(getDb().prepare('SELECT status FROM importFiles WHERE id=?').get(reviews[1]!.artifacts[0]!.importFileId)?.status).toBe('previewed');
-    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()?.count).toBe(0);
+    expect((await caller.dataSync.status({ runId: reviews[1]!.runId }))?.status).toBe(
+      'awaiting-confirmation',
+    );
+    expect(
+      getDb()
+        .prepare('SELECT status FROM importFiles WHERE id=?')
+        .get(reviews[1]!.artifacts[0]!.importFileId)?.status,
+    ).toBe('previewed');
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()?.count).toBe(
+      0,
+    );
     await caller.dataSync.discard({ runId: reviews[1]!.runId });
-  } finally { await fs.promises.rm(directory, { recursive: true, force: true }); }
+  } finally {
+    await fs.promises.rm(directory, { recursive: true, force: true });
+  }
 });
 
 let consolidatedSyncFixtureSequence = 0;
@@ -529,81 +980,96 @@ const SYNTHETIC_TIAA_ACCOUNT_IDS = [
 function syntheticTiaaActivityCsv(date: string) {
   return [
     'Date,AccountId,Action,Security,Price,Quantity,Amount,Text,Memo,Commission',
-    ...SYNTHETIC_TIAA_ACCOUNT_IDS.map((accountId, index) =>
-      `${date},${accountId},Contribution,Synthetic Fund ${index + 1},1.00,10,${index + 1}.00,Synthetic contribution,,0`
+    ...SYNTHETIC_TIAA_ACCOUNT_IDS.map(
+      (accountId, index) =>
+        `${date},${accountId},Contribution,Synthetic Fund ${index + 1},1.00,10,${index + 1}.00,Synthetic contribution,,0`,
     ),
   ].join('\n');
 }
 
 function syntheticTiaaActivityRoutes() {
-  return SYNTHETIC_TIAA_ACCOUNT_IDS.map(accountId => ({
+  return SYNTHETIC_TIAA_ACCOUNT_IDS.map((accountId) => ({
     remoteAccountId: `TIAA||Retirement Annuity ${accountId}`,
   }));
 }
 
-function stageConsolidatedSyncFacts(claims: Array<{
-  remoteAccountId: string;
-  accountName: string;
-  amountCents?: number;
-  balanceCents?: number;
-  description?: string;
-}>, requestedFileName?: string, sourceType = 'activity-export') {
+function stageConsolidatedSyncFacts(
+  claims: Array<{
+    remoteAccountId: string;
+    accountName: string;
+    amountCents?: number;
+    balanceCents?: number;
+    description?: string;
+  }>,
+  requestedFileName?: string,
+  sourceType = 'activity-export',
+) {
   const fileName = requestedFileName || `consolidated-${++consolidatedSyncFixtureSequence}.csv`;
   const originalBytes = new TextEncoder().encode(JSON.stringify({ fileName, claims }));
   const originalHash = new Bun.CryptoHasher('sha256').update(originalBytes).digest('hex');
   const sourceRole = sourceType === 'statement' ? 'statement-only' : 'activity';
   const createdAt = '2026-08-20T00:00:00.000Z';
-  const importFileId = Number(insertRow('importFiles', {
-    fileName,
-    contentHash: originalHash,
-    parserName: 'test-consolidated-parser',
-    sourceType,
-    institution: 'Example Institution',
-    status: 'previewed',
-    createdAt,
-  }));
-  getDb().prepare('INSERT INTO importOriginals VALUES (?,?,?,?)').run(importFileId, originalHash, originalHash, originalBytes);
-  const sourceFileId = Number(insertRow('sourceFiles', {
-    importFileId,
-    fileName,
-    contentHash: originalHash,
-    parserName: 'test-consolidated-parser',
-    sourceType,
-    institution: 'Example Institution',
-    coveredFrom: '2026-08-01',
-    coveredTo: '2026-08-01',
-    status: 'previewed',
-    createdAt,
-  }));
-  const sourceAccountIds = claims.map((claim, index) => {
-    const sourceAccountId = Number(insertRow('sourceAccounts', {
-      sourceFileId,
+  const importFileId = Number(
+    insertRow('importFiles', {
+      fileName,
+      contentHash: originalHash,
+      parserName: 'test-consolidated-parser',
+      sourceType,
       institution: 'Example Institution',
-      sourceAccountKey: claim.remoteAccountId,
-      sourceAccountName: claim.accountName,
-      rawJson: JSON.stringify({ remoteAccountId: claim.remoteAccountId }),
+      status: 'previewed',
       createdAt,
-    }));
+    }),
+  );
+  getDb()
+    .prepare('INSERT INTO importOriginals VALUES (?,?,?,?)')
+    .run(importFileId, originalHash, originalHash, originalBytes);
+  const sourceFileId = Number(
+    insertRow('sourceFiles', {
+      importFileId,
+      fileName,
+      contentHash: originalHash,
+      parserName: 'test-consolidated-parser',
+      sourceType,
+      institution: 'Example Institution',
+      coveredFrom: '2026-08-01',
+      coveredTo: '2026-08-01',
+      status: 'previewed',
+      createdAt,
+    }),
+  );
+  const sourceAccountIds = claims.map((claim, index) => {
+    const sourceAccountId = Number(
+      insertRow('sourceAccounts', {
+        sourceFileId,
+        institution: 'Example Institution',
+        sourceAccountKey: claim.remoteAccountId,
+        sourceAccountName: claim.accountName,
+        rawJson: JSON.stringify({ remoteAccountId: claim.remoteAccountId }),
+        createdAt,
+      }),
+    );
     const amountCents = claim.amountCents ?? (index + 1) * 1000;
     const description = claim.description ?? `Example transaction ${index + 1}`;
-    const importRowId = Number(insertRow('importRows', {
-      importFileId,
-      rowIndex: index,
-      rowType: 'transaction',
-      rawJson: '{}',
-      normalizedJson: JSON.stringify({
-        sourceRowIndex: index,
-        date: '2026-08-01',
-        amountCents,
-        description,
-        institution: 'Example Institution',
-        account: claim.accountName,
-        remoteAccountId: claim.remoteAccountId,
-        sourceRole,
-        raw: {},
+    const importRowId = Number(
+      insertRow('importRows', {
+        importFileId,
+        rowIndex: index,
+        rowType: 'transaction',
+        rawJson: '{}',
+        normalizedJson: JSON.stringify({
+          sourceRowIndex: index,
+          date: '2026-08-01',
+          amountCents,
+          description,
+          institution: 'Example Institution',
+          account: claim.accountName,
+          remoteAccountId: claim.remoteAccountId,
+          sourceRole,
+          raw: {},
+        }),
+        createdAt,
       }),
-      createdAt,
-    }));
+    );
     insertRow('sourceTransactions', {
       sourceFileId,
       sourceAccountId,
@@ -617,22 +1083,24 @@ function stageConsolidatedSyncFacts(claims: Array<{
       createdAt,
     });
     if (claim.balanceCents !== undefined) {
-      const balanceRowId = Number(insertRow('importRows', {
-        importFileId,
-        rowIndex: claims.length + index,
-        rowType: 'balance',
-        rawJson: '{}',
-        normalizedJson: JSON.stringify({
-          sourceRowIndex: null,
-          date: '2026-08-01',
-          balanceCents: claim.balanceCents,
-          institution: 'Example Institution',
-          account: claim.accountName,
-          remoteAccountId: claim.remoteAccountId,
-          raw: {},
+      const balanceRowId = Number(
+        insertRow('importRows', {
+          importFileId,
+          rowIndex: claims.length + index,
+          rowType: 'balance',
+          rawJson: '{}',
+          normalizedJson: JSON.stringify({
+            sourceRowIndex: null,
+            date: '2026-08-01',
+            balanceCents: claim.balanceCents,
+            institution: 'Example Institution',
+            account: claim.accountName,
+            remoteAccountId: claim.remoteAccountId,
+            raw: {},
+          }),
+          createdAt,
         }),
-        createdAt,
-      }));
+      );
       insertRow('sourceBalances', {
         sourceFileId,
         sourceAccountId,
@@ -649,33 +1117,45 @@ function stageConsolidatedSyncFacts(claims: Array<{
 }
 
 function snapshotAccountTransactions(accountId: number) {
-  return getDb().prepare(`
+  return getDb()
+    .prepare(
+      `
     SELECT date, amount, description, merchant, originalDescription, originalCategory, type, transactionKind, status, fingerprint, importBatchId, ledgerTransactionId, occurrenceIndex
     FROM transactions
     WHERE accountId = ?
     ORDER BY ledgerTransactionId ASC
-  `).all(accountId);
+  `,
+    )
+    .all(accountId);
 }
 
 function snapshotBalanceSnapshots(accountId: number) {
-  return getDb().prepare(`
+  return getDb()
+    .prepare(
+      `
     SELECT accountId, month, balance, capturedAt
     FROM balanceSnapshots
     WHERE accountId = ?
     ORDER BY month ASC
-  `).all(accountId);
+  `,
+    )
+    .all(accountId);
 }
 
 function resetMaterializedImports(accountId: number) {
   const db = getDb();
   db.transaction(() => {
-    db.prepare('DELETE FROM ledgerProvenance WHERE ledgerTransactionId IN (SELECT ledgerTransactionId FROM ledgerTransactions WHERE accountId = ?)').run(accountId);
+    db.prepare(
+      'DELETE FROM ledgerProvenance WHERE ledgerTransactionId IN (SELECT ledgerTransactionId FROM ledgerTransactions WHERE accountId = ?)',
+    ).run(accountId);
     db.prepare('DELETE FROM ledgerRebuildState').run();
     db.prepare('DELETE FROM transactions WHERE accountId = ?').run(accountId);
     db.prepare('DELETE FROM ledgerTransactions WHERE accountId = ?').run(accountId);
     db.prepare('UPDATE accounts SET currentBalance = 0 WHERE id = ?').run(accountId);
     db.prepare('UPDATE importRows SET fingerprint = NULL, transactionId = NULL').run();
-    db.prepare("UPDATE importFiles SET status = 'previewed', importBatchId = NULL, committedAt = NULL").run();
+    db.prepare(
+      "UPDATE importFiles SET status = 'previewed', importBatchId = NULL, committedAt = NULL",
+    ).run();
   })();
 }
 
@@ -684,35 +1164,43 @@ beforeEach(() => {
 });
 
 test('init database records account owner schema migration', () => {
-  const migration = getDb().prepare(
-    "SELECT name FROM schemaMigrations WHERE name = '2026-06-20-account-owner'"
-  ).get() as { name: string } | undefined;
-  const accountColumns = getDb().prepare('PRAGMA table_info(accounts)').all() as Array<{ name: string }>;
+  const migration = getDb()
+    .prepare("SELECT name FROM schemaMigrations WHERE name = '2026-06-20-account-owner'")
+    .get() as { name: string } | undefined;
+  const accountColumns = getDb().prepare('PRAGMA table_info(accounts)').all() as Array<{
+    name: string;
+  }>;
 
   expect(migration).toEqual({ name: '2026-06-20-account-owner' });
-  expect(accountColumns.map(column => column.name)).toContain('accountHolder');
+  expect(accountColumns.map((column) => column.name)).toContain('accountHolder');
 });
 
 test('init database records and conservatively backfills account last four migrations', () => {
   const db = getDb();
-  const inferredAccountId = Number(insertRow('accounts', {
-    name: 'Inferred Checking',
-    institution: 'Example Bank',
-    type: 'checking',
-    last4: null,
-  }));
-  const preservedAccountId = Number(insertRow('accounts', {
-    name: 'Preserved Checking',
-    institution: 'Example Bank',
-    type: 'checking',
-    last4: '9999',
-  }));
-  const ambiguousAccountId = Number(insertRow('accounts', {
-    name: 'Ambiguous Checking',
-    institution: 'Example Bank',
-    type: 'checking',
-    last4: null,
-  }));
+  const inferredAccountId = Number(
+    insertRow('accounts', {
+      name: 'Inferred Checking',
+      institution: 'Example Bank',
+      type: 'checking',
+      last4: null,
+    }),
+  );
+  const preservedAccountId = Number(
+    insertRow('accounts', {
+      name: 'Preserved Checking',
+      institution: 'Example Bank',
+      type: 'checking',
+      last4: '9999',
+    }),
+  );
+  const ambiguousAccountId = Number(
+    insertRow('accounts', {
+      name: 'Ambiguous Checking',
+      institution: 'Example Bank',
+      type: 'checking',
+      last4: null,
+    }),
+  );
   for (const [institution, alias, accountId] of [
     ['Example Bank', 'Inferred Checking ending in 0123', inferredAccountId],
     ['Example Bank', 'Preserved Checking ending in 0123', preservedAccountId],
@@ -725,51 +1213,70 @@ test('init database records and conservatively backfills account last four migra
   db.prepare("DELETE FROM schemaMigrations WHERE name = '2026-08-27-account-last4-backfill'").run();
   initDatabase();
 
-  expect(db.prepare(`
+  expect(
+    db
+      .prepare(
+        `
     SELECT id, last4
     FROM accounts
     ORDER BY id
-  `).all()).toEqual([
+  `,
+      )
+      .all(),
+  ).toEqual([
     { id: inferredAccountId, last4: '0123' },
     { id: preservedAccountId, last4: '9999' },
     { id: ambiguousAccountId, last4: null },
   ]);
-  expect(db.prepare(
-    "SELECT name FROM schemaMigrations WHERE name = '2026-08-27-account-last4'"
-  ).get()).toEqual({ name: '2026-08-27-account-last4' });
-  expect((db.prepare('PRAGMA table_info(accounts)').all() as Array<{ name: string }>)
-    .map(column => column.name)).toContain('last4');
-  expect(db.prepare(
-    "SELECT name FROM schemaMigrations WHERE name = '2026-08-27-account-last4-backfill'"
-  ).get()).toEqual({ name: '2026-08-27-account-last4-backfill' });
+  expect(
+    db.prepare("SELECT name FROM schemaMigrations WHERE name = '2026-08-27-account-last4'").get(),
+  ).toEqual({ name: '2026-08-27-account-last4' });
+  expect(
+    (db.prepare('PRAGMA table_info(accounts)').all() as Array<{ name: string }>).map(
+      (column) => column.name,
+    ),
+  ).toContain('last4');
+  expect(
+    db
+      .prepare("SELECT name FROM schemaMigrations WHERE name = '2026-08-27-account-last4-backfill'")
+      .get(),
+  ).toEqual({ name: '2026-08-27-account-last4-backfill' });
 });
 
 test('init database repairs only unsupported year-like last four backfills', () => {
   const db = getDb();
-  const suspectAccountId = Number(insertRow('accounts', {
-    name: 'Example Investment',
-    institution: 'Example Bank',
-    type: 'investment',
-    last4: '2026',
-  }));
-  const supportedAccountId = Number(insertRow('accounts', {
-    name: 'Supported Investment',
-    institution: 'Example Bank',
-    type: 'investment',
-    last4: '2026',
-  }));
-  const manualAccountId = Number(insertRow('accounts', {
-    name: 'Investment account 2026',
-    institution: 'Example Bank',
-    type: 'investment',
-    last4: '2026',
-    updatedAt: '2999-01-01T00:00:00.000Z',
-  }));
-  const sourceFileId = Number(insertRow('sourceFiles', {
-    fileName: 'synthetic-year-label.csv',
-    contentHash: 'synthetic-year-label-hash',
-    status: 'committed',
-  }));
+  const suspectAccountId = Number(
+    insertRow('accounts', {
+      name: 'Example Investment',
+      institution: 'Example Bank',
+      type: 'investment',
+      last4: '2026',
+    }),
+  );
+  const supportedAccountId = Number(
+    insertRow('accounts', {
+      name: 'Supported Investment',
+      institution: 'Example Bank',
+      type: 'investment',
+      last4: '2026',
+    }),
+  );
+  const manualAccountId = Number(
+    insertRow('accounts', {
+      name: 'Investment account 2026',
+      institution: 'Example Bank',
+      type: 'investment',
+      last4: '2026',
+      updatedAt: '2999-01-01T00:00:00.000Z',
+    }),
+  );
+  const sourceFileId = Number(
+    insertRow('sourceFiles', {
+      fileName: 'synthetic-year-label.csv',
+      contentHash: 'synthetic-year-label-hash',
+      status: 'committed',
+    }),
+  );
   insertRow('sourceAccounts', {
     sourceFileId,
     accountId: suspectAccountId,
@@ -783,7 +1290,9 @@ test('init database repairs only unsupported year-like last four backfills', () 
     accountId: supportedAccountId,
   });
 
-  db.prepare("DELETE FROM schemaMigrations WHERE name = '2026-08-27-account-last4-year-repair'").run();
+  db.prepare(
+    "DELETE FROM schemaMigrations WHERE name = '2026-08-27-account-last4-year-repair'",
+  ).run();
   initDatabase();
 
   expect(db.prepare('SELECT id, last4 FROM accounts ORDER BY id').all()).toEqual([
@@ -791,157 +1300,189 @@ test('init database repairs only unsupported year-like last four backfills', () 
     { id: supportedAccountId, last4: '2026' },
     { id: manualAccountId, last4: '2026' },
   ]);
-  expect(db.prepare(
-    "SELECT name FROM schemaMigrations WHERE name = '2026-08-27-account-last4-year-repair'"
-  ).get()).toEqual({ name: '2026-08-27-account-last4-year-repair' });
+  expect(
+    db
+      .prepare(
+        "SELECT name FROM schemaMigrations WHERE name = '2026-08-27-account-last4-year-repair'",
+      )
+      .get(),
+  ).toEqual({ name: '2026-08-27-account-last4-year-repair' });
 });
 
 test('init database records source account owner schema migration', () => {
-  const migration = getDb().prepare(
-    "SELECT name FROM schemaMigrations WHERE name = '2026-07-06-source-account-owner'"
-  ).get() as { name: string } | undefined;
-  const sourceAccountColumns = getDb().prepare('PRAGMA table_info(sourceAccounts)').all() as Array<{ name: string }>;
+  const migration = getDb()
+    .prepare("SELECT name FROM schemaMigrations WHERE name = '2026-07-06-source-account-owner'")
+    .get() as { name: string } | undefined;
+  const sourceAccountColumns = getDb().prepare('PRAGMA table_info(sourceAccounts)').all() as Array<{
+    name: string;
+  }>;
 
   expect(migration).toEqual({ name: '2026-07-06-source-account-owner' });
-  expect(sourceAccountColumns.map(column => column.name)).toContain('accountHolder');
+  expect(sourceAccountColumns.map((column) => column.name)).toContain('accountHolder');
 });
 
 test('init database records category group schema migration', () => {
-  const migration = getDb().prepare(
-    "SELECT name FROM schemaMigrations WHERE name = '2026-06-22-category-groups'"
-  ).get() as { name: string } | undefined;
-  const categoryColumns = getDb().prepare('PRAGMA table_info(categories)').all() as Array<{ name: string }>;
+  const migration = getDb()
+    .prepare("SELECT name FROM schemaMigrations WHERE name = '2026-06-22-category-groups'")
+    .get() as { name: string } | undefined;
+  const categoryColumns = getDb().prepare('PRAGMA table_info(categories)').all() as Array<{
+    name: string;
+  }>;
 
   expect(migration).toEqual({ name: '2026-06-22-category-groups' });
-  expect(categoryColumns.map(column => column.name)).toContain('categoryGroup');
+  expect(categoryColumns.map((column) => column.name)).toContain('categoryGroup');
 });
 
 test('init database records category description schema migration', () => {
-  const migration = getDb().prepare(
-    "SELECT name FROM schemaMigrations WHERE name = '2026-06-23-category-descriptions'"
-  ).get() as { name: string } | undefined;
-  const categoryColumns = getDb().prepare('PRAGMA table_info(categories)').all() as Array<{ name: string }>;
+  const migration = getDb()
+    .prepare("SELECT name FROM schemaMigrations WHERE name = '2026-06-23-category-descriptions'")
+    .get() as { name: string } | undefined;
+  const categoryColumns = getDb().prepare('PRAGMA table_info(categories)').all() as Array<{
+    name: string;
+  }>;
 
   expect(migration).toEqual({ name: '2026-06-23-category-descriptions' });
-  expect(categoryColumns.map(column => column.name)).toContain('description');
+  expect(categoryColumns.map((column) => column.name)).toContain('description');
 });
 
 test('init database records credit-card sign repair migration', () => {
-  const migration = getDb().prepare(
-    "SELECT name FROM schemaMigrations WHERE name = '2026-06-23-credit-card-cashflow-signs'"
-  ).get() as { name: string } | undefined;
+  const migration = getDb()
+    .prepare(
+      "SELECT name FROM schemaMigrations WHERE name = '2026-06-23-credit-card-cashflow-signs'",
+    )
+    .get() as { name: string } | undefined;
 
   expect(migration).toEqual({ name: '2026-06-23-credit-card-cashflow-signs' });
 });
 
 test('credit-card sign repair migration converts old money liability signs to cashflow signs', () => {
   const db = getDb();
-  const accountId = Number(insertRow('accounts', {
-    name: 'Credit Card',
-    institution: 'Test Bank',
-    type: 'credit',
-    currency: 'USD',
-  }));
-  const importFileId = Number(insertRow('importFiles', {
-    fileName: 'test-credit-card.pdf',
-    contentHash: 'credit-card-sign-test',
-    parserName: 'Test Credit Card',
-    sourceType: 'statement',
-    status: 'committed',
-  }));
-  const sourceFileId = Number(insertRow('sourceFiles', {
-    importFileId,
-    fileName: 'test-credit-card.pdf',
-    contentHash: 'credit-card-sign-test',
-    parserName: 'Test Credit Card',
-    sourceType: 'statement',
-    status: 'committed',
-  }));
-  const sourceAccountId = Number(insertRow('sourceAccounts', {
-    sourceFileId,
-    accountId,
-    institution: 'Test Bank',
-    sourceAccountKey: 'Test Bank|Credit Card',
-    sourceAccountName: 'Credit Card',
-  }));
-  const purchaseImportRowId = Number(insertRow('importRows', {
-    importFileId,
-    rowIndex: 0,
-    rowType: 'transaction',
-    rawJson: '{}',
-    normalizedJson: JSON.stringify({
-      sourceRowIndex: 0,
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Credit Card',
+      institution: 'Test Bank',
+      type: 'credit',
+      currency: 'USD',
+    }),
+  );
+  const importFileId = Number(
+    insertRow('importFiles', {
+      fileName: 'test-credit-card.pdf',
+      contentHash: 'credit-card-sign-test',
+      parserName: 'Test Credit Card',
+      sourceType: 'statement',
+      status: 'committed',
+    }),
+  );
+  const sourceFileId = Number(
+    insertRow('sourceFiles', {
+      importFileId,
+      fileName: 'test-credit-card.pdf',
+      contentHash: 'credit-card-sign-test',
+      parserName: 'Test Credit Card',
+      sourceType: 'statement',
+      status: 'committed',
+    }),
+  );
+  const sourceAccountId = Number(
+    insertRow('sourceAccounts', {
+      sourceFileId,
+      accountId,
+      institution: 'Test Bank',
+      sourceAccountKey: 'Test Bank|Credit Card',
+      sourceAccountName: 'Credit Card',
+    }),
+  );
+  const purchaseImportRowId = Number(
+    insertRow('importRows', {
+      importFileId,
+      rowIndex: 0,
+      rowType: 'transaction',
+      rawJson: '{}',
+      normalizedJson: JSON.stringify({
+        sourceRowIndex: 0,
+        date: '2026-06-01',
+        amountCents: 1250,
+        description: 'Coffee shop',
+        institution: 'Test Bank',
+        account: 'Credit Card',
+        sourceRole: 'activity',
+        raw: { moneyCategory: 'activity', type: 'credit-card-activity' },
+      }),
+      fingerprint: 'bad-purchase',
+    }),
+  );
+  const paymentImportRowId = Number(
+    insertRow('importRows', {
+      importFileId,
+      rowIndex: 1,
+      rowType: 'transaction',
+      rawJson: '{}',
+      normalizedJson: JSON.stringify({
+        sourceRowIndex: 1,
+        date: '2026-06-02',
+        amountCents: -50000,
+        description: 'ONLINE PAYMENT THANK YOU',
+        institution: 'Test Bank',
+        account: 'Credit Card',
+        sourceRole: 'activity',
+        raw: { moneyCategory: 'activity', type: 'credit-card-activity' },
+      }),
+      fingerprint: 'bad-payment',
+    }),
+  );
+  const purchaseSourceTransactionId = Number(
+    insertRow('sourceTransactions', {
+      sourceFileId,
+      sourceAccountId,
+      importRowId: purchaseImportRowId,
+      stableSourceId: 'bad-purchase-source-id',
       date: '2026-06-01',
       amountCents: 1250,
       description: 'Coffee shop',
-      institution: 'Test Bank',
-      account: 'Credit Card',
       sourceRole: 'activity',
-      raw: { moneyCategory: 'activity', type: 'credit-card-activity' },
+      priority: 50,
+      rawJson: JSON.stringify({ moneyCategory: 'activity', type: 'credit-card-activity' }),
     }),
-    fingerprint: 'bad-purchase',
-  }));
-  const paymentImportRowId = Number(insertRow('importRows', {
-    importFileId,
-    rowIndex: 1,
-    rowType: 'transaction',
-    rawJson: '{}',
-    normalizedJson: JSON.stringify({
-      sourceRowIndex: 1,
+  );
+  const paymentSourceTransactionId = Number(
+    insertRow('sourceTransactions', {
+      sourceFileId,
+      sourceAccountId,
+      importRowId: paymentImportRowId,
+      stableSourceId: 'bad-payment-source-id',
       date: '2026-06-02',
       amountCents: -50000,
       description: 'ONLINE PAYMENT THANK YOU',
-      institution: 'Test Bank',
-      account: 'Credit Card',
       sourceRole: 'activity',
-      raw: { moneyCategory: 'activity', type: 'credit-card-activity' },
+      priority: 50,
+      rawJson: JSON.stringify({ moneyCategory: 'activity', type: 'credit-card-activity' }),
     }),
-    fingerprint: 'bad-payment',
-  }));
-  const purchaseSourceTransactionId = Number(insertRow('sourceTransactions', {
-    sourceFileId,
-    sourceAccountId,
-    importRowId: purchaseImportRowId,
-    stableSourceId: 'bad-purchase-source-id',
-    date: '2026-06-01',
-    amountCents: 1250,
-    description: 'Coffee shop',
-    sourceRole: 'activity',
-    priority: 50,
-    rawJson: JSON.stringify({ moneyCategory: 'activity', type: 'credit-card-activity' }),
-  }));
-  const paymentSourceTransactionId = Number(insertRow('sourceTransactions', {
-    sourceFileId,
-    sourceAccountId,
-    importRowId: paymentImportRowId,
-    stableSourceId: 'bad-payment-source-id',
-    date: '2026-06-02',
-    amountCents: -50000,
-    description: 'ONLINE PAYMENT THANK YOU',
-    sourceRole: 'activity',
-    priority: 50,
-    rawJson: JSON.stringify({ moneyCategory: 'activity', type: 'credit-card-activity' }),
-  }));
-  const purchaseTransactionId = Number(insertRow('transactions', {
-    accountId,
-    date: '2026-06-01',
-    amount: 12.50,
-    description: 'Coffee shop',
-    type: 'credit',
-    transactionKind: 'card_payment',
-    ledgerTransactionId: 'txn_purchase_old',
-    fingerprint: 'bad-purchase',
-  }));
-  const paymentTransactionId = Number(insertRow('transactions', {
-    accountId,
-    date: '2026-06-02',
-    amount: -500,
-    description: 'ONLINE PAYMENT THANK YOU',
-    type: 'debit',
-    transactionKind: null,
-    ledgerTransactionId: 'txn_payment_old',
-    fingerprint: 'bad-payment',
-  }));
+  );
+  const purchaseTransactionId = Number(
+    insertRow('transactions', {
+      accountId,
+      date: '2026-06-01',
+      amount: 12.5,
+      description: 'Coffee shop',
+      type: 'credit',
+      transactionKind: 'card_payment',
+      ledgerTransactionId: 'txn_purchase_old',
+      fingerprint: 'bad-purchase',
+    }),
+  );
+  const paymentTransactionId = Number(
+    insertRow('transactions', {
+      accountId,
+      date: '2026-06-02',
+      amount: -500,
+      description: 'ONLINE PAYMENT THANK YOU',
+      type: 'debit',
+      transactionKind: null,
+      ledgerTransactionId: 'txn_payment_old',
+      fingerprint: 'bad-payment',
+    }),
+  );
   insertRow('ledgerTransactions', {
     ledgerTransactionId: 'txn_purchase_old',
     legacyTransactionId: purchaseTransactionId,
@@ -973,17 +1514,35 @@ test('credit-card sign repair migration converts old money liability signs to ca
     sourceTransactionId: paymentSourceTransactionId,
   });
 
-  db.prepare("DELETE FROM schemaMigrations WHERE name = '2026-06-23-credit-card-cashflow-signs'").run();
+  db.prepare(
+    "DELETE FROM schemaMigrations WHERE name = '2026-06-23-credit-card-cashflow-signs'",
+  ).run();
   initDatabase();
 
-  expect(db.prepare('SELECT amountCents FROM sourceTransactions WHERE id = ?').get(purchaseSourceTransactionId)).toEqual({ amountCents: -1250 });
-  expect(db.prepare('SELECT amountCents FROM sourceTransactions WHERE id = ?').get(paymentSourceTransactionId)).toEqual({ amountCents: 50000 });
-  expect(db.prepare('SELECT amount, type, transactionKind FROM transactions WHERE id = ?').get(purchaseTransactionId)).toEqual({
+  expect(
+    db
+      .prepare('SELECT amountCents FROM sourceTransactions WHERE id = ?')
+      .get(purchaseSourceTransactionId),
+  ).toEqual({ amountCents: -1250 });
+  expect(
+    db
+      .prepare('SELECT amountCents FROM sourceTransactions WHERE id = ?')
+      .get(paymentSourceTransactionId),
+  ).toEqual({ amountCents: 50000 });
+  expect(
+    db
+      .prepare('SELECT amount, type, transactionKind FROM transactions WHERE id = ?')
+      .get(purchaseTransactionId),
+  ).toEqual({
     amount: -12.5,
     type: 'debit',
     transactionKind: null,
   });
-  expect(db.prepare('SELECT amount, type, transactionKind FROM transactions WHERE id = ?').get(paymentTransactionId)).toEqual({
+  expect(
+    db
+      .prepare('SELECT amount, type, transactionKind FROM transactions WHERE id = ?')
+      .get(paymentTransactionId),
+  ).toEqual({
     amount: 500,
     type: 'credit',
     transactionKind: 'card_payment',
@@ -991,16 +1550,18 @@ test('credit-card sign repair migration converts old money liability signs to ca
 });
 
 test('app accounts endpoint returns domain-shaped accounts', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Checking',
-    institution: 'Local Bank',
-    type: 'checking',
-    currentBalance: 1234.56,
-    currency: 'USD',
-    accountHolder: 'Example Owner',
-    last4: '0123',
-    updatedAt: '2026-06-14T12:00:00.000Z',
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Checking',
+      institution: 'Local Bank',
+      type: 'checking',
+      currentBalance: 1234.56,
+      currency: 'USD',
+      accountHolder: 'Example Owner',
+      last4: '0123',
+      updatedAt: '2026-06-14T12:00:00.000Z',
+    }),
+  );
   insertRow('ledgerBalances', {
     accountId,
     month: '2026-06',
@@ -1049,14 +1610,16 @@ test('app accounts endpoint returns domain-shaped accounts', async () => {
 });
 
 test('app accounts endpoint derives closed accounts from zero ledger balances', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Closed Card',
-    institution: 'Local Bank',
-    type: 'credit-card',
-    currentBalance: 12.34,
-    currency: 'USD',
-    updatedAt: '2026-06-14T12:00:00.000Z',
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Closed Card',
+      institution: 'Local Bank',
+      type: 'credit-card',
+      currentBalance: 12.34,
+      currency: 'USD',
+      updatedAt: '2026-06-14T12:00:00.000Z',
+    }),
+  );
   insertRow('ledgerBalances', {
     accountId,
     month: '2026-06',
@@ -1064,8 +1627,14 @@ test('app accounts endpoint derives closed accounts from zero ledger balances', 
     capturedAt: '2026-06-30T00:00:00.000Z',
   });
 
-  const body = await listAccountsForTest() as {
-    accounts: Array<{ id: number; balance: number; latestBalanceMonth: string | null; isClosed: boolean; status: string }>;
+  const body = (await listAccountsForTest()) as {
+    accounts: Array<{
+      id: number;
+      balance: number;
+      latestBalanceMonth: string | null;
+      isClosed: boolean;
+      status: string;
+    }>;
   };
 
   expect(body.accounts).toEqual([
@@ -1080,37 +1649,48 @@ test('app accounts endpoint derives closed accounts from zero ledger balances', 
 });
 
 test('app accounts endpoint updates account owner metadata', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Joint Brokerage',
-    institution: 'Vanguard',
-    type: 'investment',
-    currentBalance: 0,
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Joint Brokerage',
+      institution: 'Vanguard',
+      type: 'investment',
+      currentBalance: 0,
+    }),
+  );
 
-  await caller.accounts.updateMetadata({ id: accountId, changes: { accountHolder: 'Example Owner' } });
+  await caller.accounts.updateMetadata({
+    id: accountId,
+    changes: { accountHolder: 'Example Owner' },
+  });
   expect(await listAccountsForTest()).toMatchObject({
-    accounts: [expect.objectContaining({
-      id: accountId,
-      accountHolder: 'Example Owner',
-    })],
+    accounts: [
+      expect.objectContaining({
+        id: accountId,
+        accountHolder: 'Example Owner',
+      }),
+    ],
   });
 
   await caller.accounts.updateMetadata({ id: accountId, changes: { accountHolder: '' } });
   expect(await listAccountsForTest()).toMatchObject({
-    accounts: [expect.objectContaining({
-      id: accountId,
-      accountHolder: null,
-    })],
+    accounts: [
+      expect.objectContaining({
+        id: accountId,
+        accountHolder: null,
+      }),
+    ],
   });
 });
 
 test('app accounts endpoint normalizes, preserves, and clears a numeric last four', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Numbered Brokerage',
-    institution: 'Example Brokerage',
-    type: 'investment',
-    currentBalance: 0,
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Numbered Brokerage',
+      institution: 'Example Brokerage',
+      type: 'investment',
+      currentBalance: 0,
+    }),
+  );
 
   await caller.accounts.updateMetadata({ id: accountId, changes: { last4: ' 0123 ' } });
   expect(await listAccountsForTest()).toMatchObject({
@@ -1118,24 +1698,29 @@ test('app accounts endpoint normalizes, preserves, and clears a numeric last fou
   });
 
   for (const invalid of ['123', '12345', '12A4']) {
-    await expect(caller.accounts.updateMetadata({ id: accountId, changes: { last4: invalid } }))
-      .rejects.toThrow('Account last four must contain exactly four digits.');
+    await expect(
+      caller.accounts.updateMetadata({ id: accountId, changes: { last4: invalid } }),
+    ).rejects.toThrow('Account last four must contain exactly four digits.');
   }
-  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId))
-    .toEqual({ last4: '0123' });
+  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId)).toEqual({
+    last4: '0123',
+  });
 
   await caller.accounts.updateMetadata({ id: accountId, changes: { last4: '' } });
-  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId))
-    .toEqual({ last4: null });
+  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId)).toEqual({
+    last4: null,
+  });
 });
 
 test('trpc accounts mutations update metadata and archive state', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'TRPC Checking',
-    institution: 'Bank',
-    type: 'checking',
-    currentBalance: 0,
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'TRPC Checking',
+      institution: 'Bank',
+      type: 'checking',
+      currentBalance: 0,
+    }),
+  );
 
   await caller.accounts.updateMetadata({
     id: accountId,
@@ -1168,38 +1753,46 @@ test('trpc accounts mutations update metadata and archive state', async () => {
 });
 
 test('app account archive hides defaults without deleting source links or annotations', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Archive Me',
-    institution: 'Local Bank',
-    type: 'checking',
-    currentBalance: 0,
-  }));
-  const importFileId = Number(insertRow('importFiles', {
-    fileName: 'archive.csv',
-    contentHash: 'archive-hash',
-    parserName: 'fixture',
-    status: 'committed',
-    createdAt: new Date().toISOString(),
-    committedAt: new Date().toISOString(),
-  }));
-  const sourceFileId = Number(insertRow('sourceFiles', {
-    importFileId,
-    fileName: 'archive.csv',
-    contentHash: 'archive-hash',
-    parserName: 'fixture',
-    status: 'committed',
-    createdAt: new Date().toISOString(),
-    committedAt: new Date().toISOString(),
-  }));
-  const sourceAccountId = Number(insertRow('sourceAccounts', {
-    sourceFileId,
-    accountId,
-    institution: 'Local Bank',
-    sourceAccountKey: 'local|archive',
-    sourceAccountName: 'Archive Me',
-    rawJson: '{}',
-    createdAt: new Date().toISOString(),
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Archive Me',
+      institution: 'Local Bank',
+      type: 'checking',
+      currentBalance: 0,
+    }),
+  );
+  const importFileId = Number(
+    insertRow('importFiles', {
+      fileName: 'archive.csv',
+      contentHash: 'archive-hash',
+      parserName: 'fixture',
+      status: 'committed',
+      createdAt: new Date().toISOString(),
+      committedAt: new Date().toISOString(),
+    }),
+  );
+  const sourceFileId = Number(
+    insertRow('sourceFiles', {
+      importFileId,
+      fileName: 'archive.csv',
+      contentHash: 'archive-hash',
+      parserName: 'fixture',
+      status: 'committed',
+      createdAt: new Date().toISOString(),
+      committedAt: new Date().toISOString(),
+    }),
+  );
+  const sourceAccountId = Number(
+    insertRow('sourceAccounts', {
+      sourceFileId,
+      accountId,
+      institution: 'Local Bank',
+      sourceAccountKey: 'local|archive',
+      sourceAccountName: 'Archive Me',
+      rawJson: '{}',
+      createdAt: new Date().toISOString(),
+    }),
+  );
   insertRow('sourceTransactions', {
     sourceFileId,
     sourceAccountId,
@@ -1213,7 +1806,9 @@ test('app account archive hides defaults without deleting source links or annota
     createdAt: new Date().toISOString(),
   });
   materializeLedger(getDb(), buildLedgerFromSourceFacts(getDb()));
-  const ledgerTransaction = getDb().prepare('SELECT ledgerTransactionId FROM ledgerTransactions WHERE accountId = ?').get(accountId) as {
+  const ledgerTransaction = getDb()
+    .prepare('SELECT ledgerTransactionId FROM ledgerTransactions WHERE accountId = ?')
+    .get(accountId) as {
     ledgerTransactionId: string;
   };
   insertRow('transactionAnnotations', {
@@ -1226,12 +1821,20 @@ test('app account archive hides defaults without deleting source links or annota
   await caller.accounts.archive({ id: accountId });
 
   expect(await listAccountsForTest()).toEqual({ accounts: [] });
-  const withArchived = await listAccountsForTest({ includeArchived: true }) as { accounts: Array<{ id: number; status: string; archivedAt: string | null }> };
+  const withArchived = (await listAccountsForTest({ includeArchived: true })) as {
+    accounts: Array<{ id: number; status: string; archivedAt: string | null }>;
+  };
   expect(withArchived.accounts).toMatchObject([{ id: accountId, status: 'archived' }]);
   expect(withArchived.accounts[0].archivedAt).toEqual(expect.any(String));
   expect(await listTransactionsForTest()).toMatchObject({ transactions: [] });
-  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(sourceAccountId)).toMatchObject({ accountId });
-  expect(getDb().prepare('SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId = ?').get(ledgerTransaction.ledgerTransactionId)).toMatchObject({
+  expect(
+    getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(sourceAccountId),
+  ).toMatchObject({ accountId });
+  expect(
+    getDb()
+      .prepare('SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId = ?')
+      .get(ledgerTransaction.ledgerTransactionId),
+  ).toMatchObject({
     notes: 'keep archived note',
   });
 
@@ -1298,49 +1901,114 @@ test('category delete reassigns annotations to Uncategorized and protects Uncate
     categoryId: uncategorizedId,
   });
 
-  await expect(caller.categories.delete({ id: uncategorizedId })).rejects.toThrow('Uncategorized cannot be deleted.');
+  await expect(caller.categories.delete({ id: uncategorizedId })).rejects.toThrow(
+    'Uncategorized cannot be deleted.',
+  );
   expect(getDb().prepare('SELECT id FROM categories WHERE id = ?').get(uncategorizedId)).toEqual({
     id: uncategorizedId,
   });
 });
 
 test('category editing supports income subcategories and rejects invalid names', async () => {
-  const payroll = await caller.categories.create({ name: ' Payroll ', type: 'income', categoryGroup: 'income' });
-  const gifts = await caller.categories.create({ name: 'Gifts received', type: 'income', categoryGroup: 'income' });
-  await caller.categories.update({ id: payroll.id, name: 'Salary', type: 'income', description: 'Pay from work' });
-  expect(await caller.categories.list()).toMatchObject({ categories: expect.arrayContaining([
-    expect.objectContaining({ id: payroll.id, name: 'Salary', type: 'income', description: 'Pay from work' }),
-    expect.objectContaining({ id: gifts.id, name: 'Gifts received', type: 'income' }),
-  ]) });
-  await expect(caller.categories.create({ name: '   ' })).rejects.toThrow('Category name is required');
+  const payroll = await caller.categories.create({
+    name: ' Payroll ',
+    type: 'income',
+    categoryGroup: 'income',
+  });
+  const gifts = await caller.categories.create({
+    name: 'Gifts received',
+    type: 'income',
+    categoryGroup: 'income',
+  });
+  await caller.categories.update({
+    id: payroll.id,
+    name: 'Salary',
+    type: 'income',
+    description: 'Pay from work',
+  });
+  expect(await caller.categories.list()).toMatchObject({
+    categories: expect.arrayContaining([
+      expect.objectContaining({
+        id: payroll.id,
+        name: 'Salary',
+        type: 'income',
+        description: 'Pay from work',
+      }),
+      expect.objectContaining({ id: gifts.id, name: 'Gifts received', type: 'income' }),
+    ]),
+  });
+  await expect(caller.categories.create({ name: '   ' })).rejects.toThrow(
+    'Category name is required',
+  );
   await expect(caller.categories.create({ name: 'salary' })).rejects.toThrow('already exists');
-  await expect(caller.categories.update({ id: gifts.id, name: ' Salary ' })).rejects.toThrow('already exists');
-  await expect(caller.categories.update({ id: gifts.id, name: ' ' })).rejects.toThrow('Category name is required');
+  await expect(caller.categories.update({ id: gifts.id, name: ' Salary ' })).rejects.toThrow(
+    'already exists',
+  );
+  await expect(caller.categories.update({ id: gifts.id, name: ' ' })).rejects.toThrow(
+    'Category name is required',
+  );
   const uncategorized = await caller.categories.create({ name: 'Uncategorized', type: 'expense' });
-  await expect(caller.categories.update({ id: uncategorized.id, name: 'Other' })).rejects.toThrow('cannot be renamed');
-  await expect(caller.categories.update({ id: uncategorized.id, type: 'income' })).rejects.toThrow('cannot be renamed');
+  await expect(caller.categories.update({ id: uncategorized.id, name: 'Other' })).rejects.toThrow(
+    'cannot be renamed',
+  );
+  await expect(caller.categories.update({ id: uncategorized.id, type: 'income' })).rejects.toThrow(
+    'cannot be renamed',
+  );
 });
 
 test('income defaults upgrade additively and preserve existing annotations and customized metadata', async () => {
   const { seedDatabase } = await import('../seed');
   const db = getDb();
   db.prepare('DELETE FROM schemaMigrations WHERE name = ?').run('income-subcategories-v1');
-  const income = await caller.categories.create({ name: 'Income', type: 'income', categoryGroup: 'income' });
-  const gifts = await caller.categories.create({ name: 'Gifts received', type: 'income', description: 'Confirmed presents only' });
-  insertRow('transactionAnnotations', { ledgerTransactionId: 'preserve-income-category', categoryId: income.id, notes: 'Keep my note' });
+  const income = await caller.categories.create({
+    name: 'Income',
+    type: 'income',
+    categoryGroup: 'income',
+  });
+  const gifts = await caller.categories.create({
+    name: 'Gifts received',
+    type: 'income',
+    description: 'Confirmed presents only',
+  });
+  insertRow('transactionAnnotations', {
+    ledgerTransactionId: 'preserve-income-category',
+    categoryId: income.id,
+    notes: 'Keep my note',
+  });
   seedDatabase();
   const categories = (await caller.categories.list()).categories;
   for (const name of ['Payroll', 'Bonuses', 'Interest', 'Other Income']) {
-    expect(categories.find(category => category.name === name)).toMatchObject({ parentId: income.id, type: 'income', categoryGroup: 'income', description: expect.any(String) });
+    expect(categories.find((category) => category.name === name)).toMatchObject({
+      parentId: income.id,
+      type: 'income',
+      categoryGroup: 'income',
+      description: expect.any(String),
+    });
   }
-  expect(categories.find(category => category.id === gifts.id)).toMatchObject({ name: 'Gifts received', parentId: income.id, description: 'Confirmed presents only' });
-  expect(categories.filter(category => category.name.toLowerCase() === 'gifts received')).toHaveLength(1);
-  const payroll = categories.find(category => category.name === 'Payroll')!;
-  await caller.categories.update({ id: payroll.id, parentId: null, description: 'My custom payroll guidance' });
+  expect(categories.find((category) => category.id === gifts.id)).toMatchObject({
+    name: 'Gifts received',
+    parentId: income.id,
+    description: 'Confirmed presents only',
+  });
+  expect(
+    categories.filter((category) => category.name.toLowerCase() === 'gifts received'),
+  ).toHaveLength(1);
+  const payroll = categories.find((category) => category.name === 'Payroll')!;
+  await caller.categories.update({
+    id: payroll.id,
+    parentId: null,
+    description: 'My custom payroll guidance',
+  });
   seedDatabase();
   expect((await caller.categories.list()).categories).toHaveLength(categories.length);
-  expect(db.prepare('SELECT parentId, description FROM categories WHERE id = ?').get(payroll.id)).toEqual({ parentId: null, description: 'My custom payroll guidance' });
-  expect(db.prepare('SELECT categoryId, notes FROM transactionAnnotations WHERE ledgerTransactionId = ?').get('preserve-income-category')).toEqual({ categoryId: income.id, notes: 'Keep my note' });
+  expect(
+    db.prepare('SELECT parentId, description FROM categories WHERE id = ?').get(payroll.id),
+  ).toEqual({ parentId: null, description: 'My custom payroll guidance' });
+  expect(
+    db
+      .prepare('SELECT categoryId, notes FROM transactionAnnotations WHERE ledgerTransactionId = ?')
+      .get('preserve-income-category'),
+  ).toEqual({ categoryId: income.id, notes: 'Keep my note' });
 });
 
 test('income defaults preserve existing custom types and parents', async () => {
@@ -1348,11 +2016,20 @@ test('income defaults preserve existing custom types and parents', async () => {
   const db = getDb();
   db.prepare('DELETE FROM schemaMigrations WHERE name = ?').run('income-subcategories-v1');
   const custom = await caller.categories.create({ name: 'Custom', type: 'income' });
-  const gifts = await caller.categories.create({ name: 'Gifts Received', type: 'income', parentId: custom.id });
+  const gifts = await caller.categories.create({
+    name: 'Gifts Received',
+    type: 'income',
+    parentId: custom.id,
+  });
   const payroll = await caller.categories.create({ name: 'Payroll', type: 'expense' });
   seedDatabase();
-  expect(db.prepare('SELECT parentId FROM categories WHERE id = ?').get(gifts.id)).toEqual({ parentId: custom.id });
-  expect(db.prepare('SELECT type, parentId FROM categories WHERE id = ?').get(payroll.id)).toEqual({ type: 'expense', parentId: null });
+  expect(db.prepare('SELECT parentId FROM categories WHERE id = ?').get(gifts.id)).toEqual({
+    parentId: custom.id,
+  });
+  expect(db.prepare('SELECT type, parentId FROM categories WHERE id = ?').get(payroll.id)).toEqual({
+    type: 'expense',
+    parentId: null,
+  });
 });
 
 test('income defaults do not create a cycle in older custom hierarchy metadata', async () => {
@@ -1362,22 +2039,42 @@ test('income defaults do not create a cycle in older custom hierarchy metadata',
   const gifts = await caller.categories.create({ name: 'Gifts Received', type: 'income' });
   await caller.categories.create({ name: 'Income', type: 'income', parentId: gifts.id });
   seedDatabase();
-  expect(db.prepare('SELECT parentId FROM categories WHERE id = ?').get(gifts.id)).toEqual({ parentId: null });
+  expect(db.prepare('SELECT parentId FROM categories WHERE id = ?').get(gifts.id)).toEqual({
+    parentId: null,
+  });
 });
 
 test('category parents reject missing parents and cycles; deleting a parent keeps children', async () => {
   const income = await caller.categories.create({ name: 'Income', type: 'income' });
-  const payroll = await caller.categories.create({ name: 'Payroll', type: 'income', parentId: String(income.id) });
-  const child = await caller.categories.create({ name: 'Salary', type: 'income', parentId: payroll.id });
-  await expect(caller.categories.create({ name: 'Invalid', parentId: 99999 })).rejects.toThrow('Parent category not found');
-  await expect(caller.categories.update({ id: income.id, parentId: income.id })).rejects.toThrow('descendants');
-  await expect(caller.categories.update({ id: income.id, parentId: child.id })).rejects.toThrow('descendants');
-  await expect(caller.categories.update({ id: payroll.id, parentId: 99999 })).rejects.toThrow('Parent category not found');
+  const payroll = await caller.categories.create({
+    name: 'Payroll',
+    type: 'income',
+    parentId: String(income.id),
+  });
+  const child = await caller.categories.create({
+    name: 'Salary',
+    type: 'income',
+    parentId: payroll.id,
+  });
+  await expect(caller.categories.create({ name: 'Invalid', parentId: 99999 })).rejects.toThrow(
+    'Parent category not found',
+  );
+  await expect(caller.categories.update({ id: income.id, parentId: income.id })).rejects.toThrow(
+    'descendants',
+  );
+  await expect(caller.categories.update({ id: income.id, parentId: child.id })).rejects.toThrow(
+    'descendants',
+  );
+  await expect(caller.categories.update({ id: payroll.id, parentId: 99999 })).rejects.toThrow(
+    'Parent category not found',
+  );
   await caller.categories.delete({ id: income.id });
-  expect((await caller.categories.list()).categories).toEqual(expect.arrayContaining([
-    expect.objectContaining({ id: payroll.id, parentId: null }),
-    expect.objectContaining({ id: child.id, parentId: payroll.id }),
-  ]));
+  expect((await caller.categories.list()).categories).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: payroll.id, parentId: null }),
+      expect.objectContaining({ id: child.id, parentId: payroll.id }),
+    ]),
+  );
 });
 
 test('trpc categories and categorization rules expose typed crud', async () => {
@@ -1395,11 +2092,13 @@ test('trpc categories and categorization rules expose typed crud', async () => {
     description: 'Updated through tRPC',
   });
   expect(await caller.categories.list()).toMatchObject({
-    categories: [expect.objectContaining({
-      id: created.id,
-      name: 'TRPC Category Updated',
-      description: 'Updated through tRPC',
-    })],
+    categories: [
+      expect.objectContaining({
+        id: created.id,
+        name: 'TRPC Category Updated',
+        description: 'Updated through tRPC',
+      }),
+    ],
   });
 
   const rule = await caller.categorizationRules.create({
@@ -1410,7 +2109,12 @@ test('trpc categories and categorization rules expose typed crud', async () => {
   });
   await caller.categorizationRules.update({ id: rule.id, priority: 84 });
   expect(await caller.categorizationRules.list()).toEqual([
-    expect.objectContaining({ id: rule.id, categoryId: created.id, pattern: 'trpc-rule', priority: 84 }),
+    expect.objectContaining({
+      id: rule.id,
+      categoryId: created.id,
+      pattern: 'trpc-rule',
+      priority: 84,
+    }),
   ]);
   await caller.categorizationRules.delete({ id: rule.id });
   expect(await caller.categorizationRules.list()).toEqual([]);
@@ -1440,7 +2144,11 @@ test('trpc category delete reassigns annotations to Uncategorized', async () => 
   });
 
   await caller.categories.delete({ id: diningId });
-  expect(getDb().prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId = ?').get('trpc-category-delete')).toMatchObject({
+  expect(
+    getDb()
+      .prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId = ?')
+      .get('trpc-category-delete'),
+  ).toMatchObject({
     categoryId: uncategorizedId,
   });
 });
@@ -1549,7 +2257,9 @@ test('app transactions endpoint supports domain query filters', async () => {
     endDate: '2026-06-30',
   });
 
-  expect(body.transactions.map((transaction: { description: string }) => transaction.description)).toEqual(['Cafe']);
+  expect(
+    body.transactions.map((transaction: { description: string }) => transaction.description),
+  ).toEqual(['Cafe']);
 });
 
 test('app transactions endpoint supports infinite-scroll paging metadata', async () => {
@@ -1581,26 +2291,29 @@ test('app transactions endpoint supports infinite-scroll paging metadata', async
     type: 'expense',
   });
 
-  const firstPage = await listTransactionsForTest({ limit: 2, offset: 0 }) as {
+  const firstPage = (await listTransactionsForTest({ limit: 2, offset: 0 })) as {
     transactions: Array<{ description: string }>;
     totalCount: number;
     hasMore: boolean;
     nextOffset: number | null;
     totals: { income: number; expenses: number; net: number };
   };
-  const secondPage = await listTransactionsForTest({ limit: 2, offset: 2 }) as {
+  const secondPage = (await listTransactionsForTest({ limit: 2, offset: 2 })) as {
     transactions: Array<{ description: string }>;
     totalCount: number;
     hasMore: boolean;
     nextOffset: number | null;
   };
 
-  expect(firstPage.transactions.map(transaction => transaction.description)).toEqual(['Newest', 'Middle']);
+  expect(firstPage.transactions.map((transaction) => transaction.description)).toEqual([
+    'Newest',
+    'Middle',
+  ]);
   expect(firstPage.totalCount).toBe(3);
   expect(firstPage.hasMore).toBe(true);
   expect(firstPage.nextOffset).toBe(2);
   expect(firstPage.totals).toMatchObject({ income: 100, expenses: 50, net: 50 });
-  expect(secondPage.transactions.map(transaction => transaction.description)).toEqual(['Oldest']);
+  expect(secondPage.transactions.map((transaction) => transaction.description)).toEqual(['Oldest']);
   expect(secondPage.totalCount).toBe(3);
   expect(secondPage.hasMore).toBe(false);
   expect(secondPage.nextOffset).toBeNull();
@@ -1660,9 +2373,17 @@ test('trpc transaction totals classify bank-side card payments and investment tr
 });
 
 test('account sets scope transaction pages, totals, analytics and bulk categorization', async () => {
-  const ids = ['One', 'Two', 'Three'].map(name => insertRow('accounts', { name, institution: 'Bank', type: 'checking' }));
+  const ids = ['One', 'Two', 'Three'].map((name) =>
+    insertRow('accounts', { name, institution: 'Bank', type: 'checking' }),
+  );
   for (const [index, accountId] of ids.entries()) {
-    insertLegacyFixture('transactions', { accountId, date: '2026-06-10', amount: -(index + 1) * 10, description: `Purchase ${index}`, type: 'expense' });
+    insertLegacyFixture('transactions', {
+      accountId,
+      date: '2026-06-10',
+      amount: -(index + 1) * 10,
+      description: `Purchase ${index}`,
+      type: 'expense',
+    });
   }
   const accountIds = [ids[0]!, ids[2]!];
   const result = await caller.transactions.list({ accountIds, limit: 1 });
@@ -1670,7 +2391,9 @@ test('account sets scope transaction pages, totals, analytics and bulk categoriz
   expect(result.totals.expenses).toBe(40);
   expect(result.transactions).toHaveLength(1);
   const second = await caller.transactions.list({ accountIds, limit: 1, offset: 1 });
-  expect(new Set([...result.transactions, ...second.transactions].map(row => row.account?.id))).toEqual(new Set(accountIds));
+  expect(
+    new Set([...result.transactions, ...second.transactions].map((row) => row.account?.id)),
+  ).toEqual(new Set(accountIds));
   expect((await caller.analytics.report({ accountIds })).summary.expenses).toBe(40);
   const selectedSpending = (await caller.analytics.report({ accountIds })).spendingExplorer;
   expect(selectedSpending.amountCents).toBe(4000);
@@ -1680,9 +2403,15 @@ test('account sets scope transaction pages, totals, analytics and bulk categoriz
   expect((await caller.transactions.list()).totalCount).toBe(3);
   expect((await caller.transactions.list({ accountIds: [ids[0]!, ids[0]!] })).totalCount).toBe(1);
   const categoryId = insertRow('categories', { name: 'Selected only', type: 'expense' });
-  expect((await caller.transactions.categorizeMatching({ query: { accountIds: [] }, categoryId })).count).toBe(0);
-  expect((await caller.transactions.categorizeMatching({ query: { accountIds }, categoryId })).count).toBe(2);
-  expect((await caller.transactions.list({ accountIds: [ids[1]!] })).transactions[0]?.category).toBeNull();
+  expect(
+    (await caller.transactions.categorizeMatching({ query: { accountIds: [] }, categoryId })).count,
+  ).toBe(0);
+  expect(
+    (await caller.transactions.categorizeMatching({ query: { accountIds }, categoryId })).count,
+  ).toBe(2);
+  expect(
+    (await caller.transactions.list({ accountIds: [ids[1]!] })).transactions[0]?.category,
+  ).toBeNull();
   await expect(caller.transactions.list({ accountIds: [-1] })).rejects.toThrow();
 });
 
@@ -1762,24 +2491,45 @@ test('trpc analytics report aggregates backend-owned cashflow semantics', async 
   ]);
   expect(report.spendingExplorer).toMatchObject({ amountCents: 2500, transactionIds: [cafeId] });
   expect(report.analysisTransactionIds.sort()).toEqual([Number(cafeId), Number(payrollId)].sort());
-  expect(report.transactions.find(row => row.id === cafeId)).toMatchObject({ label: 'Blue Cafe', amount: -25 });
-  expect(Object.keys(report.transactions.find(row => row.id === cafeId)!).sort()).toEqual([
-    'accountId', 'amount', 'categoryId', 'date', 'id', 'label', 'ledgerTransactionId', 'notes',
+  expect(report.transactions.find((row) => row.id === cafeId)).toMatchObject({
+    label: 'Blue Cafe',
+    amount: -25,
+  });
+  expect(Object.keys(report.transactions.find((row) => row.id === cafeId)!).sort()).toEqual([
+    'accountId',
+    'amount',
+    'categoryId',
+    'date',
+    'id',
+    'label',
+    'ledgerTransactionId',
+    'notes',
   ]);
   expect(report).not.toHaveProperty('analysisTransactions');
-  expect(report.analysisTransactionIds.every(id => report.transactions.some(row => row.id === id))).toBe(true);
-  expect(report.investments.flatMap(row => row.transactionIds).every(id => !report.analysisTransactionIds.includes(id))).toBe(true);
-  expect(report.spendingExplorer.children[0]).toMatchObject({ name: 'Dining', amountCents: 2500, children: [expect.objectContaining({ name: 'Blue Cafe', transactionIds: [cafeId] })] });
-  expect((await caller.analytics.report({ startDate: '2026-07-01', endDate: '2026-07-31' })).spendingExplorer.amountCents).toBe(0);
+  expect(
+    report.analysisTransactionIds.every((id) => report.transactions.some((row) => row.id === id)),
+  ).toBe(true);
+  expect(
+    report.investments
+      .flatMap((row) => row.transactionIds)
+      .every((id) => !report.analysisTransactionIds.includes(id)),
+  ).toBe(true);
+  expect(report.spendingExplorer.children[0]).toMatchObject({
+    name: 'Dining',
+    amountCents: 2500,
+    children: [expect.objectContaining({ name: 'Blue Cafe', transactionIds: [cafeId] })],
+  });
+  expect(
+    (await caller.analytics.report({ startDate: '2026-07-01', endDate: '2026-07-31' }))
+      .spendingExplorer.amountCents,
+  ).toBe(0);
   expect(report.topMerchants).toEqual([
     expect.objectContaining({ name: 'Blue Cafe', amount: 25, count: 1 }),
   ]);
   expect(report.incomeStreams).toEqual([
     expect.objectContaining({ name: 'ACME Payroll', amount: 1000, count: 1 }),
   ]);
-  expect(report.investments).toEqual([
-    expect.objectContaining({ key: '2026-06', amount: 400 }),
-  ]);
+  expect(report.investments).toEqual([expect.objectContaining({ key: '2026-06', amount: 400 })]);
 
   const diningOnly = await caller.analytics.report({
     categoryFilterIds: [diningId],
@@ -1787,7 +2537,14 @@ test('trpc analytics report aggregates backend-owned cashflow semantics', async 
   });
   expect(diningOnly.summary).toMatchObject({ income: 0, expenses: 25, net: -25 });
   expect(diningOnly.spendingExplorer.amountCents).toBe(2500);
-  expect((await caller.analytics.report({ categoryFilterIds: [diningId], categoryFilterMode: 'exclude' })).spendingExplorer.amountCents).toBe(0);
+  expect(
+    (
+      await caller.analytics.report({
+        categoryFilterIds: [diningId],
+        categoryFilterMode: 'exclude',
+      })
+    ).spendingExplorer.amountCents,
+  ).toBe(0);
 });
 
 test('app transactions endpoint supports column sort keys', async () => {
@@ -1822,19 +2579,28 @@ test('app transactions endpoint supports column sort keys', async () => {
   });
   await updateTransactionForTest(alphaId, { categoryId: groceriesId });
 
-  const descriptionAsc = await listTransactionsForTest({ sortBy: 'description_asc' }) as {
+  const descriptionAsc = (await listTransactionsForTest({ sortBy: 'description_asc' })) as {
     transactions: Array<{ description: string }>;
   };
-  const accountDesc = await listTransactionsForTest({ sortBy: 'account_desc' }) as {
+  const accountDesc = (await listTransactionsForTest({ sortBy: 'account_desc' })) as {
     transactions: Array<{ account: { name: string } }>;
   };
-  const categoryDesc = await listTransactionsForTest({ sortBy: 'category_desc' }) as {
+  const categoryDesc = (await listTransactionsForTest({ sortBy: 'category_desc' })) as {
     transactions: Array<{ category: { name: string } }>;
   };
 
-  expect(descriptionAsc.transactions.map(transaction => transaction.description)).toEqual(['Alpha merchant', 'Beta merchant']);
-  expect(accountDesc.transactions.map(transaction => transaction.account.name)).toEqual(['Savings', 'Checking']);
-  expect(categoryDesc.transactions.map(transaction => transaction.category.name)).toEqual(['Travel', 'Groceries']);
+  expect(descriptionAsc.transactions.map((transaction) => transaction.description)).toEqual([
+    'Alpha merchant',
+    'Beta merchant',
+  ]);
+  expect(accountDesc.transactions.map((transaction) => transaction.account.name)).toEqual([
+    'Savings',
+    'Checking',
+  ]);
+  expect(categoryDesc.transactions.map((transaction) => transaction.category.name)).toEqual([
+    'Travel',
+    'Groceries',
+  ]);
 });
 
 test('app transactions endpoint filters uncategorized transactions by missing or explicit uncategorized category', async () => {
@@ -1872,10 +2638,9 @@ test('app transactions endpoint filters uncategorized transactions by missing or
 
   const body = await listTransactionsForTest({ categoryId: 'uncategorized' });
 
-  expect(body.transactions.map((transaction: { description: string }) => transaction.description)).toEqual([
-    'Explicit uncategorized',
-    'Missing category',
-  ]);
+  expect(
+    body.transactions.map((transaction: { description: string }) => transaction.description),
+  ).toEqual(['Explicit uncategorized', 'Missing category']);
   expect(body.transactions.map((transaction: { id: number }) => transaction.id)).toEqual([
     explicitUncategorizedId,
     missingCategoryId,
@@ -1901,7 +2666,9 @@ test('app transactions search includes notes', async () => {
 
   const body = await listTransactionsForTest({ search: 'reimbursable' });
 
-  expect(body.transactions.map((transaction: { notes: string }) => transaction.notes)).toEqual(['reimbursable team lunch']);
+  expect(body.transactions.map((transaction: { notes: string }) => transaction.notes)).toEqual([
+    'reimbursable team lunch',
+  ]);
 });
 
 test('app transactions search includes signed and unsigned amounts with optional thousands separators', async () => {
@@ -1937,17 +2704,21 @@ test('app transactions search includes signed and unsigned amounts with optional
   const unsignedWithSeparator = await listTransactionsForTest({ search: '1,234.56' });
   const signedNegative = await listTransactionsForTest({ search: '-1234.56' });
 
-  expect(unsignedWithoutSeparator.transactions.map((transaction: { description: string }) => transaction.description)).toEqual([
-    'Large income',
-    'Large expense',
-  ]);
-  expect(unsignedWithSeparator.transactions.map((transaction: { description: string }) => transaction.description)).toEqual([
-    'Large income',
-    'Large expense',
-  ]);
-  expect(signedNegative.transactions.map((transaction: { description: string }) => transaction.description)).toEqual([
-    'Large expense',
-  ]);
+  expect(
+    unsignedWithoutSeparator.transactions.map(
+      (transaction: { description: string }) => transaction.description,
+    ),
+  ).toEqual(['Large income', 'Large expense']);
+  expect(
+    unsignedWithSeparator.transactions.map(
+      (transaction: { description: string }) => transaction.description,
+    ),
+  ).toEqual(['Large income', 'Large expense']);
+  expect(
+    signedNegative.transactions.map(
+      (transaction: { description: string }) => transaction.description,
+    ),
+  ).toEqual(['Large expense']);
 });
 
 test('app transactions search requires all terms to match', async () => {
@@ -1981,10 +2752,9 @@ test('app transactions search requires all terms to match', async () => {
 
   const body = await listTransactionsForTest({ search: 'check 930.00' });
 
-  expect(body.transactions.map((transaction: { description: string }) => transaction.description)).toEqual([
-    'Online transfer',
-    'Check 1234',
-  ]);
+  expect(
+    body.transactions.map((transaction: { description: string }) => transaction.description),
+  ).toEqual(['Online transfer', 'Check 1234']);
 });
 
 test('app transactions search supports quoted phrase terms', async () => {
@@ -2011,9 +2781,9 @@ test('app transactions search supports quoted phrase terms', async () => {
 
   const body = await listTransactionsForTest({ search: '"customer withdrawal" 9000' });
 
-  expect(body.transactions.map((transaction: { description: string }) => transaction.description)).toEqual([
-    'Customer Withdrawal Image',
-  ]);
+  expect(
+    body.transactions.map((transaction: { description: string }) => transaction.description),
+  ).toEqual(['Customer Withdrawal Image']);
 });
 
 test('app transactions ignore legacy category and notes columns without annotations', async () => {
@@ -2066,7 +2836,9 @@ test('app transaction updates store category and notes only as annotations', asy
     notes: 'annotation-only',
   });
 
-  const transaction = getDb().prepare('SELECT categoryId, notes FROM transactions WHERE id = ?').get(transactionId) as {
+  const transaction = getDb()
+    .prepare('SELECT categoryId, notes FROM transactions WHERE id = ?')
+    .get(transactionId) as {
     categoryId: number | null;
     notes: string | null;
   };
@@ -2124,22 +2896,26 @@ test('transaction annotations survive transaction row rebuild', async () => {
 });
 
 test('app transactions endpoint reads and annotates ledger rows without legacy transaction rows', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Checking',
-    institution: 'Local Bank',
-    type: 'checking',
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Checking',
+      institution: 'Local Bank',
+      type: 'checking',
+    }),
+  );
   const categoryId = Number(insertRow('categories', { name: 'Dining', type: 'expense' }));
-  const transactionId = Number(insertLegacyFixture('transactions', {
-    accountId,
-    date: '2026-06-16',
-    amount: -12.34,
-    description: 'Ledger Cafe',
-    merchant: 'Cafe',
-    originalDescription: 'POS LEDGER CAFE',
-    type: 'expense',
-    status: 'cleared',
-  }));
+  const transactionId = Number(
+    insertLegacyFixture('transactions', {
+      accountId,
+      date: '2026-06-16',
+      amount: -12.34,
+      description: 'Ledger Cafe',
+      merchant: 'Cafe',
+      originalDescription: 'POS LEDGER CAFE',
+      type: 'expense',
+      status: 'cleared',
+    }),
+  );
 
   await updateTransactionForTest(transactionId, {
     categoryId,
@@ -2168,7 +2944,10 @@ test('app transactions endpoint reads and annotates ledger rows without legacy t
     amount: -12.34,
     notes: 'before legacy delete',
   });
-  expect((getDb().prepare('SELECT COUNT(*) AS count FROM transactions').get() as { count: number }).count).toBe(0);
+  expect(
+    (getDb().prepare('SELECT COUNT(*) AS count FROM transactions').get() as { count: number })
+      .count,
+  ).toBe(0);
 
   await updateTransactionForTest(ledgerOnly.transactions[0].id, {
     notes: 'ledger-only annotation',
@@ -2179,16 +2958,22 @@ test('app transactions endpoint reads and annotates ledger rows without legacy t
 });
 
 test('trpc transactions procedures read and categorize transactions', async () => {
-  const accountId = insertRow('accounts', { name: 'Checking', type: 'checking', currentBalance: 0 });
+  const accountId = insertRow('accounts', {
+    name: 'Checking',
+    type: 'checking',
+    currentBalance: 0,
+  });
   const categoryId = insertRow('categories', { name: 'Food', type: 'expense' });
-  const transactionId = Number(insertLegacyFixture('transactions', {
-    accountId,
-    date: '2026-06-02',
-    amount: -18.25,
-    description: 'TRPC Cafe',
-    type: 'expense',
-    status: 'cleared',
-  }));
+  const transactionId = Number(
+    insertLegacyFixture('transactions', {
+      accountId,
+      date: '2026-06-02',
+      amount: -18.25,
+      description: 'TRPC Cafe',
+      type: 'expense',
+      status: 'cleared',
+    }),
+  );
 
   const before = await caller.transactions.list({ search: 'TRPC Cafe', limit: 1 });
   expect(before.transactions).toHaveLength(1);
@@ -2208,7 +2993,11 @@ test('trpc transactions procedures read and categorize transactions', async () =
 });
 
 test('trpc transactions categorize matching applies to the full filtered result set', async () => {
-  const accountId = insertRow('accounts', { name: 'Checking', type: 'checking', currentBalance: 0 });
+  const accountId = insertRow('accounts', {
+    name: 'Checking',
+    type: 'checking',
+    currentBalance: 0,
+  });
   const categoryId = insertRow('categories', { name: 'Coffee', type: 'expense' });
   insertLegacyFixture('transactions', {
     accountId,
@@ -2256,7 +3045,9 @@ test('trpc transactions categorize matching applies to the full filtered result 
 
   const matching = await caller.transactions.list({ search: 'Bulk Coffee' });
   expect(matching.transactions).toHaveLength(2);
-  expect(matching.transactions.every(transaction => transaction.category?.id === categoryId)).toBe(true);
+  expect(
+    matching.transactions.every((transaction) => transaction.category?.id === categoryId),
+  ).toBe(true);
 
   const unmatched = await caller.transactions.list({ search: 'Unmatched Lunch' });
   expect(unmatched.transactions).toHaveLength(1);
@@ -2270,19 +3061,25 @@ test('trpc transactions categorize matching applies to the full filtered result 
 
   const restored = await caller.transactions.list({ search: 'Bulk Coffee' });
   expect(restored.transactions).toHaveLength(2);
-  expect(restored.transactions.every(transaction => transaction.category === null)).toBe(true);
+  expect(restored.transactions.every((transaction) => transaction.category === null)).toBe(true);
 });
 
 test('trpc transactions categorization coverage summarizes categorized count and money', async () => {
-  const accountId = Number(insertRow('accounts', { name: 'Checking', type: 'checking', currentBalance: 0 }));
-  const archivedAccountId = Number(insertRow('accounts', {
-    name: 'Archived Checking',
-    type: 'checking',
-    currentBalance: 0,
-    status: 'archived',
-  }));
+  const accountId = Number(
+    insertRow('accounts', { name: 'Checking', type: 'checking', currentBalance: 0 }),
+  );
+  const archivedAccountId = Number(
+    insertRow('accounts', {
+      name: 'Archived Checking',
+      type: 'checking',
+      currentBalance: 0,
+      status: 'archived',
+    }),
+  );
   const foodCategoryId = Number(insertRow('categories', { name: 'Food', type: 'expense' }));
-  const uncategorizedCategoryId = Number(insertRow('categories', { name: 'Uncategorized', type: 'expense' }));
+  const uncategorizedCategoryId = Number(
+    insertRow('categories', { name: 'Uncategorized', type: 'expense' }),
+  );
   const now = new Date().toISOString();
   const insertLedger = (ledgerTransactionId: string, amountCents: number, account = accountId) => {
     insertRow('ledgerTransactions', {
@@ -2337,7 +3134,9 @@ test('trpc transactions categorization coverage summarizes categorized count and
 test('trpc budgets and import profiles expose typed crud', async () => {
   const categoryId = Number(insertRow('categories', { name: 'Food', type: 'expense' }));
 
-  const set = await caller.budgets.set({ categoryId, month: '2026-06', amount: 450 }) as { id: number };
+  const set = (await caller.budgets.set({ categoryId, month: '2026-06', amount: 450 })) as {
+    id: number;
+  };
   const budgetId = Number(set.id);
   expect(Number.isFinite(budgetId)).toBe(true);
   expect(await caller.budgets.list({ month: '2026-06' })).toEqual([
@@ -2361,7 +3160,11 @@ test('trpc budgets and import profiles expose typed crud', async () => {
     lastAccountId: null,
   });
   expect(await caller.importProfiles.list()).toEqual([
-    expect.objectContaining({ id: profile.id, headerSignature: 'trpc-profile', profileName: 'TRPC Profile Updated' }),
+    expect.objectContaining({
+      id: profile.id,
+      headerSignature: 'trpc-profile',
+      profileName: 'TRPC Profile Updated',
+    }),
   ]);
 });
 
@@ -2376,15 +3179,19 @@ test('trpc budgeting report computes period actuals and variance on the backend'
     institution: 'Vanguard',
     type: 'investment',
   });
-  const diningId = Number(insertRow('categories', {
-    name: 'Dining',
-    type: 'expense',
-    color: '#f97316',
-  }));
-  const incomeId = Number(insertRow('categories', {
-    name: 'Income',
-    type: 'income',
-  }));
+  const diningId = Number(
+    insertRow('categories', {
+      name: 'Dining',
+      type: 'expense',
+      color: '#f97316',
+    }),
+  );
+  const incomeId = Number(
+    insertRow('categories', {
+      name: 'Income',
+      type: 'income',
+    }),
+  );
   await caller.budgets.set({ categoryId: diningId, month: '2026-06', amount: 100 });
 
   const cafeId = insertLegacyFixture('transactions', {
@@ -2432,23 +3239,27 @@ test('trpc budgeting report computes period actuals and variance on the backend'
     unplannedCount: 0,
     overCount: 1,
   });
-  expect(report.rows).toContainEqual(expect.objectContaining({
-    actual: 126,
-    budgetAmount: 100,
-    variance: 26,
-    status: 'over',
-    category: expect.objectContaining({ id: diningId, name: 'Dining' }),
-  }));
+  expect(report.rows).toContainEqual(
+    expect.objectContaining({
+      actual: 126,
+      budgetAmount: 100,
+      variance: 26,
+      status: 'over',
+      category: expect.objectContaining({ id: diningId, name: 'Dining' }),
+    }),
+  );
 });
 
 test('ai categorization apply writes transaction annotations by ledger id', async () => {
   const oldCategoryId = Number(insertRow('categories', { name: 'Uncategorized', type: 'expense' }));
   const categoryId = Number(insertRow('categories', { name: 'Dining', type: 'expense' }));
-  const accountId = Number(insertRow('accounts', {
-    name: 'AI Test Checking',
-    type: 'checking',
-    currentBalance: 0,
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'AI Test Checking',
+      type: 'checking',
+      currentBalance: 0,
+    }),
+  );
   insertRow('ledgerTransactions', {
     ledgerTransactionId: 'txn_ai_apply',
     accountId,
@@ -2482,7 +3293,9 @@ test('ai categorization apply writes transaction annotations by ledger id', asyn
     },
   });
   expect(
-    getDb().prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId = ?').get('txn_ai_apply')
+    getDb()
+      .prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId = ?')
+      .get('txn_ai_apply'),
   ).toMatchObject({ categoryId });
 
   expect(result.undoOperation).not.toBeNull();
@@ -2490,18 +3303,22 @@ test('ai categorization apply writes transaction annotations by ledger id', asyn
     undoOperationId: result.undoOperation!.id,
   });
   expect(
-    getDb().prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId = ?').get('txn_ai_apply')
+    getDb()
+      .prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId = ?')
+      .get('txn_ai_apply'),
   ).toMatchObject({ categoryId: oldCategoryId });
 });
 
 test('ai categorization apply reports skipped already categorized transactions', async () => {
   const oldCategoryId = Number(insertRow('categories', { name: 'Old Category', type: 'expense' }));
   const newCategoryId = Number(insertRow('categories', { name: 'New Category', type: 'expense' }));
-  const accountId = Number(insertRow('accounts', {
-    name: 'AI Test Checking',
-    type: 'checking',
-    currentBalance: 0,
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'AI Test Checking',
+      type: 'checking',
+      currentBalance: 0,
+    }),
+  );
   insertRow('ledgerTransactions', {
     ledgerTransactionId: 'txn_ai_skip',
     accountId,
@@ -2530,19 +3347,25 @@ test('ai categorization apply reports skipped already categorized transactions',
     skipped: [{ transactionId: 'txn_ai_skip', reason: 'Already categorized' }],
   });
   expect(
-    getDb().prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId = ?').get('txn_ai_skip')
+    getDb()
+      .prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId = ?')
+      .get('txn_ai_skip'),
   ).toMatchObject({ categoryId: oldCategoryId });
 });
 
 test('ai categorization preview includes both forms of uncategorized transactions', async () => {
   const previousOpenAiKey = process.env.OPENAI_API_KEY;
   process.env.OPENAI_API_KEY = '';
-  const uncategorizedId = Number(insertRow('categories', { name: 'Uncategorized', type: 'expense' }));
-  const accountId = Number(insertRow('accounts', {
-    name: 'AI Review Checking',
-    type: 'checking',
-    currentBalance: 0,
-  }));
+  const uncategorizedId = Number(
+    insertRow('categories', { name: 'Uncategorized', type: 'expense' }),
+  );
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'AI Review Checking',
+      type: 'checking',
+      currentBalance: 0,
+    }),
+  );
   insertRow('ledgerTransactions', {
     ledgerTransactionId: 'txn_ai_empty',
     accountId,
@@ -2593,11 +3416,13 @@ test('ai categorization preview includes both forms of uncategorized transaction
 test('ai categorization auto-apply reports missing server key without categorizing', async () => {
   const previousOpenAiKey = process.env.OPENAI_API_KEY;
   process.env.OPENAI_API_KEY = '';
-  const accountId = Number(insertRow('accounts', {
-    name: 'AI Auto Checking',
-    type: 'checking',
-    currentBalance: 0,
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'AI Auto Checking',
+      type: 'checking',
+      currentBalance: 0,
+    }),
+  );
   insertRow('ledgerTransactions', {
     ledgerTransactionId: 'txn_ai_auto_no_key',
     accountId,
@@ -2625,7 +3450,9 @@ test('ai categorization auto-apply reports missing server key without categorizi
       undoOperation: null,
     });
     expect(
-      getDb().prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId = ?').get('txn_ai_auto_no_key')
+      getDb()
+        .prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId = ?')
+        .get('txn_ai_auto_no_key'),
     ).toBeNull();
   } finally {
     if (previousOpenAiKey === undefined) {
@@ -2639,11 +3466,13 @@ test('ai categorization auto-apply reports missing server key without categorizi
 test('ai categorization auto-apply job reports progress without blocking on missing key', async () => {
   const previousOpenAiKey = process.env.OPENAI_API_KEY;
   process.env.OPENAI_API_KEY = '';
-  const accountId = Number(insertRow('accounts', {
-    name: 'AI Auto Job Checking',
-    type: 'checking',
-    currentBalance: 0,
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'AI Auto Job Checking',
+      type: 'checking',
+      currentBalance: 0,
+    }),
+  );
   insertRow('ledgerTransactions', {
     ledgerTransactionId: 'txn_ai_auto_job_no_key',
     accountId,
@@ -2663,7 +3492,7 @@ test('ai categorization auto-apply job reports progress without blocking on miss
 
     let finalJob = job;
     for (let attempt = 0; attempt < 10 && finalJob.status !== 'completed'; attempt += 1) {
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
       finalJob = await caller.transactions.autoApplyAiCategorizationJob({ jobId: job.id });
     }
 
@@ -2748,67 +3577,169 @@ test('ai categorization groups uncategorized transactions by merchant before mod
 
 test('check review groups use signed cents and account identity without collapsing occurrences', () => {
   const rows = [-7500, -7500, -7501, -150000, 7500, -7500].map((amountCents, index) => ({
-    id: index + 1, ledgerTransactionId: `amount-check-${index}`, accountId: index === 5 ? 2 : 1,
-    accountName: 'Same name', accountInstitution: 'Bank', accountType: 'checking', date: '2026-06-01',
-    amountCents, description: `Check ${index + 1}*`, merchant: `Check ${index + 1}*`,
-    originalDescription: null, originalCategory: null, transactionKind: 'activity',
+    id: index + 1,
+    ledgerTransactionId: `amount-check-${index}`,
+    accountId: index === 5 ? 2 : 1,
+    accountName: 'Same name',
+    accountInstitution: 'Bank',
+    accountType: 'checking',
+    date: '2026-06-01',
+    amountCents,
+    description: `Check ${index + 1}*`,
+    merchant: `Check ${index + 1}*`,
+    originalDescription: null,
+    originalCategory: null,
+    transactionKind: 'activity',
   }));
   const groups = groupTransactionsForAiCategorization(rows);
   expect(groups).toHaveLength(5);
   expect(groups[0]!.transactionCount).toBe(2);
   expect(groups[0]!.merchantName).toBe('Checks · $75.00');
-  expect(groups.flatMap(group => group.transactionIds).sort()).toEqual(rows.map(row => row.ledgerTransactionId).sort());
-  expect(groups.some(group => group.merchantName === 'Checks · +$75.00')).toBe(true);
-  expect(groupTransactionsForAiCategorization(rows.map(row => ({ ...row, accountId: undefined })))).toHaveLength(6);
+  expect(groups.flatMap((group) => group.transactionIds).sort()).toEqual(
+    rows.map((row) => row.ledgerTransactionId).sort(),
+  );
+  expect(groups.some((group) => group.merchantName === 'Checks · +$75.00')).toBe(true);
+  expect(
+    groupTransactionsForAiCategorization(rows.map((row) => ({ ...row, accountId: undefined }))),
+  ).toHaveLength(6);
 });
 
 test('history works without an AI key and automatic application remains undoable', async () => {
   const previous = process.env.OPENAI_API_KEY;
   delete process.env.OPENAI_API_KEY;
   try {
-    const accountId = Number(insertRow('accounts', {name:'Checking',type:'checking'}));
-    const categoryId = Number(insertRow('categories', {name:'Food',type:'expense'}));
-    for (const id of ['history-old','history-new']) insertRow('ledgerTransactions', {
-      ledgerTransactionId:id,accountId,date:'2026-06-01',amountCents:-1000,
-      description:'Specific Coffee',merchant:'Specific Coffee',type:'expense',transactionKind:'activity',
-    });
-    upsertTransactionAnnotation('history-old', {categoryId});
+    const accountId = Number(insertRow('accounts', { name: 'Checking', type: 'checking' }));
+    const categoryId = Number(insertRow('categories', { name: 'Food', type: 'expense' }));
+    for (const id of ['history-old', 'history-new'])
+      insertRow('ledgerTransactions', {
+        ledgerTransactionId: id,
+        accountId,
+        date: '2026-06-01',
+        amountCents: -1000,
+        description: 'Specific Coffee',
+        merchant: 'Specific Coffee',
+        type: 'expense',
+        transactionKind: 'activity',
+      });
+    upsertTransactionAnnotation('history-old', { categoryId });
     const preview = await caller.transactions.aiCategorizationPreview();
-    expect(preview.suggestions[0]).toMatchObject({source:'history',categoryId});
-    expect(getDb().prepare("SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='history-new'").get()).toBeNull();
+    expect(preview.suggestions[0]).toMatchObject({ source: 'history', categoryId });
+    expect(
+      getDb()
+        .prepare(
+          "SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='history-new'",
+        )
+        .get(),
+    ).toBeNull();
     const result = await caller.transactions.autoApplyAiCategorization({});
     expect(result.appliedCount).toBe(1);
     expect(result.undoOperation).not.toBeNull();
-    expect(getDb().prepare("SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='history-new'").get()?.categoryId).toBe(categoryId);
-    await caller.transactions.restoreCategories({undoOperationId:result.undoOperation!.id});
-    expect(getDb().prepare("SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='history-new'").get()?.categoryId ?? null).toBeNull();
-    expect(getDb().prepare("SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='history-old'").get()?.categoryId).toBe(categoryId);
-  } finally { if(previous === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY=previous; }
+    expect(
+      getDb()
+        .prepare(
+          "SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='history-new'",
+        )
+        .get()?.categoryId,
+    ).toBe(categoryId);
+    await caller.transactions.restoreCategories({ undoOperationId: result.undoOperation!.id });
+    expect(
+      getDb()
+        .prepare(
+          "SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='history-new'",
+        )
+        .get()?.categoryId ?? null,
+    ).toBeNull();
+    expect(
+      getDb()
+        .prepare(
+          "SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='history-old'",
+        )
+        .get()?.categoryId,
+    ).toBe(categoryId);
+  } finally {
+    if (previous === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previous;
+  }
 });
 
 test('a repeated check amount is not sufficient evidence to inherit its purpose', () => {
-  const row = { id: 1, ledgerTransactionId: 'new-check', accountId: 1, accountName: 'Checking', accountInstitution: 'Bank', accountType: 'checking', date: '2026-06-01', amountCents: -7500, description: 'Check 123', merchant: 'Check 123', originalDescription: null, originalCategory: null, transactionKind: 'activity' };
-  const categories = [{ id: 1, name: 'Education', type: 'expense' }, { id: 2, name: 'Housing', type: 'expense' }] as Parameters<typeof matchHistoricalCategories>[1];
+  const row = {
+    id: 1,
+    ledgerTransactionId: 'new-check',
+    accountId: 1,
+    accountName: 'Checking',
+    accountInstitution: 'Bank',
+    accountType: 'checking',
+    date: '2026-06-01',
+    amountCents: -7500,
+    description: 'Check 123',
+    merchant: 'Check 123',
+    originalDescription: null,
+    originalCategory: null,
+    transactionKind: 'activity',
+  };
+  const categories = [
+    { id: 1, name: 'Education', type: 'expense' },
+    { id: 2, name: 'Housing', type: 'expense' },
+  ] as Parameters<typeof matchHistoricalCategories>[1];
   const groups = groupTransactionsForAiCategorization([row]);
-  const history = [{ ...row, ledgerTransactionId: 'old-check', merchant: 'Check 122', categoryId: 1 }];
+  const history = [
+    { ...row, ledgerTransactionId: 'old-check', merchant: 'Check 122', categoryId: 1 },
+  ];
   const matched = matchHistoricalCategories(groups, categories, history);
   expect(matched.suggestions).toHaveLength(0);
   expect(matched.questions).toHaveLength(1);
   expect(matched.unmatched).toHaveLength(0);
-  for (const different of [{accountId:2}, {amountCents:-7501}, {amountCents:7500}]) {
-    expect(matchHistoricalCategories(groups, categories, history.map(r=>({...r,...different}))).suggestions).toHaveLength(0);
+  for (const different of [{ accountId: 2 }, { amountCents: -7501 }, { amountCents: 7500 }]) {
+    expect(
+      matchHistoricalCategories(
+        groups,
+        categories,
+        history.map((r) => ({ ...r, ...different })),
+      ).suggestions,
+    ).toHaveLength(0);
   }
-  const conflict = matchHistoricalCategories(groups, categories, [...history, {...history[0]!, categoryId:2}]);
+  const conflict = matchHistoricalCategories(groups, categories, [
+    ...history,
+    { ...history[0]!, categoryId: 2 },
+  ]);
   expect(conflict.questions).toHaveLength(1);
   expect(conflict.unmatched).toHaveLength(0);
   expect(conflict.suggestions).toHaveLength(0);
 });
 
 test('bank-decorated processors cannot inherit rent or gift labels from history', () => {
-  for (const text of ['Venmo Payment Annie Weng', 'VENMO DES:PAYMENT ID:123 INDN:TEST WEB', 'Zelle payment from Test', 'PAYPAL DES:INST XFER ID:123', 'Cash App transfer', 'Mobile deposit']) {
-    const row = { id:1, ledgerTransactionId:'new', accountId:1, accountName:'Checking', accountInstitution:'Bank', accountType:'checking', date:'2026-06-01', amountCents:-1000, description:text, merchant:text, originalDescription:null, originalCategory:null, transactionKind:'activity' };
-    const categories = [{id:1,name:'Housing',type:'expense'}] as Parameters<typeof matchHistoricalCategories>[1];
-    const result = matchHistoricalCategories(groupTransactionsForAiCategorization([row]), categories, [{...row,categoryId:1}]);
+  for (const text of [
+    'Venmo Payment Annie Weng',
+    'VENMO DES:PAYMENT ID:123 INDN:TEST WEB',
+    'Zelle payment from Test',
+    'PAYPAL DES:INST XFER ID:123',
+    'Cash App transfer',
+    'Mobile deposit',
+  ]) {
+    const row = {
+      id: 1,
+      ledgerTransactionId: 'new',
+      accountId: 1,
+      accountName: 'Checking',
+      accountInstitution: 'Bank',
+      accountType: 'checking',
+      date: '2026-06-01',
+      amountCents: -1000,
+      description: text,
+      merchant: text,
+      originalDescription: null,
+      originalCategory: null,
+      transactionKind: 'activity',
+    };
+    const categories = [{ id: 1, name: 'Housing', type: 'expense' }] as Parameters<
+      typeof matchHistoricalCategories
+    >[1];
+    const result = matchHistoricalCategories(
+      groupTransactionsForAiCategorization([row]),
+      categories,
+      [{ ...row, categoryId: 1 }],
+    );
     expect(result.suggestions).toHaveLength(0);
     expect(result.questions).toHaveLength(1);
     expect(result.unmatched).toHaveLength(0);
@@ -2819,43 +3750,126 @@ test('AI review includes explicit Uncategorized while preserving saved categorie
   const previous = process.env.OPENAI_API_KEY;
   delete process.env.OPENAI_API_KEY;
   try {
-    const accountId = Number(insertRow('accounts', {name:'Checking',type:'checking'}));
-    const categoryId = Number(insertRow('categories', {name:'Food',type:'expense'}));
-    const unknownId = Number(insertRow('categories', {name:'Uncategorized',type:'expense'}));
-    for (const id of ['known','explicit','missing']) insertRow('ledgerTransactions', {ledgerTransactionId:id,accountId,date:'2026-06-01',amountCents:-1000,description:'Specific Coffee',merchant:'Specific Coffee',transactionKind:'activity'});
-    upsertTransactionAnnotation('known', {categoryId});
-    upsertTransactionAnnotation('explicit', {categoryId:unknownId,notes:'Keep note'});
-    const before = getDb().prepare('SELECT * FROM transactionAnnotations ORDER BY ledgerTransactionId').all();
+    const accountId = Number(insertRow('accounts', { name: 'Checking', type: 'checking' }));
+    const categoryId = Number(insertRow('categories', { name: 'Food', type: 'expense' }));
+    const unknownId = Number(insertRow('categories', { name: 'Uncategorized', type: 'expense' }));
+    for (const id of ['known', 'explicit', 'missing'])
+      insertRow('ledgerTransactions', {
+        ledgerTransactionId: id,
+        accountId,
+        date: '2026-06-01',
+        amountCents: -1000,
+        description: 'Specific Coffee',
+        merchant: 'Specific Coffee',
+        transactionKind: 'activity',
+      });
+    upsertTransactionAnnotation('known', { categoryId });
+    upsertTransactionAnnotation('explicit', { categoryId: unknownId, notes: 'Keep note' });
+    const before = getDb()
+      .prepare('SELECT * FROM transactionAnnotations ORDER BY ledgerTransactionId')
+      .all();
     const preview = await caller.transactions.aiCategorizationPreview();
     expect(preview.scanned).toBe(2);
-    expect(preview.suggestions[0]?.transactionIds.sort()).toEqual(['explicit','missing']);
-    expect(getDb().prepare('SELECT * FROM transactionAnnotations ORDER BY ledgerTransactionId').all()).toEqual(before);
+    expect(preview.suggestions[0]?.transactionIds.sort()).toEqual(['explicit', 'missing']);
+    expect(
+      getDb().prepare('SELECT * FROM transactionAnnotations ORDER BY ledgerTransactionId').all(),
+    ).toEqual(before);
     const applied = await caller.transactions.autoApplyAiCategorization({});
     expect(applied.appliedCount).toBe(2);
-    expect(getDb().prepare("SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId='explicit'").get()?.notes).toBe('Keep note');
-    await caller.transactions.restoreCategories({undoOperationId:applied.undoOperation!.id});
-    expect(getDb().prepare("SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='explicit'").get()?.categoryId).toBe(unknownId);
-    expect(getDb().prepare("SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='missing'").get()?.categoryId ?? null).toBeNull();
-  } finally { if (previous === undefined) delete process.env.OPENAI_API_KEY; else process.env.OPENAI_API_KEY = previous; }
+    expect(
+      getDb()
+        .prepare("SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId='explicit'")
+        .get()?.notes,
+    ).toBe('Keep note');
+    await caller.transactions.restoreCategories({ undoOperationId: applied.undoOperation!.id });
+    expect(
+      getDb()
+        .prepare(
+          "SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='explicit'",
+        )
+        .get()?.categoryId,
+    ).toBe(unknownId);
+    expect(
+      getDb()
+        .prepare(
+          "SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='missing'",
+        )
+        .get()?.categoryId ?? null,
+    ).toBeNull();
+  } finally {
+    if (previous === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = previous;
+  }
 });
 
 test('historical categories never imply internal transfer pairs or generic processor payees', () => {
-  const row = { id:1, ledgerTransactionId:'new', accountId:1, accountName:'Checking', accountInstitution:'Bank', accountType:'checking', date:'2026-06-01', amountCents:-1000, description:'Venmo', merchant:'Venmo', originalDescription:null, originalCategory:null, transactionKind:'activity' };
-  const categories = [{id:1,name:'Food',type:'expense'}, {id:2,name:'Internal Transfer',type:'internal_transfer'}] as Parameters<typeof matchHistoricalCategories>[1];
-  expect(matchHistoricalCategories(groupTransactionsForAiCategorization([row]),categories,[{...row,categoryId:1}]).suggestions).toHaveLength(0);
-  const merchant = {...row,merchant:'Specific merchant'};
-  expect(matchHistoricalCategories(groupTransactionsForAiCategorization([merchant]),categories,[{...merchant,categoryId:2}]).suggestions).toHaveLength(0);
+  const row = {
+    id: 1,
+    ledgerTransactionId: 'new',
+    accountId: 1,
+    accountName: 'Checking',
+    accountInstitution: 'Bank',
+    accountType: 'checking',
+    date: '2026-06-01',
+    amountCents: -1000,
+    description: 'Venmo',
+    merchant: 'Venmo',
+    originalDescription: null,
+    originalCategory: null,
+    transactionKind: 'activity',
+  };
+  const categories = [
+    { id: 1, name: 'Food', type: 'expense' },
+    { id: 2, name: 'Internal Transfer', type: 'internal_transfer' },
+  ] as Parameters<typeof matchHistoricalCategories>[1];
+  expect(
+    matchHistoricalCategories(groupTransactionsForAiCategorization([row]), categories, [
+      { ...row, categoryId: 1 },
+    ]).suggestions,
+  ).toHaveLength(0);
+  const merchant = { ...row, merchant: 'Specific merchant' };
+  expect(
+    matchHistoricalCategories(groupTransactionsForAiCategorization([merchant]), categories, [
+      { ...merchant, categoryId: 2 },
+    ]).suggestions,
+  ).toHaveLength(0);
 });
 
 test('history reuses confirmed income subcategories, not legacy broad income', () => {
-  const row = { id: 1, ledgerTransactionId: 'new-pay', accountId: 1, accountName: 'Checking', accountInstitution: 'Bank', accountType: 'checking', date: '2026-06-01', amountCents: 150000, description: 'Example employer', merchant: 'Example employer', originalDescription: null, originalCategory: null, transactionKind: 'activity' };
-  const categories = [{ id: 1, name: 'Income', type: 'income', parentId: null }, { id: 2, name: 'Payroll', type: 'income', parentId: 1 }, { id: 3, name: 'Bonuses', type: 'income', parentId: 1 }] as Parameters<typeof matchHistoricalCategories>[1];
+  const row = {
+    id: 1,
+    ledgerTransactionId: 'new-pay',
+    accountId: 1,
+    accountName: 'Checking',
+    accountInstitution: 'Bank',
+    accountType: 'checking',
+    date: '2026-06-01',
+    amountCents: 150000,
+    description: 'Example employer',
+    merchant: 'Example employer',
+    originalDescription: null,
+    originalCategory: null,
+    transactionKind: 'activity',
+  };
+  const categories = [
+    { id: 1, name: 'Income', type: 'income', parentId: null },
+    { id: 2, name: 'Payroll', type: 'income', parentId: 1 },
+    { id: 3, name: 'Bonuses', type: 'income', parentId: 1 },
+  ] as Parameters<typeof matchHistoricalCategories>[1];
   const groups = groupTransactionsForAiCategorization([row]);
   const broad = { ...row, ledgerTransactionId: 'old-income', categoryId: 1 };
-  expect(matchHistoricalCategories(groups, categories, [broad])).toMatchObject({ suggestions: [], questions: [], unmatched: groups });
+  expect(matchHistoricalCategories(groups, categories, [broad])).toMatchObject({
+    suggestions: [],
+    questions: [],
+    unmatched: groups,
+  });
   const payroll = { ...row, ledgerTransactionId: 'old-payroll', categoryId: 2 };
-  expect(matchHistoricalCategories(groups, categories, [broad, payroll]).suggestions[0]).toMatchObject({ source: 'history', categoryId: 2 });
-  expect(matchHistoricalCategories(groups, categories, [payroll, { ...row, categoryId: 3 }]).questions).toHaveLength(1);
+  expect(
+    matchHistoricalCategories(groups, categories, [broad, payroll]).suggestions[0],
+  ).toMatchObject({ source: 'history', categoryId: 2 });
+  expect(
+    matchHistoricalCategories(groups, categories, [payroll, { ...row, categoryId: 3 }]).questions,
+  ).toHaveLength(1);
 });
 
 test('transaction detail and scoped review share active ledger rows; category edits are backed up and guarded', async () => {
@@ -2863,80 +3877,181 @@ test('transaction detail and scoped review share active ledger rows; category ed
   const foodId = Number(insertRow('categories', { name: 'Food', type: 'expense' }));
   const shoppingId = Number(insertRow('categories', { name: 'Shopping', type: 'expense' }));
   for (const [index, amountCents] of [-1000, -1000, 1000].entries()) {
-    insertRow('ledgerTransactions', { ledgerTransactionId: `related-${index}`, accountId, date: '2026-10-01', amountCents,
-      description: 'Coffee Shop', merchant: 'Coffee Shop', transactionKind: 'activity', originalDescription: 'Original evidence' });
-    upsertTransactionAnnotation(`related-${index}`, { categoryId: index === 0 ? foodId : shoppingId, notes: 'Keep note' });
+    insertRow('ledgerTransactions', {
+      ledgerTransactionId: `related-${index}`,
+      accountId,
+      date: '2026-10-01',
+      amountCents,
+      description: 'Coffee Shop',
+      merchant: 'Coffee Shop',
+      transactionKind: 'activity',
+      originalDescription: 'Original evidence',
+    });
+    upsertTransactionAnnotation(`related-${index}`, {
+      categoryId: index === 0 ? foodId : shoppingId,
+      notes: 'Keep note',
+    });
   }
   const detail = await caller.transactions.details({ ledgerTransactionId: 'related-0' });
-  expect(detail.related.map(row => row.ledgerTransactionId)).toEqual(['related-1']);
+  expect(detail.related.map((row) => row.ledgerTransactionId)).toEqual(['related-1']);
   expect(detail.categoryNames).toEqual(['Food', 'Shopping']);
   expect(detail.transaction.originalDescription).toBe('Original evidence');
-  const report = await caller.analytics.report({ accountIds: [accountId], startDate: '2026-10-01', endDate: '2026-10-02' });
+  const report = await caller.analytics.report({
+    accountIds: [accountId],
+    startDate: '2026-10-01',
+    endDate: '2026-10-02',
+  });
   expect(report.worthReviewing.groups).toHaveLength(1);
   expect(report.worthReviewing.groups[0]?.transactions).toHaveLength(2);
   expect((await caller.analytics.report({ accountIds: [] })).worthReviewing.groups).toEqual([]);
-  expect((await caller.analytics.report({ startDate: '2026-11-01' })).worthReviewing.groups).toEqual([]);
+  expect(
+    (await caller.analytics.report({ startDate: '2026-11-01' })).worthReviewing.groups,
+  ).toEqual([]);
   const beforeLedger = getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all();
-  const result = await caller.transactions.applyReviewedCategories({ label: 'Reviewed coffee', changes: [{ ...detail.review, categoryId: shoppingId }] });
+  const result = await caller.transactions.applyReviewedCategories({
+    label: 'Reviewed coffee',
+    changes: [{ ...detail.review, categoryId: shoppingId }],
+  });
   expect(result.count).toBe(1);
   expect(result.undoOperation?.count).toBe(1);
   expect((await caller.backups.list()).backups.length).toBeGreaterThan(0);
-  expect(getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all()).toEqual(beforeLedger);
-  expect(getDb().prepare('SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId = ?').get('related-0')?.notes).toBe('Keep note');
-  await expect(caller.transactions.applyReviewedCategories({ label: 'Stale', changes: [{ ...detail.review, categoryId: foodId }] })).rejects.toThrow('changed');
+  expect(getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all()).toEqual(
+    beforeLedger,
+  );
+  expect(
+    getDb()
+      .prepare('SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId = ?')
+      .get('related-0')?.notes,
+  ).toBe('Keep note');
+  await expect(
+    caller.transactions.applyReviewedCategories({
+      label: 'Stale',
+      changes: [{ ...detail.review, categoryId: foodId }],
+    }),
+  ).rejects.toThrow('changed');
   await caller.transactions.restoreCategories({ undoOperationId: result.undoOperation!.id });
-  expect((await caller.transactions.details({ ledgerTransactionId: 'related-0' })).selected.category?.id).toBe(foodId);
-  const cleared = await caller.transactions.applyReviewedCategories({ label: 'Clear category', changes: [{ ...detail.review, categoryId: null }] });
-  expect((await caller.transactions.details({ ledgerTransactionId: 'related-0' })).selected.category).toBeNull();
+  expect(
+    (await caller.transactions.details({ ledgerTransactionId: 'related-0' })).selected.category?.id,
+  ).toBe(foodId);
+  const cleared = await caller.transactions.applyReviewedCategories({
+    label: 'Clear category',
+    changes: [{ ...detail.review, categoryId: null }],
+  });
+  expect(
+    (await caller.transactions.details({ ledgerTransactionId: 'related-0' })).selected.category,
+  ).toBeNull();
   await caller.transactions.restoreCategories({ undoOperationId: cleared.undoOperation!.id });
 });
 
 test('conservative category cleanup previews only evidenced unknowns and applies as one reversible annotation batch', async () => {
   const { previewConservativeCategoryCleanup } = await import('./categoryCleanup');
-  const checking = Number(insertRow('accounts', {name:'Checking',type:'checking',last4:'1111'}));
-  const savings = Number(insertRow('accounts', {name:'Savings',type:'savings',last4:'2222'}));
-  const brokerage = Number(insertRow('accounts', {name:'Brokerage',type:'investment'}));
-  const food = Number(insertRow('categories', {name:'Food',type:'expense'}));
-  const unknown = Number(insertRow('categories', {name:'Uncategorized',type:'expense'}));
-  const investment = Number(insertRow('categories', {name:'Investment',type:'investment'}));
-  const payroll = Number(insertRow('categories', {name:'Payroll',type:'income'}));
-  const transfer = Number(insertRow('categories', {name:'Transfer',type:'transfer'}));
-  const put = (id: string, description: string, amountCents: number, accountId = checking, categoryId: number | null = null) => {
-    insertRow('ledgerTransactions', {ledgerTransactionId:id,accountId,date:'2026-10-01',amountCents,description,merchant:description,transactionKind:'activity'});
-    if (categoryId !== null) upsertTransactionAnnotation(id, {categoryId,notes:'Keep note'});
+  const checking = Number(
+    insertRow('accounts', { name: 'Checking', type: 'checking', last4: '1111' }),
+  );
+  const savings = Number(
+    insertRow('accounts', { name: 'Savings', type: 'savings', last4: '2222' }),
+  );
+  const brokerage = Number(insertRow('accounts', { name: 'Brokerage', type: 'investment' }));
+  const food = Number(insertRow('categories', { name: 'Food', type: 'expense' }));
+  const unknown = Number(insertRow('categories', { name: 'Uncategorized', type: 'expense' }));
+  const investment = Number(insertRow('categories', { name: 'Investment', type: 'investment' }));
+  const payroll = Number(insertRow('categories', { name: 'Payroll', type: 'income' }));
+  const transfer = Number(insertRow('categories', { name: 'Transfer', type: 'transfer' }));
+  const put = (
+    id: string,
+    description: string,
+    amountCents: number,
+    accountId = checking,
+    categoryId: number | null = null,
+  ) => {
+    insertRow('ledgerTransactions', {
+      ledgerTransactionId: id,
+      accountId,
+      date: '2026-10-01',
+      amountCents,
+      description,
+      merchant: description,
+      transactionKind: 'activity',
+    });
+    if (categoryId !== null) upsertTransactionAnnotation(id, { categoryId, notes: 'Keep note' });
   };
-  put('buy-one','VTSAX Buy Cash 1.000 100.00',-10000,brokerage);
-  put('buy-two','VTSAX Buy Cash 1.000 100.00',-10000,brokerage,unknown);
-  put('buy-saved','VTSAX Buy Cash 1.000 100.00',-10000,brokerage,food);
-  put('tax','JOURNALED RSU US FEDERAL (Cash)',-1000,brokerage);
-  put('fee','Service fee',-100,brokerage);
-  put('fee-old','Service fee',-100,brokerage,investment);
-  put('coffee-old','Specific Coffee',-500,checking,food);
-  put('coffee','Specific Coffee',-500);
-  put('venmo-old','Venmo Payment Test',-500,checking,food);
-  put('venmo','Venmo Payment Test',-500,checking,unknown);
-  put('check-old','Check 123',-7500,checking,food);
-  put('check','Check 124',-7500);
-  put('payroll','Employer PAYROLL123',90000);
-  put('p2p-payroll','Zelle payroll reimbursement',90000);
-  put('transfer-out','Online Banking transfer to CHK 1111 Confirmation# ABC123',-10000,savings);
-  put('transfer-in','Online Banking transfer from SAV 2222 Confirmation# ABC123',10000);
-  put('unpaired-transfer','Online Banking transfer to CHK 1111 Confirmation# OTHER123',-10000,savings);
+  put('buy-one', 'VTSAX Buy Cash 1.000 100.00', -10000, brokerage);
+  put('buy-two', 'VTSAX Buy Cash 1.000 100.00', -10000, brokerage, unknown);
+  put('buy-saved', 'VTSAX Buy Cash 1.000 100.00', -10000, brokerage, food);
+  put('tax', 'JOURNALED RSU US FEDERAL (Cash)', -1000, brokerage);
+  put('fee', 'Service fee', -100, brokerage);
+  put('fee-old', 'Service fee', -100, brokerage, investment);
+  put('coffee-old', 'Specific Coffee', -500, checking, food);
+  put('coffee', 'Specific Coffee', -500);
+  put('venmo-old', 'Venmo Payment Test', -500, checking, food);
+  put('venmo', 'Venmo Payment Test', -500, checking, unknown);
+  put('check-old', 'Check 123', -7500, checking, food);
+  put('check', 'Check 124', -7500);
+  put('payroll', 'Employer PAYROLL123', 90000);
+  put('p2p-payroll', 'Zelle payroll reimbursement', 90000);
+  put('transfer-out', 'Online Banking transfer to CHK 1111 Confirmation# ABC123', -10000, savings);
+  put('transfer-in', 'Online Banking transfer from SAV 2222 Confirmation# ABC123', 10000);
+  put(
+    'unpaired-transfer',
+    'Online Banking transfer to CHK 1111 Confirmation# OTHER123',
+    -10000,
+    savings,
+  );
   const facts = getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all();
-  const annotations = getDb().prepare('SELECT ledgerTransactionId,categoryId,notes FROM transactionAnnotations ORDER BY ledgerTransactionId').all();
+  const annotations = getDb()
+    .prepare(
+      'SELECT ledgerTransactionId,categoryId,notes FROM transactionAnnotations ORDER BY ledgerTransactionId',
+    )
+    .all();
   const preview = previewConservativeCategoryCleanup();
-  expect(preview.changes.map(row=>row.transactionId).sort()).toEqual(['buy-one','buy-two','coffee','payroll','transfer-in','transfer-out']);
-  expect(preview.candidates.find(row=>row.transaction.ledgerTransactionId==='payroll')?.categoryId).toBe(payroll);
-  expect(preview.candidates.find(row=>row.transaction.ledgerTransactionId==='transfer-out')?.categoryId).toBe(transfer);
-  expect(getDb().prepare('SELECT ledgerTransactionId,categoryId,notes FROM transactionAnnotations ORDER BY ledgerTransactionId').all()).toEqual(annotations);
-  const result = await caller.transactions.applyReviewedCategories({label:'Conservative cleanup',changes:preview.changes});
+  expect(preview.changes.map((row) => row.transactionId).sort()).toEqual([
+    'buy-one',
+    'buy-two',
+    'coffee',
+    'payroll',
+    'transfer-in',
+    'transfer-out',
+  ]);
+  expect(
+    preview.candidates.find((row) => row.transaction.ledgerTransactionId === 'payroll')?.categoryId,
+  ).toBe(payroll);
+  expect(
+    preview.candidates.find((row) => row.transaction.ledgerTransactionId === 'transfer-out')
+      ?.categoryId,
+  ).toBe(transfer);
+  expect(
+    getDb()
+      .prepare(
+        'SELECT ledgerTransactionId,categoryId,notes FROM transactionAnnotations ORDER BY ledgerTransactionId',
+      )
+      .all(),
+  ).toEqual(annotations);
+  const result = await caller.transactions.applyReviewedCategories({
+    label: 'Conservative cleanup',
+    changes: preview.changes,
+  });
   expect(result.count).toBe(6);
   expect(result.undoOperation?.count).toBe(6);
   expect(getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all()).toEqual(facts);
-  expect(getDb().prepare("SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId='buy-two'").get()?.notes).toBe('Keep note');
-  await caller.transactions.restoreCategories({undoOperationId:result.undoOperation!.id});
-  for (const before of annotations) expect(getDb().prepare('SELECT ledgerTransactionId,categoryId,notes FROM transactionAnnotations WHERE ledgerTransactionId=?').get(before.ledgerTransactionId)).toEqual(before);
-  expect(getDb().prepare("SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='coffee'").get()?.categoryId ?? null).toBeNull();
+  expect(
+    getDb()
+      .prepare("SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId='buy-two'")
+      .get()?.notes,
+  ).toBe('Keep note');
+  await caller.transactions.restoreCategories({ undoOperationId: result.undoOperation!.id });
+  for (const before of annotations)
+    expect(
+      getDb()
+        .prepare(
+          'SELECT ledgerTransactionId,categoryId,notes FROM transactionAnnotations WHERE ledgerTransactionId=?',
+        )
+        .get(before.ledgerTransactionId),
+    ).toEqual(before);
+  expect(
+    getDb()
+      .prepare("SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId='coffee'")
+      .get()?.categoryId ?? null,
+  ).toBeNull();
 });
 
 test('reviewed category changes are atomic, preserve notes and ledger facts, and undo as one operation', async () => {
@@ -2946,7 +4061,13 @@ test('reviewed category changes are atomic, preserve notes and ledger facts, and
   const payrollId = Number(insertRow('categories', { name: 'Payroll', type: 'income' }));
   const giftsId = Number(insertRow('categories', { name: 'Gifts Received', type: 'income' }));
   const changes = ['reviewed-payroll', 'reviewed-gift'].map((transactionId, index) => {
-    const expected = { accountId, date: '2026-01-01', amountCents: 10000, description: `Receipt ${index}`, categoryId: incomeId };
+    const expected = {
+      accountId,
+      date: '2026-01-01',
+      amountCents: 10000,
+      description: `Receipt ${index}`,
+      categoryId: incomeId,
+    };
     insertRow('ledgerTransactions', { ledgerTransactionId: transactionId, ...expected });
     upsertTransactionAnnotation(transactionId, { categoryId: incomeId, notes: `Note ${index}` });
     return { transactionId, categoryId: index === 0 ? payrollId : giftsId, expected };
@@ -2956,13 +4077,27 @@ test('reviewed category changes are atomic, preserve notes and ledger facts, and
   const before = db.prepare('SELECT * FROM ledgerTransactions ORDER BY ledgerTransactionId').all();
   const result = applyReviewedCategoryChanges({ label: 'Historical income cleanup', changes });
   expect(result.count).toBe(2);
-  expect(result.undoOperation).toMatchObject({ categoryName: 'Historical income cleanup', count: 2 });
-  expect(db.prepare('SELECT * FROM ledgerTransactions ORDER BY ledgerTransactionId').all()).toEqual(before);
-  expect(db.prepare('SELECT balanceCents FROM ledgerBalances WHERE accountId = ?').get(accountId)).toEqual({ balanceCents: 90000 });
-  expect(db.prepare('SELECT notes FROM transactionAnnotations ORDER BY ledgerTransactionId').all()).toEqual([{ notes: 'Note 1' }, { notes: 'Note 0' }]);
+  expect(result.undoOperation).toMatchObject({
+    categoryName: 'Historical income cleanup',
+    count: 2,
+  });
+  expect(db.prepare('SELECT * FROM ledgerTransactions ORDER BY ledgerTransactionId').all()).toEqual(
+    before,
+  );
+  expect(
+    db.prepare('SELECT balanceCents FROM ledgerBalances WHERE accountId = ?').get(accountId),
+  ).toEqual({ balanceCents: 90000 });
+  expect(
+    db.prepare('SELECT notes FROM transactionAnnotations ORDER BY ledgerTransactionId').all(),
+  ).toEqual([{ notes: 'Note 1' }, { notes: 'Note 0' }]);
   await caller.transactions.restoreCategories({ undoOperationId: result.undoOperation!.id });
-  expect(db.prepare('SELECT categoryId, notes FROM transactionAnnotations ORDER BY ledgerTransactionId').all()).toEqual([
-    { categoryId: incomeId, notes: 'Note 1' }, { categoryId: incomeId, notes: 'Note 0' },
+  expect(
+    db
+      .prepare('SELECT categoryId, notes FROM transactionAnnotations ORDER BY ledgerTransactionId')
+      .all(),
+  ).toEqual([
+    { categoryId: incomeId, notes: 'Note 1' },
+    { categoryId: incomeId, notes: 'Note 0' },
   ]);
 });
 
@@ -2971,7 +4106,13 @@ test('reviewed category plans reject stale annotations, facts, destinations, mis
   const accountId = Number(insertRow('accounts', { name: 'Checking', type: 'checking' }));
   const incomeId = Number(insertRow('categories', { name: 'Income', type: 'income' }));
   const payrollId = Number(insertRow('categories', { name: 'Payroll', type: 'income' }));
-  const expected = { accountId, date: '2026-01-01', amountCents: 10000, description: 'Receipt', categoryId: incomeId };
+  const expected = {
+    accountId,
+    date: '2026-01-01',
+    amountCents: 10000,
+    description: 'Receipt',
+    categoryId: incomeId,
+  };
   for (const transactionId of ['reviewed-first', 'reviewed-second']) {
     insertRow('ledgerTransactions', { ledgerTransactionId: transactionId, ...expected });
     upsertTransactionAnnotation(transactionId, { categoryId: incomeId, notes: 'Keep' });
@@ -2990,8 +4131,14 @@ test('reviewed category plans reject stale annotations, facts, destinations, mis
   ];
   const db = getDb();
   for (const bad of invalid) {
-    expect(() => applyReviewedCategoryChanges({ label: 'Reviewed', changes: [first, bad] })).toThrow();
-    expect(db.prepare('SELECT categoryId FROM transactionAnnotations ORDER BY ledgerTransactionId').all()).toEqual([{ categoryId: incomeId }, { categoryId: incomeId }]);
+    expect(() =>
+      applyReviewedCategoryChanges({ label: 'Reviewed', changes: [first, bad] }),
+    ).toThrow();
+    expect(
+      db
+        .prepare('SELECT categoryId FROM transactionAnnotations ORDER BY ledgerTransactionId')
+        .all(),
+    ).toEqual([{ categoryId: incomeId }, { categoryId: incomeId }]);
     expect(db.prepare('SELECT COUNT(*) n FROM transactionCategoryUndoOperations').get()?.n).toBe(0);
   }
 });
@@ -3037,14 +4184,15 @@ test('ai categorization can sort merchant groups by money instead of count', () 
     },
   ];
 
-  expect(groupTransactionsForAiCategorization(rows).map(group => group.merchantName)).toEqual([
+  expect(groupTransactionsForAiCategorization(rows).map((group) => group.merchantName)).toEqual([
     'Coffee',
     'Rent',
   ]);
-  expect(groupTransactionsForAiCategorization(rows, { sort: 'money' }).map(group => group.merchantName)).toEqual([
-    'Rent',
-    'Coffee',
-  ]);
+  expect(
+    groupTransactionsForAiCategorization(rows, { sort: 'money' }).map(
+      (group) => group.merchantName,
+    ),
+  ).toEqual(['Rent', 'Coffee']);
 });
 
 test('ai categorization persists merchant grouping rules for generic processor descriptions', async () => {
@@ -3073,7 +4221,8 @@ test('ai categorization persists merchant grouping rules for generic processor d
       amountCents: -16594,
       description: 'PROCESSOR DES:INST XFER ID:SUITSUPPLYU 041 INDN:TEST USER CO ID:PAYPALTEST WEB',
       merchant: 'PROCESSOR DES:INST XFER ID:SUITSUPPLYU 041 INDN:TEST USER CO ID:PAYPALTEST WEB',
-      originalDescription: 'PROCESSOR DES:INST XFER ID:SUITSUPPLYU 041 INDN:TEST USER CO ID:PAYPALTEST WEB',
+      originalDescription:
+        'PROCESSOR DES:INST XFER ID:SUITSUPPLYU 041 INDN:TEST USER CO ID:PAYPALTEST WEB',
       originalCategory: null,
       transactionKind: 'activity',
     },
@@ -3095,10 +4244,12 @@ test('ai categorization persists merchant grouping rules for generic processor d
   });
 
   const splitGroups = groupTransactionsForAiCategorization(processorRows);
-  expect(splitGroups.map(group => ({
-    merchantName: group.merchantName,
-    transactionIds: group.transactionIds,
-  }))).toEqual([
+  expect(
+    splitGroups.map((group) => ({
+      merchantName: group.merchantName,
+      transactionIds: group.transactionIds,
+    })),
+  ).toEqual([
     { merchantName: 'Suitsupplyu', transactionIds: ['processor_suit'] },
     { merchantName: 'Uber', transactionIds: ['processor_uber'] },
   ]);
@@ -3194,11 +4345,13 @@ test('ai categorization can split a merchant into individual transaction review 
   });
 
   const splitGroups = groupTransactionsForAiCategorization(rows);
-  expect(splitGroups.map(group => ({
-    merchantName: group.merchantName,
-    transactionIds: group.transactionIds,
-    transactionCount: group.transactionCount,
-  }))).toEqual([
+  expect(
+    splitGroups.map((group) => ({
+      merchantName: group.merchantName,
+      transactionIds: group.transactionIds,
+      transactionCount: group.transactionCount,
+    })),
+  ).toEqual([
     { merchantName: 'Venmo', transactionIds: ['venmo_rent'], transactionCount: 1 },
     { merchantName: 'Venmo', transactionIds: ['venmo_dinner'], transactionCount: 1 },
   ]);
@@ -3216,7 +4369,8 @@ test('ai categorization normalizes PayPal processor descriptions to counterparti
       amountCents: -1593,
       description: 'PAYPAL DES:PURCHASE ID:APPLE.COM BILL INDN:TEST USER CO ID:PAYPALTEST WEB',
       merchant: 'PAYPAL DES:PURCHASE ID:APPLE.COM BILL INDN:TEST USER CO ID:PAYPALTEST WEB',
-      originalDescription: 'PAYPAL DES:PURCHASE ID:APPLE.COM BILL INDN:TEST USER CO ID:PAYPALTEST WEB',
+      originalDescription:
+        'PAYPAL DES:PURCHASE ID:APPLE.COM BILL INDN:TEST USER CO ID:PAYPALTEST WEB',
       originalCategory: null,
       transactionKind: 'activity',
     },
@@ -3230,7 +4384,8 @@ test('ai categorization normalizes PayPal processor descriptions to counterparti
       amountCents: -2867,
       description: 'PAYPAL DES:INST XFER ID:APPLE.COM BILL INDN:TEST USER CO ID:PAYPALTEST WEB',
       merchant: 'PAYPAL DES:INST XFER ID:APPLE.COM BILL INDN:TEST USER CO ID:PAYPALTEST WEB',
-      originalDescription: 'PAYPAL DES:INST XFER ID:APPLE.COM BILL INDN:TEST USER CO ID:PAYPALTEST WEB',
+      originalDescription:
+        'PAYPAL DES:INST XFER ID:APPLE.COM BILL INDN:TEST USER CO ID:PAYPALTEST WEB',
       originalCategory: null,
       transactionKind: 'activity',
     },
@@ -3264,11 +4419,16 @@ test('ai categorization normalizes PayPal processor descriptions to counterparti
     },
   ]);
 
-  expect(groups.map(group => ({
-    merchantName: group.merchantName,
-    transactionIds: group.transactionIds,
-  }))).toEqual([
-    { merchantName: 'Apple Com Bill', transactionIds: ['paypal_apple_purchase', 'paypal_apple_inst_xfer'] },
+  expect(
+    groups.map((group) => ({
+      merchantName: group.merchantName,
+      transactionIds: group.transactionIds,
+    })),
+  ).toEqual([
+    {
+      merchantName: 'Apple Com Bill',
+      transactionIds: ['paypal_apple_purchase', 'paypal_apple_inst_xfer'],
+    },
     { merchantName: 'Uber', transactionIds: ['paypal_uber'] },
     { merchantName: 'Digitalocea', transactionIds: ['paypal_digital_ocean'] },
   ]);
@@ -3334,17 +4494,23 @@ test('ai categorization reviews investment-account transfer decisions instead of
     icon: 'trending-up',
   };
 
-  expect(shouldTreatInvestmentCategoryAsTransfer({
-    group: cashTransferGroup!,
-    category: investmentCategory,
-  })).toBe(true);
-  expect(shouldTreatInvestmentCategoryAsTransfer({
-    group: investmentAccountGroup!,
-    category: investmentCategory,
-  })).toBe(false);
-  expect(shouldReviewInvestmentAccountTransferDecision({
-    group: retirementContributionGroup!,
-  })).toBe(true);
+  expect(
+    shouldTreatInvestmentCategoryAsTransfer({
+      group: cashTransferGroup!,
+      category: investmentCategory,
+    }),
+  ).toBe(true);
+  expect(
+    shouldTreatInvestmentCategoryAsTransfer({
+      group: investmentAccountGroup!,
+      category: investmentCategory,
+    }),
+  ).toBe(false);
+  expect(
+    shouldReviewInvestmentAccountTransferDecision({
+      group: retirementContributionGroup!,
+    }),
+  ).toBe(true);
 });
 test('trpc net worth report is backend-owned and reads ledger balances', async () => {
   const checkingId = insertRow('accounts', {
@@ -3378,13 +4544,15 @@ test('trpc net worth report is backend-owned and reads ledger balances', async (
 });
 
 test('investment report endpoints expose money-style ledger reports', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Brokerage',
-    institution: 'Vanguard',
-    type: 'investment',
-    accountHolder: 'Example Owner',
-    currentBalance: 0,
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Brokerage',
+      institution: 'Vanguard',
+      type: 'investment',
+      accountHolder: 'Example Owner',
+      currentBalance: 0,
+    }),
+  );
   insertRow('ledgerTransactions', {
     ledgerTransactionId: 'txn_report_contribution',
     accountId,
@@ -3422,8 +4590,14 @@ test('investment report endpoints expose money-style ledger reports', async () =
     updatedAt: new Date().toISOString(),
   });
 
-  const netWorth = await netWorthReportForTest() as {
-    accounts: Array<{ id: number; name: string; institution: string; type: string; account_holder: string | null }>;
+  const netWorth = (await netWorthReportForTest()) as {
+    accounts: Array<{
+      id: number;
+      name: string;
+      institution: string;
+      type: string;
+      account_holder: string | null;
+    }>;
     rows: Array<{
       month: string;
       account_id: number;
@@ -3434,32 +4608,40 @@ test('investment report endpoints expose money-style ledger reports', async () =
     }>;
     returns: Array<{ account_id: number; ending_balance_cents: number }>;
   };
-  expect(netWorth.accounts).toContainEqual(expect.objectContaining({
-    id: accountId,
-    name: 'Brokerage',
-    institution: 'Vanguard',
-    type: 'investment',
-    account_holder: 'Example Owner',
-  }));
-  expect(netWorth.rows).toContainEqual(expect.objectContaining({
-    month: '2026-01',
-    account_id: accountId,
-    contributions_cents: 100000,
-    end_balance_cents: 100000,
-  }));
-  expect(netWorth.rows).toContainEqual(expect.objectContaining({
-    month: '2026-02',
-    account_id: accountId,
-    dividends_cents: 5000,
-    gains_cents: 7000,
-    end_balance_cents: 112000,
-  }));
-  expect(netWorth.returns).toContainEqual(expect.objectContaining({
-    account_id: accountId,
-    ending_balance_cents: 112000,
-  }));
+  expect(netWorth.accounts).toContainEqual(
+    expect.objectContaining({
+      id: accountId,
+      name: 'Brokerage',
+      institution: 'Vanguard',
+      type: 'investment',
+      account_holder: 'Example Owner',
+    }),
+  );
+  expect(netWorth.rows).toContainEqual(
+    expect.objectContaining({
+      month: '2026-01',
+      account_id: accountId,
+      contributions_cents: 100000,
+      end_balance_cents: 100000,
+    }),
+  );
+  expect(netWorth.rows).toContainEqual(
+    expect.objectContaining({
+      month: '2026-02',
+      account_id: accountId,
+      dividends_cents: 5000,
+      gains_cents: 7000,
+      end_balance_cents: 112000,
+    }),
+  );
+  expect(netWorth.returns).toContainEqual(
+    expect.objectContaining({
+      account_id: accountId,
+      ending_balance_cents: 112000,
+    }),
+  );
 
-  const savingsRate = await savingsRateReportForTest() as {
+  const savingsRate = (await savingsRateReportForTest()) as {
     account_months: Array<{
       account_id: number;
       month: string;
@@ -3469,81 +4651,151 @@ test('investment report endpoints expose money-style ledger reports', async () =
     }>;
     income_sources: Array<{ label: string; amount_cents: number; is_market_income: boolean }>;
   };
-  expect(savingsRate.account_months).toContainEqual(expect.objectContaining({
-    account_id: accountId,
-    month: '2026-02',
-    income_cents: 5000,
-    market_income_cents: 5000,
-    investment_delta_cents: 0,
-  }));
-  expect(savingsRate.income_sources).toContainEqual(expect.objectContaining({
-    label: 'Dividends',
-    amount_cents: 5000,
-    is_market_income: true,
-  }));
+  expect(savingsRate.account_months).toContainEqual(
+    expect.objectContaining({
+      account_id: accountId,
+      month: '2026-02',
+      income_cents: 5000,
+      market_income_cents: 5000,
+      investment_delta_cents: 0,
+    }),
+  );
+  expect(savingsRate.income_sources).toContainEqual(
+    expect.objectContaining({
+      label: 'Dividends',
+      amount_cents: 5000,
+      is_market_income: true,
+    }),
+  );
 
   const trpcNetWorth = await caller.reports.netWorth();
-  expect(trpcNetWorth.rows).toContainEqual(expect.objectContaining({
-    month: '2026-02',
-    account_id: accountId,
-    dividends_cents: 5000,
-    gains_cents: 7000,
-    end_balance_cents: 112000,
-  }));
+  expect(trpcNetWorth.rows).toContainEqual(
+    expect.objectContaining({
+      month: '2026-02',
+      account_id: accountId,
+      dividends_cents: 5000,
+      gains_cents: 7000,
+      end_balance_cents: 112000,
+    }),
+  );
   const trpcSavingsRate = await caller.reports.savingsRate();
-  expect(trpcSavingsRate.income_sources).toContainEqual(expect.objectContaining({
-    label: 'Dividends',
-    amount_cents: 5000,
-    is_market_income: true,
-  }));
+  expect(trpcSavingsRate.income_sources).toContainEqual(
+    expect.objectContaining({
+      label: 'Dividends',
+      amount_cents: 5000,
+      is_market_income: true,
+    }),
+  );
 });
 
 test('reporting closure carries basis into an existing destination without a fictitious loss or double-counting later transfers', async () => {
-  const source = Number(insertRow('accounts', {name:'Source fund',type:'investment',reportingClosedOn:'2026-08-19'}));
-  const destination = Number(insertRow('accounts', {name:'Existing brokerage',type:'investment'}));
-  const {confirmClosureTransfer}=await import('./transferRecords');
-  confirmClosureTransfer(source,'2026-08-19',destination);
+  const source = Number(
+    insertRow('accounts', {
+      name: 'Source fund',
+      type: 'investment',
+      reportingClosedOn: '2026-08-19',
+    }),
+  );
+  const destination = Number(
+    insertRow('accounts', { name: 'Existing brokerage', type: 'investment' }),
+  );
+  const { confirmClosureTransfer } = await import('./transferRecords');
+  confirmClosureTransfer(source, '2026-08-19', destination);
   for (const [accountId, month, balanceCents, capturedAt] of [
-    [source,'2026-01',1000000,'2026-01-31'],[source,'2026-06',1500000,'2026-06-30'],[source,'2026-08',0,'2026-08-19'],
-    [destination,'2026-01',2000000,'2026-01-31'],[destination,'2026-08',3500000,'2026-08-31'],
-  ] as const) insertRow('ledgerBalances',{accountId,month,balanceCents,capturedAt});
-  const sum = (rows: Array<{contributions_cents:number;gains_cents:number|null}>) => rows.reduce((a,r)=>[a[0]!+r.contributions_cents,a[1]!+(r.gains_cents??0)],[0,0]);
+    [source, '2026-01', 1000000, '2026-01-31'],
+    [source, '2026-06', 1500000, '2026-06-30'],
+    [source, '2026-08', 0, '2026-08-19'],
+    [destination, '2026-01', 2000000, '2026-01-31'],
+    [destination, '2026-08', 3500000, '2026-08-31'],
+  ] as const)
+    insertRow('ledgerBalances', { accountId, month, balanceCents, capturedAt });
+  const sum = (rows: Array<{ contributions_cents: number; gains_cents: number | null }>) =>
+    rows.reduce((a, r) => [a[0]! + r.contributions_cents, a[1]! + (r.gains_cents ?? 0)], [0, 0]);
   const before = await caller.reports.netWorth();
-  expect(before.transfer_links).toContainEqual(expect.objectContaining({id:`closure:${source}`, confirmation:'confirmed', evidence_status:'awaiting-bank-records',amount_cents:null}));
-  expect(sum(before.rows.filter(r=>r.account_id===source))).toEqual([0,0]);
-  expect(sum(before.rows.filter(r=>r.account_id===destination))).toEqual([3000000,500000]);
-  expect(before.rows.filter(r=>r.account_id===source && r.month<'2026-08').every(r=>(r.gains_cents??0)>=0)).toBe(true);
-  expect(before.returns.find(r=>r.account_id===source)?.end_date).toBe('2026-06-30');
-  for (const [accountId,amountCents,id] of [[source,-1500000,'out'],[destination,1500000,'in']] as const) {
-    insertRow('ledgerTransactions',{accountId,date:'2026-08-19',amountCents,description:`Transfer ${id}`,ledgerTransactionId:id});
+  expect(before.transfer_links).toContainEqual(
+    expect.objectContaining({
+      id: `closure:${source}`,
+      confirmation: 'confirmed',
+      evidence_status: 'awaiting-bank-records',
+      amount_cents: null,
+    }),
+  );
+  expect(sum(before.rows.filter((r) => r.account_id === source))).toEqual([0, 0]);
+  expect(sum(before.rows.filter((r) => r.account_id === destination))).toEqual([3000000, 500000]);
+  expect(
+    before.rows
+      .filter((r) => r.account_id === source && r.month < '2026-08')
+      .every((r) => (r.gains_cents ?? 0) >= 0),
+  ).toBe(true);
+  expect(before.returns.find((r) => r.account_id === source)?.end_date).toBe('2026-06-30');
+  for (const [accountId, amountCents, id] of [
+    [source, -1500000, 'out'],
+    [destination, 1500000, 'in'],
+  ] as const) {
+    insertRow('ledgerTransactions', {
+      accountId,
+      date: '2026-08-19',
+      amountCents,
+      description: `Transfer ${id}`,
+      ledgerTransactionId: id,
+    });
   }
   const after = await caller.reports.netWorth();
-  expect(sum(after.rows.filter(r=>r.account_id===source))).toEqual([0,0]);
-  expect(sum(after.rows.filter(r=>r.account_id===destination))).toEqual([3000000,500000]);
+  expect(sum(after.rows.filter((r) => r.account_id === source))).toEqual([0, 0]);
+  expect(sum(after.rows.filter((r) => r.account_id === destination))).toEqual([3000000, 500000]);
   expect(after.transfer_links).toHaveLength(1);
-  expect(after.transfer_links[0]).toMatchObject({id:`closure:${source}`,confirmation:'confirmed',evidence_status:'matched',amount_cents:1500000});
+  expect(after.transfer_links[0]).toMatchObject({
+    id: `closure:${source}`,
+    confirmation: 'confirmed',
+    evidence_status: 'matched',
+    amount_cents: 1500000,
+  });
 });
 
 test('investment report carries basis and gains across Roth IRA transfers', async () => {
-  const fidelityRothId = Number(insertRow('accounts', {
-    name: 'Roth Individual',
-    institution: 'Fidelity',
-    type: 'investment',
-    currentBalance: 0,
-  }));
-  const robinhoodRothId = Number(insertRow('accounts', {
-    name: 'Robinhood Roth IRA - 8978',
-    institution: 'Robinhood',
-    type: 'investment',
-    currentBalance: 0,
-  }));
+  const fidelityRothId = Number(
+    insertRow('accounts', {
+      name: 'Roth Individual',
+      institution: 'Fidelity',
+      type: 'investment',
+      currentBalance: 0,
+    }),
+  );
+  const robinhoodRothId = Number(
+    insertRow('accounts', {
+      name: 'Robinhood Roth IRA - 8978',
+      institution: 'Robinhood',
+      type: 'investment',
+      currentBalance: 0,
+    }),
+  );
   const now = new Date().toISOString();
 
   for (const row of [
-    { accountId: fidelityRothId, month: '2023-01', balanceCents: 943634, capturedAt: '2023-01-31T00:00:00.000Z' },
-    { accountId: fidelityRothId, month: '2024-03', balanceCents: 3760135, capturedAt: '2024-03-31T00:00:00.000Z' },
-    { accountId: fidelityRothId, month: '2024-04', balanceCents: 52074, capturedAt: '2024-04-30T00:00:00.000Z' },
-    { accountId: robinhoodRothId, month: '2024-04', balanceCents: 3565305, capturedAt: '2024-04-30T00:00:00.000Z' },
+    {
+      accountId: fidelityRothId,
+      month: '2023-01',
+      balanceCents: 943634,
+      capturedAt: '2023-01-31T00:00:00.000Z',
+    },
+    {
+      accountId: fidelityRothId,
+      month: '2024-03',
+      balanceCents: 3760135,
+      capturedAt: '2024-03-31T00:00:00.000Z',
+    },
+    {
+      accountId: fidelityRothId,
+      month: '2024-04',
+      balanceCents: 52074,
+      capturedAt: '2024-04-30T00:00:00.000Z',
+    },
+    {
+      accountId: robinhoodRothId,
+      month: '2024-04',
+      balanceCents: 3565305,
+      capturedAt: '2024-04-30T00:00:00.000Z',
+    },
   ]) {
     insertRow('ledgerBalances', {
       ...row,
@@ -3590,7 +4842,7 @@ test('investment report carries basis and gains across Roth IRA transfers', asyn
     });
   }
 
-  const netWorth = await netWorthReportForTest() as {
+  const netWorth = (await netWorthReportForTest()) as {
     rows: Array<{
       month: string;
       account_id: number;
@@ -3608,43 +4860,53 @@ test('investment report carries basis and gains across Roth IRA transfers', asyn
     }>;
   };
 
-  expect(netWorth.transfer_links).toContainEqual(expect.objectContaining({
-    source_account_id: fidelityRothId,
-    destination_account_id: robinhoodRothId,
-    amount_cents: 3457034,
-    basis_cents: 943634,
-    gains_cents: 2513400,
-  }));
-  expect(netWorth.rows).toContainEqual(expect.objectContaining({
-    month: '2024-04',
-    account_id: robinhoodRothId,
-    contributions_cents: 943634,
-    interest_cents: 108271,
-    gains_cents: 2513400,
-    end_balance_cents: 3565305,
-  }));
-  expect(netWorth.rows).toContainEqual(expect.objectContaining({
-    month: '2024-04',
-    account_id: fidelityRothId,
-    contributions_cents: -943634,
-    gains_cents: -2764427,
-    end_balance_cents: 52074,
-  }));
+  expect(netWorth.transfer_links).toContainEqual(
+    expect.objectContaining({
+      source_account_id: fidelityRothId,
+      destination_account_id: robinhoodRothId,
+      amount_cents: 3457034,
+      basis_cents: 943634,
+      gains_cents: 2513400,
+    }),
+  );
+  expect(netWorth.rows).toContainEqual(
+    expect.objectContaining({
+      month: '2024-04',
+      account_id: robinhoodRothId,
+      contributions_cents: 943634,
+      interest_cents: 108271,
+      gains_cents: 2513400,
+      end_balance_cents: 3565305,
+    }),
+  );
+  expect(netWorth.rows).toContainEqual(
+    expect.objectContaining({
+      month: '2024-04',
+      account_id: fidelityRothId,
+      contributions_cents: -943634,
+      gains_cents: -2764427,
+      end_balance_cents: 52074,
+    }),
+  );
 });
 
 test('net worth uses balance snapshots rather than transaction activity for cash accounts', async () => {
-  const checkingWithoutBalancesId = Number(insertRow('accounts', {
-    name: 'CSV-only Checking',
-    institution: 'Wells Fargo',
-    type: 'checking',
-    currentBalance: 0,
-  }));
-  const checkingWithBalancesId = Number(insertRow('accounts', {
-    name: 'Statement Checking',
-    institution: 'Wells Fargo',
-    type: 'checking',
-    currentBalance: 0,
-  }));
+  const checkingWithoutBalancesId = Number(
+    insertRow('accounts', {
+      name: 'CSV-only Checking',
+      institution: 'Wells Fargo',
+      type: 'checking',
+      currentBalance: 0,
+    }),
+  );
+  const checkingWithBalancesId = Number(
+    insertRow('accounts', {
+      name: 'Statement Checking',
+      institution: 'Wells Fargo',
+      type: 'checking',
+      currentBalance: 0,
+    }),
+  );
   const now = new Date().toISOString();
 
   for (const row of [
@@ -3679,8 +4941,18 @@ test('net worth uses balance snapshots rather than transaction activity for cash
   }
 
   for (const row of [
-    { accountId: checkingWithBalancesId, month: '2026-01', balanceCents: 500000, capturedAt: '2026-01-31T00:00:00.000Z' },
-    { accountId: checkingWithBalancesId, month: '2026-02', balanceCents: 425000, capturedAt: '2026-02-28T00:00:00.000Z' },
+    {
+      accountId: checkingWithBalancesId,
+      month: '2026-01',
+      balanceCents: 500000,
+      capturedAt: '2026-01-31T00:00:00.000Z',
+    },
+    {
+      accountId: checkingWithBalancesId,
+      month: '2026-02',
+      balanceCents: 425000,
+      capturedAt: '2026-02-28T00:00:00.000Z',
+    },
   ]) {
     insertRow('ledgerBalances', {
       ...row,
@@ -3689,7 +4961,7 @@ test('net worth uses balance snapshots rather than transaction activity for cash
     });
   }
 
-  const netWorth = await netWorthReportForTest() as {
+  const netWorth = (await netWorthReportForTest()) as {
     rows: Array<{
       month: string;
       account_id: number;
@@ -3699,45 +4971,53 @@ test('net worth uses balance snapshots rather than transaction activity for cash
     }>;
   };
 
-  expect(netWorth.rows.some(row => row.account_id === checkingWithoutBalancesId)).toBe(false);
-  expect(netWorth.rows).toContainEqual(expect.objectContaining({
-    month: '2026-01',
-    account_id: checkingWithBalancesId,
-    contributions_cents: 500000,
-    gains_cents: 0,
-    end_balance_cents: 500000,
-  }));
-  expect(netWorth.rows).toContainEqual(expect.objectContaining({
-    month: '2026-02',
-    account_id: checkingWithBalancesId,
-    contributions_cents: -75000,
-    gains_cents: 0,
-    end_balance_cents: 425000,
-  }));
+  expect(netWorth.rows.some((row) => row.account_id === checkingWithoutBalancesId)).toBe(false);
+  expect(netWorth.rows).toContainEqual(
+    expect.objectContaining({
+      month: '2026-01',
+      account_id: checkingWithBalancesId,
+      contributions_cents: 500000,
+      gains_cents: 0,
+      end_balance_cents: 500000,
+    }),
+  );
+  expect(netWorth.rows).toContainEqual(
+    expect.objectContaining({
+      month: '2026-02',
+      account_id: checkingWithBalancesId,
+      contributions_cents: -75000,
+      gains_cents: 0,
+      end_balance_cents: 425000,
+    }),
+  );
 });
 
 test('init database backfills ledger read model from legacy app tables', () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Checking',
-    institution: 'Local Bank',
-    type: 'checking',
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Checking',
+      institution: 'Local Bank',
+      type: 'checking',
+    }),
+  );
   const categoryId = Number(insertRow('categories', { name: 'Dining', type: 'expense' }));
-  const transactionId = Number(insertRow('transactions', {
-    accountId,
-    categoryId,
-    date: '2026-06-14',
-    amount: -18.42,
-    description: 'Lunch',
-    merchant: 'Cafe',
-    originalDescription: 'POS CAFE',
-    originalCategory: 'Food',
-    type: 'expense',
-    status: 'cleared',
-    notes: 'legacy-note',
-    fingerprint: 'legacy-fingerprint',
-    createdAt: '2026-06-14T12:00:00.000Z',
-  }));
+  const transactionId = Number(
+    insertRow('transactions', {
+      accountId,
+      categoryId,
+      date: '2026-06-14',
+      amount: -18.42,
+      description: 'Lunch',
+      merchant: 'Cafe',
+      originalDescription: 'POS CAFE',
+      originalCategory: 'Food',
+      type: 'expense',
+      status: 'cleared',
+      notes: 'legacy-note',
+      fingerprint: 'legacy-fingerprint',
+      createdAt: '2026-06-14T12:00:00.000Z',
+    }),
+  );
   insertRow('balanceSnapshots', {
     accountId,
     month: '2026-06',
@@ -3745,16 +5025,24 @@ test('init database backfills ledger read model from legacy app tables', () => {
     capturedAt: '2026-06-30T00:00:00.000Z',
   });
 
-  getDb().prepare('DELETE FROM schemaMigrations WHERE name = ?').run('2026-09-07-ledger-read-cutover');
-  getDb().prepare('DELETE FROM schemaMigrations WHERE name = ?').run('2026-09-07-legacy-annotations');
+  getDb()
+    .prepare('DELETE FROM schemaMigrations WHERE name = ?')
+    .run('2026-09-07-ledger-read-cutover');
+  getDb()
+    .prepare('DELETE FROM schemaMigrations WHERE name = ?')
+    .run('2026-09-07-legacy-annotations');
   initDatabase();
 
-  const transaction = getDb().prepare('SELECT ledgerTransactionId FROM transactions WHERE id = ?').get(transactionId) as {
+  const transaction = getDb()
+    .prepare('SELECT ledgerTransactionId FROM transactions WHERE id = ?')
+    .get(transactionId) as {
     ledgerTransactionId: string;
   };
   expect(transaction.ledgerTransactionId.startsWith('txn_')).toBe(true);
 
-  const ledgerTransaction = getDb().prepare('SELECT * FROM ledgerTransactions WHERE legacyTransactionId = ?').get(transactionId) as {
+  const ledgerTransaction = getDb()
+    .prepare('SELECT * FROM ledgerTransactions WHERE legacyTransactionId = ?')
+    .get(transactionId) as {
     ledgerTransactionId: string;
     accountId: number;
     amountCents: number;
@@ -3771,7 +5059,9 @@ test('init database backfills ledger read model from legacy app tables', () => {
     fingerprint: 'legacy-fingerprint',
   });
 
-  const annotation = getDb().prepare('SELECT * FROM transactionAnnotations WHERE ledgerTransactionId = ?').get(transaction.ledgerTransactionId) as {
+  const annotation = getDb()
+    .prepare('SELECT * FROM transactionAnnotations WHERE ledgerTransactionId = ?')
+    .get(transaction.ledgerTransactionId) as {
     categoryId: number;
     notes: string;
   };
@@ -3780,7 +5070,9 @@ test('init database backfills ledger read model from legacy app tables', () => {
     notes: 'legacy-note',
   });
 
-  const ledgerBalance = getDb().prepare('SELECT * FROM ledgerBalances WHERE accountId = ? AND month = ?').get(accountId, '2026-06') as {
+  const ledgerBalance = getDb()
+    .prepare('SELECT * FROM ledgerBalances WHERE accountId = ? AND month = ?')
+    .get(accountId, '2026-06') as {
     balanceCents: number;
     capturedAt: string;
   };
@@ -3791,14 +5083,24 @@ test('init database backfills ledger read model from legacy app tables', () => {
 });
 
 test('app imports preview parses a Chase CSV on the backend', async () => {
-  const csv = fs.readFileSync(path.resolve(import.meta.dir, '..', '..', 'sample-imports', 'chase-credit-card-demo.csv'), 'utf8');
+  const csv = fs.readFileSync(
+    path.resolve(import.meta.dir, '..', '..', 'sample-imports', 'chase-credit-card-demo.csv'),
+    'utf8',
+  );
 
   const body = await postImportPreview('chase-credit-card-demo.csv', csv);
 
   expect(body.requiresMapping).toBe(false);
   expect(body.profileUsed).toBe('Chase Credit Card');
   expect(body.importFileId).toBe(1);
-  expect(body.headers).toEqual(['Transaction Date', 'Post Date', 'Description', 'Category', 'Type', 'Amount']);
+  expect(body.headers).toEqual([
+    'Transaction Date',
+    'Post Date',
+    'Description',
+    'Category',
+    'Type',
+    'Amount',
+  ]);
   expect(body.balances).toEqual([]);
   expect(body.transactions).toHaveLength(10);
   expect(body.transactions[0]).toMatchObject({
@@ -3811,7 +5113,9 @@ test('app imports preview parses a Chase CSV on the backend', async () => {
     originalCategory: 'Payment',
   });
 
-  const sourceFile = getDb().prepare('SELECT * FROM sourceFiles WHERE importFileId = ?').get(body.importFileId) as {
+  const sourceFile = getDb()
+    .prepare('SELECT * FROM sourceFiles WHERE importFileId = ?')
+    .get(body.importFileId) as {
     parserName: string;
     sourceType: string;
     status: string;
@@ -3821,19 +5125,24 @@ test('app imports preview parses a Chase CSV on the backend', async () => {
     sourceType: 'activity-export',
     status: 'previewed',
   });
-  const sourceTransactionCount = getDb().prepare('SELECT COUNT(*) AS count FROM sourceTransactions').get() as { count: number };
+  const sourceTransactionCount = getDb()
+    .prepare('SELECT COUNT(*) AS count FROM sourceTransactions')
+    .get() as { count: number };
   expect(sourceTransactionCount.count).toBe(10);
 });
 
 test('trpc imports preview and history use the backend parser path', async () => {
-  const csv = fs.readFileSync(path.resolve(import.meta.dir, '..', '..', 'sample-imports', 'chase-credit-card-demo.csv'), 'utf8');
+  const csv = fs.readFileSync(
+    path.resolve(import.meta.dir, '..', '..', 'sample-imports', 'chase-credit-card-demo.csv'),
+    'utf8',
+  );
 
-  const preview = await caller.imports.preview({
+  const preview = (await caller.imports.preview({
     fileName: 'chase-credit-card-demo.csv',
     text: csv,
     fileBase64: Buffer.from(csv).toString('base64'),
     customProfile: null,
-  }) as Awaited<ReturnType<typeof postImportPreview>>;
+  })) as Awaited<ReturnType<typeof postImportPreview>>;
 
   expect(preview).toMatchObject({
     requiresMapping: false,
@@ -3851,7 +5160,9 @@ test('trpc imports preview and history use the backend parser path', async () =>
   const commit = await caller.imports.commit({
     accountId,
     importFileId: preview.importFileId,
-    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    importRowIds: preview.transactions.map(
+      (transaction: { importRowId: number }) => transaction.importRowId,
+    ),
     forceImportRowIds: [],
     balanceRowIds: [],
     accountMappings: [],
@@ -3866,15 +5177,18 @@ test('trpc imports preview and history use the backend parser path', async () =>
 
   expect(commit.importedCount).toBe(10);
   expect(await caller.imports.history()).toMatchObject({
-    imports: [expect.objectContaining({ id: preview.importFileId, status: 'committed', transactionCount: 10 })],
+    imports: [
+      expect.objectContaining({
+        id: preview.importFileId,
+        status: 'committed',
+        transactionCount: 10,
+      }),
+    ],
   });
 });
 
 test('app imports preview requires explicit mapping for unknown CSVs', async () => {
-  const csv = [
-    'When,Details,Value',
-    '06/14/2026,Coffee Shop,-6.75',
-  ].join('\n');
+  const csv = ['When,Details,Value', '06/14/2026,Coffee Shop,-6.75'].join('\n');
 
   const unmapped = await postImportPreview('unknown-bank.csv', csv);
   expect(unmapped.requiresMapping).toBe(true);
@@ -3904,12 +5218,17 @@ test('app imports preview requires explicit mapping for unknown CSVs', async () 
     description: 'Coffee Shop',
     merchant: 'Coffee Shop',
   });
-  const importFile = getDb().prepare('SELECT parserName FROM importFiles WHERE id = ?').get(mapped.importFileId) as { parserName: string };
+  const importFile = getDb()
+    .prepare('SELECT parserName FROM importFiles WHERE id = ?')
+    .get(mapped.importFileId) as { parserName: string };
   expect(importFile.parserName).toBe('custom-csv');
 });
 
 test('app imports commit inserts unique transactions and updates account balance', async () => {
-  const csv = fs.readFileSync(path.resolve(import.meta.dir, '..', '..', 'sample-imports', 'chase-credit-card-demo.csv'), 'utf8');
+  const csv = fs.readFileSync(
+    path.resolve(import.meta.dir, '..', '..', 'sample-imports', 'chase-credit-card-demo.csv'),
+    'utf8',
+  );
   const accountId = insertRow('accounts', {
     name: 'Chase Sapphire',
     institution: 'Chase',
@@ -3918,10 +5237,12 @@ test('app imports commit inserts unique transactions and updates account balance
   });
   const preview = await postImportPreview('chase-credit-card-demo.csv', csv);
 
-  const firstCommit = await commitImportForTest( {
+  const firstCommit = await commitImportForTest({
     accountId,
     importFileId: preview.importFileId,
-    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    importRowIds: preview.transactions.map(
+      (transaction: { importRowId: number }) => transaction.importRowId,
+    ),
     importMeta: {
       importFileId: preview.importFileId,
       headers: preview.headers,
@@ -3937,7 +5258,9 @@ test('app imports commit inserts unique transactions and updates account balance
   expect(automaticCategorizationStatus().pending).toBe(10);
   expect(getDb().prepare('SELECT * FROM transactionAnnotations').all()).toEqual([]);
 
-  const importFile = getDb().prepare('SELECT * FROM importFiles WHERE id = ?').get(preview.importFileId) as {
+  const importFile = getDb()
+    .prepare('SELECT * FROM importFiles WHERE id = ?')
+    .get(preview.importFileId) as {
     status: string;
     parserName: string;
     sourceType: string;
@@ -3956,13 +5279,21 @@ test('app imports commit inserts unique transactions and updates account balance
     importBatchId: firstCommit.importBatchId,
   });
   expect(
-    (getDb().prepare('SELECT status FROM sourceFiles WHERE importFileId = ?').get(preview.importFileId) as { status: string }).status
+    (
+      getDb()
+        .prepare('SELECT status FROM sourceFiles WHERE importFileId = ?')
+        .get(preview.importFileId) as { status: string }
+    ).status,
   ).toBe('committed');
 
-  const account = getDb().prepare('SELECT currentBalance FROM accounts WHERE id = ?').get(accountId) as { currentBalance: number };
+  const account = getDb()
+    .prepare('SELECT currentBalance FROM accounts WHERE id = ?')
+    .get(accountId) as { currentBalance: number };
   expect(account.currentBalance).toBeCloseTo(1350.22);
 
-  const imported = getDb().prepare('SELECT * FROM transactions WHERE accountId = ? ORDER BY date DESC').all(accountId);
+  const imported = getDb()
+    .prepare('SELECT * FROM transactions WHERE accountId = ? ORDER BY date DESC')
+    .all(accountId);
   expect(imported).toHaveLength(10);
   expect(imported[0]).toMatchObject({
     description: 'ACME PAYROLL',
@@ -3970,7 +5301,9 @@ test('app imports commit inserts unique transactions and updates account balance
     fingerprint: firstCommit.insertedFingerprints[0],
   });
 
-  const sourceRow = getDb().prepare('SELECT * FROM importRows WHERE id = ?').get(preview.transactions[0].importRowId) as {
+  const sourceRow = getDb()
+    .prepare('SELECT * FROM importRows WHERE id = ?')
+    .get(preview.transactions[0].importRowId) as {
     transactionId: number;
     fingerprint: string;
     rawJson: string;
@@ -3988,13 +5321,17 @@ test('app imports commit inserts unique transactions and updates account balance
     },
   });
 
-  const ledgerRows = getDb().prepare(`
+  const ledgerRows = getDb()
+    .prepare(
+      `
     SELECT lt.*, t.id AS transactionId
     FROM ledgerTransactions lt
     JOIN transactions t ON t.ledgerTransactionId = lt.ledgerTransactionId
     WHERE lt.accountId = ?
     ORDER BY lt.date DESC
-  `).all(accountId) as Array<{
+  `,
+    )
+    .all(accountId) as Array<{
     transactionId: number;
     legacyTransactionId: number;
     amountCents: number;
@@ -4015,10 +5352,12 @@ test('app imports commit inserts unique transactions and updates account balance
   const savedProfile = getDb().prepare('SELECT * FROM importProfiles').get();
   expect(savedProfile).toBeNull();
 
-  const secondCommit = await commitImportForTest( {
+  const secondCommit = await commitImportForTest({
     accountId,
     importFileId: preview.importFileId,
-    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    importRowIds: preview.transactions.map(
+      (transaction: { importRowId: number }) => transaction.importRowId,
+    ),
     importMeta: {
       importFileId: preview.importFileId,
       headers: preview.headers,
@@ -4031,10 +5370,12 @@ test('app imports commit inserts unique transactions and updates account balance
   expect(secondCommit.importedCount).toBe(0);
   expect(secondCommit.skippedDuplicateCount).toBe(10);
 
-  const forcedCommit = await commitImportForTest( {
+  const forcedCommit = await commitImportForTest({
     accountId,
     importFileId: preview.importFileId,
-    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    importRowIds: preview.transactions.map(
+      (transaction: { importRowId: number }) => transaction.importRowId,
+    ),
     forceImportRowIds: [preview.transactions[0].importRowId],
     importMeta: {
       importFileId: preview.importFileId,
@@ -4047,13 +5388,20 @@ test('app imports commit inserts unique transactions and updates account balance
 
   expect(forcedCommit.importedCount).toBe(1);
   expect(forcedCommit.skippedDuplicateCount).toBe(9);
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM transactions WHERE accountId = ?').get(accountId)).toMatchObject({
+  expect(
+    getDb()
+      .prepare('SELECT COUNT(*) AS count FROM transactions WHERE accountId = ?')
+      .get(accountId),
+  ).toMatchObject({
     count: 11,
   });
 });
 
 test('app import history lists committed files and can unimport one', async () => {
-  const csv = fs.readFileSync(path.resolve(import.meta.dir, '..', '..', 'sample-imports', 'chase-credit-card-demo.csv'), 'utf8');
+  const csv = fs.readFileSync(
+    path.resolve(import.meta.dir, '..', '..', 'sample-imports', 'chase-credit-card-demo.csv'),
+    'utf8',
+  );
   const accountId = insertRow('accounts', {
     name: 'Chase Sapphire',
     institution: 'Chase',
@@ -4063,18 +5411,24 @@ test('app import history lists committed files and can unimport one', async () =
   });
   const preview = await postImportPreview('chase-credit-card-demo.csv', csv);
 
-  await commitImportForTest( {
+  await commitImportForTest({
     accountId,
     importFileId: preview.importFileId,
-    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    importRowIds: preview.transactions.map(
+      (transaction: { importRowId: number }) => transaction.importRowId,
+    ),
   });
-  const annotatedTransaction = getDb().prepare(`
+  const annotatedTransaction = getDb()
+    .prepare(
+      `
     SELECT ledgerTransactionId
     FROM ledgerTransactions
     WHERE importFileId = ?
     ORDER BY ledgerTransactionId ASC
     LIMIT 1
-  `).get(preview.importFileId) as { ledgerTransactionId: string };
+  `,
+    )
+    .get(preview.importFileId) as { ledgerTransactionId: string };
   insertRow('transactionAnnotations', {
     ledgerTransactionId: annotatedTransaction.ledgerTransactionId,
     notes: 'keep this user note',
@@ -4082,7 +5436,7 @@ test('app import history lists committed files and can unimport one', async () =
     updatedAt: new Date().toISOString(),
   });
 
-  const history = await listImportHistoryForTest() as {
+  const history = (await listImportHistoryForTest()) as {
     imports: Array<{
       id: number;
       fileName: string;
@@ -4102,21 +5456,47 @@ test('app import history lists committed files and can unimport one', async () =
     status: 'committed',
     transactionCount: 10,
     sourceKind: 'activity',
-    accounts: [{
-      id: accountId,
-      name: 'Chase Sapphire',
-      accountHolder: 'Example Owner',
-    }],
+    accounts: [
+      {
+        id: accountId,
+        name: 'Chase Sapphire',
+        accountHolder: 'Example Owner',
+      },
+    ],
   });
 
   await caller.imports.unimport({ importFileId: preview.importFileId });
 
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM transactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
-  expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(preview.importFileId)).toMatchObject({ status: 'unimported' });
-  expect(getDb().prepare('SELECT status FROM sourceFiles WHERE importFileId = ?').get(preview.importFileId)).toMatchObject({ status: 'unimported' });
-  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE sourceFileId = (SELECT id FROM sourceFiles WHERE importFileId = ?)').get(preview.importFileId)).toMatchObject({ accountId });
-  expect(getDb().prepare('SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId = ?').get(annotatedTransaction.ledgerTransactionId)).toMatchObject({
+  expect(
+    getDb()
+      .prepare('SELECT COUNT(*) AS count FROM transactions WHERE accountId = ?')
+      .get(accountId),
+  ).toMatchObject({ count: 0 });
+  expect(
+    getDb()
+      .prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?')
+      .get(accountId),
+  ).toMatchObject({ count: 0 });
+  expect(
+    getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(preview.importFileId),
+  ).toMatchObject({ status: 'unimported' });
+  expect(
+    getDb()
+      .prepare('SELECT status FROM sourceFiles WHERE importFileId = ?')
+      .get(preview.importFileId),
+  ).toMatchObject({ status: 'unimported' });
+  expect(
+    getDb()
+      .prepare(
+        'SELECT accountId FROM sourceAccounts WHERE sourceFileId = (SELECT id FROM sourceFiles WHERE importFileId = ?)',
+      )
+      .get(preview.importFileId),
+  ).toMatchObject({ accountId });
+  expect(
+    getDb()
+      .prepare('SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId = ?')
+      .get(annotatedTransaction.ledgerTransactionId),
+  ).toMatchObject({
     notes: 'keep this user note',
   });
 
@@ -4126,17 +5506,40 @@ test('app import history lists committed files and can unimport one', async () =
     importFileId: preview.importFileId,
     transactionCount: 10,
   });
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM transactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 10 });
-  expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(preview.importFileId)).toMatchObject({ status: 'committed' });
-  expect(getDb().prepare('SELECT status FROM sourceFiles WHERE importFileId = ?').get(preview.importFileId)).toMatchObject({ status: 'committed' });
-  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE sourceFileId = (SELECT id FROM sourceFiles WHERE importFileId = ?)').get(preview.importFileId)).toMatchObject({ accountId });
-  expect(getDb().prepare('SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId = ?').get(annotatedTransaction.ledgerTransactionId)).toMatchObject({
+  expect(
+    getDb()
+      .prepare('SELECT COUNT(*) AS count FROM transactions WHERE accountId = ?')
+      .get(accountId),
+  ).toMatchObject({ count: 10 });
+  expect(
+    getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(preview.importFileId),
+  ).toMatchObject({ status: 'committed' });
+  expect(
+    getDb()
+      .prepare('SELECT status FROM sourceFiles WHERE importFileId = ?')
+      .get(preview.importFileId),
+  ).toMatchObject({ status: 'committed' });
+  expect(
+    getDb()
+      .prepare(
+        'SELECT accountId FROM sourceAccounts WHERE sourceFileId = (SELECT id FROM sourceFiles WHERE importFileId = ?)',
+      )
+      .get(preview.importFileId),
+  ).toMatchObject({ accountId });
+  expect(
+    getDb()
+      .prepare('SELECT notes FROM transactionAnnotations WHERE ledgerTransactionId = ?')
+      .get(annotatedTransaction.ledgerTransactionId),
+  ).toMatchObject({
     notes: 'keep this user note',
   });
 });
 
 test('app import history returns each consolidated file once with deduplicated account metadata', async () => {
-  const csv = fs.readFileSync(path.resolve(import.meta.dir, '..', '..', 'sample-imports', 'chase-credit-card-demo.csv'), 'utf8');
+  const csv = fs.readFileSync(
+    path.resolve(import.meta.dir, '..', '..', 'sample-imports', 'chase-credit-card-demo.csv'),
+    'utf8',
+  );
   const primaryAccountId = insertRow('accounts', {
     name: 'Primary Card',
     institution: 'Chase',
@@ -4156,10 +5559,14 @@ test('app import history returns each consolidated file once with deduplicated a
   await commitImportForTest({
     accountId: primaryAccountId,
     importFileId: preview.importFileId,
-    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    importRowIds: preview.transactions.map(
+      (transaction: { importRowId: number }) => transaction.importRowId,
+    ),
   });
 
-  const sourceFile = getDb().prepare('SELECT id FROM sourceFiles WHERE importFileId = ?').get(preview.importFileId) as {
+  const sourceFile = getDb()
+    .prepare('SELECT id FROM sourceFiles WHERE importFileId = ?')
+    .get(preview.importFileId) as {
     id: number;
   };
   insertRow('sourceAccounts', {
@@ -4196,64 +5603,140 @@ test('app import history returns each consolidated file once with deduplicated a
 });
 
 test('quiet account reminders are explicit, reversible and do not manufacture balances', async () => {
-  const id = Number(insertRow('accounts', { name: 'Quiet IRA', institution: 'Vanguard', type: 'investment' }));
+  const id = Number(
+    insertRow('accounts', { name: 'Quiet IRA', institution: 'Vanguard', type: 'investment' }),
+  );
   await caller.accounts.updateMetadata({ id, changes: { freshnessPolicy: 'on-demand' } });
   const report = await caller.dataFreshness.report({ today: '2026-09-21' });
-  expect(report.accounts.find(a => a.accountId === id)).toMatchObject({ status: 'on-demand', balanceStatus: 'no-data', latestBalanceDate: null, activityCheckedThrough: null });
-  expect(report.catchUp.items.some(a => a.accountId === id)).toBe(false);
-  expect((await caller.accounts.list()).accounts.find(a => a.id === id)).toMatchObject({ status: 'active', freshnessPolicy: 'on-demand' });
+  expect(report.accounts.find((a) => a.accountId === id)).toMatchObject({
+    status: 'on-demand',
+    balanceStatus: 'no-data',
+    latestBalanceDate: null,
+    activityCheckedThrough: null,
+  });
+  expect(report.catchUp.items.some((a) => a.accountId === id)).toBe(false);
+  expect((await caller.accounts.list()).accounts.find((a) => a.id === id)).toMatchObject({
+    status: 'active',
+    freshnessPolicy: 'on-demand',
+  });
   expect(getDb().prepare('SELECT COUNT(*) AS n FROM sourceBalances').get()!.n).toBe(0);
-  await expect(caller.accounts.updateMetadata({ id, changes: { freshnessPolicy: 'invalid' as 'regular' } })).rejects.toThrow();
+  await expect(
+    caller.accounts.updateMetadata({ id, changes: { freshnessPolicy: 'invalid' as 'regular' } }),
+  ).rejects.toThrow();
   await caller.accounts.updateMetadata({ id, changes: { freshnessPolicy: 'regular' } });
-  expect((await caller.dataFreshness.report({ today: '2026-09-21' })).catchUp.items.some(a => a.accountId === id)).toBe(true);
+  expect(
+    (await caller.dataFreshness.report({ today: '2026-09-21' })).catchUp.items.some(
+      (a) => a.accountId === id,
+    ),
+  ).toBe(true);
 });
 
 test('declared single-account coverage recognizes quiet periods without refreshing a balance', async () => {
-  const id = Number(insertRow('accounts', { name: 'Quiet IRA', institution: 'Vanguard', type: 'investment' }));
-  const file = Number(insertRow('sourceFiles', { fileName: 'quiet.csv', contentHash: 'quiet', parserName: 'test', status: 'committed', coverageBasis: 'declared', coveredFrom: '2026-09-01', coveredTo: '2026-09-20' }));
-  const sourceAccountId = Number(insertRow('sourceAccounts', { sourceFileId: file, accountId: id, sourceAccountKey: 'quiet', institution: 'Vanguard' }));
-  const account = async () => (await caller.dataFreshness.report({ today: '2026-09-21' })).accounts.find(a => a.accountId === id)!;
-  expect(await account()).toMatchObject({ transactionStatus: 'current', activityCheckedThrough: '2026-09-20', latestTransactionDate: null, balanceStatus: 'no-data', latestBalanceDate: null });
-  insertRow('sourceBalances', { sourceFileId: file, sourceAccountId, date: '2026-09-20', balanceCents: 0, priority: 100 });
-  expect(await account()).toMatchObject({ status: 'current', transactionStatus: 'current', balanceStatus: 'current', latestBalanceDate: '2026-09-20' });
-  expect((await caller.dataFreshness.report({ today: '2026-12-01' })).accounts.find(a => a.accountId === id)).toMatchObject({ status: 'stale', transactionStatus: 'stale', balanceStatus: 'stale' });
+  const id = Number(
+    insertRow('accounts', { name: 'Quiet IRA', institution: 'Vanguard', type: 'investment' }),
+  );
+  const file = Number(
+    insertRow('sourceFiles', {
+      fileName: 'quiet.csv',
+      contentHash: 'quiet',
+      parserName: 'test',
+      status: 'committed',
+      coverageBasis: 'declared',
+      coveredFrom: '2026-09-01',
+      coveredTo: '2026-09-20',
+    }),
+  );
+  const sourceAccountId = Number(
+    insertRow('sourceAccounts', {
+      sourceFileId: file,
+      accountId: id,
+      sourceAccountKey: 'quiet',
+      institution: 'Vanguard',
+    }),
+  );
+  const account = async () =>
+    (await caller.dataFreshness.report({ today: '2026-09-21' })).accounts.find(
+      (a) => a.accountId === id,
+    )!;
+  expect(await account()).toMatchObject({
+    transactionStatus: 'current',
+    activityCheckedThrough: '2026-09-20',
+    latestTransactionDate: null,
+    balanceStatus: 'no-data',
+    latestBalanceDate: null,
+  });
+  insertRow('sourceBalances', {
+    sourceFileId: file,
+    sourceAccountId,
+    date: '2026-09-20',
+    balanceCents: 0,
+    priority: 100,
+  });
+  expect(await account()).toMatchObject({
+    status: 'current',
+    transactionStatus: 'current',
+    balanceStatus: 'current',
+    latestBalanceDate: '2026-09-20',
+  });
+  expect(
+    (await caller.dataFreshness.report({ today: '2026-12-01' })).accounts.find(
+      (a) => a.accountId === id,
+    ),
+  ).toMatchObject({ status: 'stale', transactionStatus: 'stale', balanceStatus: 'stale' });
   getDb().prepare("UPDATE sourceFiles SET coverageBasis='observed' WHERE id=?").run(file);
   expect((await account()).activityCheckedThrough).toBeNull();
-  getDb().prepare("UPDATE sourceFiles SET coverageBasis='declared', status='unimported' WHERE id=?").run(file);
+  getDb()
+    .prepare("UPDATE sourceFiles SET coverageBasis='declared', status='unimported' WHERE id=?")
+    .run(file);
   expect((await account()).activityCheckedThrough).toBeNull();
-  getDb().prepare("UPDATE sourceFiles SET status='committed', coveredTo='2027-01-01' WHERE id=?").run(file);
+  getDb()
+    .prepare("UPDATE sourceFiles SET status='committed', coveredTo='2027-01-01' WHERE id=?")
+    .run(file);
   expect((await account()).activityCheckedThrough).toBeNull();
   getDb().prepare("UPDATE sourceFiles SET coveredTo='2026-09-20' WHERE id=?").run(file);
-  insertRow('sourceAccounts', { sourceFileId: file, accountId: id, sourceAccountKey: 'another', institution: 'Vanguard' });
+  insertRow('sourceAccounts', {
+    sourceFileId: file,
+    accountId: id,
+    sourceAccountKey: 'another',
+    institution: 'Vanguard',
+  });
   expect((await account()).activityCheckedThrough).toBeNull();
 });
 
 test('app data freshness reports latest source fact dates by account', async () => {
-  const checkingId = Number(insertRow('accounts', {
-    name: 'Fresh Checking',
-    institution: 'Bank of America',
-    type: 'checking',
-    currentBalance: 0,
-  }));
-  const staleCardId = Number(insertRow('accounts', {
-    name: 'Old Card',
-    institution: 'Chase',
-    type: 'credit-card',
-    currentBalance: 0,
-  }));
-  const noDataId = Number(insertRow('accounts', {
-    name: 'Never Imported',
-    institution: 'Marcus',
-    type: 'savings',
-    currentBalance: 0,
-  }));
-  const closedId = Number(insertRow('accounts', {
-    name: 'Closed Brokerage',
-    institution: 'Vanguard',
-    type: 'investment',
-    status: 'closed',
-    currentBalance: 0,
-  }));
+  const checkingId = Number(
+    insertRow('accounts', {
+      name: 'Fresh Checking',
+      institution: 'Bank of America',
+      type: 'checking',
+      currentBalance: 0,
+    }),
+  );
+  const staleCardId = Number(
+    insertRow('accounts', {
+      name: 'Old Card',
+      institution: 'Chase',
+      type: 'credit-card',
+      currentBalance: 0,
+    }),
+  );
+  const noDataId = Number(
+    insertRow('accounts', {
+      name: 'Never Imported',
+      institution: 'Marcus',
+      type: 'savings',
+      currentBalance: 0,
+    }),
+  );
+  const closedId = Number(
+    insertRow('accounts', {
+      name: 'Closed Brokerage',
+      institution: 'Vanguard',
+      type: 'investment',
+      status: 'closed',
+      currentBalance: 0,
+    }),
+  );
   insertRow('accounts', {
     name: 'Archived Account',
     institution: 'Bank of America',
@@ -4262,32 +5745,38 @@ test('app data freshness reports latest source fact dates by account', async () 
     currentBalance: 0,
   });
 
-  const freshImportFileId = Number(insertRow('importFiles', {
-    fileName: 'bofa-checking.csv',
-    contentHash: 'fresh-hash',
-    parserName: 'Bank of America Activity',
-    institution: 'Bank of America',
-    sourceType: 'activity-export',
-    status: 'committed',
-    committedAt: '2026-06-25T12:00:00.000Z',
-  }));
-  const freshSourceFileId = Number(insertRow('sourceFiles', {
-    importFileId: freshImportFileId,
-    fileName: 'bofa-checking.csv',
-    contentHash: 'fresh-hash',
-    parserName: 'Bank of America Activity',
-    institution: 'Bank of America',
-    sourceType: 'activity-export',
-    status: 'committed',
-    committedAt: '2026-06-25T12:00:00.000Z',
-  }));
-  const freshSourceAccountId = Number(insertRow('sourceAccounts', {
-    sourceFileId: freshSourceFileId,
-    accountId: checkingId,
-    institution: 'Bank of America',
-    sourceAccountKey: 'bofa-checking',
-    sourceAccountName: 'Fresh Checking',
-  }));
+  const freshImportFileId = Number(
+    insertRow('importFiles', {
+      fileName: 'bofa-checking.csv',
+      contentHash: 'fresh-hash',
+      parserName: 'Bank of America Activity',
+      institution: 'Bank of America',
+      sourceType: 'activity-export',
+      status: 'committed',
+      committedAt: '2026-06-25T12:00:00.000Z',
+    }),
+  );
+  const freshSourceFileId = Number(
+    insertRow('sourceFiles', {
+      importFileId: freshImportFileId,
+      fileName: 'bofa-checking.csv',
+      contentHash: 'fresh-hash',
+      parserName: 'Bank of America Activity',
+      institution: 'Bank of America',
+      sourceType: 'activity-export',
+      status: 'committed',
+      committedAt: '2026-06-25T12:00:00.000Z',
+    }),
+  );
+  const freshSourceAccountId = Number(
+    insertRow('sourceAccounts', {
+      sourceFileId: freshSourceFileId,
+      accountId: checkingId,
+      institution: 'Bank of America',
+      sourceAccountKey: 'bofa-checking',
+      sourceAccountName: 'Fresh Checking',
+    }),
+  );
   insertRow('sourceTransactions', {
     sourceFileId: freshSourceFileId,
     sourceAccountId: freshSourceAccountId,
@@ -4306,32 +5795,38 @@ test('app data freshness reports latest source fact dates by account', async () 
     priority: 100,
   });
 
-  const staleImportFileId = Number(insertRow('importFiles', {
-    fileName: 'chase.csv',
-    contentHash: 'stale-hash',
-    parserName: 'Chase Credit Card',
-    institution: 'Chase',
-    sourceType: 'activity-export',
-    status: 'committed',
-    committedAt: '2026-04-01T12:00:00.000Z',
-  }));
-  const staleSourceFileId = Number(insertRow('sourceFiles', {
-    importFileId: staleImportFileId,
-    fileName: 'chase.csv',
-    contentHash: 'stale-hash',
-    parserName: 'Chase Credit Card',
-    institution: 'Chase',
-    sourceType: 'activity-export',
-    status: 'committed',
-    committedAt: '2026-04-01T12:00:00.000Z',
-  }));
-  const staleSourceAccountId = Number(insertRow('sourceAccounts', {
-    sourceFileId: staleSourceFileId,
-    accountId: staleCardId,
-    institution: 'Chase',
-    sourceAccountKey: 'chase-card',
-    sourceAccountName: 'Old Card',
-  }));
+  const staleImportFileId = Number(
+    insertRow('importFiles', {
+      fileName: 'chase.csv',
+      contentHash: 'stale-hash',
+      parserName: 'Chase Credit Card',
+      institution: 'Chase',
+      sourceType: 'activity-export',
+      status: 'committed',
+      committedAt: '2026-04-01T12:00:00.000Z',
+    }),
+  );
+  const staleSourceFileId = Number(
+    insertRow('sourceFiles', {
+      importFileId: staleImportFileId,
+      fileName: 'chase.csv',
+      contentHash: 'stale-hash',
+      parserName: 'Chase Credit Card',
+      institution: 'Chase',
+      sourceType: 'activity-export',
+      status: 'committed',
+      committedAt: '2026-04-01T12:00:00.000Z',
+    }),
+  );
+  const staleSourceAccountId = Number(
+    insertRow('sourceAccounts', {
+      sourceFileId: staleSourceFileId,
+      accountId: staleCardId,
+      institution: 'Chase',
+      sourceAccountKey: 'chase-card',
+      sourceAccountName: 'Old Card',
+    }),
+  );
   insertRow('sourceTransactions', {
     sourceFileId: staleSourceFileId,
     sourceAccountId: staleSourceAccountId,
@@ -4344,10 +5839,18 @@ test('app data freshness reports latest source fact dates by account', async () 
   });
 
   const body = await dataFreshnessForTest('2026-07-01');
-  const checking = body.accounts.find((account: { accountId: number }) => account.accountId === checkingId);
-  const staleCard = body.accounts.find((account: { accountId: number }) => account.accountId === staleCardId);
-  const noData = body.accounts.find((account: { accountId: number }) => account.accountId === noDataId);
-  const closed = body.accounts.find((account: { accountId: number }) => account.accountId === closedId);
+  const checking = body.accounts.find(
+    (account: { accountId: number }) => account.accountId === checkingId,
+  );
+  const staleCard = body.accounts.find(
+    (account: { accountId: number }) => account.accountId === staleCardId,
+  );
+  const noData = body.accounts.find(
+    (account: { accountId: number }) => account.accountId === noDataId,
+  );
+  const closed = body.accounts.find(
+    (account: { accountId: number }) => account.accountId === closedId,
+  );
 
   expect(body.summary).toMatchObject({
     totalAccounts: 4,
@@ -4383,54 +5886,62 @@ test('app data freshness reports latest source fact dates by account', async () 
     generatedAt: '2026-07-01',
     totalItems: 2,
   });
-  expect(body.catchUp.items).toEqual(expect.arrayContaining([
-    expect.objectContaining({
-      id: `account-${staleCardId}`,
-      accountId: staleCardId,
-      institution: 'Chase',
-      status: 'stale',
-      latestFactDate: '2026-04-01',
-      downloadWindow: {
-        startDate: '2026-03-25',
-        endDate: '2026-07-01',
-        overlapDays: 7,
-        label: '2026-03-25 through 2026-07-01',
-      },
-      suggestedDownloads: expect.arrayContaining(['Credit-card activity CSV']),
-    }),
-    expect.objectContaining({
-      id: `account-${noDataId}`,
-      accountId: noDataId,
-      institution: 'Marcus',
-      status: 'no-data',
-      latestFactDate: null,
-      downloadWindow: {
-        startDate: '2025-07-01',
-        endDate: '2026-07-01',
-        overlapDays: 0,
-        label: 'last 12 months through 2026-07-01',
-      },
-      suggestedDownloads: expect.arrayContaining(['Activity CSV', 'Statement PDF']),
-    }),
-  ]));
-  expect(body.catchUp.groups).toEqual(expect.arrayContaining([
-    expect.objectContaining({
-      institution: 'Chase',
-      statuses: { due: 0, stale: 1, noData: 0 },
-    }),
-    expect.objectContaining({
-      institution: 'Marcus',
-      statuses: { due: 0, stale: 0, noData: 1 },
-    }),
-  ]));
+  expect(body.catchUp.items).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        id: `account-${staleCardId}`,
+        accountId: staleCardId,
+        institution: 'Chase',
+        status: 'stale',
+        latestFactDate: '2026-04-01',
+        downloadWindow: {
+          startDate: '2026-03-25',
+          endDate: '2026-07-01',
+          overlapDays: 7,
+          label: '2026-03-25 through 2026-07-01',
+        },
+        suggestedDownloads: expect.arrayContaining(['Credit-card activity CSV']),
+      }),
+      expect.objectContaining({
+        id: `account-${noDataId}`,
+        accountId: noDataId,
+        institution: 'Marcus',
+        status: 'no-data',
+        latestFactDate: null,
+        downloadWindow: {
+          startDate: '2025-07-01',
+          endDate: '2026-07-01',
+          overlapDays: 0,
+          label: 'last 12 months through 2026-07-01',
+        },
+        suggestedDownloads: expect.arrayContaining(['Activity CSV', 'Statement PDF']),
+      }),
+    ]),
+  );
+  expect(body.catchUp.groups).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        institution: 'Chase',
+        statuses: { due: 0, stale: 1, noData: 0 },
+      }),
+      expect.objectContaining({
+        institution: 'Marcus',
+        statuses: { due: 0, stale: 0, noData: 1 },
+      }),
+    ]),
+  );
 
   const catchUp = await dataCatchUpForTest('2026-07-01');
   expect(catchUp).toMatchObject({
     generatedAt: '2026-07-01',
     totalItems: 2,
   });
-  expect(catchUp.items.map((item: { accountId: number }) => item.accountId).sort()).toEqual([noDataId, staleCardId].sort());
-  expect(catchUp.items.map((item: { accountId: number }) => item.accountId)).not.toContain(closedId);
+  expect(catchUp.items.map((item: { accountId: number }) => item.accountId).sort()).toEqual(
+    [noDataId, staleCardId].sort(),
+  );
+  expect(catchUp.items.map((item: { accountId: number }) => item.accountId)).not.toContain(
+    closedId,
+  );
 
   const trpcReport = await caller.dataFreshness.report({ today: '2026-07-01' });
   expect(trpcReport.summary).toMatchObject({
@@ -4448,22 +5959,26 @@ test('app data freshness reports latest source fact dates by account', async () 
 });
 
 test('Vanguard sync targets survive reversible unimport provenance', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Vanguard',
-    institution: 'Vanguard',
-    type: 'investment',
-    accountHolder: 'Example Holder',
-    currentBalance: 0,
-  }));
-  const sourceFileId = Number(insertRow('sourceFiles', {
-    fileName: '2026-07-31-Brokerage---account-2.pdf',
-    contentHash: 'unimported-vanguard-profile',
-    parserName: 'vanguard-statement',
-    sourceType: 'statement',
-    institution: 'Vanguard',
-    status: 'unimported',
-    createdAt: '2026-08-01T00:00:00.000Z',
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Vanguard',
+      institution: 'Vanguard',
+      type: 'investment',
+      accountHolder: 'Example Holder',
+      currentBalance: 0,
+    }),
+  );
+  const sourceFileId = Number(
+    insertRow('sourceFiles', {
+      fileName: '2026-07-31-Brokerage---account-2.pdf',
+      contentHash: 'unimported-vanguard-profile',
+      parserName: 'vanguard-statement',
+      sourceType: 'statement',
+      institution: 'Vanguard',
+      status: 'unimported',
+      createdAt: '2026-08-01T00:00:00.000Z',
+    }),
+  );
   insertRow('sourceAccounts', {
     sourceFileId,
     accountId,
@@ -4494,12 +6009,14 @@ test('TIAA has one app catch-up target for any active local TIAA account', async
     status: 'active',
   });
 
-  expect(await caller.dataSync.targets()).toEqual([{
-    id: 'tiaa',
-    accountIds: [1],
-    institutionId: 'tiaa',
-    label: 'TIAA',
-  }]);
+  expect(await caller.dataSync.targets()).toEqual([
+    {
+      id: 'tiaa',
+      accountIds: [1],
+      institutionId: 'tiaa',
+      label: 'TIAA',
+    },
+  ]);
 });
 
 test('Fidelity local accounts expose exactly one registered app catch-up menu target', async () => {
@@ -4513,7 +6030,9 @@ test('Fidelity local accounts expose exactly one registered app catch-up menu ta
     status: 'active',
   });
 
-  expect((await caller.dataSync.targets()).filter(target => target.institutionId === 'fidelity')).toEqual([]);
+  expect(
+    (await caller.dataSync.targets()).filter((target) => target.institutionId === 'fidelity'),
+  ).toEqual([]);
 
   for (const name of ['Synthetic brokerage', 'Synthetic retirement plan']) {
     insertRow('accounts', {
@@ -4527,33 +6046,42 @@ test('Fidelity local accounts expose exactly one registered app catch-up menu ta
     });
   }
 
-  expect((await caller.dataSync.targets()).filter(target => target.institutionId === 'fidelity')).toEqual([{
-    id: 'fidelity',
-    accountIds: [2, 3],
-    institutionId: 'fidelity',
-    label: 'Fidelity (Synthetic Holder)',
-  }]);
+  expect(
+    (await caller.dataSync.targets()).filter((target) => target.institutionId === 'fidelity'),
+  ).toEqual([
+    {
+      id: 'fidelity',
+      accountIds: [2, 3],
+      institutionId: 'fidelity',
+      label: 'Fidelity (Synthetic Holder)',
+    },
+  ]);
 });
 
 test('institution catch-up stages reviewable claims before explicit confirmation', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Primary Checking',
-    institution: 'Bank of America',
-    type: 'checking',
-    currentBalance: 0,
-    currency: 'USD',
-    status: 'active',
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Primary Checking',
+      institution: 'Bank of America',
+      type: 'checking',
+      currentBalance: 0,
+      currency: 'USD',
+      status: 'active',
+    }),
+  );
   const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-sync-review-'));
   const fileName = 'bofa-checking-1234-2026-01-01-to-2026-01-31.csv';
   const filePath = path.join(directory, fileName);
-  await fs.promises.writeFile(filePath, [
-    'Description,,Summary Amt.',
-    'Opening Balance,,1000.00',
-    'Date,Description,Amount,Running Bal.',
-    '01/05/2026,EXAMPLE PAYROLL,2500.00,3500.00',
-    '01/06/2026,EXAMPLE UTILITY,-125.50,3374.50',
-  ].join('\n'));
+  await fs.promises.writeFile(
+    filePath,
+    [
+      'Description,,Summary Amt.',
+      'Opening Balance,,1000.00',
+      'Date,Description,Amount,Running Bal.',
+      '01/05/2026,EXAMPLE PAYROLL,2500.00,3500.00',
+      '01/06/2026,EXAMPLE UTILITY,-125.50,3374.50',
+    ].join('\n'),
+  );
 
   try {
     const artifact = await stageSyncArtifact({ path: filePath, accountId });
@@ -4571,19 +6099,24 @@ test('institution catch-up stages reviewable claims before explicit confirmation
       outflowCents: 12550,
       netAmountCents: 237450,
     });
-    expect(artifact.accountClaims).toEqual([expect.objectContaining({
-      remoteAccountId: 'Bank of America||Adv Plus Banking - 1234',
-      accountName: 'Adv Plus Banking - 1234',
-      resolvedAccountId: accountId,
-      resolution: 'connector',
-      transactionCount: 2,
-      balanceCount: 2,
-    })]);
+    expect(artifact.accountClaims).toEqual([
+      expect.objectContaining({
+        remoteAccountId: 'Bank of America||Adv Plus Banking - 1234',
+        accountName: 'Adv Plus Banking - 1234',
+        resolvedAccountId: accountId,
+        resolution: 'connector',
+        transactionCount: 2,
+        balanceCount: 2,
+      }),
+    ]);
     expect(artifact.transactionSamples).toHaveLength(2);
     expect(artifact.balanceClaims).toHaveLength(2);
-    expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(artifact.importFileId))
-      .toEqual({ status: 'previewed' });
-    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
+    expect(
+      getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(artifact.importFileId),
+    ).toEqual({ status: 'previewed' });
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({
+      count: 0,
+    });
     expect((await listImportHistoryForTest()).imports).toHaveLength(0);
 
     const repeatedPreview = await stageSyncArtifact({ path: filePath, accountId });
@@ -4591,22 +6124,29 @@ test('institution catch-up stages reviewable claims before explicit confirmation
       importFileId: artifact.importFileId,
       status: 'ready',
     });
-    expect(getDb().prepare('SELECT COUNT(*) AS count FROM importFiles').get()).toEqual({ count: 1 });
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM importFiles').get()).toEqual({
+      count: 1,
+    });
 
     // Production connector review/confirmation must survive loss of its download
     // staging file and a database backup round-trip.
     const downloadedBytes = await fs.promises.readFile(filePath);
-    const retained = getDb().prepare('SELECT bytes FROM importOriginals WHERE importFileId=?').get(artifact.importFileId);
+    const retained = getDb()
+      .prepare('SELECT bytes FROM importOriginals WHERE importFileId=?')
+      .get(artifact.importFileId);
     expect(Buffer.from(retained!.bytes)).toEqual(downloadedBytes);
     const snapshotSource = new Database(databaseBackupStatus().databasePath, { readonly: true });
     const backupDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'retention-backup-'));
     const snapshot = writeSnapshot(snapshotSource, backupDirectory, 'retention-test');
     const restored = new Database(snapshot.path, { readonly: true });
     try {
-      const restoredOriginal = restored.query('SELECT bytes FROM importOriginals WHERE importFileId=?').get(artifact.importFileId) as { bytes: Uint8Array };
+      const restoredOriginal = restored
+        .query('SELECT bytes FROM importOriginals WHERE importFileId=?')
+        .get(artifact.importFileId) as { bytes: Uint8Array };
       expect(Buffer.from(restoredOriginal.bytes)).toEqual(downloadedBytes);
     } finally {
-      restored.close(); snapshotSource.close();
+      restored.close();
+      snapshotSource.close();
       await fs.promises.rm(backupDirectory, { recursive: true, force: true });
     }
     await fs.promises.unlink(filePath);
@@ -4628,10 +6168,18 @@ test('institution catch-up stages reviewable claims before explicit confirmation
     const firstOutcomes = await caller.dataSync.outcomes({ runId: review.runId });
     expect(firstOutcomes.canConfirm).toBe(true);
     getDb().prepare('UPDATE accounts SET name = ? WHERE id = ?').run('Renamed checking', accountId);
-    await expect(caller.dataSync.confirm({ runId: review.runId, outcomeRevision: firstOutcomes.revision })).rejects.toThrow('stale');
-    expect((await caller.dataSync.status({ runId: review.runId }))?.status).toBe('awaiting-confirmation');
-    expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(artifact.importFileId)).toEqual({ status: 'previewed' });
-    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
+    await expect(
+      caller.dataSync.confirm({ runId: review.runId, outcomeRevision: firstOutcomes.revision }),
+    ).rejects.toThrow('stale');
+    expect((await caller.dataSync.status({ runId: review.runId }))?.status).toBe(
+      'awaiting-confirmation',
+    );
+    expect(
+      getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(artifact.importFileId),
+    ).toEqual({ status: 'previewed' });
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({
+      count: 0,
+    });
     const confirmedJob = await confirmReviewedSync({ runId: review.runId });
     expect(confirmedJob).toMatchObject({
       status: 'complete',
@@ -4641,11 +6189,16 @@ test('institution catch-up stages reviewable claims before explicit confirmation
         skippedArtifacts: 0,
       },
     });
-    expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(artifact.importFileId))
-      .toEqual({ status: 'committed' });
-    expect(getDb().prepare('SELECT DISTINCT accountId FROM sourceAccounts').all()).toEqual([{ accountId }]);
+    expect(
+      getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(artifact.importFileId),
+    ).toEqual({ status: 'committed' });
+    expect(getDb().prepare('SELECT DISTINCT accountId FROM sourceAccounts').all()).toEqual([
+      { accountId },
+    ]);
     expect(getDb().prepare('SELECT COUNT(*) AS count FROM accounts').get()).toEqual({ count: 1 });
-    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 2 });
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({
+      count: 2,
+    });
     expect((await listImportHistoryForTest()).imports).toHaveLength(1);
 
     await fs.promises.writeFile(filePath, downloadedBytes);
@@ -4662,25 +6215,31 @@ test('institution catch-up stages reviewable claims before explicit confirmation
       importFileId: artifact.importFileId,
       status: 'already-imported',
     });
-    expect(getDb().prepare('SELECT COUNT(*) AS count FROM importFiles').get()).toEqual({ count: 1 });
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM importFiles').get()).toEqual({
+      count: 1,
+    });
   } finally {
     await fs.promises.rm(directory, { recursive: true, force: true });
   }
 });
 
 test('institution catch-up stages parser-backed Fidelity activity JSON', async () => {
-  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-fidelity-json-review-'));
+  const directory = await fs.promises.mkdtemp(
+    path.join(os.tmpdir(), 'easymoney-fidelity-json-review-'),
+  );
   const fileName = 'fidelity-retail-brokerage-1234-activity-2026-07-01-to-2026-07-31.json';
   const filePath = path.join(directory, fileName);
   const text = JSON.stringify({
     errors: [],
     data: {
-      transactions: [{
-        acctNum: 'Z00001234',
-        date: Date.parse('2026-07-15T00:00:00.000Z') / 1_000,
-        amtDetail: { net: 12.34 },
-        description: `Example activity ${'detail '.repeat(1_000)}`,
-      }],
+      transactions: [
+        {
+          acctNum: 'Z00001234',
+          date: Date.parse('2026-07-15T00:00:00.000Z') / 1_000,
+          amtDetail: { net: 12.34 },
+          description: `Example activity ${'detail '.repeat(1_000)}`,
+        },
+      ],
     },
   });
   expect(text.length).toBeGreaterThan(4_096);
@@ -4700,65 +6259,82 @@ test('institution catch-up stages parser-backed Fidelity activity JSON', async (
       coveredFrom: '2026-07-15',
       coveredTo: '2026-07-15',
     });
-    expect(artifact.accountClaims).toEqual([expect.objectContaining({
-      remoteAccountId: 'fidelity:Z00001234',
-      accountName: 'Fidelity account ending in 1234',
-      resolution: 'auto-create',
-      requiresExplicitMapping: true,
-      transactionCount: 1,
-    })]);
+    expect(artifact.accountClaims).toEqual([
+      expect.objectContaining({
+        remoteAccountId: 'fidelity:Z00001234',
+        accountName: 'Fidelity account ending in 1234',
+        resolution: 'auto-create',
+        requiresExplicitMapping: true,
+        transactionCount: 1,
+      }),
+    ]);
   } finally {
     await fs.promises.rm(directory, { recursive: true, force: true });
   }
 });
 
 test('independent sync previews arbitrate identical content once at confirmation', async () => {
-  const firstAccountId = Number(insertRow('accounts', {
-    name: 'First Synthetic Checking',
-    institution: 'Bank of America',
-    type: 'checking',
-    currentBalance: 0,
-    currency: 'USD',
-    status: 'active',
-  }));
-  const secondAccountId = Number(insertRow('accounts', {
-    name: 'Second Synthetic Checking',
-    institution: 'Bank of America',
-    type: 'checking',
-    currentBalance: 0,
-    currency: 'USD',
-    status: 'active',
-  }));
-  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-sync-arbitration-'));
+  const firstAccountId = Number(
+    insertRow('accounts', {
+      name: 'First Synthetic Checking',
+      institution: 'Bank of America',
+      type: 'checking',
+      currentBalance: 0,
+      currency: 'USD',
+      status: 'active',
+    }),
+  );
+  const secondAccountId = Number(
+    insertRow('accounts', {
+      name: 'Second Synthetic Checking',
+      institution: 'Bank of America',
+      type: 'checking',
+      currentBalance: 0,
+      currency: 'USD',
+      status: 'active',
+    }),
+  );
+  const directory = await fs.promises.mkdtemp(
+    path.join(os.tmpdir(), 'easymoney-sync-arbitration-'),
+  );
   const fileName = 'bofa-checking-1234-2026-07-01-to-2026-07-31.csv';
-  const fileBytes = new TextEncoder().encode([
-    'Description,,Summary Amt.',
-    'Opening Balance,,1000.00',
-    'Date,Description,Amount,Running Bal.',
-    '07/05/2026,SYNTHETIC PAYROLL,2500.00,3500.00',
-  ].join('\n'));
+  const fileBytes = new TextEncoder().encode(
+    [
+      'Description,,Summary Amt.',
+      'Opening Balance,,1000.00',
+      'Date,Description,Amount,Running Bal.',
+      '07/05/2026,SYNTHETIC PAYROLL,2500.00,3500.00',
+    ].join('\n'),
+  );
   await fs.promises.writeFile(path.join(directory, fileName), fileBytes);
   const manifest = (runId: string, accountId: number) => ({
     protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
     runId,
     institutionId: 'bank-of-america' as const,
-    artifacts: [{
-      fileName,
-      accountId,
-      sizeBytes: fileBytes.byteLength,
-      sha256: new Bun.CryptoHasher('sha256').update(fileBytes).digest('hex'),
-    }],
+    artifacts: [
+      {
+        fileName,
+        accountId,
+        sizeBytes: fileBytes.byteLength,
+        sha256: new Bun.CryptoHasher('sha256').update(fileBytes).digest('hex'),
+      },
+    ],
   });
 
   try {
     const first = await stageSyncArtifactManifest(
-      manifest('sync-arbitration-first', firstAccountId), directory, () => {},
+      manifest('sync-arbitration-first', firstAccountId),
+      directory,
+      () => {},
     );
     const second = await stageSyncArtifactManifest(
-      manifest('sync-arbitration-second', secondAccountId), directory, () => {},
+      manifest('sync-arbitration-second', secondAccountId),
+      directory,
+      () => {},
     );
-    expect(second.review.artifacts[0]!.importFileId)
-      .not.toBe(first.review.artifacts[0]!.importFileId);
+    expect(second.review.artifacts[0]!.importFileId).not.toBe(
+      first.review.artifacts[0]!.importFileId,
+    );
     await saveAwaitingSyncReview(first.review);
     await saveAwaitingSyncReview(second.review);
 
@@ -4770,21 +6346,33 @@ test('independent sync previews arbitrate identical content once at confirmation
       status: 'complete',
       result: { recordedTransactionFacts: 0, skippedArtifacts: 1 },
     });
-    expect(getDb().prepare(`
+    expect(
+      getDb()
+        .prepare(
+          `
       SELECT status, COUNT(*) AS count
       FROM importFiles
       GROUP BY status
       ORDER BY status
-    `).all()).toEqual([
+    `,
+        )
+        .all(),
+    ).toEqual([
       { status: 'committed', count: 1 },
       { status: 'discarded', count: 1 },
     ]);
-    expect(getDb().prepare(`
+    expect(
+      getDb()
+        .prepare(
+          `
       SELECT DISTINCT sa.accountId
       FROM sourceAccounts sa
       JOIN sourceFiles sf ON sf.id = sa.sourceFileId
       WHERE sf.status = 'committed'
-    `).all()).toEqual([{ accountId: firstAccountId }]);
+    `,
+        )
+        .all(),
+    ).toEqual([{ accountId: firstAccountId }]);
   } finally {
     await fs.promises.rm(directory, { recursive: true, force: true });
   }
@@ -4810,49 +6398,59 @@ test('artifact fact identity ignores storage provenance and row order but preser
   const first = stageConsolidatedSyncFacts(claims, 'first-storage-name.csv');
   const reordered = stageConsolidatedSyncFacts([...claims].reverse(), 'different-storage-name.csv');
 
-  expect(importArtifactFactFingerprint(reordered.importFileId))
-    .toBe(importArtifactFactFingerprint(first.importFileId));
-  getDb().prepare("UPDATE importFiles SET status = 'committed' WHERE id = ?").run(first.importFileId);
-  getDb().prepare("UPDATE sourceFiles SET status = 'committed' WHERE importFileId = ?").run(first.importFileId);
+  expect(importArtifactFactFingerprint(reordered.importFileId)).toBe(
+    importArtifactFactFingerprint(first.importFileId),
+  );
+  getDb()
+    .prepare("UPDATE importFiles SET status = 'committed' WHERE id = ?")
+    .run(first.importFileId);
+  getDb()
+    .prepare("UPDATE sourceFiles SET status = 'committed' WHERE importFileId = ?")
+    .run(first.importFileId);
   expect(findCommittedImportArtifactFactDuplicate(reordered.importFileId)).toBe(first.importFileId);
 
-  const changedBalance = stageConsolidatedSyncFacts([
-    { ...claims[0]!, balanceCents: 98_801 },
-    claims[1]!,
-  ], 'changed-balance.csv');
+  const changedBalance = stageConsolidatedSyncFacts(
+    [{ ...claims[0]!, balanceCents: 98_801 }, claims[1]!],
+    'changed-balance.csv',
+  );
   expect(findCommittedImportArtifactFactDuplicate(changedBalance.importFileId)).toBeNull();
 
   const changedCoverage = stageConsolidatedSyncFacts(claims, 'changed-coverage.csv');
-  getDb().prepare("UPDATE sourceFiles SET coveredTo = '2026-08-02' WHERE importFileId = ?")
+  getDb()
+    .prepare("UPDATE sourceFiles SET coveredTo = '2026-08-02' WHERE importFileId = ?")
     .run(changedCoverage.importFileId);
   expect(findCommittedImportArtifactFactDuplicate(changedCoverage.importFileId)).toBeNull();
 
   const changedParser = stageConsolidatedSyncFacts(claims, 'changed-parser.csv');
-  getDb().prepare("UPDATE sourceFiles SET parserName = 'different-parser' WHERE importFileId = ?")
+  getDb()
+    .prepare("UPDATE sourceFiles SET parserName = 'different-parser' WHERE importFileId = ?")
     .run(changedParser.importFileId);
   expect(findCommittedImportArtifactFactDuplicate(changedParser.importFileId)).toBeNull();
 
   const changedSourceType = stageConsolidatedSyncFacts(claims, 'changed-source-type.csv');
-  getDb().prepare("UPDATE sourceFiles SET sourceType = 'statement' WHERE importFileId = ?")
+  getDb()
+    .prepare("UPDATE sourceFiles SET sourceType = 'statement' WHERE importFileId = ?")
     .run(changedSourceType.importFileId);
   expect(findCommittedImportArtifactFactDuplicate(changedSourceType.importFileId)).toBeNull();
 
-  const changedAccount = stageConsolidatedSyncFacts([
-    { ...claims[0]!, remoteAccountId: 'remote:other-checking' },
-    claims[1]!,
-  ], 'changed-account.csv');
+  const changedAccount = stageConsolidatedSyncFacts(
+    [{ ...claims[0]!, remoteAccountId: 'remote:other-checking' }, claims[1]!],
+    'changed-account.csv',
+  );
   expect(findCommittedImportArtifactFactDuplicate(changedAccount.importFileId)).toBeNull();
 
-  const changedTransaction = stageConsolidatedSyncFacts([
-    { ...claims[0]!, description: 'Materially different debit' },
-    claims[1]!,
-  ], 'changed-transaction.csv');
+  const changedTransaction = stageConsolidatedSyncFacts(
+    [{ ...claims[0]!, description: 'Materially different debit' }, claims[1]!],
+    'changed-transaction.csv',
+  );
   expect(findCommittedImportArtifactFactDuplicate(changedTransaction.importFileId)).toBeNull();
 
   const changedOccurrence = stageConsolidatedSyncFacts(claims, 'changed-occurrence.csv');
-  const occurrenceSourceFile = getDb().prepare('SELECT id FROM sourceFiles WHERE importFileId = ?')
+  const occurrenceSourceFile = getDb()
+    .prepare('SELECT id FROM sourceFiles WHERE importFileId = ?')
     .get(changedOccurrence.importFileId) as { id: number };
-  const occurrenceAccount = getDb().prepare('SELECT id FROM sourceAccounts WHERE sourceFileId = ? ORDER BY id LIMIT 1')
+  const occurrenceAccount = getDb()
+    .prepare('SELECT id FROM sourceAccounts WHERE sourceFileId = ? ORDER BY id LIMIT 1')
     .get(occurrenceSourceFile.id) as { id: number };
   insertRow('sourceTransactions', {
     sourceFileId: occurrenceSourceFile.id,
@@ -4866,31 +6464,34 @@ test('artifact fact identity ignores storage provenance and row order but preser
   });
   expect(findCommittedImportArtifactFactDuplicate(changedOccurrence.importFileId)).toBeNull();
 
-  getDb().prepare("UPDATE importFiles SET status = 'unimported' WHERE id = ?").run(first.importFileId);
-  getDb().prepare("UPDATE sourceFiles SET status = 'unimported' WHERE importFileId = ?").run(first.importFileId);
+  getDb()
+    .prepare("UPDATE importFiles SET status = 'unimported' WHERE id = ?")
+    .run(first.importFileId);
+  getDb()
+    .prepare("UPDATE sourceFiles SET status = 'unimported' WHERE importFileId = ?")
+    .run(first.importFileId);
   expect(findCommittedImportArtifactFactDuplicate(reordered.importFileId)).toBeNull();
 });
 
 test('manual balance-only preview marks byte-distinct repeated facts already imported', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Advantage Savings - 1234',
-    institution: 'Bank of America',
-    type: 'savings',
-    currentBalance: 0,
-    currency: 'USD',
-    last4: '1234',
-    status: 'active',
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Advantage Savings - 1234',
+      institution: 'Bank of America',
+      type: 'savings',
+      currentBalance: 0,
+      currency: 'USD',
+      last4: '1234',
+      status: 'active',
+    }),
+  );
   const text = [
     'Description,,Summary Amt.',
     'Opening Balance,,1000.00',
     'Date,Description,Amount,Running Bal.',
     '01/05/2026,BALANCE SNAPSHOT,,1000.00',
   ].join('\n');
-  const first = await postImportPreview(
-    'bofa-savings-1234-2026-01-01-to-2026-01-31.csv',
-    text,
-  );
+  const first = await postImportPreview('bofa-savings-1234-2026-01-01-to-2026-01-31.csv', text);
   expect(first.transactions).toHaveLength(0);
   expect(first.balanceRowIds).toHaveLength(1);
   await commitImportForTest({
@@ -4898,42 +6499,51 @@ test('manual balance-only preview marks byte-distinct repeated facts already imp
     importFileId: first.importFileId,
     importRowIds: [],
     balanceRowIds: first.balanceRowIds,
-    accountMappings: [{
-      sourceAccountId: first.accountMappings[0].sourceAccountId,
-      mode: 'existing',
-      accountId,
-      last4: '1234',
-    }],
+    accountMappings: [
+      {
+        sourceAccountId: first.accountMappings[0].sourceAccountId,
+        mode: 'existing',
+        accountId,
+        last4: '1234',
+      },
+    ],
   });
 
   const repeated = await postImportPreview(
     'bofa-savings-1234-2025-01-01-to-2027-01-31.csv',
     `${text}\n`,
   );
-  expect(getDb().prepare('SELECT contentHash FROM importFiles WHERE id = ?').get(repeated.importFileId))
-    .not.toEqual(getDb().prepare('SELECT contentHash FROM importFiles WHERE id = ?').get(first.importFileId));
+  expect(
+    getDb().prepare('SELECT contentHash FROM importFiles WHERE id = ?').get(repeated.importFileId),
+  ).not.toEqual(
+    getDb().prepare('SELECT contentHash FROM importFiles WHERE id = ?').get(first.importFileId),
+  );
   expect(repeated).toMatchObject({
     alreadyImported: true,
     duplicateOfImportFileId: first.importFileId,
     transactions: [],
   });
   expect(repeated.balanceRowIds).toHaveLength(1);
-  expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(repeated.importFileId))
-    .toEqual({ status: 'discarded' });
-  expect(getDb().prepare("SELECT COUNT(*) AS count FROM sourceFiles WHERE status = 'committed'").get())
-    .toEqual({ count: 1 });
+  expect(
+    getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(repeated.importFileId),
+  ).toEqual({ status: 'discarded' });
+  expect(
+    getDb().prepare("SELECT COUNT(*) AS count FROM sourceFiles WHERE status = 'committed'").get(),
+  ).toEqual({ count: 1 });
 });
 
 test('sync review recognizes byte-distinct repeated balance facts before confirmation', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Advantage Savings - 1234',
-    institution: 'Bank of America',
-    type: 'savings',
-    currentBalance: 0,
-    currency: 'USD',
-    last4: '1234',
-    status: 'active',
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Advantage Savings - 1234',
+      institution: 'Bank of America',
+      type: 'savings',
+      currentBalance: 0,
+      currency: 'USD',
+      last4: '1234',
+      status: 'active',
+    }),
+  );
   const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-semantic-sync-'));
   const firstName = 'bofa-savings-1234-2026-01-01-to-2026-01-31.csv';
   const repeatedName = 'bofa-savings-1234-2025-01-01-to-2027-01-31.csv';
@@ -4978,24 +6588,28 @@ test('sync review recognizes byte-distinct repeated balance facts before confirm
 });
 
 test('independent byte-distinct semantic previews arbitrate once at confirmation', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Advantage Savings - 1234',
-    institution: 'Bank of America',
-    type: 'savings',
-    currentBalance: 0,
-    currency: 'USD',
-    last4: '1234',
-    status: 'active',
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Advantage Savings - 1234',
+      institution: 'Bank of America',
+      type: 'savings',
+      currentBalance: 0,
+      currency: 'USD',
+      last4: '1234',
+      status: 'active',
+    }),
+  );
   const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-semantic-race-'));
   const firstName = 'bofa-savings-1234-2026-01-01-to-2026-01-31.csv';
   const secondName = 'bofa-savings-1234-2025-01-01-to-2027-01-31.csv';
-  const firstBytes = new TextEncoder().encode([
-    'Description,,Summary Amt.',
-    'Opening Balance,,1000.00',
-    'Date,Description,Amount,Running Bal.',
-    '01/05/2026,BALANCE SNAPSHOT,,1000.00',
-  ].join('\n'));
+  const firstBytes = new TextEncoder().encode(
+    [
+      'Description,,Summary Amt.',
+      'Opening Balance,,1000.00',
+      'Date,Description,Amount,Running Bal.',
+      '01/05/2026,BALANCE SNAPSHOT,,1000.00',
+    ].join('\n'),
+  );
   const secondBytes = new Uint8Array([...firstBytes, 10]);
   await fs.promises.writeFile(path.join(directory, firstName), firstBytes);
   await fs.promises.writeFile(path.join(directory, secondName), secondBytes);
@@ -5003,20 +6617,26 @@ test('independent byte-distinct semantic previews arbitrate once at confirmation
     protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
     runId,
     institutionId: 'bank-of-america' as const,
-    artifacts: [{
-      fileName,
-      accountId,
-      sizeBytes: bytes.byteLength,
-      sha256: new Bun.CryptoHasher('sha256').update(bytes).digest('hex'),
-    }],
+    artifacts: [
+      {
+        fileName,
+        accountId,
+        sizeBytes: bytes.byteLength,
+        sha256: new Bun.CryptoHasher('sha256').update(bytes).digest('hex'),
+      },
+    ],
   });
 
   try {
     const first = await stageSyncArtifactManifest(
-      manifest('sync-semantic-race-first', firstName, firstBytes), directory, () => {},
+      manifest('sync-semantic-race-first', firstName, firstBytes),
+      directory,
+      () => {},
     );
     const second = await stageSyncArtifactManifest(
-      manifest('sync-semantic-race-second', secondName, secondBytes), directory, () => {},
+      manifest('sync-semantic-race-second', secondName, secondBytes),
+      directory,
+      () => {},
     );
     expect(first.review.readyToImport).toBe(1);
     expect(second.review.readyToImport).toBe(1);
@@ -5031,26 +6651,33 @@ test('independent byte-distinct semantic previews arbitrate once at confirmation
       status: 'complete',
       result: { recordedBalanceFacts: 0, skippedArtifacts: 1 },
     });
-    expect(getDb().prepare("SELECT status, COUNT(*) AS count FROM importFiles GROUP BY status ORDER BY status").all())
-      .toEqual([
-        { status: 'committed', count: 1 },
-        { status: 'discarded', count: 1 },
-      ]);
+    expect(
+      getDb()
+        .prepare(
+          'SELECT status, COUNT(*) AS count FROM importFiles GROUP BY status ORDER BY status',
+        )
+        .all(),
+    ).toEqual([
+      { status: 'committed', count: 1 },
+      { status: 'discarded', count: 1 },
+    ]);
   } finally {
     await fs.promises.rm(directory, { recursive: true, force: true });
   }
 });
 
 test('TIAA worker staging keeps six repeated activity identities and one statement identity distinct', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Synthetic 403(b)',
-    institution: 'TIAA',
-    type: 'investment',
-    accountHolder: 'Synthetic Holder',
-    currentBalance: 0,
-    currency: 'USD',
-    status: 'active',
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Synthetic 403(b)',
+      institution: 'TIAA',
+      type: 'investment',
+      accountHolder: 'Synthetic Holder',
+      currentBalance: 0,
+      currency: 'USD',
+      status: 'active',
+    }),
+  );
   const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-tiaa-routes-'));
   const activityFiles = [
     {
@@ -5075,18 +6702,28 @@ test('TIAA worker staging keeps six repeated activity identities and one stateme
         sha256: new Bun.CryptoHasher('sha256').update(bytes).digest('hex'),
       });
     }
-    const stagedActivity = await stageSyncArtifactManifest({
-      protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
-      runId: 'sync-tiaa-grouped-identities',
-      institutionId: 'tiaa',
-      artifacts: manifestArtifacts,
-    }, directory, () => {});
-    const statement = stageConsolidatedSyncFacts([{
-      remoteAccountId: 'TIAA||Retirement Annuity',
-      accountName: 'Retirement Annuity',
-      amountCents: 125_00,
-      balanceCents: 900_000_00,
-    }], 'tiaa-2026-06-30-retirement-q2-2026-acde1234abcd.pdf', 'statement');
+    const stagedActivity = await stageSyncArtifactManifest(
+      {
+        protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+        runId: 'sync-tiaa-grouped-identities',
+        institutionId: 'tiaa',
+        artifacts: manifestArtifacts,
+      },
+      directory,
+      () => {},
+    );
+    const statement = stageConsolidatedSyncFacts(
+      [
+        {
+          remoteAccountId: 'TIAA||Retirement Annuity',
+          accountName: 'Retirement Annuity',
+          amountCents: 125_00,
+          balanceCents: 900_000_00,
+        },
+      ],
+      'tiaa-2026-06-30-retirement-q2-2026-acde1234abcd.pdf',
+      'statement',
+    );
     const statementReview = buildSyncArtifactReview({
       importFileId: statement.importFileId,
       fileName: statement.fileName,
@@ -5094,18 +6731,22 @@ test('TIAA worker staging keeps six repeated activity identities and one stateme
       accountRoutes: [{ remoteAccountId: 'TIAA||Retirement Annuity' }],
     });
     const artifacts = [...stagedActivity.review.artifacts, statementReview];
-    const claims = artifacts.flatMap(artifact => artifact.accountClaims);
+    const claims = artifacts.flatMap((artifact) => artifact.accountClaims);
     const claimsByRemoteId = new Map<string, (typeof claims)[number]>();
     for (const claim of claims) claimsByRemoteId.set(claim.remoteAccountId, claim);
 
-    expect(stagedActivity.review.artifacts.map(artifact => artifact.accountClaims.length)).toEqual([6, 6]);
+    expect(
+      stagedActivity.review.artifacts.map((artifact) => artifact.accountClaims.length),
+    ).toEqual([6, 6]);
     expect(claims).toHaveLength(13);
-    expect([...claimsByRemoteId.keys()].sort()).toEqual([
-      'TIAA||Retirement Annuity',
-      ...SYNTHETIC_TIAA_ACCOUNT_IDS.map(accountId => `TIAA||Retirement Annuity ${accountId}`),
-    ].sort());
+    expect([...claimsByRemoteId.keys()].sort()).toEqual(
+      [
+        'TIAA||Retirement Annuity',
+        ...SYNTHETIC_TIAA_ACCOUNT_IDS.map((accountId) => `TIAA||Retirement Annuity ${accountId}`),
+      ].sort(),
+    );
     expect(claimsByRemoteId.size).toBe(7);
-    expect(claims.every(claim => claim.requiresExplicitMapping)).toBe(true);
+    expect(claims.every((claim) => claim.requiresExplicitMapping)).toBe(true);
 
     const review = {
       runId: 'sync-tiaa-grouped-identities',
@@ -5118,7 +6759,7 @@ test('TIAA worker staging keeps six repeated activity identities and one stateme
     await saveAwaitingSyncReview(review);
     const confirmed = await confirmReviewedSync({
       runId: review.runId,
-      accountMappings: [...claimsByRemoteId.values()].map(claim => ({
+      accountMappings: [...claimsByRemoteId.values()].map((claim) => ({
         sourceAccountId: claim.sourceAccountId,
         mode: 'existing' as const,
         accountId,
@@ -5133,10 +6774,14 @@ test('TIAA worker staging keeps six repeated activity identities and one stateme
         skippedArtifacts: 0,
       },
     });
-    expect(getDb().prepare('SELECT COUNT(*) AS count FROM sourceAccounts WHERE accountId = ?').get(accountId))
-      .toEqual({ count: 13 });
-    expect(getDb().prepare("SELECT COUNT(*) AS count FROM importFiles WHERE status = 'committed'").get())
-      .toEqual({ count: 3 });
+    expect(
+      getDb()
+        .prepare('SELECT COUNT(*) AS count FROM sourceAccounts WHERE accountId = ?')
+        .get(accountId),
+    ).toEqual({ count: 13 });
+    expect(
+      getDb().prepare("SELECT COUNT(*) AS count FROM importFiles WHERE status = 'committed'").get(),
+    ).toEqual({ count: 3 });
   } finally {
     await fs.promises.rm(directory, { recursive: true, force: true });
   }
@@ -5150,66 +6795,88 @@ test('TIAA manifest staging discards earlier previews when a later artifact fail
   await fs.promises.writeFile(path.join(directory, fileName), bytes);
 
   try {
-    await expect(stageSyncArtifactManifest({
-      protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
-      runId: 'sync-tiaa-partial-staging',
-      institutionId: 'tiaa',
-      artifacts: [{
-        fileName,
-        accountRoutes: syntheticTiaaActivityRoutes(),
-        sizeBytes: bytes.byteLength,
-        sha256: new Bun.CryptoHasher('sha256').update(bytes).digest('hex'),
-      }, {
-        fileName: 'tiaa-retirement-annuity-2026-missing.csv',
-        accountRoutes: syntheticTiaaActivityRoutes(),
-        sizeBytes: 1,
-        sha256: '0'.repeat(64),
-      }],
-    }, directory, () => {})).rejects.toThrow();
+    await expect(
+      stageSyncArtifactManifest(
+        {
+          protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+          runId: 'sync-tiaa-partial-staging',
+          institutionId: 'tiaa',
+          artifacts: [
+            {
+              fileName,
+              accountRoutes: syntheticTiaaActivityRoutes(),
+              sizeBytes: bytes.byteLength,
+              sha256: new Bun.CryptoHasher('sha256').update(bytes).digest('hex'),
+            },
+            {
+              fileName: 'tiaa-retirement-annuity-2026-missing.csv',
+              accountRoutes: syntheticTiaaActivityRoutes(),
+              sizeBytes: 1,
+              sha256: '0'.repeat(64),
+            },
+          ],
+        },
+        directory,
+        () => {},
+      ),
+    ).rejects.toThrow();
 
-    expect(getDb().prepare('SELECT status FROM importFiles').all()).toEqual([{ status: 'discarded' }]);
-    expect(getDb().prepare('SELECT status FROM sourceFiles').all()).toEqual([{ status: 'discarded' }]);
-    expect(getDb().prepare("SELECT COUNT(*) AS count FROM importFiles WHERE status = 'previewed'").get())
-      .toEqual({ count: 0 });
+    expect(getDb().prepare('SELECT status FROM importFiles').all()).toEqual([
+      { status: 'discarded' },
+    ]);
+    expect(getDb().prepare('SELECT status FROM sourceFiles').all()).toEqual([
+      { status: 'discarded' },
+    ]);
+    expect(
+      getDb().prepare("SELECT COUNT(*) AS count FROM importFiles WHERE status = 'previewed'").get(),
+    ).toEqual({ count: 0 });
     expect(getDb().prepare('SELECT COUNT(*) AS count FROM accounts').get()).toEqual({ count: 0 });
-    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({
+      count: 0,
+    });
   } finally {
     await fs.promises.rm(directory, { recursive: true, force: true });
   }
 });
 
 test('TIAA committed duplicate reuse ignores obsolete stored parser identities', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Synthetic 403(b)',
-    institution: 'TIAA',
-    type: 'investment',
-    currentBalance: 0,
-    currency: 'USD',
-    status: 'active',
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Synthetic 403(b)',
+      institution: 'TIAA',
+      type: 'investment',
+      currentBalance: 0,
+      currency: 'USD',
+      status: 'active',
+    }),
+  );
   const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-tiaa-committed-'));
   const fileName = 'tiaa-retirement-annuity-2026-current.csv';
   const text = syntheticTiaaActivityCsv('01/05/2026');
   const bytes = new TextEncoder().encode(text);
   const contentHash = hashImportContent(text, bytes);
   await fs.promises.writeFile(path.join(directory, fileName), bytes);
-  const importFileId = Number(insertRow('importFiles', {
-    fileName: 'legacy-tiaa-activity.csv',
-    contentHash,
-    parserName: 'tiaa-activity-csv',
-    sourceType: 'activity-export',
-    institution: 'TIAA',
-    status: 'committed',
-  }));
-  const sourceFileId = Number(insertRow('sourceFiles', {
-    importFileId,
-    fileName: 'legacy-tiaa-activity.csv',
-    contentHash,
-    parserName: 'tiaa-activity-csv',
-    sourceType: 'activity-export',
-    institution: 'TIAA',
-    status: 'committed',
-  }));
+  const importFileId = Number(
+    insertRow('importFiles', {
+      fileName: 'legacy-tiaa-activity.csv',
+      contentHash,
+      parserName: 'tiaa-activity-csv',
+      sourceType: 'activity-export',
+      institution: 'TIAA',
+      status: 'committed',
+    }),
+  );
+  const sourceFileId = Number(
+    insertRow('sourceFiles', {
+      importFileId,
+      fileName: 'legacy-tiaa-activity.csv',
+      contentHash,
+      parserName: 'tiaa-activity-csv',
+      sourceType: 'activity-export',
+      institution: 'TIAA',
+      status: 'committed',
+    }),
+  );
   insertRow('sourceAccounts', {
     sourceFileId,
     accountId,
@@ -5219,30 +6886,40 @@ test('TIAA committed duplicate reuse ignores obsolete stored parser identities',
   });
 
   try {
-    const staged = await stageSyncArtifactManifest({
-      protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
-      runId: 'sync-tiaa-committed-duplicate',
-      institutionId: 'tiaa',
-      artifacts: [{
-        fileName,
-        accountRoutes: syntheticTiaaActivityRoutes(),
-        sizeBytes: bytes.byteLength,
-        sha256: new Bun.CryptoHasher('sha256').update(bytes).digest('hex'),
-      }],
-    }, directory, () => {});
+    const staged = await stageSyncArtifactManifest(
+      {
+        protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+        runId: 'sync-tiaa-committed-duplicate',
+        institutionId: 'tiaa',
+        artifacts: [
+          {
+            fileName,
+            accountRoutes: syntheticTiaaActivityRoutes(),
+            sizeBytes: bytes.byteLength,
+            sha256: new Bun.CryptoHasher('sha256').update(bytes).digest('hex'),
+          },
+        ],
+      },
+      directory,
+      () => {},
+    );
 
     expect(staged.createdImportFileIds).toEqual([]);
     expect(staged.review).toMatchObject({
       readyToImport: 0,
       alreadyImported: 1,
-      artifacts: [{
-        importFileId,
-        status: 'already-imported',
-        accountClaims: [{ remoteAccountId: 'TIAA||Retirement Annuity' }],
-        warnings: [],
-      }],
+      artifacts: [
+        {
+          importFileId,
+          status: 'already-imported',
+          accountClaims: [{ remoteAccountId: 'TIAA||Retirement Annuity' }],
+          warnings: [],
+        },
+      ],
     });
-    expect(getDb().prepare('SELECT COUNT(*) AS count FROM importFiles').get()).toEqual({ count: 1 });
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM importFiles').get()).toEqual({
+      count: 1,
+    });
   } finally {
     await fs.promises.rm(directory, { recursive: true, force: true });
   }
@@ -5255,23 +6932,27 @@ test('TIAA re-download leaves an inactive legacy import untouched and stages new
   const bytes = new TextEncoder().encode(text);
   const contentHash = hashImportContent(text, bytes);
   await fs.promises.writeFile(path.join(directory, fileName), bytes);
-  const legacyImportFileId = Number(insertRow('importFiles', {
-    fileName: 'legacy-tiaa-activity.csv',
-    contentHash,
-    parserName: 'tiaa-activity-csv',
-    sourceType: 'activity-export',
-    institution: 'TIAA',
-    status: 'unimported',
-  }));
-  const legacySourceFileId = Number(insertRow('sourceFiles', {
-    importFileId: legacyImportFileId,
-    fileName: 'legacy-tiaa-activity.csv',
-    contentHash,
-    parserName: 'tiaa-activity-csv',
-    sourceType: 'activity-export',
-    institution: 'TIAA',
-    status: 'unimported',
-  }));
+  const legacyImportFileId = Number(
+    insertRow('importFiles', {
+      fileName: 'legacy-tiaa-activity.csv',
+      contentHash,
+      parserName: 'tiaa-activity-csv',
+      sourceType: 'activity-export',
+      institution: 'TIAA',
+      status: 'unimported',
+    }),
+  );
+  const legacySourceFileId = Number(
+    insertRow('sourceFiles', {
+      importFileId: legacyImportFileId,
+      fileName: 'legacy-tiaa-activity.csv',
+      contentHash,
+      parserName: 'tiaa-activity-csv',
+      sourceType: 'activity-export',
+      institution: 'TIAA',
+      status: 'unimported',
+    }),
+  );
   insertRow('sourceAccounts', {
     sourceFileId: legacySourceFileId,
     institution: 'TIAA',
@@ -5280,52 +6961,70 @@ test('TIAA re-download leaves an inactive legacy import untouched and stages new
   });
 
   try {
-    const staged = await stageSyncArtifactManifest({
-      protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
-      runId: 'sync-tiaa-unimported-redownload',
-      institutionId: 'tiaa',
-      artifacts: [{
-        fileName,
-        accountRoutes: syntheticTiaaActivityRoutes(),
-        sizeBytes: bytes.byteLength,
-        sha256: new Bun.CryptoHasher('sha256').update(bytes).digest('hex'),
-      }],
-    }, directory, () => {});
+    const staged = await stageSyncArtifactManifest(
+      {
+        protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+        runId: 'sync-tiaa-unimported-redownload',
+        institutionId: 'tiaa',
+        artifacts: [
+          {
+            fileName,
+            accountRoutes: syntheticTiaaActivityRoutes(),
+            sizeBytes: bytes.byteLength,
+            sha256: new Bun.CryptoHasher('sha256').update(bytes).digest('hex'),
+          },
+        ],
+      },
+      directory,
+      () => {},
+    );
 
     expect(staged.review.artifacts[0]!.accountClaims).toHaveLength(6);
-    expect(staged.review.artifacts[0]!.accountClaims.every(claim => claim.requiresExplicitMapping)).toBe(true);
-    expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(legacyImportFileId))
-      .toEqual({ status: 'unimported' });
-    expect(getDb().prepare('SELECT status FROM sourceFiles WHERE id = ?').get(legacySourceFileId))
-      .toEqual({ status: 'unimported' });
-    expect(getDb().prepare("SELECT COUNT(*) AS count FROM importFiles WHERE status = 'previewed'").get())
-      .toEqual({ count: 1 });
+    expect(
+      staged.review.artifacts[0]!.accountClaims.every((claim) => claim.requiresExplicitMapping),
+    ).toBe(true);
+    expect(
+      getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(legacyImportFileId),
+    ).toEqual({ status: 'unimported' });
+    expect(
+      getDb().prepare('SELECT status FROM sourceFiles WHERE id = ?').get(legacySourceFileId),
+    ).toEqual({ status: 'unimported' });
+    expect(
+      getDb().prepare("SELECT COUNT(*) AS count FROM importFiles WHERE status = 'previewed'").get(),
+    ).toEqual({ count: 1 });
   } finally {
     await fs.promises.rm(directory, { recursive: true, force: true });
   }
 });
 
 test('catch-up commits two consolidated source-account claims to independent local accounts', async () => {
-  const firstAccountId = Number(insertRow('accounts', {
-    name: 'First Local Account',
-    institution: 'Example Institution',
-    type: 'checking',
-    currentBalance: 0,
-    currency: 'USD',
-    status: 'active',
-  }));
-  const secondAccountId = Number(insertRow('accounts', {
-    name: 'Second Local Account',
-    institution: 'Example Institution',
-    type: 'savings',
-    currentBalance: 0,
-    currency: 'USD',
-    status: 'active',
-  }));
-  const staged = stageConsolidatedSyncFacts([
-    { remoteAccountId: 'remote:first', accountName: 'Remote Checking', amountCents: -1200 },
-    { remoteAccountId: 'remote:second', accountName: 'Remote Savings', amountCents: 3400 },
-  ], 'consolidated-two-account-review.csv');
+  const firstAccountId = Number(
+    insertRow('accounts', {
+      name: 'First Local Account',
+      institution: 'Example Institution',
+      type: 'checking',
+      currentBalance: 0,
+      currency: 'USD',
+      status: 'active',
+    }),
+  );
+  const secondAccountId = Number(
+    insertRow('accounts', {
+      name: 'Second Local Account',
+      institution: 'Example Institution',
+      type: 'savings',
+      currentBalance: 0,
+      currency: 'USD',
+      status: 'active',
+    }),
+  );
+  const staged = stageConsolidatedSyncFacts(
+    [
+      { remoteAccountId: 'remote:first', accountName: 'Remote Checking', amountCents: -1200 },
+      { remoteAccountId: 'remote:second', accountName: 'Remote Savings', amountCents: 3400 },
+    ],
+    'consolidated-two-account-review.csv',
+  );
   const artifact = buildSyncArtifactReview({
     importFileId: staged.importFileId,
     fileName: staged.fileName,
@@ -5361,7 +7060,7 @@ test('catch-up commits two consolidated source-account claims to independent loc
   await saveAwaitingSyncReview(review);
   const confirmed = await confirmReviewedSync({
     runId: review.runId,
-    accountMappings: artifact.accountClaims.map(claim => ({
+    accountMappings: artifact.accountClaims.map((claim) => ({
       sourceAccountId: claim.sourceAccountId,
       mode: 'auto',
     })),
@@ -5372,7 +7071,13 @@ test('catch-up commits two consolidated source-account claims to independent loc
     { accountId: firstAccountId },
     { accountId: secondAccountId },
   ]);
-  expect(getDb().prepare('SELECT accountId, COUNT(*) AS count FROM ledgerTransactions GROUP BY accountId ORDER BY accountId').all()).toEqual([
+  expect(
+    getDb()
+      .prepare(
+        'SELECT accountId, COUNT(*) AS count FROM ledgerTransactions GROUP BY accountId ORDER BY accountId',
+      )
+      .all(),
+  ).toEqual([
     { accountId: firstAccountId, count: 1 },
     { accountId: secondAccountId, count: 1 },
   ]);
@@ -5381,35 +7086,44 @@ test('catch-up commits two consolidated source-account claims to independent loc
 });
 
 test('catch-up requires explicit choices for partial and destinationless connector routes', async () => {
-  const routedAccountId = Number(insertRow('accounts', {
-    name: 'Routed Local Account',
-    institution: 'Example Institution',
-    type: 'checking',
-    currentBalance: 0,
-    currency: 'USD',
-    status: 'active',
-  }));
-  const suggestedAccountId = Number(insertRow('accounts', {
-    name: 'Suggested Remote Savings',
-    institution: 'Example Institution',
-    type: 'savings',
-    currentBalance: 0,
-    currency: 'USD',
-    status: 'active',
-  }));
-  const unroutedAccountId = Number(insertRow('accounts', {
-    name: 'Unrouted Remote Card',
-    institution: 'Example Institution',
-    type: 'credit',
-    currentBalance: 0,
-    currency: 'USD',
-    status: 'active',
-  }));
-  const staged = stageConsolidatedSyncFacts([
-    { remoteAccountId: 'remote:routed', accountName: 'Remote Checking' },
-    { remoteAccountId: 'remote:destinationless', accountName: 'Suggested Remote Savings' },
-    { remoteAccountId: 'remote:unrouted', accountName: 'Unrouted Remote Card' },
-  ], 'partial-connector-routes.csv');
+  const routedAccountId = Number(
+    insertRow('accounts', {
+      name: 'Routed Local Account',
+      institution: 'Example Institution',
+      type: 'checking',
+      currentBalance: 0,
+      currency: 'USD',
+      status: 'active',
+    }),
+  );
+  const suggestedAccountId = Number(
+    insertRow('accounts', {
+      name: 'Suggested Remote Savings',
+      institution: 'Example Institution',
+      type: 'savings',
+      currentBalance: 0,
+      currency: 'USD',
+      status: 'active',
+    }),
+  );
+  const unroutedAccountId = Number(
+    insertRow('accounts', {
+      name: 'Unrouted Remote Card',
+      institution: 'Example Institution',
+      type: 'credit',
+      currentBalance: 0,
+      currency: 'USD',
+      status: 'active',
+    }),
+  );
+  const staged = stageConsolidatedSyncFacts(
+    [
+      { remoteAccountId: 'remote:routed', accountName: 'Remote Checking' },
+      { remoteAccountId: 'remote:destinationless', accountName: 'Suggested Remote Savings' },
+      { remoteAccountId: 'remote:unrouted', accountName: 'Unrouted Remote Card' },
+    ],
+    'partial-connector-routes.csv',
+  );
   const artifact = buildSyncArtifactReview({
     importFileId: staged.importFileId,
     fileName: staged.fileName,
@@ -5458,8 +7172,16 @@ test('catch-up requires explicit choices for partial and destinationless connect
     runId: review.runId,
     accountMappings: [
       { sourceAccountId: staged.sourceAccountIds[0]!, mode: 'auto' },
-      { sourceAccountId: staged.sourceAccountIds[1]!, mode: 'existing', accountId: suggestedAccountId },
-      { sourceAccountId: staged.sourceAccountIds[2]!, mode: 'existing', accountId: unroutedAccountId },
+      {
+        sourceAccountId: staged.sourceAccountIds[1]!,
+        mode: 'existing',
+        accountId: suggestedAccountId,
+      },
+      {
+        sourceAccountId: staged.sourceAccountIds[2]!,
+        mode: 'existing',
+        accountId: unroutedAccountId,
+      },
     ],
   });
   expect(confirmed.status).toBe('complete');
@@ -5471,9 +7193,10 @@ test('catch-up requires explicit choices for partial and destinationless connect
 });
 
 test('catch-up confirmation rejects unvalidated mapping decision variants at the API boundary', async () => {
-  const staged = stageConsolidatedSyncFacts([
-    { remoteAccountId: 'remote:validated-input', accountName: 'Validated Input Account' },
-  ], 'validated-confirmation-input.csv');
+  const staged = stageConsolidatedSyncFacts(
+    [{ remoteAccountId: 'remote:validated-input', accountName: 'Validated Input Account' }],
+    'validated-confirmation-input.csv',
+  );
   const artifact = buildSyncArtifactReview({
     importFileId: staged.importFileId,
     fileName: staged.fileName,
@@ -5490,34 +7213,47 @@ test('catch-up confirmation rejects unvalidated mapping decision variants at the
   };
   await saveAwaitingSyncReview(review);
 
-  await expect(confirmReviewedSync({
-    runId: review.runId,
-    accountMappings: [{
-      sourceAccountId: staged.sourceAccountIds[0]!,
-      mode: 'invented-mode',
-      accountId: 1,
-    }],
-  } as never)).rejects.toThrow();
-  expect((await caller.dataSync.status({ runId: review.runId }))?.status).toBe('awaiting-confirmation');
+  await expect(
+    confirmReviewedSync({
+      runId: review.runId,
+      accountMappings: [
+        {
+          sourceAccountId: staged.sourceAccountIds[0]!,
+          mode: 'invented-mode',
+          accountId: 1,
+        },
+      ],
+    } as never),
+  ).rejects.toThrow();
+  expect((await caller.dataSync.status({ runId: review.runId }))?.status).toBe(
+    'awaiting-confirmation',
+  );
 });
 
 test('catch-up review exposes conservative last-four and latest downloaded balance evidence', () => {
-  const staged = stageConsolidatedSyncFacts([
-    {
-      remoteAccountId: 'remote:masked-balance-evidence',
-      accountName: 'Example Savings ending in 1234',
-      balanceCents: 12_345,
-    },
-    {
-      remoteAccountId: 'remote:unlabeled-balance-evidence',
-      accountName: 'Example Savings projection 2026',
-    },
-  ], 'account-evidence-review.csv');
-  const sourceFile = getDb().prepare(`
+  const staged = stageConsolidatedSyncFacts(
+    [
+      {
+        remoteAccountId: 'remote:masked-balance-evidence',
+        accountName: 'Example Savings ending in 1234',
+        balanceCents: 12_345,
+      },
+      {
+        remoteAccountId: 'remote:unlabeled-balance-evidence',
+        accountName: 'Example Savings projection 2026',
+      },
+    ],
+    'account-evidence-review.csv',
+  );
+  const sourceFile = getDb()
+    .prepare(
+      `
     SELECT sourceFileId
     FROM sourceAccounts
     WHERE id = ?
-  `).get(staged.sourceAccountIds[0]!) as { sourceFileId: number };
+  `,
+    )
+    .get(staged.sourceAccountIds[0]!) as { sourceFileId: number };
   insertRow('sourceBalances', {
     sourceFileId: sourceFile.sourceFileId,
     sourceAccountId: staged.sourceAccountIds[0]!,
@@ -5537,33 +7273,42 @@ test('catch-up review exposes conservative last-four and latest downloaded balan
     ],
   });
 
-  expect(artifact.accountClaims[0]).toEqual(expect.objectContaining({
-    last4: '1234',
-    balanceCount: 2,
-    latestBalanceDate: '2026-08-15',
-    latestBalanceCents: 0,
-  }));
-  expect(artifact.accountClaims[1]).toEqual(expect.objectContaining({
-    last4: null,
-    balanceCount: 0,
-    latestBalanceDate: null,
-    latestBalanceCents: null,
-  }));
+  expect(artifact.accountClaims[0]).toEqual(
+    expect.objectContaining({
+      last4: '1234',
+      balanceCount: 2,
+      latestBalanceDate: '2026-08-15',
+      latestBalanceCents: 0,
+    }),
+  );
+  expect(artifact.accountClaims[1]).toEqual(
+    expect.objectContaining({
+      last4: null,
+      balanceCount: 0,
+      latestBalanceDate: null,
+      latestBalanceCents: null,
+    }),
+  );
 });
 
 test('catch-up enriches legacy review claims with current staged last-four evidence', async () => {
-  const staged = stageConsolidatedSyncFacts([{
-    remoteAccountId: 'remote:legacy-review-evidence',
-    accountName: 'Legacy Review Savings ending in 4321',
-    balanceCents: 50_000,
-  }], 'legacy-account-evidence-review.csv');
+  const staged = stageConsolidatedSyncFacts(
+    [
+      {
+        remoteAccountId: 'remote:legacy-review-evidence',
+        accountName: 'Legacy Review Savings ending in 4321',
+        balanceCents: 50_000,
+      },
+    ],
+    'legacy-account-evidence-review.csv',
+  );
   const artifact = buildSyncArtifactReview({
     importFileId: staged.importFileId,
     fileName: staged.fileName,
     status: 'ready',
     accountRoutes: [{ remoteAccountId: 'remote:legacy-review-evidence' }],
   });
-  const legacyAccountClaims = artifact.accountClaims.map(claim => {
+  const legacyAccountClaims = artifact.accountClaims.map((claim) => {
     const legacyClaim: Partial<typeof claim> = { ...claim };
     legacyClaim.resolution = 'ambiguous';
     delete legacyClaim.last4;
@@ -5582,52 +7327,75 @@ test('catch-up enriches legacy review claims with current staged last-four evide
   await saveAwaitingSyncReview(review);
 
   const loaded = await caller.dataSync.status({ runId: review.runId });
-  expect(loaded?.review?.artifacts[0]?.accountClaims[0]).toEqual(expect.objectContaining({
-    sourceAccountId: staged.sourceAccountIds[0]!,
-    remoteAccountId: 'remote:legacy-review-evidence',
-    resolution: 'ambiguous',
-    last4: '4321',
-    latestBalanceDate: '2026-08-01',
-    latestBalanceCents: 50_000,
-  }));
+  expect(loaded?.review?.artifacts[0]?.accountClaims[0]).toEqual(
+    expect.objectContaining({
+      sourceAccountId: staged.sourceAccountIds[0]!,
+      remoteAccountId: 'remote:legacy-review-evidence',
+      resolution: 'ambiguous',
+      last4: '4321',
+      latestBalanceDate: '2026-08-01',
+      latestBalanceCents: 50_000,
+    }),
+  );
 
   const confirmed = await confirmReviewedSync({
     runId: review.runId,
-    accountMappings: [{
-      sourceAccountId: staged.sourceAccountIds[0]!,
-      mode: 'create',
-      account: {
-        name: 'Legacy Evidence Destination',
-        institution: 'Example Institution',
-        type: 'savings',
-        currency: 'USD',
+    accountMappings: [
+      {
+        sourceAccountId: staged.sourceAccountIds[0]!,
+        mode: 'create',
+        account: {
+          name: 'Legacy Evidence Destination',
+          institution: 'Example Institution',
+          type: 'savings',
+          currency: 'USD',
+        },
       },
-    }],
+    ],
   });
 
   expect(confirmed.status).toBe('complete');
-  expect(getDb().prepare(`
+  expect(
+    getDb()
+      .prepare(
+        `
     SELECT last4
     FROM accounts
     WHERE name = 'Legacy Evidence Destination'
-  `).get()).toEqual({ last4: '4321' });
+  `,
+      )
+      .get(),
+  ).toEqual({ last4: '4321' });
 });
 
 test('catch-up rejects conflicting last-four evidence for one remote identity', async () => {
-  const first = stageConsolidatedSyncFacts([{
-    remoteAccountId: 'remote:conflicting-last-four',
-    accountName: 'Example Account ending in 1111',
-  }], 'conflicting-last-four-activity.csv');
-  const second = stageConsolidatedSyncFacts([{
-    remoteAccountId: 'remote:conflicting-last-four',
-    accountName: 'Example Account ending in 2222',
-  }], 'conflicting-last-four-statement.pdf', 'statement');
-  const artifacts = [first, second].map(stagedArtifact => buildSyncArtifactReview({
-    importFileId: stagedArtifact.importFileId,
-    fileName: stagedArtifact.fileName,
-    status: 'ready',
-    accountRoutes: [{ remoteAccountId: 'remote:conflicting-last-four' }],
-  }));
+  const first = stageConsolidatedSyncFacts(
+    [
+      {
+        remoteAccountId: 'remote:conflicting-last-four',
+        accountName: 'Example Account ending in 1111',
+      },
+    ],
+    'conflicting-last-four-activity.csv',
+  );
+  const second = stageConsolidatedSyncFacts(
+    [
+      {
+        remoteAccountId: 'remote:conflicting-last-four',
+        accountName: 'Example Account ending in 2222',
+      },
+    ],
+    'conflicting-last-four-statement.pdf',
+    'statement',
+  );
+  const artifacts = [first, second].map((stagedArtifact) =>
+    buildSyncArtifactReview({
+      importFileId: stagedArtifact.importFileId,
+      fileName: stagedArtifact.fileName,
+      status: 'ready',
+      accountRoutes: [{ remoteAccountId: 'remote:conflicting-last-four' }],
+    }),
+  );
   const review = {
     runId: 'sync-conflicting-last-four-evidence',
     institutionId: 'bank-of-america' as const,
@@ -5638,19 +7406,23 @@ test('catch-up rejects conflicting last-four evidence for one remote identity', 
   };
   await saveAwaitingSyncReview(review);
 
-  await expect(confirmReviewedSync({
-    runId: review.runId,
-    accountMappings: [{
-      sourceAccountId: first.sourceAccountIds[0]!,
-      mode: 'create',
-      account: {
-        name: 'Conflicting Evidence Destination',
-        institution: 'Example Institution',
-        type: 'savings',
-        currency: 'USD',
-      },
-    }],
-  })).rejects.toThrow('Downloaded files disagree about the account last four.');
+  await expect(
+    confirmReviewedSync({
+      runId: review.runId,
+      accountMappings: [
+        {
+          sourceAccountId: first.sourceAccountIds[0]!,
+          mode: 'create',
+          account: {
+            name: 'Conflicting Evidence Destination',
+            institution: 'Example Institution',
+            type: 'savings',
+            currency: 'USD',
+          },
+        },
+      ],
+    }),
+  ).rejects.toThrow('Downloaded files disagree about the account last four.');
   expect(getDb().prepare('SELECT COUNT(*) AS count FROM accounts').get()).toEqual({ count: 0 });
   expect(getDb().prepare('SELECT status FROM importFiles ORDER BY id').all()).toEqual([
     { status: 'previewed' },
@@ -5659,10 +7431,15 @@ test('catch-up rejects conflicting last-four evidence for one remote identity', 
 });
 
 test('catch-up rejects a submitted last four that conflicts with downloaded evidence', async () => {
-  const staged = stageConsolidatedSyncFacts([{
-    remoteAccountId: 'remote:submitted-last-four-conflict',
-    accountName: 'Example Checking ending in 1234',
-  }], 'submitted-last-four-conflict.csv');
+  const staged = stageConsolidatedSyncFacts(
+    [
+      {
+        remoteAccountId: 'remote:submitted-last-four-conflict',
+        accountName: 'Example Checking ending in 1234',
+      },
+    ],
+    'submitted-last-four-conflict.csv',
+  );
   const artifact = buildSyncArtifactReview({
     importFileId: staged.importFileId,
     fileName: staged.fileName,
@@ -5679,43 +7456,60 @@ test('catch-up rejects a submitted last four that conflicts with downloaded evid
   };
   await saveAwaitingSyncReview(review);
 
-  await expect(confirmReviewedSync({
-    runId: review.runId,
-    accountMappings: [{
-      sourceAccountId: staged.sourceAccountIds[0]!,
-      last4: '5678',
-      mode: 'create',
-      account: {
-        name: 'Submitted Conflict Destination',
-        institution: 'Example Institution',
-        type: 'checking',
-        currency: 'USD',
-      },
-    }],
-  })).rejects.toThrow(
-    'Downloaded account last four conflicts with the submitted account last four.',
-  );
+  await expect(
+    confirmReviewedSync({
+      runId: review.runId,
+      accountMappings: [
+        {
+          sourceAccountId: staged.sourceAccountIds[0]!,
+          last4: '5678',
+          mode: 'create',
+          account: {
+            name: 'Submitted Conflict Destination',
+            institution: 'Example Institution',
+            type: 'checking',
+            currency: 'USD',
+          },
+        },
+      ],
+    }),
+  ).rejects.toThrow('Downloaded account last four conflicts with the submitted account last four.');
   expect(getDb().prepare('SELECT COUNT(*) AS count FROM accounts').get()).toEqual({ count: 0 });
-  expect(getDb().prepare('SELECT status FROM importFiles').all()).toEqual([{ status: 'previewed' }]);
+  expect(getDb().prepare('SELECT status FROM importFiles').all()).toEqual([
+    { status: 'previewed' },
+  ]);
 });
 
 test('catch-up creates one local account for the same remote identity across activity and statements', async () => {
-  const activity = stageConsolidatedSyncFacts([
-    { remoteAccountId: 'remote:shared-retirement', accountName: 'Retirement Activity ending in 8765' },
-  ], 'shared-retirement-activity.csv', 'activity-export');
-  const statement = stageConsolidatedSyncFacts([
-    {
-      remoteAccountId: 'remote:shared-retirement',
-      accountName: 'Retirement Quarterly Statement ending in 8765',
-      balanceCents: 7250000,
-    },
-  ], 'shared-retirement-statement.pdf', 'statement');
-  const artifacts = [activity, statement].map(staged => buildSyncArtifactReview({
-    importFileId: staged.importFileId,
-    fileName: staged.fileName,
-    status: 'ready',
-    accountRoutes: [{ remoteAccountId: 'remote:shared-retirement' }],
-  }));
+  const activity = stageConsolidatedSyncFacts(
+    [
+      {
+        remoteAccountId: 'remote:shared-retirement',
+        accountName: 'Retirement Activity ending in 8765',
+      },
+    ],
+    'shared-retirement-activity.csv',
+    'activity-export',
+  );
+  const statement = stageConsolidatedSyncFacts(
+    [
+      {
+        remoteAccountId: 'remote:shared-retirement',
+        accountName: 'Retirement Quarterly Statement ending in 8765',
+        balanceCents: 7250000,
+      },
+    ],
+    'shared-retirement-statement.pdf',
+    'statement',
+  );
+  const artifacts = [activity, statement].map((staged) =>
+    buildSyncArtifactReview({
+      importFileId: staged.importFileId,
+      fileName: staged.fileName,
+      status: 'ready',
+      accountRoutes: [{ remoteAccountId: 'remote:shared-retirement' }],
+    }),
+  );
   const review = {
     runId: 'sync-shared-remote-identity',
     institutionId: 'bank-of-america' as const,
@@ -5728,37 +7522,55 @@ test('catch-up creates one local account for the same remote identity across act
 
   const confirmed = await confirmReviewedSync({
     runId: review.runId,
-    accountMappings: [{
-      sourceAccountId: activity.sourceAccountIds[0]!,
-      mode: 'create',
-      account: {
-        name: 'Shared Retirement Account',
-        institution: 'Example Institution',
-        type: 'investment',
-        currency: 'USD',
+    accountMappings: [
+      {
+        sourceAccountId: activity.sourceAccountIds[0]!,
+        mode: 'create',
+        account: {
+          name: 'Shared Retirement Account',
+          institution: 'Example Institution',
+          type: 'investment',
+          currency: 'USD',
+        },
       },
-    }],
+    ],
   });
 
   expect(confirmed.status).toBe('complete');
-  const createdAccounts = getDb().prepare(`
+  const createdAccounts = getDb()
+    .prepare(
+      `
     SELECT id, last4
     FROM accounts
     WHERE name = 'Shared Retirement Account'
-  `).all() as Array<{ id: number; last4: string | null }>;
+  `,
+    )
+    .all() as Array<{ id: number; last4: string | null }>;
   expect(createdAccounts).toHaveLength(1);
   expect(createdAccounts[0]!.last4).toBe('8765');
-  expect(getDb().prepare(`
+  expect(
+    getDb()
+      .prepare(
+        `
     SELECT DISTINCT accountId
     FROM sourceAccounts
     WHERE sourceAccountKey = 'remote:shared-retirement'
-  `).all()).toEqual([{ accountId: createdAccounts[0]!.id }]);
-  expect(getDb().prepare(`
+  `,
+      )
+      .all(),
+  ).toEqual([{ accountId: createdAccounts[0]!.id }]);
+  expect(
+    getDb()
+      .prepare(
+        `
     SELECT COUNT(*) AS count
     FROM sourceAccounts
     WHERE sourceAccountKey = 'remote:shared-retirement'
       AND accountId = ?
-  `).get(createdAccounts[0]!.id)).toEqual({ count: 2 });
+  `,
+      )
+      .get(createdAccounts[0]!.id),
+  ).toEqual({ count: 2 });
   expect(getDb().prepare('SELECT status FROM importFiles ORDER BY id').all()).toEqual([
     { status: 'committed' },
     { status: 'committed' },
@@ -5766,32 +7578,41 @@ test('catch-up creates one local account for the same remote identity across act
 });
 
 test('catch-up rejects conflicting destinations for repeated remote identities', async () => {
-  const firstAccountId = Number(insertRow('accounts', {
-    name: 'First Existing Destination',
-    institution: 'Example Institution',
-    type: 'investment',
-    currentBalance: 0,
-    status: 'active',
-  }));
-  const secondAccountId = Number(insertRow('accounts', {
-    name: 'Second Existing Destination',
-    institution: 'Example Institution',
-    type: 'investment',
-    currentBalance: 0,
-    status: 'active',
-  }));
-  const first = stageConsolidatedSyncFacts([
-    { remoteAccountId: 'remote:conflicting-destination', accountName: 'First Download' },
-  ], 'conflicting-destination-activity.csv');
-  const second = stageConsolidatedSyncFacts([
-    { remoteAccountId: 'remote:conflicting-destination', accountName: 'Second Download' },
-  ], 'conflicting-destination-statement.pdf', 'statement');
-  const artifacts = [first, second].map(staged => buildSyncArtifactReview({
-    importFileId: staged.importFileId,
-    fileName: staged.fileName,
-    status: 'ready',
-    accountRoutes: [{ remoteAccountId: 'remote:conflicting-destination' }],
-  }));
+  const firstAccountId = Number(
+    insertRow('accounts', {
+      name: 'First Existing Destination',
+      institution: 'Example Institution',
+      type: 'investment',
+      currentBalance: 0,
+      status: 'active',
+    }),
+  );
+  const secondAccountId = Number(
+    insertRow('accounts', {
+      name: 'Second Existing Destination',
+      institution: 'Example Institution',
+      type: 'investment',
+      currentBalance: 0,
+      status: 'active',
+    }),
+  );
+  const first = stageConsolidatedSyncFacts(
+    [{ remoteAccountId: 'remote:conflicting-destination', accountName: 'First Download' }],
+    'conflicting-destination-activity.csv',
+  );
+  const second = stageConsolidatedSyncFacts(
+    [{ remoteAccountId: 'remote:conflicting-destination', accountName: 'Second Download' }],
+    'conflicting-destination-statement.pdf',
+    'statement',
+  );
+  const artifacts = [first, second].map((staged) =>
+    buildSyncArtifactReview({
+      importFileId: staged.importFileId,
+      fileName: staged.fileName,
+      status: 'ready',
+      accountRoutes: [{ remoteAccountId: 'remote:conflicting-destination' }],
+    }),
+  );
   const review = {
     runId: 'sync-conflicting-remote-destination',
     institutionId: 'bank-of-america' as const,
@@ -5802,13 +7623,25 @@ test('catch-up rejects conflicting destinations for repeated remote identities',
   };
   await saveAwaitingSyncReview(review);
 
-  await expect(confirmReviewedSync({
-    runId: review.runId,
-    accountMappings: [
-      { sourceAccountId: first.sourceAccountIds[0]!, mode: 'existing', accountId: firstAccountId },
-      { sourceAccountId: second.sourceAccountIds[0]!, mode: 'existing', accountId: secondAccountId },
-    ],
-  })).rejects.toThrow('Remote account remote:conflicting-destination has conflicting account choices.');
+  await expect(
+    confirmReviewedSync({
+      runId: review.runId,
+      accountMappings: [
+        {
+          sourceAccountId: first.sourceAccountIds[0]!,
+          mode: 'existing',
+          accountId: firstAccountId,
+        },
+        {
+          sourceAccountId: second.sourceAccountIds[0]!,
+          mode: 'existing',
+          accountId: secondAccountId,
+        },
+      ],
+    }),
+  ).rejects.toThrow(
+    'Remote account remote:conflicting-destination has conflicting account choices.',
+  );
   expect(getDb().prepare('SELECT accountId FROM sourceAccounts ORDER BY id').all()).toEqual([
     { accountId: null },
     { accountId: null },
@@ -5820,26 +7653,33 @@ test('catch-up rejects conflicting destinations for repeated remote identities',
 });
 
 test('catch-up rejects one auto decision when repeated remote claims resolve to different accounts', async () => {
-  const firstAccountId = Number(insertRow('accounts', {
-    name: 'First Automatic Destination',
-    institution: 'Example Institution',
-    type: 'investment',
-    currentBalance: 0,
-    status: 'active',
-  }));
-  const secondAccountId = Number(insertRow('accounts', {
-    name: 'Second Automatic Destination',
-    institution: 'Example Institution',
-    type: 'investment',
-    currentBalance: 0,
-    status: 'active',
-  }));
-  const first = stageConsolidatedSyncFacts([
-    { remoteAccountId: 'remote:conflicting-auto', accountName: 'First Automatic Download' },
-  ], 'conflicting-auto-activity.csv');
-  const second = stageConsolidatedSyncFacts([
-    { remoteAccountId: 'remote:conflicting-auto', accountName: 'Second Automatic Download' },
-  ], 'conflicting-auto-statement.pdf', 'statement');
+  const firstAccountId = Number(
+    insertRow('accounts', {
+      name: 'First Automatic Destination',
+      institution: 'Example Institution',
+      type: 'investment',
+      currentBalance: 0,
+      status: 'active',
+    }),
+  );
+  const secondAccountId = Number(
+    insertRow('accounts', {
+      name: 'Second Automatic Destination',
+      institution: 'Example Institution',
+      type: 'investment',
+      currentBalance: 0,
+      status: 'active',
+    }),
+  );
+  const first = stageConsolidatedSyncFacts(
+    [{ remoteAccountId: 'remote:conflicting-auto', accountName: 'First Automatic Download' }],
+    'conflicting-auto-activity.csv',
+  );
+  const second = stageConsolidatedSyncFacts(
+    [{ remoteAccountId: 'remote:conflicting-auto', accountName: 'Second Automatic Download' }],
+    'conflicting-auto-statement.pdf',
+    'statement',
+  );
   const firstArtifact = buildSyncArtifactReview({
     importFileId: first.importFileId,
     fileName: first.fileName,
@@ -5862,13 +7702,17 @@ test('catch-up rejects one auto decision when repeated remote claims resolve to 
   };
   await saveAwaitingSyncReview(review);
 
-  await expect(confirmReviewedSync({
-    runId: review.runId,
-    accountMappings: [{
-      sourceAccountId: first.sourceAccountIds[0]!,
-      mode: 'auto',
-    }],
-  })).rejects.toThrow(
+  await expect(
+    confirmReviewedSync({
+      runId: review.runId,
+      accountMappings: [
+        {
+          sourceAccountId: first.sourceAccountIds[0]!,
+          mode: 'auto',
+        },
+      ],
+    }),
+  ).rejects.toThrow(
     'Remote account remote:conflicting-auto has no single safe automatic destination',
   );
 
@@ -5880,29 +7724,45 @@ test('catch-up rejects one auto decision when repeated remote claims resolve to 
     { status: 'previewed' },
     { status: 'previewed' },
   ]);
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM accountAliases').get()).toEqual({ count: 0 });
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
-  expect((await caller.dataSync.status({ runId: review.runId }))?.status).toBe('awaiting-confirmation');
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM accountAliases').get()).toEqual({
+    count: 0,
+  });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({
+    count: 0,
+  });
+  expect((await caller.dataSync.status({ runId: review.runId }))?.status).toBe(
+    'awaiting-confirmation',
+  );
 });
 
 test('failed catch-up confirmation rolls back earlier account creation, links, and artifacts', async () => {
-  const first = stageConsolidatedSyncFacts([
-    { remoteAccountId: 'remote:rollback-first', accountName: 'Rollback First Account' },
-  ], 'rollback-first-activity.csv');
-  const second = stageConsolidatedSyncFacts([
-    { remoteAccountId: 'remote:rollback-second', accountName: 'Rollback Second Account' },
-  ], 'rollback-second-activity.csv');
-  const artifacts = [first, second].map(staged => buildSyncArtifactReview({
-    importFileId: staged.importFileId,
-    fileName: staged.fileName,
-    status: 'ready',
-    accountRoutes: [{ remoteAccountId: staged === first ? 'remote:rollback-first' : 'remote:rollback-second' }],
-  }));
-  getDb().prepare(`
+  const first = stageConsolidatedSyncFacts(
+    [{ remoteAccountId: 'remote:rollback-first', accountName: 'Rollback First Account' }],
+    'rollback-first-activity.csv',
+  );
+  const second = stageConsolidatedSyncFacts(
+    [{ remoteAccountId: 'remote:rollback-second', accountName: 'Rollback Second Account' }],
+    'rollback-second-activity.csv',
+  );
+  const artifacts = [first, second].map((staged) =>
+    buildSyncArtifactReview({
+      importFileId: staged.importFileId,
+      fileName: staged.fileName,
+      status: 'ready',
+      accountRoutes: [
+        { remoteAccountId: staged === first ? 'remote:rollback-first' : 'remote:rollback-second' },
+      ],
+    }),
+  );
+  getDb()
+    .prepare(
+      `
     UPDATE importRows
     SET normalizedJson = '{invalid json'
     WHERE importFileId = ?
-  `).run(second.importFileId);
+  `,
+    )
+    .run(second.importFileId);
   const review = {
     runId: 'sync-confirmation-rollback',
     institutionId: 'bank-of-america' as const,
@@ -5913,24 +7773,38 @@ test('failed catch-up confirmation rolls back earlier account creation, links, a
   };
   await saveAwaitingSyncReview(review);
 
-  await expect(confirmReviewedSync({
-    runId: review.runId,
-    accountMappings: [
-      {
-        sourceAccountId: first.sourceAccountIds[0]!,
-        mode: 'create',
-        account: { name: 'Rollback First Account', institution: 'Example Institution', type: 'checking', currency: 'USD' },
-      },
-      {
-        sourceAccountId: second.sourceAccountIds[0]!,
-        mode: 'create',
-        account: { name: 'Rollback Second Account', institution: 'Example Institution', type: 'checking', currency: 'USD' },
-      },
-    ],
-  })).rejects.toThrow();
+  await expect(
+    confirmReviewedSync({
+      runId: review.runId,
+      accountMappings: [
+        {
+          sourceAccountId: first.sourceAccountIds[0]!,
+          mode: 'create',
+          account: {
+            name: 'Rollback First Account',
+            institution: 'Example Institution',
+            type: 'checking',
+            currency: 'USD',
+          },
+        },
+        {
+          sourceAccountId: second.sourceAccountIds[0]!,
+          mode: 'create',
+          account: {
+            name: 'Rollback Second Account',
+            institution: 'Example Institution',
+            type: 'checking',
+            currency: 'USD',
+          },
+        },
+      ],
+    }),
+  ).rejects.toThrow();
 
   expect(getDb().prepare('SELECT COUNT(*) AS count FROM accounts').get()).toEqual({ count: 0 });
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM accountAliases').get()).toEqual({ count: 0 });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM accountAliases').get()).toEqual({
+    count: 0,
+  });
   expect(getDb().prepare('SELECT accountId FROM sourceAccounts ORDER BY id').all()).toEqual([
     { accountId: null },
     { accountId: null },
@@ -5939,27 +7813,41 @@ test('failed catch-up confirmation rolls back earlier account creation, links, a
     { status: 'previewed' },
     { status: 'previewed' },
   ]);
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
-  expect((await caller.dataSync.status({ runId: review.runId }))?.status).toBe('awaiting-confirmation');
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({
+    count: 0,
+  });
+  expect((await caller.dataSync.status({ runId: review.runId }))?.status).toBe(
+    'awaiting-confirmation',
+  );
 });
 
 test('catch-up retains a newly discovered remote account until an explicit create decision', async () => {
-  const staged = stageConsolidatedSyncFacts([
-    { remoteAccountId: 'remote:new', accountName: 'New Remote Savings', amountCents: 2500, balanceCents: 500000 },
-  ], 'new-remote-account-review.csv');
+  const staged = stageConsolidatedSyncFacts(
+    [
+      {
+        remoteAccountId: 'remote:new',
+        accountName: 'New Remote Savings',
+        amountCents: 2500,
+        balanceCents: 500000,
+      },
+    ],
+    'new-remote-account-review.csv',
+  );
   const artifact = buildSyncArtifactReview({
     importFileId: staged.importFileId,
     fileName: staged.fileName,
     status: 'ready',
     accountRoutes: [{ remoteAccountId: 'remote:new' }],
   });
-  expect(artifact.accountClaims).toEqual([expect.objectContaining({
-    remoteAccountId: 'remote:new',
-    resolvedAccountId: null,
-    resolution: 'auto-create',
-    transactionCount: 1,
-    balanceCount: 1,
-  })]);
+  expect(artifact.accountClaims).toEqual([
+    expect.objectContaining({
+      remoteAccountId: 'remote:new',
+      resolvedAccountId: null,
+      resolution: 'auto-create',
+      transactionCount: 1,
+      balanceCount: 1,
+    }),
+  ]);
 
   const review = {
     runId: 'sync-new-remote-account',
@@ -5973,45 +7861,56 @@ test('catch-up retains a newly discovered remote account until an explicit creat
   await expect(confirmReviewedSync({ runId: review.runId })).rejects.toThrow(
     'Resolve every source account before confirming the catch-up.',
   );
-  expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(staged.importFileId))
-    .toEqual({ status: 'previewed' });
+  expect(
+    getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(staged.importFileId),
+  ).toEqual({ status: 'previewed' });
 
   const confirmed = await confirmReviewedSync({
     runId: review.runId,
-    accountMappings: [{
-      sourceAccountId: staged.sourceAccountIds[0]!,
-      mode: 'create',
-      account: {
-        name: 'Confirmed New Savings',
-        institution: 'Example Institution',
-        type: 'savings',
-        currency: 'USD',
+    accountMappings: [
+      {
+        sourceAccountId: staged.sourceAccountIds[0]!,
+        mode: 'create',
+        account: {
+          name: 'Confirmed New Savings',
+          institution: 'Example Institution',
+          type: 'savings',
+          currency: 'USD',
+        },
       },
-    }],
+    ],
   });
   expect(confirmed.status).toBe('complete');
-  const created = getDb().prepare("SELECT id, type, status FROM accounts WHERE name = 'Confirmed New Savings'").get() as {
+  const created = getDb()
+    .prepare("SELECT id, type, status FROM accounts WHERE name = 'Confirmed New Savings'")
+    .get() as {
     id: number;
     type: string;
     status: string;
   };
   expect(created).toMatchObject({ type: 'savings', status: 'active' });
-  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(staged.sourceAccountIds[0]!))
-    .toEqual({ accountId: created.id });
+  expect(
+    getDb()
+      .prepare('SELECT accountId FROM sourceAccounts WHERE id = ?')
+      .get(staged.sourceAccountIds[0]!),
+  ).toEqual({ accountId: created.id });
 });
 
 test('catch-up rejects ambiguous parser and local account identities', async () => {
-  const duplicateRemote = stageConsolidatedSyncFacts([
-    { remoteAccountId: 'remote:duplicate', accountName: 'Parsed Account' },
-  ], 'ambiguous-remote-identity.csv');
-  expect(() => buildSyncArtifactReview({
-    importFileId: duplicateRemote.importFileId,
-    status: 'ready',
-    accountRoutes: [
-      { remoteAccountId: 'remote:duplicate' },
-      { remoteAccountId: 'remote:duplicate' },
-    ],
-  })).toThrow('Ambiguous connector account identity: remote:duplicate');
+  const duplicateRemote = stageConsolidatedSyncFacts(
+    [{ remoteAccountId: 'remote:duplicate', accountName: 'Parsed Account' }],
+    'ambiguous-remote-identity.csv',
+  );
+  expect(() =>
+    buildSyncArtifactReview({
+      importFileId: duplicateRemote.importFileId,
+      status: 'ready',
+      accountRoutes: [
+        { remoteAccountId: 'remote:duplicate' },
+        { remoteAccountId: 'remote:duplicate' },
+      ],
+    }),
+  ).toThrow('Ambiguous connector account identity: remote:duplicate');
 
   for (const name of ['First Duplicate Local', 'Second Duplicate Local']) {
     insertRow('accounts', {
@@ -6024,9 +7923,10 @@ test('catch-up rejects ambiguous parser and local account identities', async () 
       accountHolder: name,
     });
   }
-  const ambiguousLocal = stageConsolidatedSyncFacts([
-    { remoteAccountId: 'remote:ambiguous-local', accountName: 'Ambiguous Remote Account' },
-  ], 'ambiguous-local-identity.csv');
+  const ambiguousLocal = stageConsolidatedSyncFacts(
+    [{ remoteAccountId: 'remote:ambiguous-local', accountName: 'Ambiguous Remote Account' }],
+    'ambiguous-local-identity.csv',
+  );
   const artifact = buildSyncArtifactReview({
     importFileId: ambiguousLocal.importFileId,
     status: 'ready',
@@ -6047,28 +7947,34 @@ test('catch-up rejects ambiguous parser and local account identities', async () 
   await expect(confirmReviewedSync({ runId: review.runId })).rejects.toThrow(
     'Resolve every source account before confirming the catch-up.',
   );
-  expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(ambiguousLocal.importFileId))
-    .toEqual({ status: 'previewed' });
+  expect(
+    getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(ambiguousLocal.importFileId),
+  ).toEqual({ status: 'previewed' });
 });
 
 test('discarding an institution catch-up leaves staged facts out of the ledger and history', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Primary Checking',
-    institution: 'Bank of America',
-    type: 'checking',
-    currentBalance: 0,
-    currency: 'USD',
-    status: 'active',
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Primary Checking',
+      institution: 'Bank of America',
+      type: 'checking',
+      currentBalance: 0,
+      currency: 'USD',
+      status: 'active',
+    }),
+  );
   const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'easymoney-sync-discard-'));
   const fileName = 'bofa-checking-1234-2026-02-01-to-2026-02-28.csv';
   const filePath = path.join(directory, fileName);
-  await fs.promises.writeFile(filePath, [
-    'Description,,Summary Amt.',
-    'Opening Balance,,1000.00',
-    'Date,Description,Amount,Running Bal.',
-    '02/05/2026,EXAMPLE PAYROLL,2500.00,3500.00',
-  ].join('\n'));
+  await fs.promises.writeFile(
+    filePath,
+    [
+      'Description,,Summary Amt.',
+      'Opening Balance,,1000.00',
+      'Date,Description,Amount,Running Bal.',
+      '02/05/2026,EXAMPLE PAYROLL,2500.00,3500.00',
+    ].join('\n'),
+  );
 
   try {
     const artifact = await stageSyncArtifact({ path: filePath, accountId });
@@ -6084,11 +7990,17 @@ test('discarding an institution catch-up leaves staged facts out of the ledger a
     const discardedJob = await caller.dataSync.discard({ runId: review.runId });
     expect(discardedJob.status).toBe('cancelled');
 
-    expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(artifact.importFileId))
-      .toEqual({ status: 'discarded' });
-    expect(getDb().prepare('SELECT status FROM sourceFiles WHERE importFileId = ?').get(artifact.importFileId))
-      .toEqual({ status: 'discarded' });
-    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
+    expect(
+      getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(artifact.importFileId),
+    ).toEqual({ status: 'discarded' });
+    expect(
+      getDb()
+        .prepare('SELECT status FROM sourceFiles WHERE importFileId = ?')
+        .get(artifact.importFileId),
+    ).toEqual({ status: 'discarded' });
+    expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({
+      count: 0,
+    });
     expect((await listImportHistoryForTest()).imports).toHaveLength(0);
   } finally {
     await fs.promises.rm(directory, { recursive: true, force: true });
@@ -6102,95 +8014,129 @@ test('app import history can bulk unimport and reimport committed source facts',
     type: 'credit',
     currentBalance: 100,
   });
-  const firstCsv = csvFromRows([
-    '06/14/2026,06/14/2026,TACO TEMPLE,Food & Drink,Sale,-42.37',
-  ]);
+  const firstCsv = csvFromRows(['06/14/2026,06/14/2026,TACO TEMPLE,Food & Drink,Sale,-42.37']);
   const secondCsv = csvFromRows([
     '06/15/2026,06/15/2026,WHOLE FOODS MARKET,Groceries,Sale,-132.18',
   ]);
   const firstPreview = await postImportPreview('chase-credit-card-first.csv', firstCsv);
   const secondPreview = await postImportPreview('chase-credit-card-second.csv', secondCsv);
 
-  await commitImportForTest( {
+  await commitImportForTest({
     accountId,
     importFileId: firstPreview.importFileId,
-    importRowIds: firstPreview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    importRowIds: firstPreview.transactions.map(
+      (transaction: { importRowId: number }) => transaction.importRowId,
+    ),
   });
-  await commitImportForTest( {
+  await commitImportForTest({
     accountId,
     importFileId: secondPreview.importFileId,
-    importRowIds: secondPreview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    importRowIds: secondPreview.transactions.map(
+      (transaction: { importRowId: number }) => transaction.importRowId,
+    ),
   });
 
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 2 });
+  expect(
+    getDb()
+      .prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?')
+      .get(accountId),
+  ).toMatchObject({ count: 2 });
 
   const importFileIds = [firstPreview.importFileId, secondPreview.importFileId];
   const unimport = await caller.imports.bulkUnimport({ importFileIds });
   expect(unimport).toMatchObject({ ok: true, count: 2, importFileIds });
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 0 });
-  expect(getDb().prepare("SELECT COUNT(*) AS count FROM importFiles WHERE status = 'unimported'").get()).toMatchObject({ count: 2 });
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM sourceAccounts WHERE accountId = ?').get(accountId)).toMatchObject({ count: 2 });
+  expect(
+    getDb()
+      .prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?')
+      .get(accountId),
+  ).toMatchObject({ count: 0 });
+  expect(
+    getDb().prepare("SELECT COUNT(*) AS count FROM importFiles WHERE status = 'unimported'").get(),
+  ).toMatchObject({ count: 2 });
+  expect(
+    getDb()
+      .prepare('SELECT COUNT(*) AS count FROM sourceAccounts WHERE accountId = ?')
+      .get(accountId),
+  ).toMatchObject({ count: 2 });
 
   const reimport = await caller.imports.bulkReimport({ importFileIds });
   expect(reimport).toMatchObject({ ok: true, count: 2, importFileIds, transactionCount: 2 });
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?').get(accountId)).toMatchObject({ count: 2 });
-  expect(getDb().prepare("SELECT COUNT(*) AS count FROM importFiles WHERE status = 'committed'").get()).toMatchObject({ count: 2 });
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM sourceAccounts WHERE accountId = ?').get(accountId)).toMatchObject({ count: 2 });
+  expect(
+    getDb()
+      .prepare('SELECT COUNT(*) AS count FROM ledgerTransactions WHERE accountId = ?')
+      .get(accountId),
+  ).toMatchObject({ count: 2 });
+  expect(
+    getDb().prepare("SELECT COUNT(*) AS count FROM importFiles WHERE status = 'committed'").get(),
+  ).toMatchObject({ count: 2 });
+  expect(
+    getDb()
+      .prepare('SELECT COUNT(*) AS count FROM sourceAccounts WHERE accountId = ?')
+      .get(accountId),
+  ).toMatchObject({ count: 2 });
 });
 
 test('app imports commit resolves parser-emitted accounts without selected account', async () => {
   const now = '2026-06-16T00:00:00.000Z';
-  const importFileId = Number(insertRow('importFiles', {
-    fileName: 'multi-account.csv',
-    contentHash: hashImportContent('multi-account-hash'),
-    parserName: 'test-parser',
-    headerSignature: 'date|description|amount',
-    rowCount: 2,
-    sourceType: 'activity-export',
-    parserPriority: 10,
-    institution: 'Fixture Bank',
-    status: 'previewed',
-    createdAt: now,
-  }));
-  retainImportOriginal(importFileId, new TextEncoder().encode('multi-account-hash'));
-  const sourceFileId = Number(insertRow('sourceFiles', {
-    importFileId,
-    fileName: 'multi-account.csv',
-    contentHash: hashImportContent('multi-account-hash'),
-    parserName: 'test-parser',
-    sourceType: 'activity-export',
-    parserPriority: 10,
-    institution: 'Fixture Bank',
-    coveredFrom: '2026-06-15',
-    coveredTo: '2026-06-16',
-    status: 'previewed',
-    createdAt: now,
-  }));
-  const sourceAccountId = Number(insertRow('sourceAccounts', {
-    sourceFileId,
-    institution: 'Fixture Bank',
-    sourceAccountKey: 'Fixture Bank|Rewards Card - 1234',
-    sourceAccountName: 'Rewards Card - 1234',
-    rawJson: '{}',
-    createdAt: now,
-  }));
-  const transactionRowId = Number(insertRow('importRows', {
-    importFileId,
-    rowIndex: 0,
-    rowType: 'transaction',
-    rawJson: JSON.stringify({ row: 'charge' }),
-    normalizedJson: JSON.stringify({
-      sourceRowIndex: 0,
-      date: '2026-06-15',
-      amountCents: -4200,
-      description: 'Parser emitted charge',
+  const importFileId = Number(
+    insertRow('importFiles', {
+      fileName: 'multi-account.csv',
+      contentHash: hashImportContent('multi-account-hash'),
+      parserName: 'test-parser',
+      headerSignature: 'date|description|amount',
+      rowCount: 2,
+      sourceType: 'activity-export',
+      parserPriority: 10,
       institution: 'Fixture Bank',
-      account: 'Rewards Card - 1234',
-      sourceRole: 'activity',
-      raw: {},
+      status: 'previewed',
+      createdAt: now,
     }),
-    createdAt: now,
-  }));
+  );
+  retainImportOriginal(importFileId, new TextEncoder().encode('multi-account-hash'));
+  const sourceFileId = Number(
+    insertRow('sourceFiles', {
+      importFileId,
+      fileName: 'multi-account.csv',
+      contentHash: hashImportContent('multi-account-hash'),
+      parserName: 'test-parser',
+      sourceType: 'activity-export',
+      parserPriority: 10,
+      institution: 'Fixture Bank',
+      coveredFrom: '2026-06-15',
+      coveredTo: '2026-06-16',
+      status: 'previewed',
+      createdAt: now,
+    }),
+  );
+  const sourceAccountId = Number(
+    insertRow('sourceAccounts', {
+      sourceFileId,
+      institution: 'Fixture Bank',
+      sourceAccountKey: 'Fixture Bank|Rewards Card - 1234',
+      sourceAccountName: 'Rewards Card - 1234',
+      rawJson: '{}',
+      createdAt: now,
+    }),
+  );
+  const transactionRowId = Number(
+    insertRow('importRows', {
+      importFileId,
+      rowIndex: 0,
+      rowType: 'transaction',
+      rawJson: JSON.stringify({ row: 'charge' }),
+      normalizedJson: JSON.stringify({
+        sourceRowIndex: 0,
+        date: '2026-06-15',
+        amountCents: -4200,
+        description: 'Parser emitted charge',
+        institution: 'Fixture Bank',
+        account: 'Rewards Card - 1234',
+        sourceRole: 'activity',
+        raw: {},
+      }),
+      createdAt: now,
+    }),
+  );
   insertRow('sourceTransactions', {
     sourceFileId,
     sourceAccountId,
@@ -6205,33 +8151,44 @@ test('app imports commit resolves parser-emitted accounts without selected accou
     createdAt: now,
   });
 
-  const commit = await commitImportForTest( {
+  const commit = await commitImportForTest({
     accountId: null,
     importFileId,
     importRowIds: [transactionRowId],
   });
 
   expect(commit.importedCount).toBe(1);
-  const account = getDb().prepare(`
+  const account = getDb()
+    .prepare(
+      `
     SELECT *
     FROM accounts
     WHERE institution = 'Fixture Bank' AND name = 'Rewards Card - 1234'
-  `).get() as { id: number; type: string; currentBalance: number };
+  `,
+    )
+    .get() as { id: number; type: string; currentBalance: number };
   expect(account).toMatchObject({
     type: 'credit',
     currentBalance: -42,
   });
-  const alias = getDb().prepare('SELECT accountId FROM accountAliases WHERE institution = ? AND alias = ?')
+  const alias = getDb()
+    .prepare('SELECT accountId FROM accountAliases WHERE institution = ? AND alias = ?')
     .get('Fixture Bank', 'Rewards Card - 1234') as { accountId: number };
   expect(alias.accountId).toBe(account.id);
-  const sourceAccount = getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(sourceAccountId) as { accountId: number };
+  const sourceAccount = getDb()
+    .prepare('SELECT accountId FROM sourceAccounts WHERE id = ?')
+    .get(sourceAccountId) as { accountId: number };
   expect(sourceAccount.accountId).toBe(account.id);
-  const transaction = getDb().prepare(`
+  const transaction = getDb()
+    .prepare(
+      `
     SELECT t.accountId, t.amount
     FROM transactions t
     JOIN importRows ir ON ir.transactionId = t.id
     WHERE ir.id = ?
-  `).get(transactionRowId) as {
+  `,
+    )
+    .get(transactionRowId) as {
     accountId: number;
     amount: number;
   };
@@ -6242,7 +8199,10 @@ test('app imports commit resolves parser-emitted accounts without selected accou
 });
 
 test('source facts can rebuild committed transaction app rows without losing annotations', async () => {
-  const csv = fs.readFileSync(path.resolve(import.meta.dir, '..', '..', 'sample-imports', 'chase-credit-card-demo.csv'), 'utf8');
+  const csv = fs.readFileSync(
+    path.resolve(import.meta.dir, '..', '..', 'sample-imports', 'chase-credit-card-demo.csv'),
+    'utf8',
+  );
   const accountId = insertRow('accounts', {
     name: 'Chase Sapphire',
     institution: 'Chase',
@@ -6254,13 +8214,17 @@ test('source facts can rebuild committed transaction app rows without losing ann
     type: 'income',
   });
   const preview = await postImportPreview('chase-credit-card-demo.csv', csv);
-  await commitImportForTest( {
+  await commitImportForTest({
     accountId,
     importFileId: preview.importFileId,
-    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    importRowIds: preview.transactions.map(
+      (transaction: { importRowId: number }) => transaction.importRowId,
+    ),
   });
 
-  const payroll = getDb().prepare("SELECT id, ledgerTransactionId FROM transactions WHERE description = 'ACME PAYROLL'").get() as {
+  const payroll = getDb()
+    .prepare("SELECT id, ledgerTransactionId FROM transactions WHERE description = 'ACME PAYROLL'")
+    .get() as {
     id: number;
     ledgerTransactionId: string;
   };
@@ -6293,7 +8257,11 @@ test('source facts can rebuild committed transaction app rows without losing ann
   expect(body.transactions[0].notes).toBe('source-fact-safe');
   expect(body.transactions[0].description).toBe('ACME PAYROLL');
   expect(
-    (getDb().prepare("SELECT ledgerTransactionId FROM transactions WHERE description = 'ACME PAYROLL'").get() as { ledgerTransactionId: string }).ledgerTransactionId
+    (
+      getDb()
+        .prepare("SELECT ledgerTransactionId FROM transactions WHERE description = 'ACME PAYROLL'")
+        .get() as { ledgerTransactionId: string }
+    ).ledgerTransactionId,
   ).toBe(payroll.ledgerTransactionId);
 });
 
@@ -6305,52 +8273,58 @@ test('app imports commit materializes staged statement balances', async () => {
     currentBalance: 0,
   });
   const now = new Date().toISOString();
-  const importFileId = Number(insertRow('importFiles', {
-    fileName: 'fixture-statement.pdf',
-    contentHash: hashImportContent('fixture-hash'),
-    parserName: 'fixture-statement-parser',
-    sourceType: 'statement',
-    parserPriority: 50,
-    institution: 'Fixture Bank',
-    rowCount: 2,
-    status: 'previewed',
-    createdAt: now,
-  }));
+  const importFileId = Number(
+    insertRow('importFiles', {
+      fileName: 'fixture-statement.pdf',
+      contentHash: hashImportContent('fixture-hash'),
+      parserName: 'fixture-statement-parser',
+      sourceType: 'statement',
+      parserPriority: 50,
+      institution: 'Fixture Bank',
+      rowCount: 2,
+      status: 'previewed',
+      createdAt: now,
+    }),
+  );
   retainImportOriginal(importFileId, new TextEncoder().encode('fixture-hash'));
-  const transactionRowId = Number(insertRow('importRows', {
-    importFileId,
-    rowIndex: 0,
-    rowType: 'transaction',
-    rawJson: JSON.stringify({ row: 'statement interest row' }),
-    normalizedJson: JSON.stringify({
-      sourceRowIndex: 0,
-      date: '2026-06-15',
-      amountCents: 12500,
-      description: 'Statement interest',
-      institution: 'Fixture Bank',
-      account: 'Fixture Account',
-      sourceRole: 'activity',
-      raw: { row: 'statement interest row' },
+  const transactionRowId = Number(
+    insertRow('importRows', {
+      importFileId,
+      rowIndex: 0,
+      rowType: 'transaction',
+      rawJson: JSON.stringify({ row: 'statement interest row' }),
+      normalizedJson: JSON.stringify({
+        sourceRowIndex: 0,
+        date: '2026-06-15',
+        amountCents: 12500,
+        description: 'Statement interest',
+        institution: 'Fixture Bank',
+        account: 'Fixture Account',
+        sourceRole: 'activity',
+        raw: { row: 'statement interest row' },
+      }),
+      createdAt: now,
     }),
-    createdAt: now,
-  }));
-  const balanceRowId = Number(insertRow('importRows', {
-    importFileId,
-    rowIndex: 1,
-    rowType: 'balance',
-    rawJson: JSON.stringify({ row: 'statement balance row' }),
-    normalizedJson: JSON.stringify({
-      sourceRowIndex: 0,
-      date: '2026-06-30',
-      balanceCents: 987654,
-      institution: 'Fixture Bank',
-      account: 'Fixture Account',
-      raw: { row: 'statement balance row' },
+  );
+  const balanceRowId = Number(
+    insertRow('importRows', {
+      importFileId,
+      rowIndex: 1,
+      rowType: 'balance',
+      rawJson: JSON.stringify({ row: 'statement balance row' }),
+      normalizedJson: JSON.stringify({
+        sourceRowIndex: 0,
+        date: '2026-06-30',
+        balanceCents: 987654,
+        institution: 'Fixture Bank',
+        account: 'Fixture Account',
+        raw: { row: 'statement balance row' },
+      }),
+      createdAt: now,
     }),
-    createdAt: now,
-  }));
+  );
 
-  const commit = await commitImportForTest( {
+  const commit = await commitImportForTest({
     accountId,
     importFileId,
     importRowIds: [],
@@ -6361,7 +8335,9 @@ test('app imports commit materializes staged statement balances', async () => {
   expect(commit.importedCount).toBe(0);
   expect(commit.importedBalanceCount).toBe(1);
 
-  const snapshot = getDb().prepare('SELECT * FROM balanceSnapshots WHERE accountId = ?').get(accountId) as {
+  const snapshot = getDb()
+    .prepare('SELECT * FROM balanceSnapshots WHERE accountId = ?')
+    .get(accountId) as {
     month: string;
     balance: number;
     capturedAt: string;
@@ -6372,12 +8348,18 @@ test('app imports commit materializes staged statement balances', async () => {
     capturedAt: '2026-06-30T00:00:00.000Z',
   });
 
-  const account = getDb().prepare('SELECT currentBalance FROM accounts WHERE id = ?').get(accountId) as { currentBalance: number };
+  const account = getDb()
+    .prepare('SELECT currentBalance FROM accounts WHERE id = ?')
+    .get(accountId) as { currentBalance: number };
   expect(account.currentBalance).toBe(9876.54);
-  const transactionCount = getDb().prepare('SELECT COUNT(*) AS count FROM transactions WHERE accountId = ?').get(accountId) as { count: number };
+  const transactionCount = getDb()
+    .prepare('SELECT COUNT(*) AS count FROM transactions WHERE accountId = ?')
+    .get(accountId) as { count: number };
   expect(transactionCount.count).toBe(0);
 
-  const balanceRow = getDb().prepare("SELECT * FROM importRows WHERE rowType = 'balance'").get() as {
+  const balanceRow = getDb()
+    .prepare("SELECT * FROM importRows WHERE rowType = 'balance'")
+    .get() as {
     rawJson: string;
     normalizedJson: string;
   };
@@ -6386,12 +8368,15 @@ test('app imports commit materializes staged statement balances', async () => {
 });
 
 test('app import preview allows native parsers to handle malformed institution CSV quoting', async () => {
-  const preview = await postImportPreview('bofa-checking-1234-2026-01-01-to-2026-01-31.csv', [
-    'Description,,Summary Amt.',
-    'Opening Balance,,"1,000.00"',
-    'Date,Description,Amount,Running Bal.',
-    '01/05/2026,"Zelle payment from Renter for "JAN RENT"; Conf# ABC123","1,500.00","2,500.00"',
-  ].join('\n'));
+  const preview = await postImportPreview(
+    'bofa-checking-1234-2026-01-01-to-2026-01-31.csv',
+    [
+      'Description,,Summary Amt.',
+      'Opening Balance,,"1,000.00"',
+      'Date,Description,Amount,Running Bal.',
+      '01/05/2026,"Zelle payment from Renter for "JAN RENT"; Conf# ABC123","1,500.00","2,500.00"',
+    ].join('\n'),
+  );
 
   expect(preview.profileUsed).toBe('Bank of America Activity');
   expect(preview.transactions).toHaveLength(1);
@@ -6402,100 +8387,134 @@ test('app import preview allows native parsers to handle malformed institution C
     account: 'Adv Plus Banking - 1234',
     sourceAccountId: expect.any(Number),
   });
-  expect(preview.accountMappings).toEqual([{
-    sourceAccountId: preview.transactions[0].sourceAccountId,
-    institution: 'Bank of America',
-    sourceAccountName: 'Adv Plus Banking - 1234',
-    sourceAccountHolder: null,
-    last4: '1234',
-    resolvedAccountId: null,
-    resolvedAccountStatus: null,
-    resolution: 'auto-create',
-    transactionCount: 1,
-    balanceCount: 1,
-  }]);
+  expect(preview.accountMappings).toEqual([
+    {
+      sourceAccountId: preview.transactions[0].sourceAccountId,
+      institution: 'Bank of America',
+      sourceAccountName: 'Adv Plus Banking - 1234',
+      sourceAccountHolder: null,
+      last4: '1234',
+      resolvedAccountId: null,
+      resolvedAccountStatus: null,
+      resolution: 'auto-create',
+      transactionCount: 1,
+      balanceCount: 1,
+    },
+  ]);
   expect(preview.balanceRowIds).toHaveLength(1);
 });
 
 test('app imports commit uses source account mapping overrides', async () => {
-  const existingAccountId = Number(insertRow('accounts', {
-    name: 'BofA Checking',
-    institution: 'Bank of America',
-    type: 'checking',
-    currentBalance: 100,
-    currency: 'USD',
-    accountHolder: 'Manual Owner',
-  }));
-  const preview = await postImportPreview('bofa-checking-1234-2026-01-01-to-2026-01-31.csv', [
-    'Description,,Summary Amt.',
-    'Opening Balance,,"1,000.00"',
-    'Date,Description,Amount,Running Bal.',
-    '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
-  ].join('\n'));
+  const existingAccountId = Number(
+    insertRow('accounts', {
+      name: 'BofA Checking',
+      institution: 'Bank of America',
+      type: 'checking',
+      currentBalance: 100,
+      currency: 'USD',
+      accountHolder: 'Manual Owner',
+    }),
+  );
+  const preview = await postImportPreview(
+    'bofa-checking-1234-2026-01-01-to-2026-01-31.csv',
+    [
+      'Description,,Summary Amt.',
+      'Opening Balance,,"1,000.00"',
+      'Date,Description,Amount,Running Bal.',
+      '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+    ].join('\n'),
+  );
 
   const sourceAccountId = preview.accountMappings[0].sourceAccountId;
-  getDb().prepare('UPDATE sourceAccounts SET accountHolder = ? WHERE id = ?').run('Parsed Owner', sourceAccountId);
-  const commit = await commitImportForTest( {
+  getDb()
+    .prepare('UPDATE sourceAccounts SET accountHolder = ? WHERE id = ?')
+    .run('Parsed Owner', sourceAccountId);
+  const commit = await commitImportForTest({
     accountId: null,
     importFileId: preview.importFileId,
-    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    importRowIds: preview.transactions.map(
+      (transaction: { importRowId: number }) => transaction.importRowId,
+    ),
     balanceRowIds: preview.balanceRowIds,
-    accountMappings: [{
-      sourceAccountId,
-      last4: '1234',
-      accountId: existingAccountId,
-    }],
+    accountMappings: [
+      {
+        sourceAccountId,
+        last4: '1234',
+        accountId: existingAccountId,
+      },
+    ],
   });
 
   expect(commit.importedCount).toBe(1);
   expect(commit.importedBalanceCount).toBe(1);
 
-  const transactions = getDb().prepare('SELECT accountId, amount FROM transactions').all() as Array<{
+  const transactions = getDb()
+    .prepare('SELECT accountId, amount FROM transactions')
+    .all() as Array<{
     accountId: number;
     amount: number;
   }>;
   expect(transactions).toEqual([{ accountId: existingAccountId, amount: 1500 }]);
 
-  const duplicateAccount = getDb().prepare(`
+  const duplicateAccount = getDb()
+    .prepare(
+      `
     SELECT id
     FROM accounts
     WHERE institution = 'Bank of America'
       AND name = 'Adv Plus Banking - 1234'
-  `).get();
+  `,
+    )
+    .get();
   expect(duplicateAccount).toBeNull();
 
-  const alias = getDb().prepare(`
+  const alias = getDb()
+    .prepare(
+      `
     SELECT accountId
     FROM accountAliases
     WHERE institution = ? AND alias = ?
-  `).get('Bank of America', 'Adv Plus Banking - 1234') as { accountId: number };
+  `,
+    )
+    .get('Bank of America', 'Adv Plus Banking - 1234') as { accountId: number };
   expect(alias.accountId).toBe(existingAccountId);
 
-  const sourceAccount = getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(sourceAccountId) as {
+  const sourceAccount = getDb()
+    .prepare('SELECT accountId FROM sourceAccounts WHERE id = ?')
+    .get(sourceAccountId) as {
     accountId: number;
   };
   expect(sourceAccount.accountId).toBe(existingAccountId);
-  expect(getDb().prepare('SELECT accountHolder, last4 FROM accounts WHERE id = ?').get(existingAccountId)).toEqual({
+  expect(
+    getDb()
+      .prepare('SELECT accountHolder, last4 FROM accounts WHERE id = ?')
+      .get(existingAccountId),
+  ).toEqual({
     accountHolder: 'Manual Owner',
     last4: '1234',
   });
 });
 
 test('app imports auto mappings preserve a leading-zero last four', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Adv Plus Banking - 0123',
-    institution: 'Bank of America',
-    type: 'checking',
-    currentBalance: 0,
-    currency: 'USD',
-    last4: null,
-  }));
-  const preview = await postImportPreview('bofa-checking-0123-2026-01-01-to-2026-01-31.csv', [
-    'Description,,Summary Amt.',
-    'Opening Balance,,"1,000.00"',
-    'Date,Description,Amount,Running Bal.',
-    '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
-  ].join('\n'));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Adv Plus Banking - 0123',
+      institution: 'Bank of America',
+      type: 'checking',
+      currentBalance: 0,
+      currency: 'USD',
+      last4: null,
+    }),
+  );
+  const preview = await postImportPreview(
+    'bofa-checking-0123-2026-01-01-to-2026-01-31.csv',
+    [
+      'Description,,Summary Amt.',
+      'Opening Balance,,"1,000.00"',
+      'Date,Description,Amount,Running Bal.',
+      '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+    ].join('\n'),
+  );
 
   expect(preview.accountMappings[0]).toMatchObject({
     last4: '0123',
@@ -6506,180 +8525,253 @@ test('app imports auto mappings preserve a leading-zero last four', async () => 
   await commitImportForTest({
     accountId: null,
     importFileId: preview.importFileId,
-    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    importRowIds: preview.transactions.map(
+      (transaction: { importRowId: number }) => transaction.importRowId,
+    ),
     balanceRowIds: preview.balanceRowIds,
-    accountMappings: [{
-      sourceAccountId: preview.accountMappings[0].sourceAccountId,
-      mode: 'auto',
-      last4: '0123',
-    }],
+    accountMappings: [
+      {
+        sourceAccountId: preview.accountMappings[0].sourceAccountId,
+        mode: 'auto',
+        last4: '0123',
+      },
+    ],
   });
 
-  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId))
-    .toEqual({ last4: '0123' });
-  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?')
-    .get(preview.accountMappings[0].sourceAccountId)).toEqual({ accountId });
+  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId)).toEqual({
+    last4: '0123',
+  });
+  expect(
+    getDb()
+      .prepare('SELECT accountId FROM sourceAccounts WHERE id = ?')
+      .get(preview.accountMappings[0].sourceAccountId),
+  ).toEqual({ accountId });
 });
 
 test('app imports reject a staged last four conflicting with an existing destination when payload omits it', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Existing Destination',
-    institution: 'Bank of America',
-    type: 'checking',
-    currentBalance: 0,
-    currency: 'USD',
-    last4: '9999',
-  }));
-  const preview = await postImportPreview('bofa-checking-1234-2026-01-01-to-2026-01-31.csv', [
-    'Description,,Summary Amt.',
-    'Opening Balance,,"1,000.00"',
-    'Date,Description,Amount,Running Bal.',
-    '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
-  ].join('\n'));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Existing Destination',
+      institution: 'Bank of America',
+      type: 'checking',
+      currentBalance: 0,
+      currency: 'USD',
+      last4: '9999',
+    }),
+  );
+  const preview = await postImportPreview(
+    'bofa-checking-1234-2026-01-01-to-2026-01-31.csv',
+    [
+      'Description,,Summary Amt.',
+      'Opening Balance,,"1,000.00"',
+      'Date,Description,Amount,Running Bal.',
+      '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+    ].join('\n'),
+  );
   const sourceAccountId = preview.accountMappings[0].sourceAccountId;
 
-  await expect(commitImportForTest({
-    accountId: null,
-    importFileId: preview.importFileId,
-    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
-    balanceRowIds: preview.balanceRowIds,
-    accountMappings: [{
-      sourceAccountId,
-      mode: 'existing',
-      accountId,
-    }],
-  })).rejects.toThrow('Selected account has a conflicting last four.');
+  await expect(
+    commitImportForTest({
+      accountId: null,
+      importFileId: preview.importFileId,
+      importRowIds: preview.transactions.map(
+        (transaction: { importRowId: number }) => transaction.importRowId,
+      ),
+      balanceRowIds: preview.balanceRowIds,
+      accountMappings: [
+        {
+          sourceAccountId,
+          mode: 'existing',
+          accountId,
+        },
+      ],
+    }),
+  ).rejects.toThrow('Selected account has a conflicting last four.');
 
-  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId))
-    .toEqual({ last4: '9999' });
-  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(sourceAccountId))
-    .toEqual({ accountId: null });
-  expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(preview.importFileId))
-    .toEqual({ status: 'previewed' });
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM accountAliases').get()).toEqual({ count: 0 });
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
+  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId)).toEqual({
+    last4: '9999',
+  });
+  expect(
+    getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(sourceAccountId),
+  ).toEqual({ accountId: null });
+  expect(
+    getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(preview.importFileId),
+  ).toEqual({ status: 'previewed' });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM accountAliases').get()).toEqual({
+    count: 0,
+  });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({
+    count: 0,
+  });
 });
 
 test('app imports reject a submitted last four conflicting with authoritative staged evidence', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Existing Destination',
-    institution: 'Bank of America',
-    type: 'checking',
-    currentBalance: 0,
-    currency: 'USD',
-    last4: null,
-  }));
-  const preview = await postImportPreview('bofa-checking-1234-2026-01-01-to-2026-01-31.csv', [
-    'Description,,Summary Amt.',
-    'Opening Balance,,"1,000.00"',
-    'Date,Description,Amount,Running Bal.',
-    '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
-  ].join('\n'));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Existing Destination',
+      institution: 'Bank of America',
+      type: 'checking',
+      currentBalance: 0,
+      currency: 'USD',
+      last4: null,
+    }),
+  );
+  const preview = await postImportPreview(
+    'bofa-checking-1234-2026-01-01-to-2026-01-31.csv',
+    [
+      'Description,,Summary Amt.',
+      'Opening Balance,,"1,000.00"',
+      'Date,Description,Amount,Running Bal.',
+      '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+    ].join('\n'),
+  );
   const sourceAccountId = preview.accountMappings[0].sourceAccountId;
 
-  await expect(commitImportForTest({
-    accountId: null,
-    importFileId: preview.importFileId,
-    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
-    balanceRowIds: preview.balanceRowIds,
-    accountMappings: [{
-      sourceAccountId,
-      mode: 'existing',
-      accountId,
-      last4: '9999',
-    }],
-  })).rejects.toThrow('Downloaded account last four conflicts with the submitted account last four.');
+  await expect(
+    commitImportForTest({
+      accountId: null,
+      importFileId: preview.importFileId,
+      importRowIds: preview.transactions.map(
+        (transaction: { importRowId: number }) => transaction.importRowId,
+      ),
+      balanceRowIds: preview.balanceRowIds,
+      accountMappings: [
+        {
+          sourceAccountId,
+          mode: 'existing',
+          accountId,
+          last4: '9999',
+        },
+      ],
+    }),
+  ).rejects.toThrow('Downloaded account last four conflicts with the submitted account last four.');
 
-  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId))
-    .toEqual({ last4: null });
-  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(sourceAccountId))
-    .toEqual({ accountId: null });
-  expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(preview.importFileId))
-    .toEqual({ status: 'previewed' });
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
+  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId)).toEqual({
+    last4: null,
+  });
+  expect(
+    getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(sourceAccountId),
+  ).toEqual({ accountId: null });
+  expect(
+    getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(preview.importFileId),
+  ).toEqual({ status: 'previewed' });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({
+    count: 0,
+  });
 });
 
 test('app imports enforce staged last four during automatic resolution without a mapping payload', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Adv Plus Banking - 1234',
-    institution: 'Bank of America',
-    type: 'checking',
-    currentBalance: 0,
-    currency: 'USD',
-    last4: '9999',
-  }));
-  const preview = await postImportPreview('bofa-checking-1234-2026-01-01-to-2026-01-31.csv', [
-    'Description,,Summary Amt.',
-    'Opening Balance,,"1,000.00"',
-    'Date,Description,Amount,Running Bal.',
-    '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
-  ].join('\n'));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Adv Plus Banking - 1234',
+      institution: 'Bank of America',
+      type: 'checking',
+      currentBalance: 0,
+      currency: 'USD',
+      last4: '9999',
+    }),
+  );
+  const preview = await postImportPreview(
+    'bofa-checking-1234-2026-01-01-to-2026-01-31.csv',
+    [
+      'Description,,Summary Amt.',
+      'Opening Balance,,"1,000.00"',
+      'Date,Description,Amount,Running Bal.',
+      '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+    ].join('\n'),
+  );
 
   expect(preview.accountMappings[0]).toMatchObject({
     resolvedAccountId: accountId,
     resolution: 'exact',
     last4: '1234',
   });
-  await expect(commitImportForTest({
-    accountId: null,
-    importFileId: preview.importFileId,
-    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
-    balanceRowIds: preview.balanceRowIds,
-  })).rejects.toThrow('Selected account has a conflicting last four.');
+  await expect(
+    commitImportForTest({
+      accountId: null,
+      importFileId: preview.importFileId,
+      importRowIds: preview.transactions.map(
+        (transaction: { importRowId: number }) => transaction.importRowId,
+      ),
+      balanceRowIds: preview.balanceRowIds,
+    }),
+  ).rejects.toThrow('Selected account has a conflicting last four.');
 
-  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId))
-    .toEqual({ last4: '9999' });
-  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?')
-    .get(preview.accountMappings[0].sourceAccountId)).toEqual({ accountId: null });
-  expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(preview.importFileId))
-    .toEqual({ status: 'previewed' });
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({ count: 0 });
+  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId)).toEqual({
+    last4: '9999',
+  });
+  expect(
+    getDb()
+      .prepare('SELECT accountId FROM sourceAccounts WHERE id = ?')
+      .get(preview.accountMappings[0].sourceAccountId),
+  ).toEqual({ accountId: null });
+  expect(
+    getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(preview.importFileId),
+  ).toEqual({ status: 'previewed' });
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get()).toEqual({
+    count: 0,
+  });
 });
 
 test('app imports reject malformed mapping last four at the API boundary', async () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Existing Destination',
-    institution: 'Bank of America',
-    type: 'checking',
-    currentBalance: 0,
-    currency: 'USD',
-  }));
-  const preview = await postImportPreview('bofa-checking-1234-2026-01-01-to-2026-01-31.csv', [
-    'Description,,Summary Amt.',
-    'Opening Balance,,"1,000.00"',
-    'Date,Description,Amount,Running Bal.',
-    '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
-  ].join('\n'));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Existing Destination',
+      institution: 'Bank of America',
+      type: 'checking',
+      currentBalance: 0,
+      currency: 'USD',
+    }),
+  );
+  const preview = await postImportPreview(
+    'bofa-checking-1234-2026-01-01-to-2026-01-31.csv',
+    [
+      'Description,,Summary Amt.',
+      'Opening Balance,,"1,000.00"',
+      'Date,Description,Amount,Running Bal.',
+      '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+    ].join('\n'),
+  );
 
-  await expect(caller.imports.commit({
-    accountId: null,
-    importFileId: preview.importFileId,
-    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
-    balanceRowIds: preview.balanceRowIds,
-    accountMappings: [{
-      sourceAccountId: preview.accountMappings[0].sourceAccountId,
-      mode: 'existing',
-      accountId,
-      last4: '123',
-    }],
-  } as never)).rejects.toThrow();
+  await expect(
+    caller.imports.commit({
+      accountId: null,
+      importFileId: preview.importFileId,
+      importRowIds: preview.transactions.map(
+        (transaction: { importRowId: number }) => transaction.importRowId,
+      ),
+      balanceRowIds: preview.balanceRowIds,
+      accountMappings: [
+        {
+          sourceAccountId: preview.accountMappings[0].sourceAccountId,
+          mode: 'existing',
+          accountId,
+          last4: '123',
+        },
+      ],
+    } as never),
+  ).rejects.toThrow();
 
-  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId))
-    .toEqual({ last4: null });
-  expect(getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(preview.importFileId))
-    .toEqual({ status: 'previewed' });
+  expect(getDb().prepare('SELECT last4 FROM accounts WHERE id = ?').get(accountId)).toEqual({
+    last4: null,
+  });
+  expect(
+    getDb().prepare('SELECT status FROM importFiles WHERE id = ?').get(preview.importFileId),
+  ).toEqual({ status: 'previewed' });
 });
 
 test('app import preview reports archived matches and commit requires explicit unarchive decision', async () => {
-  const archivedAccountId = Number(insertRow('accounts', {
-    name: 'Adv Plus Banking - 1234',
-    institution: 'Bank of America',
-    type: 'checking',
-    currentBalance: 0,
-    currency: 'USD',
-    status: 'archived',
-    archivedAt: '2026-06-01T00:00:00.000Z',
-  }));
+  const archivedAccountId = Number(
+    insertRow('accounts', {
+      name: 'Adv Plus Banking - 1234',
+      institution: 'Bank of America',
+      type: 'checking',
+      currentBalance: 0,
+      currency: 'USD',
+      status: 'archived',
+      archivedAt: '2026-06-01T00:00:00.000Z',
+    }),
+  );
   insertRow('accountAliases', {
     institution: 'Bank of America',
     alias: 'Adv Plus Banking - 1234',
@@ -6687,12 +8779,15 @@ test('app import preview reports archived matches and commit requires explicit u
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });
-  const preview = await postImportPreview('bofa-checking-1234-2026-01-01-to-2026-01-31.csv', [
-    'Description,,Summary Amt.',
-    'Opening Balance,,"1,000.00"',
-    'Date,Description,Amount,Running Bal.',
-    '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
-  ].join('\n'));
+  const preview = await postImportPreview(
+    'bofa-checking-1234-2026-01-01-to-2026-01-31.csv',
+    [
+      'Description,,Summary Amt.',
+      'Opening Balance,,"1,000.00"',
+      'Date,Description,Amount,Running Bal.',
+      '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+    ].join('\n'),
+  );
 
   expect(preview.accountMappings[0]).toMatchObject({
     resolvedAccountId: archivedAccountId,
@@ -6700,66 +8795,93 @@ test('app import preview reports archived matches and commit requires explicit u
     resolution: 'archived-match',
   });
 
-  await expect(commitImportForTest({
-    accountId: null,
-    importFileId: preview.importFileId,
-    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
-    accountMappings: [{ sourceAccountId: preview.accountMappings[0].sourceAccountId, mode: 'auto' }],
-  })).rejects.toThrow('Import account mapping requires an explicit account choice.');
+  await expect(
+    commitImportForTest({
+      accountId: null,
+      importFileId: preview.importFileId,
+      importRowIds: preview.transactions.map(
+        (transaction: { importRowId: number }) => transaction.importRowId,
+      ),
+      accountMappings: [
+        { sourceAccountId: preview.accountMappings[0].sourceAccountId, mode: 'auto' },
+      ],
+    }),
+  ).rejects.toThrow('Import account mapping requires an explicit account choice.');
 
-  const commit = await commitImportForTest( {
+  const commit = await commitImportForTest({
     accountId: null,
     importFileId: preview.importFileId,
-    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    importRowIds: preview.transactions.map(
+      (transaction: { importRowId: number }) => transaction.importRowId,
+    ),
     balanceRowIds: preview.balanceRowIds,
-    accountMappings: [{
-      sourceAccountId: preview.accountMappings[0].sourceAccountId,
-      mode: 'unarchive',
-      accountId: archivedAccountId,
-      last4: '1234',
-    }],
+    accountMappings: [
+      {
+        sourceAccountId: preview.accountMappings[0].sourceAccountId,
+        mode: 'unarchive',
+        accountId: archivedAccountId,
+        last4: '1234',
+      },
+    ],
   });
 
   expect(commit.importedCount).toBe(1);
-  expect(getDb().prepare('SELECT status, archivedAt, last4 FROM accounts WHERE id = ?').get(archivedAccountId)).toMatchObject({
+  expect(
+    getDb()
+      .prepare('SELECT status, archivedAt, last4 FROM accounts WHERE id = ?')
+      .get(archivedAccountId),
+  ).toMatchObject({
     status: 'active',
     archivedAt: null,
     last4: '1234',
   });
-  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(preview.accountMappings[0].sourceAccountId)).toMatchObject({
+  expect(
+    getDb()
+      .prepare('SELECT accountId FROM sourceAccounts WHERE id = ?')
+      .get(preview.accountMappings[0].sourceAccountId),
+  ).toMatchObject({
     accountId: archivedAccountId,
   });
 });
 
 test('app imports commit creates accounts from explicit source account mapping decisions', async () => {
-  const preview = await postImportPreview('bofa-savings-4321-2026-01-01-to-2026-01-31.csv', [
-    'Description,,Summary Amt.',
-    'Opening Balance,,"1,000.00"',
-    'Date,Description,Amount,Running Bal.',
-    '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
-  ].join('\n'));
+  const preview = await postImportPreview(
+    'bofa-savings-4321-2026-01-01-to-2026-01-31.csv',
+    [
+      'Description,,Summary Amt.',
+      'Opening Balance,,"1,000.00"',
+      'Date,Description,Amount,Running Bal.',
+      '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+    ].join('\n'),
+  );
 
-  const commit = await commitImportForTest( {
+  const commit = await commitImportForTest({
     accountId: null,
     importFileId: preview.importFileId,
-    importRowIds: preview.transactions.map((transaction: { importRowId: number }) => transaction.importRowId),
+    importRowIds: preview.transactions.map(
+      (transaction: { importRowId: number }) => transaction.importRowId,
+    ),
     balanceRowIds: preview.balanceRowIds,
-    accountMappings: [{
-      sourceAccountId: preview.accountMappings[0].sourceAccountId,
-      mode: 'create',
-      last4: '4321',
-      account: {
-        name: 'Imported Savings',
-        institution: 'Bank of America',
-        type: 'savings',
-        currency: 'USD',
-        accountHolder: 'Example Owner',
+    accountMappings: [
+      {
+        sourceAccountId: preview.accountMappings[0].sourceAccountId,
+        mode: 'create',
+        last4: '4321',
+        account: {
+          name: 'Imported Savings',
+          institution: 'Bank of America',
+          type: 'savings',
+          currency: 'USD',
+          accountHolder: 'Example Owner',
+        },
       },
-    }],
+    ],
   });
 
   expect(commit.importedCount).toBe(1);
-  const account = getDb().prepare("SELECT * FROM accounts WHERE name = 'Imported Savings'").get() as {
+  const account = getDb()
+    .prepare("SELECT * FROM accounts WHERE name = 'Imported Savings'")
+    .get() as {
     id: number;
     institution: string;
     type: string;
@@ -6774,34 +8896,49 @@ test('app imports commit creates accounts from explicit source account mapping d
     last4: '4321',
     status: 'active',
   });
-  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(preview.accountMappings[0].sourceAccountId)).toMatchObject({
+  expect(
+    getDb()
+      .prepare('SELECT accountId FROM sourceAccounts WHERE id = ?')
+      .get(preview.accountMappings[0].sourceAccountId),
+  ).toMatchObject({
     accountId: account.id,
   });
-  expect(getDb().prepare('SELECT accountId FROM accountAliases WHERE alias = ?').get('Advantage Savings - 4321')).toMatchObject({
+  expect(
+    getDb()
+      .prepare('SELECT accountId FROM accountAliases WHERE alias = ?')
+      .get('Advantage Savings - 4321'),
+  ).toMatchObject({
     accountId: account.id,
   });
 });
 
 test('app import preview stages multiple source balances for the same account and date', async () => {
-  const preview = await postImportPreview('bofa-savings-1234-2026-01-01-to-2026-01-31.csv', [
-    'Description,,Summary Amt.',
-    'Opening Balance,,"1,000.00"',
-    'Date,Description,Amount,Running Bal.',
-    '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
-    '01/05/2026,UTILITY BILL,"-125.50","2,374.50"',
-  ].join('\n'));
+  const preview = await postImportPreview(
+    'bofa-savings-1234-2026-01-01-to-2026-01-31.csv',
+    [
+      'Description,,Summary Amt.',
+      'Opening Balance,,"1,000.00"',
+      'Date,Description,Amount,Running Bal.',
+      '01/05/2026,TRANSFER IN,"1,500.00","2,500.00"',
+      '01/05/2026,UTILITY BILL,"-125.50","2,374.50"',
+    ].join('\n'),
+  );
 
   expect(preview.profileUsed).toBe('Bank of America Activity');
   expect(preview.transactions).toHaveLength(2);
   expect(preview.balanceRowIds).toHaveLength(2);
 
-  const sourceBalances = getDb().prepare(`
+  const sourceBalances = getDb()
+    .prepare(
+      `
     SELECT sb.date, sb.balanceCents
     FROM sourceBalances sb
     JOIN sourceFiles sf ON sf.id = sb.sourceFileId
     WHERE sf.importFileId = ?
     ORDER BY sb.importRowId ASC
-  `).all(preview.importFileId);
+  `,
+    )
+    .all(preview.importFileId);
   expect(sourceBalances).toEqual([
     { date: '2026-01-05', balanceCents: 250000 },
     { date: '2026-01-05', balanceCents: 237450 },
@@ -6824,11 +8961,14 @@ test('app import materialization is independent of import file commit order', as
   const previewA = await postImportPreview('chase-a.csv', csvFromRows(rows.slice(0, 3)));
   const previewB = await postImportPreview('chase-b.csv', csvFromRows(rows.slice(1, 4)));
 
-  const commitPreview = (preview: { importFileId: number; transactions: Array<{ importRowId: number }> }) =>
+  const commitPreview = (preview: {
+    importFileId: number;
+    transactions: Array<{ importRowId: number }>;
+  }) =>
     commitImportForTest({
       accountId,
       importFileId: preview.importFileId,
-      importRowIds: preview.transactions.map(transaction => transaction.importRowId),
+      importRowIds: preview.transactions.map((transaction) => transaction.importRowId),
     });
 
   await commitPreview(previewA);
@@ -6847,22 +8987,38 @@ test('app import materialization is independent of import file commit order', as
 test('manual import, unimport, and reimport preserve unrelated account rows and legacy IDs', async () => {
   const first = Number(insertRow('accounts', { name: 'First scoped card', type: 'credit' }));
   const other = Number(insertRow('accounts', { name: 'Untouched scoped card', type: 'credit' }));
-  const firstPreview = await postImportPreview('scoped-first.csv', csvFromRows([
-    '06/13/2026,06/14/2026,FIRST PURCHASE,Food & Drink,Sale,-42.37',
-    '06/13/2026,06/14/2026,FIRST PURCHASE,Food & Drink,Sale,-42.37',
-  ]));
-  const otherPreview = await postImportPreview('scoped-other.csv', csvFromRows([
-    '06/12/2026,06/13/2026,OTHER PURCHASE,Food & Drink,Sale,-10.00',
-  ]));
+  const firstPreview = await postImportPreview(
+    'scoped-first.csv',
+    csvFromRows([
+      '06/13/2026,06/14/2026,FIRST PURCHASE,Food & Drink,Sale,-42.37',
+      '06/13/2026,06/14/2026,FIRST PURCHASE,Food & Drink,Sale,-42.37',
+    ]),
+  );
+  const otherPreview = await postImportPreview(
+    'scoped-other.csv',
+    csvFromRows(['06/12/2026,06/13/2026,OTHER PURCHASE,Food & Drink,Sale,-10.00']),
+  );
   await commitImportForTest({ accountId: other, importFileId: otherPreview.importFileId });
-  const untouched = getDb().prepare('SELECT * FROM ledgerTransactions WHERE accountId = ?').all(other);
+  const untouched = getDb()
+    .prepare('SELECT * FROM ledgerTransactions WHERE accountId = ?')
+    .all(other);
   const legacy = getDb().prepare('SELECT * FROM transactions WHERE accountId = ?').all(other);
-  const importRows = getDb().prepare('SELECT * FROM importRows WHERE importFileId = ?').all(otherPreview.importFileId);
+  const importRows = getDb()
+    .prepare('SELECT * FROM importRows WHERE importFileId = ?')
+    .all(otherPreview.importFileId);
   await commitImportForTest({ accountId: first, importFileId: firstPreview.importFileId });
   const assertUntouched = () => {
-    expect(getDb().prepare('SELECT * FROM ledgerTransactions WHERE accountId = ?').all(other)).toEqual(untouched);
-    expect(getDb().prepare('SELECT * FROM transactions WHERE accountId = ?').all(other)).toEqual(legacy);
-    expect(getDb().prepare('SELECT * FROM importRows WHERE importFileId = ?').all(otherPreview.importFileId)).toEqual(importRows);
+    expect(
+      getDb().prepare('SELECT * FROM ledgerTransactions WHERE accountId = ?').all(other),
+    ).toEqual(untouched);
+    expect(getDb().prepare('SELECT * FROM transactions WHERE accountId = ?').all(other)).toEqual(
+      legacy,
+    );
+    expect(
+      getDb()
+        .prepare('SELECT * FROM importRows WHERE importFileId = ?')
+        .all(otherPreview.importFileId),
+    ).toEqual(importRows);
   };
   assertUntouched();
   await caller.imports.unimport({ importFileId: firstPreview.importFileId });
@@ -6874,35 +9030,74 @@ test('manual import, unimport, and reimport preserve unrelated account rows and 
   await caller.imports.bulkReimport({ importFileIds: [firstPreview.importFileId] });
   assertUntouched();
   const built = buildLedgerFromSourceFacts();
-  expect(getDb().prepare('SELECT COUNT(*) n FROM ledgerTransactions').get()).toEqual({ n: built.transactions.length });
-  expect(built.transactions.filter(row => row.accountId === first)).toHaveLength(2);
+  expect(getDb().prepare('SELECT COUNT(*) n FROM ledgerTransactions').get()).toEqual({
+    n: built.transactions.length,
+  });
+  expect(built.transactions.filter((row) => row.accountId === first)).toHaveLength(2);
 });
 
 test('sync confirmation scopes a consolidated artifact without rewriting another account', async () => {
   const other = Number(insertRow('accounts', { name: 'Untouched sync card', type: 'credit' }));
-  const preview = await postImportPreview('untouched-sync.csv', csvFromRows([
-    '06/12/2026,06/13/2026,UNRELATED PURCHASE,Food & Drink,Sale,-10.00',
-  ]));
+  const preview = await postImportPreview(
+    'untouched-sync.csv',
+    csvFromRows(['06/12/2026,06/13/2026,UNRELATED PURCHASE,Food & Drink,Sale,-10.00']),
+  );
   await commitImportForTest({ accountId: other, importFileId: preview.importFileId });
-  const untouched = getDb().prepare('SELECT * FROM ledgerTransactions WHERE accountId = ?').all(other);
+  const untouched = getDb()
+    .prepare('SELECT * FROM ledgerTransactions WHERE accountId = ?')
+    .all(other);
   const legacy = getDb().prepare('SELECT * FROM transactions WHERE accountId = ?').all(other);
-  const accounts = ['First', 'Second'].map(name => Number(insertRow('accounts', { name: `Scoped sync ${name}`, institution: 'Example Institution', type: 'checking' })));
-  const staged = stageConsolidatedSyncFacts([
-    { remoteAccountId: 'remote:scoped-first', accountName: 'First' },
-    { remoteAccountId: 'remote:scoped-second', accountName: 'Second' },
-  ], 'scoped-consolidated.csv');
+  const accounts = ['First', 'Second'].map((name) =>
+    Number(
+      insertRow('accounts', {
+        name: `Scoped sync ${name}`,
+        institution: 'Example Institution',
+        type: 'checking',
+      }),
+    ),
+  );
+  const staged = stageConsolidatedSyncFacts(
+    [
+      { remoteAccountId: 'remote:scoped-first', accountName: 'First' },
+      { remoteAccountId: 'remote:scoped-second', accountName: 'Second' },
+    ],
+    'scoped-consolidated.csv',
+  );
   const artifact = buildSyncArtifactReview({
-    importFileId: staged.importFileId, fileName: staged.fileName, status: 'ready',
+    importFileId: staged.importFileId,
+    fileName: staged.fileName,
+    status: 'ready',
     accountRoutes: [
       { remoteAccountId: 'remote:scoped-first', accountId: accounts[0]! },
       { remoteAccountId: 'remote:scoped-second', accountId: accounts[1]! },
     ],
   });
-  const review = { runId: 'sync-scoped-consolidated', institutionId: 'bank-of-america' as const, downloaded: 1, readyToImport: 1, alreadyImported: 0, artifacts: [artifact] };
+  const review = {
+    runId: 'sync-scoped-consolidated',
+    institutionId: 'bank-of-america' as const,
+    downloaded: 1,
+    readyToImport: 1,
+    alreadyImported: 0,
+    artifacts: [artifact],
+  };
   await saveAwaitingSyncReview(review);
   expect((await confirmReviewedSync({ runId: review.runId })).status).toBe('complete');
-  expect(getDb().prepare('SELECT * FROM ledgerTransactions WHERE accountId = ?').all(other)).toEqual(untouched);
-  expect(getDb().prepare('SELECT * FROM transactions WHERE accountId = ?').all(other)).toEqual(legacy);
-  expect(getDb().prepare('SELECT DISTINCT accountId FROM ledgerTransactions ORDER BY accountId').all()).toEqual([other, ...accounts].map(accountId => ({ accountId })));
-  expect(getDb().prepare('SELECT ledgerTransactionId FROM ledgerTransactions ORDER BY ledgerTransactionId').all()).toEqual(buildLedgerFromSourceFacts().transactions.map(row => ({ ledgerTransactionId: row.ledgerTransactionId })));
+  expect(
+    getDb().prepare('SELECT * FROM ledgerTransactions WHERE accountId = ?').all(other),
+  ).toEqual(untouched);
+  expect(getDb().prepare('SELECT * FROM transactions WHERE accountId = ?').all(other)).toEqual(
+    legacy,
+  );
+  expect(
+    getDb().prepare('SELECT DISTINCT accountId FROM ledgerTransactions ORDER BY accountId').all(),
+  ).toEqual([other, ...accounts].map((accountId) => ({ accountId })));
+  expect(
+    getDb()
+      .prepare('SELECT ledgerTransactionId FROM ledgerTransactions ORDER BY ledgerTransactionId')
+      .all(),
+  ).toEqual(
+    buildLedgerFromSourceFacts().transactions.map((row) => ({
+      ledgerTransactionId: row.ledgerTransactionId,
+    })),
+  );
 });

@@ -16,10 +16,11 @@ if (process.platform !== 'darwin') {
   console.log('Skipping the macOS Electrobun app bundle audit on this platform');
   process.exit(0);
 }
-const requestedEnvironment = process.argv
-  .slice(2)
-  .find(argument => argument.startsWith('--env='))
-  ?.slice('--env='.length) || 'stable';
+const requestedEnvironment =
+  process.argv
+    .slice(2)
+    .find((argument) => argument.startsWith('--env='))
+    ?.slice('--env='.length) || 'stable';
 const buildDirectory = path.join(
   projectRoot,
   'build',
@@ -32,47 +33,56 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 function walk(directory: string): string[] {
-  return fs.readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const entryPath = path.join(directory, entry.name);
     return entry.isDirectory() ? [entryPath, ...walk(entryPath)] : [entryPath];
   });
 }
 
 assert(fs.existsSync(buildDirectory), `Missing Electrobun build directory: ${buildDirectory}`);
-const outerBundleNames = fs.readdirSync(buildDirectory)
-  .filter(fileName => fileName.endsWith('.app'));
+const outerBundleNames = fs
+  .readdirSync(buildDirectory)
+  .filter((fileName) => fileName.endsWith('.app'));
 assert(
   outerBundleNames.length === 1,
   `Expected one Electrobun app bundle, found ${outerBundleNames.length}`,
 );
 const outerBundle = path.join(buildDirectory, outerBundleNames[0]!);
 const outerResources = path.join(outerBundle, 'Contents', 'Resources');
-const payloadArchives = fs.readdirSync(outerResources)
-  .filter(fileName => fileName.endsWith('.tar.zst'));
-assert(payloadArchives.length <= 1, `Expected at most one packaged app payload, found ${payloadArchives.length}`);
+const payloadArchives = fs
+  .readdirSync(outerResources)
+  .filter((fileName) => fileName.endsWith('.tar.zst'));
+assert(
+  payloadArchives.length <= 1,
+  `Expected at most one packaged app payload, found ${payloadArchives.length}`,
+);
 
 const extractionDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'easymoney-bundle-audit-'));
 try {
   let innerBundle = outerBundle;
   if (payloadArchives.length === 1) {
-    const extractResult = Bun.spawnSync([
-      'tar',
-      '--extract',
-      '--zstd',
-      '--file',
-      path.join(outerResources, payloadArchives[0]!),
-      '--directory',
-      extractionDirectory,
-    ], {
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
+    const extractResult = Bun.spawnSync(
+      [
+        'tar',
+        '--extract',
+        '--zstd',
+        '--file',
+        path.join(outerResources, payloadArchives[0]!),
+        '--directory',
+        extractionDirectory,
+      ],
+      {
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    );
     assert(
       extractResult.exitCode === 0,
       `Could not extract packaged app payload: ${extractResult.stderr.toString().trim()}`,
     );
-    const innerBundleNames = fs.readdirSync(extractionDirectory)
-      .filter(fileName => fileName.endsWith('.app'));
+    const innerBundleNames = fs
+      .readdirSync(extractionDirectory)
+      .filter((fileName) => fileName.endsWith('.app'));
     assert(
       innerBundleNames.length === 1,
       `Expected one app in the packaged payload, found ${innerBundleNames.length}`,
@@ -80,12 +90,14 @@ try {
     innerBundle = path.join(extractionDirectory, innerBundleNames[0]!);
   }
   const packagedPaths = [
-    ...walk(outerBundle).map(filePath => `wrapper/${path.relative(outerBundle, filePath)}`),
+    ...walk(outerBundle).map((filePath) => `wrapper/${path.relative(outerBundle, filePath)}`),
     ...(innerBundle === outerBundle
       ? []
-      : walk(innerBundle).map(filePath => `payload/${path.relative(innerBundle, filePath)}`)),
+      : walk(innerBundle).map((filePath) => `payload/${path.relative(innerBundle, filePath)}`)),
   ];
-  const forbiddenFiles = packagedPaths.filter(relativePath => forbiddenRuntimeName.test(relativePath));
+  const forbiddenFiles = packagedPaths.filter((relativePath) =>
+    forbiddenRuntimeName.test(relativePath),
+  );
   assert(
     forbiddenFiles.length === 0,
     `Forbidden Hutch or Cottontail runtime files were packaged: ${forbiddenFiles.join(', ')}`,

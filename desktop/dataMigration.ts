@@ -13,7 +13,7 @@ export interface LegacyDataMigrationOptions {
 }
 
 function firstExistingPath(paths: string[]) {
-  return paths.find(candidate => fs.existsSync(candidate)) ?? null;
+  return paths.find((candidate) => fs.existsSync(candidate)) ?? null;
 }
 
 interface TableNameRow {
@@ -62,14 +62,18 @@ function canonicalValue(value: unknown): unknown {
 }
 
 function sortedJson(rows: unknown[]) {
-  return rows.map(row => JSON.stringify(canonicalValue(row))).sort();
+  return rows.map((row) => JSON.stringify(canonicalValue(row))).sort();
 }
 
 function seedStateFingerprint(categories: CategoryRow[], rules: RuleRow[]) {
-  return createHash('sha256').update(JSON.stringify({
-    categories: sortedJson(categories),
-    rules: sortedJson(rules),
-  })).digest('hex');
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        categories: sortedJson(categories),
+        rules: sortedJson(rules),
+      }),
+    )
+    .digest('hex');
 }
 
 function quotedIdentifier(identifier: string) {
@@ -77,30 +81,42 @@ function quotedIdentifier(identifier: string) {
 }
 
 function seedStateFingerprintConnection(database: Database) {
-  const tableNames = (database.query(`
+  const tableNames = (
+    database
+      .query(
+        `
     SELECT name
     FROM sqlite_schema
     WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
-  `).all() as TableNameRow[]).map(row => row.name);
+  `,
+      )
+      .all() as TableNameRow[]
+  ).map((row) => row.name);
 
-  if (![...SEED_ONLY_TABLES].every(tableName => tableNames.includes(tableName))) {
+  if (![...SEED_ONLY_TABLES].every((tableName) => tableNames.includes(tableName))) {
     return null;
   }
 
   for (const tableName of tableNames) {
     if (SEED_ONLY_TABLES.has(tableName)) continue;
-    const row = database.query(
-      `SELECT 1 AS present FROM ${quotedIdentifier(tableName)} LIMIT 1`,
-    ).get();
+    const row = database
+      .query(`SELECT 1 AS present FROM ${quotedIdentifier(tableName)} LIMIT 1`)
+      .get();
     if (row) return null;
   }
 
-  const categories = database.query(`
+  const categories = database
+    .query(
+      `
     SELECT c.name, COALESCE(parent.name, c.parentId) AS parentId,
       c.type, c.categoryGroup, c.description, c.color, c.icon
     FROM categories c LEFT JOIN categories parent ON parent.id = c.parentId
-  `).all() as CategoryRow[];
-  const rules = database.query(`
+  `,
+    )
+    .all() as CategoryRow[];
+  const rules = database
+    .query(
+      `
     SELECT
       categorizationRules.pattern,
       categories.name AS categoryName,
@@ -108,27 +124,40 @@ function seedStateFingerprintConnection(database: Database) {
       categorizationRules.matchType
     FROM categorizationRules
     LEFT JOIN categories ON categories.id = categorizationRules.categoryId
-  `).all() as RuleRow[];
+  `,
+    )
+    .all() as RuleRow[];
   return seedStateFingerprint(categories, rules);
 }
 
 const defaultRules = DEFAULT_RULES.map(([pattern, categoryName, priority]) => ({
-  pattern, categoryName, priority, matchType: 'contains',
+  pattern,
+  categoryName,
+  priority,
+  matchType: 'contains',
 }));
-const defaultCategoryRow = (category: typeof DEFAULT_CATEGORIES[number]): CategoryRow => ({
-  name: category.name, parentId: category.parentName ?? null, type: category.type,
-  categoryGroup: category.categoryGroup, description: category.description ?? null,
-  color: category.color, icon: category.icon,
+const defaultCategoryRow = (category: (typeof DEFAULT_CATEGORIES)[number]): CategoryRow => ({
+  name: category.name,
+  parentId: category.parentName ?? null,
+  type: category.type,
+  categoryGroup: category.categoryGroup,
+  description: category.description ?? null,
+  color: category.color,
+  icon: category.icon,
 });
 
 // Recognize both the current hierarchy and the pre-subcategory empty seed.
 // Compare parent names rather than allocation-dependent SQLite IDs.
 const DEFAULT_SEED_STATE_FINGERPRINTS = new Set([
   seedStateFingerprint(DEFAULT_CATEGORIES.map(defaultCategoryRow), defaultRules),
-  seedStateFingerprint(DEFAULT_CATEGORIES.filter(category => !category.parentName).map(category => ({
-    ...defaultCategoryRow(category), parentId: null, description: null,
-  })),
-  defaultRules),
+  seedStateFingerprint(
+    DEFAULT_CATEGORIES.filter((category) => !category.parentName).map((category) => ({
+      ...defaultCategoryRow(category),
+      parentId: null,
+      description: null,
+    })),
+    defaultRules,
+  ),
 ]);
 
 function isDefaultOnlyDatabaseConnection(database: Database) {
@@ -158,7 +187,9 @@ function defaultSeedFingerprint(databasePath: string) {
     const database = new Database(databasePath, { readonly: true });
     try {
       const fingerprint = seedStateFingerprintConnection(database);
-      return fingerprint !== null && DEFAULT_SEED_STATE_FINGERPRINTS.has(fingerprint) ? fingerprint : null;
+      return fingerprint !== null && DEFAULT_SEED_STATE_FINGERPRINTS.has(fingerprint)
+        ? fingerprint
+        : null;
     } finally {
       database.close();
     }
@@ -194,16 +225,21 @@ function readRecoveryMarker(databasePath: string) {
       if (applicationId.application_id !== RECOVERY_APPLICATION_ID) return null;
       const check = database.query('PRAGMA quick_check').get() as { quick_check: string };
       if (check.quick_check !== 'ok') return null;
-      const marker = database.query(`
+      const marker = database
+        .query(
+          `
         SELECT marker, formatVersion, primarySeedFingerprint
         FROM ${RECOVERY_MARKER_TABLE}
         WHERE id = 1
-      `).get() as RecoveryMarkerRow | null;
+      `,
+        )
+        .get() as RecoveryMarkerRow | null;
       if (
-        marker?.marker !== RECOVERY_MARKER
-        || marker.formatVersion !== RECOVERY_FORMAT_VERSION
-        || !/^[a-f0-9]{64}$/.test(marker.primarySeedFingerprint)
-      ) return null;
+        marker?.marker !== RECOVERY_MARKER ||
+        marker.formatVersion !== RECOVERY_FORMAT_VERSION ||
+        !/^[a-f0-9]{64}$/.test(marker.primarySeedFingerprint)
+      )
+        return null;
       return marker;
     } finally {
       database.close();
@@ -251,11 +287,16 @@ function createSnapshotFile(
     try {
       snapshotDatabase.query('PRAGMA journal_mode = DELETE').get();
       if (primarySeedFingerprint) {
-        const existingMarkerTable = snapshotDatabase.query(`
+        const existingMarkerTable = snapshotDatabase
+          .query(
+            `
           SELECT 1 AS present FROM sqlite_schema
           WHERE type = 'table' AND name = ?
-        `).get(RECOVERY_MARKER_TABLE);
-        if (existingMarkerTable) throw new Error('Legacy database uses the reserved recovery table');
+        `,
+          )
+          .get(RECOVERY_MARKER_TABLE);
+        if (existingMarkerTable)
+          throw new Error('Legacy database uses the reserved recovery table');
         snapshotDatabase.exec(`
           PRAGMA application_id = ${RECOVERY_APPLICATION_ID};
           CREATE TABLE ${RECOVERY_MARKER_TABLE} (
@@ -265,11 +306,15 @@ function createSnapshotFile(
             primarySeedFingerprint TEXT NOT NULL
           );
         `);
-        snapshotDatabase.query(`
+        snapshotDatabase
+          .query(
+            `
           INSERT INTO ${RECOVERY_MARKER_TABLE}
             (id, marker, formatVersion, primarySeedFingerprint)
           VALUES (1, ?, ?, ?)
-        `).run(RECOVERY_MARKER, RECOVERY_FORMAT_VERSION, primarySeedFingerprint);
+        `,
+          )
+          .run(RECOVERY_MARKER, RECOVERY_FORMAT_VERSION, primarySeedFingerprint);
       }
       const check = snapshotDatabase.query('PRAGMA quick_check').get() as { quick_check: string };
       if (check.quick_check !== 'ok') throw new Error('Legacy database snapshot failed validation');
@@ -323,14 +368,21 @@ export function migrateLegacyData(options: LegacyDataMigrationOptions) {
   const allowDatabaseMigration = options.allowDatabaseMigration ?? true;
   const allowEnvironmentMigration = options.allowEnvironmentMigration ?? true;
   const legacyRoot = path.join(options.homeDirectory, 'src', 'EasyMoney');
-  const legacyDatabase = allowDatabaseMigration ? firstExistingPath([
-    process.env.EASYMONEY_LEGACY_DB_PATH ?? '',
-    path.join(legacyRoot, 'data', 'easymoney.sqlite'),
-  ].filter(Boolean)) : null;
-  const legacyEnvironment = allowEnvironmentMigration ? firstExistingPath([
-    process.env.EASYMONEY_LEGACY_ENV_PATH ?? '',
-    path.join(legacyRoot, '.env.local'),
-  ].filter(Boolean)) : null;
+  const legacyDatabase = allowDatabaseMigration
+    ? firstExistingPath(
+        [
+          process.env.EASYMONEY_LEGACY_DB_PATH ?? '',
+          path.join(legacyRoot, 'data', 'easymoney.sqlite'),
+        ].filter(Boolean),
+      )
+    : null;
+  const legacyEnvironment = allowEnvironmentMigration
+    ? firstExistingPath(
+        [process.env.EASYMONEY_LEGACY_ENV_PATH ?? '', path.join(legacyRoot, '.env.local')].filter(
+          Boolean,
+        ),
+      )
+    : null;
 
   let migratedDatabaseFrom: string | null = null;
   let recoveredEmptyDatabase = false;
@@ -344,10 +396,7 @@ export function migrateLegacyData(options: LegacyDataMigrationOptions) {
   const recoveryMarker = recoveryExists ? readRecoveryMarker(recoveryPath) : null;
 
   if (recoveryMarker) {
-    if (
-      destinationExists
-      && !primaryMatchesRecoveryMarker(options.databasePath, recoveryMarker)
-    ) {
+    if (destinationExists && !primaryMatchesRecoveryMarker(options.databasePath, recoveryMarker)) {
       throw new Error(
         'Both the primary and recovered EasyMoney databases changed; refusing to choose between them.',
       );
@@ -359,17 +408,17 @@ export function migrateLegacyData(options: LegacyDataMigrationOptions) {
   }
 
   const legacyHasData = Boolean(
-    legacyDatabase
-    && path.resolve(legacyDatabase) !== path.resolve(options.databasePath)
-    && path.resolve(legacyDatabase) !== path.resolve(recoveryPath)
-    && databaseContainsDurableUserData(legacyDatabase),
+    legacyDatabase &&
+    path.resolve(legacyDatabase) !== path.resolve(options.databasePath) &&
+    path.resolve(legacyDatabase) !== path.resolve(recoveryPath) &&
+    databaseContainsDurableUserData(legacyDatabase),
   );
   if (legacyDatabase && legacyHasData && !recoveryMarker) {
     if (!destinationExists && migrateDatabaseSnapshot(legacyDatabase, options.databasePath)) {
       migratedDatabaseFrom = legacyDatabase;
     } else if (
-      primarySeedFingerprint
-      && migrateDatabaseSnapshot(legacyDatabase, recoveryPath, primarySeedFingerprint)
+      primarySeedFingerprint &&
+      migrateDatabaseSnapshot(legacyDatabase, recoveryPath, primarySeedFingerprint)
     ) {
       selectedDatabasePath = recoveryPath;
       migratedDatabaseFrom = legacyDatabase;

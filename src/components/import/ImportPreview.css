@@ -188,8 +188,12 @@
   font-weight: 700;
 }
 
-.stat-value.positive { color: var(--color-success); }
-.stat-value.negative { color: var(--color-danger); }
+.stat-value.positive {
+  color: var(--color-success);
+}
+.stat-value.negative {
+  color: var(--color-danger);
+}
 
 .preview-table-container {
   border-radius: 1rem;
@@ -234,9 +238,15 @@
   text-overflow: ellipsis;
 }
 
-.text-right { text-align: right !important; }
-.font-medium { font-weight: 500; }
-.positive { color: var(--color-success) !important; }
+.text-right {
+  text-align: right !important;
+}
+.font-medium {
+  font-weight: 500;
+}
+.positive {
+  color: var(--color-success) !important;
+}
 
 .badge {
   font-size: 0.75rem;

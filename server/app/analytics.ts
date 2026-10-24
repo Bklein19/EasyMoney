@@ -52,9 +52,16 @@ export interface AnalyticsTransaction {
 }
 
 export function analyticsTransaction(transaction: TransactionListItem): AnalyticsTransaction {
-  return { id: transaction.id, ledgerTransactionId: transaction.ledgerTransactionId,
-    accountId: transaction.account?.id ?? null, categoryId: transaction.category?.id ?? null,
-    date: transaction.date, amount: transaction.amount, label: merchantName(transaction), notes: transaction.notes };
+  return {
+    id: transaction.id,
+    ledgerTransactionId: transaction.ledgerTransactionId,
+    accountId: transaction.account?.id ?? null,
+    categoryId: transaction.category?.id ?? null,
+    date: transaction.date,
+    amount: transaction.amount,
+    label: merchantName(transaction),
+    notes: transaction.notes,
+  };
 }
 
 function resolveGrouping(transactions: TransactionListItem[], groupMode: AnalyticsGroupMode) {
@@ -63,7 +70,7 @@ function resolveGrouping(transactions: TransactionListItem[], groupMode: Analyti
   if (groupMode === 'Monthly') return { labelFormat: 'MMM yyyy', keyFormat: 'yyyy-MM' };
   if (groupMode === 'Yearly') return { labelFormat: 'yyyy', keyFormat: 'yyyy' };
 
-  const dates = transactions.map(transaction => new Date(transaction.date).getTime());
+  const dates = transactions.map((transaction) => new Date(transaction.date).getTime());
   const diffDays = dates.length
     ? (Math.max(...dates) - Math.min(...dates)) / (1000 * 60 * 60 * 24)
     : 0;
@@ -75,21 +82,24 @@ function periodFor(date: string, keyFormat: string, labelFormat: string) {
   const dateObj = parseISO(date);
   const weekStart = startOfWeek(dateObj);
   const key = keyFormat === 'week' ? format(weekStart, 'yyyy-MM-dd') : format(dateObj, keyFormat);
-  const label = keyFormat === 'week' ? `Week of ${format(weekStart, 'MMM d')}` : format(dateObj, labelFormat);
-  const periodStart = keyFormat === 'yyyy'
-    ? startOfYear(dateObj)
-    : keyFormat === 'yyyy-MM'
-      ? startOfMonth(dateObj)
-      : keyFormat === 'week'
-        ? weekStart
-        : startOfDay(dateObj);
-  const periodEnd = keyFormat === 'yyyy'
-    ? endOfYear(dateObj)
-    : keyFormat === 'yyyy-MM'
-      ? endOfMonth(dateObj)
-      : keyFormat === 'week'
-        ? endOfWeek(dateObj)
-        : endOfDay(dateObj);
+  const label =
+    keyFormat === 'week' ? `Week of ${format(weekStart, 'MMM d')}` : format(dateObj, labelFormat);
+  const periodStart =
+    keyFormat === 'yyyy'
+      ? startOfYear(dateObj)
+      : keyFormat === 'yyyy-MM'
+        ? startOfMonth(dateObj)
+        : keyFormat === 'week'
+          ? weekStart
+          : startOfDay(dateObj);
+  const periodEnd =
+    keyFormat === 'yyyy'
+      ? endOfYear(dateObj)
+      : keyFormat === 'yyyy-MM'
+        ? endOfMonth(dateObj)
+        : keyFormat === 'week'
+          ? endOfWeek(dateObj)
+          : endOfDay(dateObj);
 
   return {
     key,
@@ -116,14 +126,19 @@ function merchantName(transaction: TransactionListItem) {
 }
 
 function normalizeMerchant(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() || 'unknown';
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim() || 'unknown'
+  );
 }
 
 function applyCategoryFilter(transactions: TransactionListItem[], input: AnalyticsReportInput) {
   const selected = new Set((input.categoryFilterIds ?? []).map(String));
   if (selected.size === 0) return transactions;
   const mode = input.categoryFilterMode ?? 'include';
-  return transactions.filter(transaction => {
+  return transactions.filter((transaction) => {
     const isSelected = selected.has(categoryKey(transaction));
     return mode === 'include' ? isSelected : !isSelected;
   });
@@ -155,34 +170,53 @@ export function getSpendingExplorerTransactions(input: {
   offset?: number;
 }) {
   const scope = input.scope ?? {};
-  const { categoryScopedTransactions, accountMap, categories, categoryMap } = analyticsContext(scope);
-  const expenses = categoryScopedTransactions.filter(transaction => isExpense(transaction, accountMap, categoryMap));
+  const { categoryScopedTransactions, accountMap, categories, categoryMap } =
+    analyticsContext(scope);
+  const expenses = categoryScopedTransactions.filter((transaction) =>
+    isExpense(transaction, accountMap, categoryMap),
+  );
   // Legacy display IDs can overlap newer read-model row IDs. Use private indexes
   // only to resolve the tree, then query by stable ledger identity, never display ID.
-  const root = buildSpendingTree(expenses.map((transaction, index) => ({ ...transaction, id: index + 1 })), categories);
+  const root = buildSpendingTree(
+    expenses.map((transaction, index) => ({ ...transaction, id: index + 1 })),
+    categories,
+  );
   const pending = [root];
   let ledgerTransactionIds: string[] = [];
   while (pending.length) {
     const node = pending.pop()!;
     if (node.id === input.nodeId) {
-      ledgerTransactionIds = node.transactionIds.map(index => expenses[index - 1]!.ledgerTransactionId).filter((id): id is string => Boolean(id));
+      ledgerTransactionIds = node.transactionIds
+        .map((index) => expenses[index - 1]!.ledgerTransactionId)
+        .filter((id): id is string => Boolean(id));
       break;
     }
     pending.push(...node.children);
   }
   return listTransactions({
-    accountId: scope.accountId, accountIds: scope.accountIds,
-    startDate: scope.startDate, endDate: scope.endDate,
-    ledgerTransactionIds, search: input.search, sortBy: input.sortBy ?? 'date_desc',
-    limit: 50, offset: input.offset,
+    accountId: scope.accountId,
+    accountIds: scope.accountIds,
+    startDate: scope.startDate,
+    endDate: scope.endDate,
+    ledgerTransactionIds,
+    search: input.search,
+    sortBy: input.sortBy ?? 'date_desc',
+    limit: 50,
+    offset: input.offset,
   });
 }
 
 export function getAnalyticsReport(input: AnalyticsReportInput = {}) {
-  const { categoryScopedTransactions, accountMap, categories, categoryMap } = analyticsContext(input);
-  const analysisTransactions = categoryScopedTransactions.filter(transaction => {
+  const { categoryScopedTransactions, accountMap, categories, categoryMap } =
+    analyticsContext(input);
+  const analysisTransactions = categoryScopedTransactions.filter((transaction) => {
     const flow = getTransactionFlow(transaction, accountMap, categoryMap);
-    return flow !== 'transfer' && flow !== 'card_payment' && flow !== 'internal_transfer' && flow !== 'investment';
+    return (
+      flow !== 'transfer' &&
+      flow !== 'card_payment' &&
+      flow !== 'internal_transfer' &&
+      flow !== 'investment'
+    );
   });
 
   const summary = {
@@ -205,46 +239,64 @@ export function getAnalyticsReport(input: AnalyticsReportInput = {}) {
   }
   summary.net = summary.income - summary.expenses;
 
-  const { labelFormat, keyFormat } = resolveGrouping(categoryScopedTransactions, input.groupMode ?? 'Auto');
+  const { labelFormat, keyFormat } = resolveGrouping(
+    categoryScopedTransactions,
+    input.groupMode ?? 'Auto',
+  );
 
-  const cashFlowByPeriod = new Map<string, {
-    key: string;
-    label: string;
-    startDate: string;
-    endDate: string;
-    income: number;
-    expenses: number;
-    net: number;
-    categoryAmounts: Record<string, number>;
-    transactionIds: number[];
-  }>();
-  const spendingByCategory = new Map<string, {
-    id: string;
-    name: string;
-    amount: number;
-    color: string;
-    transactionIds: number[];
-  }>();
-  const merchants = new Map<string, {
-    normalized: string;
-    name: string;
-    amount: number;
-    count: number;
-    transactionIds: number[];
-  }>();
-  const incomeStreams = new Map<string, {
-    normalized: string;
-    name: string;
-    amount: number;
-    count: number;
-    transactionIds: number[];
-  }>();
-  const investmentsByPeriod = new Map<string, {
-    key: string;
-    label: string;
-    amount: number;
-    transactionIds: number[];
-  }>();
+  const cashFlowByPeriod = new Map<
+    string,
+    {
+      key: string;
+      label: string;
+      startDate: string;
+      endDate: string;
+      income: number;
+      expenses: number;
+      net: number;
+      categoryAmounts: Record<string, number>;
+      transactionIds: number[];
+    }
+  >();
+  const spendingByCategory = new Map<
+    string,
+    {
+      id: string;
+      name: string;
+      amount: number;
+      color: string;
+      transactionIds: number[];
+    }
+  >();
+  const merchants = new Map<
+    string,
+    {
+      normalized: string;
+      name: string;
+      amount: number;
+      count: number;
+      transactionIds: number[];
+    }
+  >();
+  const incomeStreams = new Map<
+    string,
+    {
+      normalized: string;
+      name: string;
+      amount: number;
+      count: number;
+      transactionIds: number[];
+    }
+  >();
+  const investmentsByPeriod = new Map<
+    string,
+    {
+      key: string;
+      label: string;
+      amount: number;
+      transactionIds: number[];
+    }
+  >();
 
   for (const transaction of categoryScopedTransactions) {
     const period = periodFor(transaction.date, keyFormat, labelFormat);
@@ -332,12 +384,17 @@ export function getAnalyticsReport(input: AnalyticsReportInput = {}) {
     summary,
     cashFlow: [...cashFlowByPeriod.values()].sort((a, b) => a.key.localeCompare(b.key)),
     spendingByCategory: [...spendingByCategory.values()].sort((a, b) => b.amount - a.amount),
-    spendingExplorer: buildSpendingTree(categoryScopedTransactions.filter(transaction => isExpense(transaction, accountMap, categoryMap)), categories),
+    spendingExplorer: buildSpendingTree(
+      categoryScopedTransactions.filter((transaction) =>
+        isExpense(transaction, accountMap, categoryMap),
+      ),
+      categories,
+    ),
     topMerchants: [...merchants.values()].sort((a, b) => b.amount - a.amount).slice(0, 10),
     incomeStreams: [...incomeStreams.values()].sort((a, b) => b.amount - a.amount),
     investments: [...investmentsByPeriod.values()].sort((a, b) => a.key.localeCompare(b.key)),
     transactions: categoryScopedTransactions.map(analyticsTransaction),
     // Preserve backend flow decisions without sending the same rows a second time.
-    analysisTransactionIds: analysisTransactions.map(transaction => transaction.id),
+    analysisTransactionIds: analysisTransactions.map((transaction) => transaction.id),
   };
 }

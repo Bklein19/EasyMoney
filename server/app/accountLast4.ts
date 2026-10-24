@@ -32,9 +32,11 @@ export function accountLast4FromRemoteIdentity(value: string | null | undefined)
 }
 
 export function commonAccountLast4(values: Array<string | null | undefined>): string | null {
-  const candidates = new Set(values
-    .map(value => accountLast4FromLabel(value) ?? accountLast4FromRemoteIdentity(value))
-    .filter((value): value is string => value !== null));
+  const candidates = new Set(
+    values
+      .map((value) => accountLast4FromLabel(value) ?? accountLast4FromRemoteIdentity(value))
+      .filter((value): value is string => value !== null),
+  );
   return candidates.size === 1 ? [...candidates][0]! : null;
 }
 
@@ -42,10 +44,12 @@ export function sourceAccountLast4(sourceAccount: {
   sourceAccountKey?: string | null;
   sourceAccountName?: string | null;
 }): string | null {
-  const candidates = new Set([
-    accountLast4FromLabel(sourceAccount.sourceAccountName),
-    accountLast4FromLabel(sourceAccount.sourceAccountKey) ??
-      accountLast4FromRemoteIdentity(sourceAccount.sourceAccountKey),
-  ].filter((value): value is string => value !== null));
+  const candidates = new Set(
+    [
+      accountLast4FromLabel(sourceAccount.sourceAccountName),
+      accountLast4FromLabel(sourceAccount.sourceAccountKey) ??
+        accountLast4FromRemoteIdentity(sourceAccount.sourceAccountKey),
+    ].filter((value): value is string => value !== null),
+  );
   return candidates.size === 1 ? [...candidates][0]! : null;
 }

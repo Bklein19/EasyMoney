@@ -18,12 +18,17 @@ interface SpendingByCategoryProps {
   onExcludeCategory?: (category: CategorySpendingRow) => void;
 }
 
-const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val);
+const formatCurrency = (val: number) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+  }).format(val);
 
 export default function SpendingByCategory({
   rows = [],
   onSelectCategory,
-  onExcludeCategory
+  onExcludeCategory,
 }: SpendingByCategoryProps) {
   const data = rows;
 
@@ -54,10 +59,7 @@ export default function SpendingByCategory({
             >
               <span className="category-bar-label">{entry.name}</span>
               <span className="category-bar-track" aria-hidden="true">
-                <span
-                  className="category-bar-fill"
-                  style={{ width, backgroundColor: color }}
-                />
+                <span className="category-bar-fill" style={{ width, backgroundColor: color }} />
               </span>
               <span className="category-bar-value amount amount--negative">
                 {formatCurrency(entry.amount)}

@@ -17,8 +17,19 @@ interface PeriodClickBand {
   width: number;
 }
 
-export function getPeriodClickBands(centers: number[], plotStart: number, plotWidth: number): PeriodClickBand[] {
-  if (centers.length === 0 || !Number.isFinite(plotStart) || !Number.isFinite(plotWidth) || plotWidth <= 0 || centers.some(center => !Number.isFinite(center))) return [];
+export function getPeriodClickBands(
+  centers: number[],
+  plotStart: number,
+  plotWidth: number,
+): PeriodClickBand[] {
+  if (
+    centers.length === 0 ||
+    !Number.isFinite(plotStart) ||
+    !Number.isFinite(plotWidth) ||
+    plotWidth <= 0 ||
+    centers.some((center) => !Number.isFinite(center))
+  )
+    return [];
 
   const plotEnd = plotStart + plotWidth;
   return centers.map((center, index) => {
@@ -31,7 +42,7 @@ export function getPeriodClickBands(centers: number[], plotStart: number, plotWi
 export function getAnalyticsPeriodRange(
   data: AnalyticsPeriodRow[],
   firstIndex: number,
-  lastIndex: number
+  lastIndex: number,
 ): AnalyticsPeriodRow | null {
   const startIndex = Math.min(firstIndex, lastIndex);
   const endIndex = Math.max(firstIndex, lastIndex);
@@ -59,14 +70,14 @@ export default function PeriodClickOverlay({ data, onSelectPeriod }: PeriodClick
 
   if (!data.length || !onSelectPeriod || !plotArea || !xScale) return null;
 
-  const positionedPeriods = data.flatMap(period => {
+  const positionedPeriods = data.flatMap((period) => {
     const center = xScale(period.displayLabel, { position: 'middle' });
     return typeof center === 'number' && Number.isFinite(center) ? [{ center, period }] : [];
   });
   const bands = getPeriodClickBands(
     positionedPeriods.map(({ center }) => center),
     plotArea.x,
-    plotArea.width
+    plotArea.width,
   );
   // ResponsiveContainer can briefly have zero width while the grid is resizing.
   // Never index an empty band array during that intermediate render.
@@ -74,7 +85,7 @@ export default function PeriodClickOverlay({ data, onSelectPeriod }: PeriodClick
 
   const selectPeriod = (
     period: AnalyticsPeriodRow,
-    event: MouseEvent<SVGRectElement> | KeyboardEvent<SVGRectElement>
+    event: MouseEvent<SVGRectElement> | KeyboardEvent<SVGRectElement>,
   ) => {
     event.stopPropagation();
     onSelectPeriod(period);
@@ -109,7 +120,7 @@ export default function PeriodClickOverlay({ data, onSelectPeriod }: PeriodClick
     const periodRange = getAnalyticsPeriodRange(
       positionedPeriods.map(({ period }) => period),
       startIndex,
-      index
+      index,
     );
     if (periodRange) onSelectPeriod(periodRange);
   };
@@ -122,9 +133,8 @@ export default function PeriodClickOverlay({ data, onSelectPeriod }: PeriodClick
   return (
     <g className="period-click-overlay">
       {positionedPeriods.map(({ period }, index) => {
-        const isInDragRange = dragRange !== null &&
-          index >= Math.min(...dragRange) &&
-          index <= Math.max(...dragRange);
+        const isInDragRange =
+          dragRange !== null && index >= Math.min(...dragRange) && index <= Math.max(...dragRange);
 
         return (
           <rect
@@ -138,11 +148,11 @@ export default function PeriodClickOverlay({ data, onSelectPeriod }: PeriodClick
             role="button"
             tabIndex={0}
             aria-label={`Filter to ${String(period.displayLabel)}`}
-            onPointerDown={event => startDrag(index, event)}
-            onPointerEnter={event => extendDrag(index, event)}
-            onPointerUp={event => finishDrag(index, event)}
+            onPointerDown={(event) => startDrag(index, event)}
+            onPointerEnter={(event) => extendDrag(index, event)}
+            onPointerUp={(event) => finishDrag(index, event)}
             onPointerCancel={cancelDrag}
-            onClick={event => {
+            onClick={(event) => {
               if (suppressClickRef.current) {
                 event.stopPropagation();
                 suppressClickRef.current = false;
@@ -150,7 +160,7 @@ export default function PeriodClickOverlay({ data, onSelectPeriod }: PeriodClick
               }
               selectPeriod(period, event);
             }}
-            onKeyDown={event => {
+            onKeyDown={(event) => {
               if (event.key === 'Enter' || event.key === ' ') selectPeriod(period, event);
             }}
           />

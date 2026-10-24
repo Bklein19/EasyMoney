@@ -24,7 +24,9 @@ test('shift selects an inclusive display-order range in either direction', () =>
 });
 
 test('command shift adds a range to the existing selection', () => {
-  expect([...selectAccountIds(order, new Set([3]), 4, 2, { shift: true, additive: true })]).toEqual([3, 4, 2]);
+  expect([...selectAccountIds(order, new Set([3]), 4, 2, { shift: true, additive: true })]).toEqual(
+    [3, 4, 2],
+  );
 });
 
 test('missing or collapsed anchor falls back to selecting the clicked row', () => {

@@ -1,17 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 
 import { fidelityRetailActivityRemoteAccountId } from './fidelityAccountIdentity.ts';
-import {
-  fidelityActivityApiParser,
-  parseFidelityActivityApi,
-} from './fidelityActivityApi.ts';
+import { fidelityActivityApiParser, parseFidelityActivityApi } from './fidelityActivityApi.ts';
 import { IMPORT_PARSERS, resolveImportParser } from './index.ts';
 
 function epoch(date: string): number {
   return Date.parse(`${date}T00:00:00.000Z`) / 1_000;
 }
 
-function parseArtifact(value: unknown, fileName = 'fidelity-retail-example-activity-2026-08-01-to-2026-08-31.json') {
+function parseArtifact(
+  value: unknown,
+  fileName = 'fidelity-retail-example-activity-2026-08-01-to-2026-08-31.json',
+) {
   return parseFidelityActivityApi({
     fileName,
     headers: [],
@@ -67,7 +67,7 @@ describe('Fidelity retail activity account identities', () => {
     'Z00-000000 extra',
     'prefix Z00-000000 suffix',
     'not-an-account',
-  ])('rejects invalid activity account identity %p', value => {
+  ])('rejects invalid activity account identity %p', (value) => {
     expect(fidelityRetailActivityRemoteAccountId(value)).toBeNull();
   });
 });
@@ -83,24 +83,26 @@ describe('Fidelity activity API parser', () => {
       coveredFrom: '2026-08-20',
       coveredTo: '2026-08-20',
       balances: [],
-      transactions: [{
-        sourceRowIndex: 0,
-        date: '2026-08-20',
-        amountCents: 1235,
-        description: 'DIVIDEND RECEIVED',
-        institution: 'Fidelity',
-        account: 'Fidelity account ending in 0000',
-        remoteAccountId: 'fidelity:Z00000000',
-        sourceRole: 'activity',
-        raw: {
-          source: 'fidelity-activity-api-json',
-          transactionNumber: 'example-transaction',
-          transactionType: 'Dividend',
-          securityDescription: 'Example Fund',
-          symbol: 'EXMPL',
-          quantity: '1.25',
+      transactions: [
+        {
+          sourceRowIndex: 0,
+          date: '2026-08-20',
+          amountCents: 1235,
+          description: 'DIVIDEND RECEIVED',
+          institution: 'Fidelity',
+          account: 'Fidelity account ending in 0000',
+          remoteAccountId: 'fidelity:Z00000000',
+          sourceRole: 'activity',
+          raw: {
+            source: 'fidelity-activity-api-json',
+            transactionNumber: 'example-transaction',
+            transactionType: 'Dividend',
+            securityDescription: 'Example Fund',
+            symbol: 'EXMPL',
+            quantity: '1.25',
+          },
         },
-      }],
+      ],
     });
   });
 
@@ -112,15 +114,17 @@ describe('Fidelity activity API parser', () => {
     expect(result).toMatchObject({
       coveredFrom: '2026-08-21',
       coveredTo: '2026-08-21',
-      transactions: [{
-        sourceRowIndex: 0,
-        date: '2026-08-21',
-        amountCents: 120045,
-        description: 'Employee contribution: Contribution: Example Index Fund: Example Bond Fund',
-        account: 'Fidelity retirement plan 12345',
-        remoteAccountId: 'fidelity:retail-token:12345',
-        sourceRole: 'activity',
-      }],
+      transactions: [
+        {
+          sourceRowIndex: 0,
+          date: '2026-08-21',
+          amountCents: 120045,
+          description: 'Employee contribution: Contribution: Example Index Fund: Example Bond Fund',
+          account: 'Fidelity retirement plan 12345',
+          remoteAccountId: 'fidelity:retail-token:12345',
+          sourceRole: 'activity',
+        },
+      ],
     });
   });
 
@@ -180,12 +184,14 @@ describe('Fidelity activity API parser', () => {
       message: 'missing transactions',
     },
   ])('rejects $name', ({ text, message }) => {
-    expect(() => parseFidelityActivityApi({
-      fileName: 'fidelity-retail-example-activity-2026-08-01-to-2026-08-31.json',
-      headers: [],
-      rows: [],
-      text,
-    })).toThrow(message);
+    expect(() =>
+      parseFidelityActivityApi({
+        fileName: 'fidelity-retail-example-activity-2026-08-01-to-2026-08-31.json',
+        headers: [],
+        rows: [],
+        text,
+      }),
+    ).toThrow(message);
   });
 
   test.each([
@@ -233,18 +239,22 @@ describe('Fidelity activity API parser', () => {
       data: { transactions: [brokerageTransaction()] },
     }).replace('12.345', '1e400');
 
-    expect(() => parseFidelityActivityApi({
-      fileName: 'fidelity-retail-example-activity-2026-08-01-to-2026-08-31.json',
-      headers: [],
-      rows: [],
-      text,
-    })).toThrow('account or amount is invalid');
+    expect(() =>
+      parseFidelityActivityApi({
+        fileName: 'fidelity-retail-example-activity-2026-08-01-to-2026-08-31.json',
+        headers: [],
+        rows: [],
+        text,
+      }),
+    ).toThrow('account or amount is invalid');
   });
 
   test('rejects mixed brokerage and retirement account identities', () => {
-    expect(() => parseArtifact({
-      data: { transactions: [brokerageTransaction(), retirementTransaction()] },
-    })).toThrow('response contains multiple accounts');
+    expect(() =>
+      parseArtifact({
+        data: { transactions: [brokerageTransaction(), retirementTransaction()] },
+      }),
+    ).toThrow('response contains multiple accounts');
   });
 });
 
@@ -254,16 +264,20 @@ describe('Fidelity activity API matcher and registry', () => {
 
   test('requires both the generated JSON filename and structural response shape', () => {
     expect(fidelityActivityApiParser.matches({ fileName, headers: [], sample })).toBe(true);
-    expect(fidelityActivityApiParser.matches({
-      fileName: 'renamed.json',
-      headers: [],
-      sample,
-    })).toBe(false);
-    expect(fidelityActivityApiParser.matches({
-      fileName,
-      headers: [],
-      sample: JSON.stringify({ data: {} }),
-    })).toBe(false);
+    expect(
+      fidelityActivityApiParser.matches({
+        fileName: 'renamed.json',
+        headers: [],
+        sample,
+      }),
+    ).toBe(false);
+    expect(
+      fidelityActivityApiParser.matches({
+        fileName,
+        headers: [],
+        sample: JSON.stringify({ data: {} }),
+      }),
+    ).toBe(false);
     expect(fidelityActivityApiParser.matches({ fileName, headers: [], sample: '{' })).toBe(false);
   });
 
@@ -278,18 +292,25 @@ describe('Fidelity activity API matcher and registry', () => {
 
     expect(largeArtifact.length).toBeGreaterThan(4_096);
     expect(() => JSON.parse(truncatedSample)).toThrow();
-    expect(fidelityActivityApiParser.matches({ fileName, headers: [], sample: truncatedSample })).toBe(true);
-    expect(resolveImportParser({ fileName, headers: [], sample: truncatedSample })?.id)
-      .toBe('fidelity-activity-api-json');
+    expect(
+      fidelityActivityApiParser.matches({ fileName, headers: [], sample: truncatedSample }),
+    ).toBe(true);
+    expect(resolveImportParser({ fileName, headers: [], sample: truncatedSample })?.id).toBe(
+      'fidelity-activity-api-json',
+    );
   });
 
   test('is the sole registry match for plain and stored artifact filenames', () => {
     for (const candidate of [fileName, `${'a'.repeat(64)}-${fileName}`]) {
       const file = { fileName: candidate, headers: [], sample };
-      expect(IMPORT_PARSERS.filter(parser => parser.matches({
-        ...file,
-        fileName: candidate.replace(/^[0-9a-f]{64}-/, ''),
-      })).map(parser => parser.id)).toEqual(['fidelity-activity-api-json']);
+      expect(
+        IMPORT_PARSERS.filter((parser) =>
+          parser.matches({
+            ...file,
+            fileName: candidate.replace(/^[0-9a-f]{64}-/, ''),
+          }),
+        ).map((parser) => parser.id),
+      ).toEqual(['fidelity-activity-api-json']);
       expect(resolveImportParser(file)?.id).toBe('fidelity-activity-api-json');
     }
   });

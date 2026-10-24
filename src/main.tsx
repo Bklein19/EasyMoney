@@ -12,10 +12,14 @@ initializePalette(window);
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing root element');
 
-void restoreNavigation(window).catch(error => console.error('Could not restore navigation history', error)).then(() => createRoot(root).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <App />
-    </QueryClientProvider>
-  </StrictMode>,
-));
+void restoreNavigation(window)
+  .catch((error) => console.error('Could not restore navigation history', error))
+  .then(() =>
+    createRoot(root).render(
+      <StrictMode>
+        <QueryClientProvider client={queryClient}>
+          <App />
+        </QueryClientProvider>
+      </StrictMode>,
+    ),
+  );

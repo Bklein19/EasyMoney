@@ -25,7 +25,7 @@ export function getBudgetingReport(input: BudgetingReportInput = {}) {
     endDate: input.endDate,
   }).transactions;
   const categories = listCategories().categories;
-  const expenseCategories = categories.filter(category => category.type === 'expense');
+  const expenseCategories = categories.filter((category) => category.type === 'expense');
   const budgets = listBudgets(input.month ? { month: input.month } : {});
   const accountMap = buildAccountMap(listAccounts({ includeArchived: true }).accounts);
   const categoryMap = buildCategoryMap(categories);
@@ -48,45 +48,57 @@ export function getBudgetingReport(input: BudgetingReportInput = {}) {
     }
   }
 
-  const budgetByCategoryId = Object.fromEntries(budgets.map((budget: any) => [String(budget.categoryId), budget]));
-  const periodScale = Number.isFinite(input.periodScale) && Number(input.periodScale) > 0 ? Number(input.periodScale) : 1;
+  const budgetByCategoryId = Object.fromEntries(
+    budgets.map((budget: any) => [String(budget.categoryId), budget]),
+  );
+  const periodScale =
+    Number.isFinite(input.periodScale) && Number(input.periodScale) > 0
+      ? Number(input.periodScale)
+      : 1;
   const categoryPercents = input.categoryPercents ?? {};
-  const hasPercentTargets = Object.values(categoryPercents).some(value => Number(value) > 0);
+  const hasPercentTargets = Object.values(categoryPercents).some((value) => Number(value) > 0);
   const autoGlobalBudget = cashFlow.income > 0 ? cashFlow.income : cashFlow.expenses;
-  const baseGlobalBudget = Number.isFinite(input.globalBudget) && Number(input.globalBudget) > 0
-    ? Number(input.globalBudget)
-    : autoGlobalBudget;
+  const baseGlobalBudget =
+    Number.isFinite(input.globalBudget) && Number(input.globalBudget) > 0
+      ? Number(input.globalBudget)
+      : autoGlobalBudget;
   const globalBudget = baseGlobalBudget * periodScale;
 
   const categoryIds = new Set([
-    ...expenseCategories.map(category => String(category.id)),
+    ...expenseCategories.map((category) => String(category.id)),
     ...Object.keys(cashFlow.byCategory),
     ...budgets.map((budget: any) => String(budget.categoryId)),
   ]);
 
   const rows = [...categoryIds]
-    .map(categoryId => {
-      const category = categoryId === 'uncategorized'
-        ? { id: 'uncategorized', name: 'Uncategorized', color: '#94a3b8', type: 'expense' }
-        : categoryMap[categoryId];
+    .map((categoryId) => {
+      const category =
+        categoryId === 'uncategorized'
+          ? { id: 'uncategorized', name: 'Uncategorized', color: '#94a3b8', type: 'expense' }
+          : categoryMap[categoryId];
       if (!category) return null;
 
       const actual = cashFlow.byCategory[categoryId] ?? 0;
       const budget = budgetByCategoryId[categoryId];
       const targetPercent = Number(categoryPercents[categoryId]) || 0;
-      const budgetAmount = hasPercentTargets && categoryId !== 'uncategorized'
-        ? (targetPercent / 100) * globalBudget
-        : Number(budget?.amount ?? 0);
-      const effectiveTargetPercent = hasPercentTargets && categoryId !== 'uncategorized'
-        ? targetPercent
-        : globalBudget > 0 ? (budgetAmount / globalBudget) * 100 : 0;
+      const budgetAmount =
+        hasPercentTargets && categoryId !== 'uncategorized'
+          ? (targetPercent / 100) * globalBudget
+          : Number(budget?.amount ?? 0);
+      const effectiveTargetPercent =
+        hasPercentTargets && categoryId !== 'uncategorized'
+          ? targetPercent
+          : globalBudget > 0
+            ? (budgetAmount / globalBudget) * 100
+            : 0;
       const actualPercent = cashFlow.expenses > 0 ? (actual / cashFlow.expenses) * 100 : 0;
       const variance = actual - budgetAmount;
-      const status = budgetAmount <= 0 && actual > 0
-        ? 'unplanned'
-        : variance > Math.max(25, budgetAmount * 0.05)
-          ? 'over'
-          : 'aligned';
+      const status =
+        budgetAmount <= 0 && actual > 0
+          ? 'unplanned'
+          : variance > Math.max(25, budgetAmount * 0.05)
+            ? 'over'
+            : 'aligned';
 
       return {
         category,
@@ -118,9 +130,8 @@ export function getBudgetingReport(input: BudgetingReportInput = {}) {
       overspentAmount,
       actualSpendPercent: globalBudget > 0 ? (cashFlow.expenses / globalBudget) * 100 : 0,
       targetTotalPercent: rows.reduce((sum, row) => sum + row.targetPercent, 0),
-      overCount: rows.filter(row => row.status === 'over').length,
-      unplannedCount: rows.filter(row => row.status === 'unplanned').length,
+      overCount: rows.filter((row) => row.status === 'over').length,
+      unplannedCount: rows.filter((row) => row.status === 'unplanned').length,
     },
   };
 }
-

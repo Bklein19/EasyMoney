@@ -10,7 +10,8 @@ const BATCH_SIZE = 32;
 const BANK_COUNTERPARTY_STRATEGY = 'bank_description_counterparty';
 const INDIVIDUAL_TRANSACTION_STRATEGY = 'individual_transactions';
 type AiCategorizationSort = 'count' | 'money';
-type MerchantGroupingStrategy = typeof BANK_COUNTERPARTY_STRATEGY | typeof INDIVIDUAL_TRANSACTION_STRATEGY;
+type MerchantGroupingStrategy =
+  typeof BANK_COUNTERPARTY_STRATEGY | typeof INDIVIDUAL_TRANSACTION_STRATEGY;
 
 interface UncategorizedTransactionRow {
   id: number;
@@ -164,7 +165,9 @@ interface AutoApplyAiCategorizationJob extends AutoApplyAiCategorizationSnapshot
 
 const autoApplyJobs = new Map<string, AutoApplyAiCategorizationJob>();
 export function hasActiveCategorizationJobs() {
-  return [...autoApplyJobs.values()].some(job => job.status === 'queued' || job.status === 'running');
+  return [...autoApplyJobs.values()].some(
+    (job) => job.status === 'queued' || job.status === 'running',
+  );
 }
 
 function getOpenAiKey() {
@@ -187,7 +190,7 @@ function listCategorizationCategories() {
       `SELECT id, name, parentId, type, categoryGroup, description, color, icon
        FROM categories
        WHERE lower(name) != 'uncategorized'
-       ORDER BY name ASC, id ASC`
+       ORDER BY name ASC, id ASC`,
     )
     .all() as CategorySummary[];
 }
@@ -217,7 +220,7 @@ function listUncategorizedTransactions() {
        WHERE t.ledgerTransactionId IS NOT NULL
          AND (ta.categoryId IS NULL OR lower(c.name) = 'uncategorized')
          AND COALESCE(a.status, 'active') != 'archived'
-       ORDER BY t.date DESC, t.id DESC`
+       ORDER BY t.date DESC, t.id DESC`,
     )
     .all() as UncategorizedTransactionRow[];
 }
@@ -231,9 +234,8 @@ function listMerchantGroupingRules() {
 function getCategoryName(categoryId: string | number | null | undefined) {
   const id = Number(categoryId);
   if (!Number.isFinite(id)) return 'Uncategorized';
-  const row = getDb()
-    .prepare('SELECT name FROM categories WHERE id = ?')
-    .get(id) as { name: string } | undefined;
+  const row = getDb().prepare('SELECT name FROM categories WHERE id = ?').get(id) as
+    { name: string } | undefined;
   return row?.name ?? 'selected category';
 }
 
@@ -244,16 +246,18 @@ function createCategoryUndoOperation(input: {
   if (!input.previousCategories.length) return null;
   const now = new Date().toISOString();
   const result = getDb()
-    .prepare(`
+    .prepare(
+      `
       INSERT INTO transactionCategoryUndoOperations
         (categoryName, transactionCount, payloadJson, status, createdAt)
       VALUES (?, ?, ?, 'pending', ?)
-    `)
+    `,
+    )
     .run(
       input.categoryName,
       input.previousCategories.length,
       JSON.stringify(input.previousCategories),
-      now
+      now,
     );
 
   return {
@@ -315,14 +319,19 @@ function normalizeMerchantText(value: string | null | undefined) {
     .replace(/\s+/g, ' ')
     .trim();
 
-  if (!cleaned) cleaned = merchantText.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() || 'unknown';
+  if (!cleaned)
+    cleaned =
+      merchantText
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim() || 'unknown';
 
   return {
     key: cleaned.toUpperCase(),
     displayName: cleaned
       .split(' ')
       .filter(Boolean)
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(' '),
     originalName: original,
   };
@@ -333,11 +342,7 @@ function transactionMerchantText(row: UncategorizedTransactionRow) {
 }
 
 function extractBankDescriptionCounterparty(row: UncategorizedTransactionRow) {
-  const candidates = [
-    row.originalDescription,
-    row.description,
-    row.merchant,
-  ];
+  const candidates = [row.originalDescription, row.description, row.merchant];
 
   for (const candidate of candidates) {
     const match = candidate?.match(/\bID:([^]+?)\s+INDN:/i);
@@ -353,7 +358,10 @@ function extractBankDescriptionCounterparty(row: UncategorizedTransactionRow) {
   return null;
 }
 
-function merchantGroupingForRow(row: UncategorizedTransactionRow, rulesBySourceKey: Map<string, MerchantGroupingRule>) {
+function merchantGroupingForRow(
+  row: UncategorizedTransactionRow,
+  rulesBySourceKey: Map<string, MerchantGroupingRule>,
+) {
   const base = normalizeMerchantText(transactionMerchantText(row));
   const rule = rulesBySourceKey.get(base.key);
   if (rule?.strategy === INDIVIDUAL_TRANSACTION_STRATEGY) {
@@ -370,10 +378,16 @@ function merchantGroupingForRow(row: UncategorizedTransactionRow, rulesBySourceK
   // A bare check number is not a payee. Use signed cents within the account
   // as a review convenience, without changing transaction identity or category.
   if (/^check(?:\s+#?\d+\*?)?$/i.test(transactionMerchantText(row).trim())) {
-    const amount = (Math.abs(row.amountCents) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const amount = (Math.abs(row.amountCents) / 100).toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
     return {
-      normalized: { ...base, key: `CHECK\0${row.accountId ?? row.ledgerTransactionId}\0${row.amountCents}`,
-        displayName: `Checks · ${row.amountCents > 0 ? '+' : ''}$${amount}` },
+      normalized: {
+        ...base,
+        key: `CHECK\0${row.accountId ?? row.ledgerTransactionId}\0${row.amountCents}`,
+        displayName: `Checks · ${row.amountCents > 0 ? '+' : ''}$${amount}`,
+      },
       sourceMerchantKey: base.key,
       groupingRuleId: null,
     };
@@ -404,13 +418,17 @@ function merchantGroupingForRow(row: UncategorizedTransactionRow, rulesBySourceK
 }
 
 function bankDescriptionCounterpartyCount(group: MerchantCategorizationGroup) {
-  return new Set(group.transactions
-    .map(transaction => extractBankDescriptionCounterparty(transaction))
-    .filter((value): value is string => Boolean(value))
-    .map(value => normalizeMerchantText(value).key)).size;
+  return new Set(
+    group.transactions
+      .map((transaction) => extractBankDescriptionCounterparty(transaction))
+      .filter((value): value is string => Boolean(value))
+      .map((value) => normalizeMerchantText(value).key),
+  ).size;
 }
 
-function recommendedSplitStrategy(group: MerchantCategorizationGroup): MerchantGroupingStrategy | null {
+function recommendedSplitStrategy(
+  group: MerchantCategorizationGroup,
+): MerchantGroupingStrategy | null {
   if (group.groupingRuleId !== null || group.transactionCount <= 1) return null;
   return bankDescriptionCounterpartyCount(group) > 1
     ? BANK_COUNTERPARTY_STRATEGY
@@ -424,30 +442,40 @@ function normalizeAiCategorizationSort(value: unknown): AiCategorizationSort {
 function compareMerchantGroups(sort: AiCategorizationSort) {
   return (a: MerchantCategorizationGroup, b: MerchantCategorizationGroup) => {
     if (sort === 'money') {
-      return b.absoluteAmount - a.absoluteAmount ||
+      return (
+        b.absoluteAmount - a.absoluteAmount ||
         b.transactionCount - a.transactionCount ||
-        a.merchantName.localeCompare(b.merchantName);
+        a.merchantName.localeCompare(b.merchantName)
+      );
     }
 
-    return b.transactionCount - a.transactionCount ||
+    return (
+      b.transactionCount - a.transactionCount ||
       b.absoluteAmount - a.absoluteAmount ||
-      a.merchantName.localeCompare(b.merchantName);
+      a.merchantName.localeCompare(b.merchantName)
+    );
   };
 }
 
 export function groupTransactionsForAiCategorization(
   rows: UncategorizedTransactionRow[],
-  options: { sort?: unknown } = {}
+  options: { sort?: unknown } = {},
 ): MerchantCategorizationGroup[] {
   const groupsByKey = new Map<string, MerchantCategorizationGroup>();
-  const rulesBySourceKey = new Map(listMerchantGroupingRules().map(rule => [rule.sourceMerchantKey, rule]));
+  const rulesBySourceKey = new Map(
+    listMerchantGroupingRules().map((rule) => [rule.sourceMerchantKey, rule]),
+  );
   const sort = normalizeAiCategorizationSort(options.sort);
 
   for (const row of rows) {
-    const { normalized, sourceMerchantKey, groupingRuleId } = merchantGroupingForRow(row, rulesBySourceKey);
-    const groupId = groupingRuleId === null
-      ? `merchant:${normalized.key}`
-      : `merchant:${sourceMerchantKey}:split:${normalized.key}`;
+    const { normalized, sourceMerchantKey, groupingRuleId } = merchantGroupingForRow(
+      row,
+      rulesBySourceKey,
+    );
+    const groupId =
+      groupingRuleId === null
+        ? `merchant:${normalized.key}`
+        : `merchant:${sourceMerchantKey}:split:${normalized.key}`;
     const existing = groupsByKey.get(groupId);
     const amount = row.amountCents / 100;
     const group = existing ?? {
@@ -476,13 +504,13 @@ export function groupTransactionsForAiCategorization(
   }
 
   return [...groupsByKey.values()]
-    .map(group => {
+    .map((group) => {
       const transactions = group.transactions.sort((a, b) => b.date.localeCompare(a.date));
       return {
         ...group,
         aliases: group.aliases.sort((a, b) => a.localeCompare(b)),
         transactions,
-        transactionIds: transactions.map(transaction => transaction.ledgerTransactionId),
+        transactionIds: transactions.map((transaction) => transaction.ledgerTransactionId),
       };
     })
     .sort(compareMerchantGroups(sort));
@@ -500,26 +528,37 @@ function compactMerchantGroup(group: MerchantCategorizationGroup) {
   };
 }
 
-export function requiresPersonalCategoryReview(row: Pick<UncategorizedTransactionRow, 'merchant' | 'description' | 'originalDescription'>) {
+export function requiresPersonalCategoryReview(
+  row: Pick<UncategorizedTransactionRow, 'merchant' | 'description' | 'originalDescription'>,
+) {
   const text = (row.merchant || row.description || row.originalDescription || '').trim();
   // Repeated processors, check amounts and bank-generated IDs are not evidence
   // of the payment's purpose. Keep them out of historical auto-application.
   const evidence = [text, row.description, row.originalDescription].filter(Boolean).join(' ');
-  return /\b(?:venmo|zelle|paypal|cash\s?app)\b/i.test(evidence) ||
+  return (
+    /\b(?:venmo|zelle|paypal|cash\s?app)\b/i.test(evidence) ||
     /^check(?:\s+#?\d+\*?)?$/i.test(text) ||
-    /\b(?:atm|mobile|cash|check|cheque)\s+(?:deposit|withdrawal)\b/i.test(evidence);
+    /\b(?:atm|mobile|cash|check|cheque)\s+(?:deposit|withdrawal)\b/i.test(evidence)
+  );
 }
 
 /** A model or inherited label cannot settle tax treatment or prove a transfer. */
 export function financialCategoryConcern(
-  row: Pick<UncategorizedTransactionRow, 'merchant' | 'description' | 'originalDescription' | 'amountCents'>,
+  row: Pick<
+    UncategorizedTransactionRow,
+    'merchant' | 'description' | 'originalDescription' | 'amountCents'
+  >,
   category: Pick<CategorySummary, 'type' | 'name'>,
 ) {
   const text = `${row.merchant ?? ''} ${row.description ?? ''} ${row.originalDescription ?? ''}`;
-  if (/\b(?:tax|irs|medicare|withholding|social securi)|\bjournaled rsu\b/i.test(text)) return 'Tax and RSU withholding treatment needs review.';
-  if (category.type === 'income' && row.amountCents < 0) return 'An outgoing payment should not be guessed as income.';
-  if ((category.type === 'transfer' || category.name.toLowerCase() === 'transfer') &&
-      !/\b(?:payment|pmt|autopay|transfer|ach|moneyline|investment|vanguard buy)\b/i.test(text)) {
+  if (/\b(?:tax|irs|medicare|withholding|social securi)|\bjournaled rsu\b/i.test(text))
+    return 'Tax and RSU withholding treatment needs review.';
+  if (category.type === 'income' && row.amountCents < 0)
+    return 'An outgoing payment should not be guessed as income.';
+  if (
+    (category.type === 'transfer' || category.name.toLowerCase() === 'transfer') &&
+    !/\b(?:payment|pmt|autopay|transfer|ach|moneyline|investment|vanguard buy)\b/i.test(text)
+  ) {
     return 'A merchant credit may be a refund, not an account transfer. Check the source.';
   }
   return null;
@@ -533,49 +572,103 @@ function historyKey(row: UncategorizedTransactionRow): string | null {
   return JSON.stringify([row.accountId, key, Math.sign(row.amountCents)]);
 }
 
-export function matchHistoricalCategories(groups: MerchantCategorizationGroup[], categories: CategorySummary[], history: Array<UncategorizedTransactionRow & { categoryId: number; categoryOrigin?: string | null }>) {
-  const broadIncomeIds = new Set(categories.filter(category => category.type === 'income' && categories.some(child => child.parentId === category.id)).map(category => category.id));
+export function matchHistoricalCategories(
+  groups: MerchantCategorizationGroup[],
+  categories: CategorySummary[],
+  history: Array<
+    UncategorizedTransactionRow & { categoryId: number; categoryOrigin?: string | null }
+  >,
+) {
+  const broadIncomeIds = new Set(
+    categories
+      .filter(
+        (category) =>
+          category.type === 'income' && categories.some((child) => child.parentId === category.id),
+      )
+      .map((category) => category.id),
+  );
   const byKey = new Map<string, Set<number>>();
   for (const row of history) {
     // A legacy broad Income label says nothing about its subtype. It must neither
     // propagate to new receipts nor conflict with a specific confirmed subtype.
     if (broadIncomeIds.has(row.categoryId)) continue;
-    if (row.categoryOrigin !== 'manual' && categories.find(category => category.id === row.categoryId)?.name === 'Entertainment' &&
-        /\b(?:openai|anthropic|claude)\b/i.test(`${row.merchant} ${row.description}`)) continue;
+    if (
+      row.categoryOrigin !== 'manual' &&
+      categories.find((category) => category.id === row.categoryId)?.name === 'Entertainment' &&
+      /\b(?:openai|anthropic|claude)\b/i.test(`${row.merchant} ${row.description}`)
+    )
+      continue;
     const key = historyKey(row);
     if (!key) continue;
     if (!byKey.has(key)) byKey.set(key, new Set());
     byKey.get(key)!.add(row.categoryId);
   }
-  const suggestions: AiCategorySuggestion[] = [], questions: AiCategoryQuestion[] = [], unmatched: MerchantCategorizationGroup[] = [];
+  const suggestions: AiCategorySuggestion[] = [],
+    questions: AiCategoryQuestion[] = [],
+    unmatched: MerchantCategorizationGroup[] = [];
   for (const group of groups) {
-    if (group.transactions.some(row => historyKey(row) === null)) {
-      questions.push(reviewQuestion({ group, reason: 'Payment purpose cannot be inferred from a processor, check amount, or deposit label. Review the counterparty and purpose before choosing a category.' }));
+    if (group.transactions.some((row) => historyKey(row) === null)) {
+      questions.push(
+        reviewQuestion({
+          group,
+          reason:
+            'Payment purpose cannot be inferred from a processor, check amount, or deposit label. Review the counterparty and purpose before choosing a category.',
+        }),
+      );
       continue;
     }
-    const matches = group.transactions.map(row => byKey.get(historyKey(row) ?? ''));
-    const ids = new Set(matches.flatMap(match => [...(match ?? [])]));
+    const matches = group.transactions.map((row) => byKey.get(historyKey(row) ?? ''));
+    const ids = new Set(matches.flatMap((match) => [...(match ?? [])]));
     if (ids.size > 1) {
-      questions.push(reviewQuestion({ group, reason: 'Previous matching transactions have different categories. Choose a category for this group or handle transactions separately.' }));
+      questions.push(
+        reviewQuestion({
+          group,
+          reason:
+            'Previous matching transactions have different categories. Choose a category for this group or handle transactions separately.',
+        }),
+      );
       continue;
     }
-    const category = categories.find(category => ids.has(category.id));
+    const category = categories.find((category) => ids.has(category.id));
     // Internal transfers require pair evidence, not merchant history. Preserve
     // explicit individual-review rules, and never let partial history decide a group.
-    if (!category || matches.some(match => !match?.size) || group.groupingRuleId !== null || category.type === 'internal_transfer' || shouldTreatInvestmentCategoryAsTransfer({ group, category })) {
-      unmatched.push(group); continue;
+    if (
+      !category ||
+      matches.some((match) => !match?.size) ||
+      group.groupingRuleId !== null ||
+      category.type === 'internal_transfer' ||
+      shouldTreatInvestmentCategoryAsTransfer({ group, category })
+    ) {
+      unmatched.push(group);
+      continue;
     }
-    suggestions.push({ ...categorySuggestion({ group, category, decisionKind: 'category', reason: 'Matched previous transactions: all saved categories for this account and merchant agree.' }), source: 'history' });
+    suggestions.push({
+      ...categorySuggestion({
+        group,
+        category,
+        decisionKind: 'category',
+        reason:
+          'Matched previous transactions: all saved categories for this account and merchant agree.',
+      }),
+      source: 'history',
+    });
   }
   return { suggestions, questions, unmatched };
 }
 
-function historicalCategories(groups: MerchantCategorizationGroup[], categories: CategorySummary[]) {
-  const history = getDb().prepare(`SELECT t.*, a.name AS accountName, a.institution AS accountInstitution,
+function historicalCategories(
+  groups: MerchantCategorizationGroup[],
+  categories: CategorySummary[],
+) {
+  const history = getDb()
+    .prepare(
+      `SELECT t.*, a.name AS accountName, a.institution AS accountInstitution,
     a.type AS accountType, ta.categoryId, ta.categoryOrigin FROM ledgerTransactions t
     JOIN transactionAnnotations ta ON ta.ledgerTransactionId=t.ledgerTransactionId
     JOIN categories c ON c.id=ta.categoryId JOIN accounts a ON a.id=t.accountId
-    WHERE lower(c.name)!='uncategorized' AND COALESCE(a.status,'active')!='archived'`).all() as Array<UncategorizedTransactionRow & { categoryId: number }>;
+    WHERE lower(c.name)!='uncategorized' AND COALESCE(a.status,'active')!='archived'`,
+    )
+    .all() as Array<UncategorizedTransactionRow & { categoryId: number }>;
   return matchHistoricalCategories(groups, categories, history);
 }
 
@@ -588,7 +681,9 @@ function isCashAccountType(value: string | null) {
 }
 
 function isInvestmentAccountType(value: string | null) {
-  return ['investment', 'brokerage', 'retirement', 'ira', '401k'].includes((value ?? '').toLowerCase());
+  return ['investment', 'brokerage', 'retirement', 'ira', '401k'].includes(
+    (value ?? '').toLowerCase(),
+  );
 }
 
 export function shouldTreatInvestmentCategoryAsTransfer(input: {
@@ -597,22 +692,35 @@ export function shouldTreatInvestmentCategoryAsTransfer(input: {
 }) {
   if (!isInvestmentCategory(input.category)) return false;
 
-  const hasCashAccountTransaction = input.group.transactions.some(transaction => isCashAccountType(transaction.accountType));
-  const hasInvestmentAccountTransaction = input.group.transactions.some(transaction => isInvestmentAccountType(transaction.accountType));
+  const hasCashAccountTransaction = input.group.transactions.some((transaction) =>
+    isCashAccountType(transaction.accountType),
+  );
+  const hasInvestmentAccountTransaction = input.group.transactions.some((transaction) =>
+    isInvestmentAccountType(transaction.accountType),
+  );
   return hasCashAccountTransaction && !hasInvestmentAccountTransaction;
 }
 
 export function shouldReviewInvestmentAccountTransferDecision(input: {
   group: MerchantCategorizationGroup;
 }) {
-  const hasCashAccountTransaction = input.group.transactions.some(transaction => isCashAccountType(transaction.accountType));
-  const hasInvestmentAccountTransaction = input.group.transactions.some(transaction => isInvestmentAccountType(transaction.accountType));
+  const hasCashAccountTransaction = input.group.transactions.some((transaction) =>
+    isCashAccountType(transaction.accountType),
+  );
+  const hasInvestmentAccountTransaction = input.group.transactions.some((transaction) =>
+    isInvestmentAccountType(transaction.accountType),
+  );
   return hasInvestmentAccountTransaction && !hasCashAccountTransaction;
 }
 
-function findTreatmentCategory(categories: CategorySummary[], treatment: 'transfer' | 'investment') {
-  return categories.find(category => category.type === treatment)
-    ?? categories.find(category => category.name.toLowerCase() === treatment);
+function findTreatmentCategory(
+  categories: CategorySummary[],
+  treatment: 'transfer' | 'investment',
+) {
+  return (
+    categories.find((category) => category.type === treatment) ??
+    categories.find((category) => category.name.toLowerCase() === treatment)
+  );
 }
 
 function categorySuggestion(input: {
@@ -642,10 +750,7 @@ function categorySuggestion(input: {
   };
 }
 
-function reviewQuestion(input: {
-  group: MerchantCategorizationGroup;
-  reason: string;
-}) {
+function reviewQuestion(input: { group: MerchantCategorizationGroup; reason: string }) {
   const group = input.group;
   return {
     groupId: group.id,
@@ -665,10 +770,13 @@ function reviewQuestion(input: {
 }
 
 function merchantGroupAccountNames(group: MerchantCategorizationGroup) {
-  return [...new Set(group.transactions
-    .map(row => row.accountName)
-    .filter((name): name is string => typeof name === 'string' && name.length > 0))]
-    .sort((a, b) => a.localeCompare(b));
+  return [
+    ...new Set(
+      group.transactions
+        .map((row) => row.accountName)
+        .filter((name): name is string => typeof name === 'string' && name.length > 0),
+    ),
+  ].sort((a, b) => a.localeCompare(b));
 }
 
 function transactionSummary(row: UncategorizedTransactionRow): AiCategorizationTransaction {
@@ -684,7 +792,9 @@ function transactionSummary(row: UncategorizedTransactionRow): AiCategorizationT
 }
 
 export function getAiCategorizationTransactionDetails(input: { transactionIds: string[] }) {
-  const ids = [...new Set((input.transactionIds ?? []).map(id => String(id)).filter(Boolean))].slice(0, MAX_GROUPS);
+  const ids = [
+    ...new Set((input.transactionIds ?? []).map((id) => String(id)).filter(Boolean)),
+  ].slice(0, MAX_GROUPS);
   if (!ids.length) return { transactions: [] as AiCategorizationTransaction[] };
 
   const placeholders = ids.map(() => '?').join(', ');
@@ -707,7 +817,7 @@ export function getAiCategorizationTransactionDetails(input: { transactionIds: s
        FROM ledgerTransactions t
        LEFT JOIN accounts a ON a.id = t.accountId
        WHERE t.ledgerTransactionId IN (${placeholders})
-       ORDER BY t.date DESC, t.id DESC`
+       ORDER BY t.date DESC, t.id DESC`,
     )
     .all(...ids) as UncategorizedTransactionRow[];
 
@@ -716,12 +826,14 @@ export function getAiCategorizationTransactionDetails(input: { transactionIds: s
 
 function buildCategorizationOutputSchema() {
   return z.strictObject({
-    decisions: z.array(z.strictObject({
-      groupId: z.string(),
-      kind: z.enum(['category', 'transfer', 'needs_review']),
-      categoryName: z.string(),
-      reason: z.string(),
-    })),
+    decisions: z.array(
+      z.strictObject({
+        groupId: z.string(),
+        kind: z.enum(['category', 'transfer', 'needs_review']),
+        categoryName: z.string(),
+        reason: z.string(),
+      }),
+    ),
   });
 }
 
@@ -766,16 +878,17 @@ async function categorizeBatchWithOpenAi(input: {
   const result = await runner.run(
     agent,
     JSON.stringify({
-      categories: input.categories.map(category => ({
+      categories: input.categories.map((category) => ({
         name: category.name,
-        parentName: input.categories.find(parent => parent.id === category.parentId)?.name ?? null,
+        parentName:
+          input.categories.find((parent) => parent.id === category.parentId)?.name ?? null,
         type: category.type,
         categoryGroup: category.categoryGroup,
         description: category.description || '',
       })),
       merchantGroups: input.groups.map(compactMerchantGroup),
     }),
-    { maxTurns: 1 }
+    { maxTurns: 1 },
   );
 
   if (!result.finalOutput) {
@@ -790,9 +903,9 @@ export function categorizeModelDecisions(input: {
   groups: MerchantCategorizationGroup[];
   categories: CategorySummary[];
 }): CategorizedGroupBatch {
-  const categoryByName = new Map(input.categories.map(category => [category.name, category]));
+  const categoryByName = new Map(input.categories.map((category) => [category.name, category]));
   const transferCategory = findTreatmentCategory(input.categories, 'transfer');
-  const groupById = new Map(input.groups.map(group => [group.id, group]));
+  const groupById = new Map(input.groups.map((group) => [group.id, group]));
   const suggestions: AiCategorySuggestion[] = [];
   const questions: AiCategoryQuestion[] = [];
   let ignoredCount = 0;
@@ -806,17 +919,26 @@ export function categorizeModelDecisions(input: {
 
     // Model output is advice, not authority to infer personal payment purposes or
     // confirmed transfer pairs. Reject conflicting/duplicate decisions as well.
-    if (input.decisions.filter(decision => decision.groupId === item.groupId).length !== 1) {
-      if (!questions.some(question => question.groupId === group.id)) {
-        questions.push(reviewQuestion({ group, reason: 'Conflicting model decisions need review.' }));
+    if (input.decisions.filter((decision) => decision.groupId === item.groupId).length !== 1) {
+      if (!questions.some((question) => question.groupId === group.id)) {
+        questions.push(
+          reviewQuestion({ group, reason: 'Conflicting model decisions need review.' }),
+        );
       }
       continue;
     }
-    if (group.transactions.some(requiresPersonalCategoryReview) ||
-        categoryByName.get(item.categoryName)?.type === 'internal_transfer' ||
-        item.categoryName.toLowerCase() === 'internal transfer' ||
-        item.categoryName.toLowerCase() === 'gifts received') {
-      questions.push(reviewQuestion({ group, reason: 'This payment needs personal context before assigning a category.' }));
+    if (
+      group.transactions.some(requiresPersonalCategoryReview) ||
+      categoryByName.get(item.categoryName)?.type === 'internal_transfer' ||
+      item.categoryName.toLowerCase() === 'internal transfer' ||
+      item.categoryName.toLowerCase() === 'gifts received'
+    ) {
+      questions.push(
+        reviewQuestion({
+          group,
+          reason: 'This payment needs personal context before assigning a category.',
+        }),
+      );
       continue;
     }
 
@@ -827,51 +949,63 @@ export function categorizeModelDecisions(input: {
         continue;
       }
       if (shouldTreatInvestmentCategoryAsTransfer({ group, category }) && transferCategory) {
-        suggestions.push(categorySuggestion({
-          group,
-          category: transferCategory,
-          decisionKind: 'transfer',
-          reason: `${item.reason} This looks like account-to-account movement, so EasyMoney will treat it as a transfer.`,
-        }));
+        suggestions.push(
+          categorySuggestion({
+            group,
+            category: transferCategory,
+            decisionKind: 'transfer',
+            reason: `${item.reason} This looks like account-to-account movement, so EasyMoney will treat it as a transfer.`,
+          }),
+        );
         continue;
       }
-      suggestions.push(categorySuggestion({
-        group,
-        category,
-        decisionKind: 'category',
-        reason: item.reason,
-      }));
+      suggestions.push(
+        categorySuggestion({
+          group,
+          category,
+          decisionKind: 'category',
+          reason: item.reason,
+        }),
+      );
       continue;
     }
 
     if (item.kind === 'transfer') {
       if (shouldReviewInvestmentAccountTransferDecision({ group })) {
-        questions.push(reviewQuestion({
-          group,
-          reason: `${item.reason} This activity is already inside an investment account. It may be a transfer, contribution, purchase, or other investment activity, so it needs review before applying Transfer.`,
-        }));
+        questions.push(
+          reviewQuestion({
+            group,
+            reason: `${item.reason} This activity is already inside an investment account. It may be a transfer, contribution, purchase, or other investment activity, so it needs review before applying Transfer.`,
+          }),
+        );
         continue;
       }
       if (!transferCategory) {
-        questions.push(reviewQuestion({
-          group,
-          reason: `${item.reason} EasyMoney could not find a Transfer category to apply automatically.`,
-        }));
+        questions.push(
+          reviewQuestion({
+            group,
+            reason: `${item.reason} EasyMoney could not find a Transfer category to apply automatically.`,
+          }),
+        );
         continue;
       }
-      suggestions.push(categorySuggestion({
-        group,
-        category: transferCategory,
-        decisionKind: 'transfer',
-        reason: item.reason,
-      }));
+      suggestions.push(
+        categorySuggestion({
+          group,
+          category: transferCategory,
+          decisionKind: 'transfer',
+          reason: item.reason,
+        }),
+      );
       continue;
     }
 
-    questions.push(reviewQuestion({
-      group,
-      reason: item.reason,
-    }));
+    questions.push(
+      reviewQuestion({
+        group,
+        reason: item.reason,
+      }),
+    );
   }
 
   return { suggestions, questions, ignoredCount };
@@ -887,7 +1021,9 @@ export async function previewAiCategorization(
   const sort = normalizeAiCategorizationSort(options.sort);
   const categories = listCategorizationCategories();
   const scope = options.transactionIds === undefined ? null : new Set(options.transactionIds);
-  const transactions = listUncategorizedTransactions().filter(row => scope === null || scope.has(row.ledgerTransactionId));
+  const transactions = listUncategorizedTransactions().filter(
+    (row) => scope === null || scope.has(row.ledgerTransactionId),
+  );
   const groups = groupTransactionsForAiCategorization(transactions, { sort });
   const reviewGroups = groups.slice(0, groupLimit);
   const historical = historicalCategories(reviewGroups, categories);
@@ -902,7 +1038,8 @@ export async function previewAiCategorization(
       sort,
       suggestions: historical.suggestions,
       questions: historical.questions,
-      message: 'Historical matches are available without AI. Set OPENAI_API_KEY to review unmatched groups with AI.',
+      message:
+        'Historical matches are available without AI. Set OPENAI_API_KEY to review unmatched groups with AI.',
     };
   }
 
@@ -959,7 +1096,7 @@ export async function previewAiCategorization(
 
 export async function autoApplyAiCategorization(
   input: { sort?: unknown } = {},
-  onProgress?: AutoApplyAiCategorizationProgress
+  onProgress?: AutoApplyAiCategorizationProgress,
 ) {
   const apiKey = getOpenAiKey();
   const model = getOpenAiModel();
@@ -967,11 +1104,11 @@ export async function autoApplyAiCategorization(
   const categories = listCategorizationCategories();
   const transactions = listUncategorizedTransactions();
   const groups = groupTransactionsForAiCategorization(transactions, { sort });
-	const historical = historicalCategories(groups, categories);
-	const progressBase = {
-		configured: Boolean(apiKey),
-		model,
-		sort,
+  const historical = historicalCategories(groups, categories);
+  const progressBase = {
+    configured: Boolean(apiKey),
+    model,
+    sort,
     scanned: transactions.length,
     groupCount: groups.length,
     reviewedGroupCount: 0,
@@ -981,17 +1118,27 @@ export async function autoApplyAiCategorization(
     ignoredDecisionCount: 0,
     requested: 0,
     appliedCount: 0,
-		skippedCount: 0,
-		undoOperation: null as CategoryUndoOperation | null,
-		message: '',
-	};
+    skippedCount: 0,
+    undoOperation: null as CategoryUndoOperation | null,
+    message: '',
+  };
 
   if (!apiKey) {
-    const applied = applyAiCategorizationSuggestions({ suggestions: historical.suggestions.flatMap(group => group.transactionIds.map(transactionId => ({ transactionId, categoryId: group.categoryId }))) });
+    const applied = applyAiCategorizationSuggestions({
+      suggestions: historical.suggestions.flatMap((group) =>
+        group.transactionIds.map((transactionId) => ({
+          transactionId,
+          categoryId: group.categoryId,
+        })),
+      ),
+    });
     return {
       ...progressBase,
-      appliedCount: applied.count, requested: applied.requested, skippedCount: applied.skipped.length,
-      undoOperation: applied.undoOperation, suggestedGroupCount: historical.suggestions.length,
+      appliedCount: applied.count,
+      requested: applied.requested,
+      skippedCount: applied.skipped.length,
+      undoOperation: applied.undoOperation,
+      suggestedGroupCount: historical.suggestions.length,
       unresolvedGroupCount: groups.length - historical.suggestions.length,
       message: `Matched previous transactions: applied ${applied.count} categories without AI. Unmatched groups remain for review.`,
     };
@@ -1021,7 +1168,9 @@ export async function autoApplyAiCategorization(
       groups: batch,
       categories,
     });
-    suggestions.push(...categorized.suggestions.filter(suggestion => suggestion.confidence === 'high'));
+    suggestions.push(
+      ...categorized.suggestions.filter((suggestion) => suggestion.confidence === 'high'),
+    );
     questionGroupCount += categorized.questions.length;
     ignoredDecisionCount += categorized.ignoredCount;
     reviewedGroupCount += batch.length;
@@ -1038,10 +1187,12 @@ export async function autoApplyAiCategorization(
   }
 
   const applyResult = applyAiCategorizationSuggestions({
-    suggestions: suggestions.flatMap(suggestion => suggestion.transactionIds.map(transactionId => ({
-      transactionId,
-      categoryId: suggestion.categoryId,
-    }))),
+    suggestions: suggestions.flatMap((suggestion) =>
+      suggestion.transactionIds.map((transactionId) => ({
+        transactionId,
+        categoryId: suggestion.categoryId,
+      })),
+    ),
   });
 
   return {
@@ -1085,7 +1236,10 @@ function toAutoApplyJobSnapshot(job: AutoApplyAiCategorizationJob) {
   };
 }
 
-function updateAutoApplyJob(job: AutoApplyAiCategorizationJob, snapshot: Partial<AutoApplyAiCategorizationJob>) {
+function updateAutoApplyJob(
+  job: AutoApplyAiCategorizationJob,
+  snapshot: Partial<AutoApplyAiCategorizationJob>,
+) {
   Object.assign(job, snapshot, { updatedAt: new Date().toISOString() });
   autoApplyJobs.set(job.id, job);
 }
@@ -1123,7 +1277,7 @@ export function startAutoApplyAiCategorizationJob(input: { sort?: unknown } = {}
       message: 'Starting AI categorization.',
     });
     try {
-      const result = await autoApplyAiCategorization(input, snapshot => {
+      const result = await autoApplyAiCategorization(input, (snapshot) => {
         updateAutoApplyJob(job, {
           ...snapshot,
           status: 'running',
@@ -1133,9 +1287,10 @@ export function startAutoApplyAiCategorizationJob(input: { sort?: unknown } = {}
         ...result,
         status: 'completed',
         completedAt: new Date().toISOString(),
-        message: result.configured === false
-          ? result.message
-          : `Auto-applied ${result.appliedCount.toLocaleString()} confident category update${result.appliedCount === 1 ? '' : 's'}. Left ${result.unresolvedGroupCount.toLocaleString()} merchant group${result.unresolvedGroupCount === 1 ? '' : 's'} uncategorized for review.`,
+        message:
+          result.configured === false
+            ? result.message
+            : `Auto-applied ${result.appliedCount.toLocaleString()} confident category update${result.appliedCount === 1 ? '' : 's'}. Left ${result.unresolvedGroupCount.toLocaleString()} merchant group${result.unresolvedGroupCount === 1 ? '' : 's'} uncategorized for review.`,
       });
     } catch (error) {
       updateAutoApplyJob(job, {
@@ -1158,33 +1313,45 @@ export function getAutoApplyAiCategorizationJob(input: { jobId: string }) {
   return toAutoApplyJobSnapshot(job);
 }
 
-export function createMerchantGroupingRule(input: { sourceMerchantKey: string; strategy?: string }) {
-  const sourceMerchantKey = String(input.sourceMerchantKey || '').trim().toUpperCase();
+export function createMerchantGroupingRule(input: {
+  sourceMerchantKey: string;
+  strategy?: string;
+}) {
+  const sourceMerchantKey = String(input.sourceMerchantKey || '')
+    .trim()
+    .toUpperCase();
   if (!sourceMerchantKey) {
     throw new Error('Merchant grouping rule requires a source merchant key.');
   }
-  const strategy = input.strategy === INDIVIDUAL_TRANSACTION_STRATEGY
-    ? INDIVIDUAL_TRANSACTION_STRATEGY
-    : BANK_COUNTERPARTY_STRATEGY;
+  const strategy =
+    input.strategy === INDIVIDUAL_TRANSACTION_STRATEGY
+      ? INDIVIDUAL_TRANSACTION_STRATEGY
+      : BANK_COUNTERPARTY_STRATEGY;
 
   const now = new Date().toISOString();
-  getDb().prepare(`
+  getDb()
+    .prepare(
+      `
     INSERT INTO merchantGroupingRules (sourceMerchantKey, strategy, createdAt, updatedAt)
     VALUES (?, ?, ?, ?)
     ON CONFLICT(sourceMerchantKey) DO UPDATE SET
       strategy = excluded.strategy,
       updatedAt = excluded.updatedAt
-  `).run(sourceMerchantKey, strategy, now, now);
+  `,
+    )
+    .run(sourceMerchantKey, strategy, now, now);
 
   return getDb()
-    .prepare('SELECT id, sourceMerchantKey, strategy, createdAt, updatedAt FROM merchantGroupingRules WHERE sourceMerchantKey = ?')
+    .prepare(
+      'SELECT id, sourceMerchantKey, strategy, createdAt, updatedAt FROM merchantGroupingRules WHERE sourceMerchantKey = ?',
+    )
     .get(sourceMerchantKey) as {
-      id: number;
-      sourceMerchantKey: string;
-      strategy: string;
-      createdAt: string;
-      updatedAt: string;
-    };
+    id: number;
+    sourceMerchantKey: string;
+    strategy: string;
+    createdAt: string;
+    updatedAt: string;
+  };
 }
 
 export function applyAiCategorizationSuggestions(input: {
@@ -1199,7 +1366,9 @@ export function applyAiCategorizationSuggestions(input: {
 } {
   const suggestions = input.suggestions ?? [];
   const validCategories = new Set(
-    (getDb().prepare('SELECT id FROM categories').all() as Array<{ id: number }>).map(row => Number(row.id))
+    (getDb().prepare('SELECT id FROM categories').all() as Array<{ id: number }>).map((row) =>
+      Number(row.id),
+    ),
   );
   const requested = new Map<string, number>();
 
@@ -1213,7 +1382,9 @@ export function applyAiCategorizationSuggestions(input: {
 
   const ids = [...requested.keys()];
   const rows = ids.length
-    ? getDb().prepare(`
+    ? (getDb()
+        .prepare(
+          `
         SELECT
           t.ledgerTransactionId,
           ta.categoryId,
@@ -1222,9 +1393,15 @@ export function applyAiCategorizationSuggestions(input: {
         LEFT JOIN transactionAnnotations ta ON ta.ledgerTransactionId = t.ledgerTransactionId
         LEFT JOIN categories c ON c.id = ta.categoryId
         WHERE t.ledgerTransactionId IN (${ids.map(() => '?').join(', ')})
-      `).all(...ids) as Array<{ ledgerTransactionId: string; categoryId: number | null; categoryName: string | null }>
+      `,
+        )
+        .all(...ids) as Array<{
+        ledgerTransactionId: string;
+        categoryId: number | null;
+        categoryName: string | null;
+      }>)
     : [];
-  const rowById = new Map(rows.map(row => [row.ledgerTransactionId, row]));
+  const rowById = new Map(rows.map((row) => [row.ledgerTransactionId, row]));
   const applyIds: string[] = [];
   const skipped: Array<{ transactionId: string; reason: string }> = [];
 
@@ -1241,14 +1418,17 @@ export function applyAiCategorizationSuggestions(input: {
     applyIds.push(transactionId);
   }
 
-  const previousCategories = applyIds.map(transactionId => ({
+  const previousCategories = applyIds.map((transactionId) => ({
     transactionId,
     categoryId: rowById.get(transactionId)?.categoryId ?? null,
   }));
-  const appliedCategoryIds = [...new Set(applyIds.map(transactionId => requested.get(transactionId)).filter(Boolean))];
-  const categoryName = appliedCategoryIds.length === 1
-    ? getCategoryName(appliedCategoryIds[0])
-    : 'selected categories';
+  const appliedCategoryIds = [
+    ...new Set(applyIds.map((transactionId) => requested.get(transactionId)).filter(Boolean)),
+  ];
+  const categoryName =
+    appliedCategoryIds.length === 1
+      ? getCategoryName(appliedCategoryIds[0])
+      : 'selected categories';
   let undoOperation: CategoryUndoOperation | null = null;
 
   if (applyIds.length) {

@@ -1,5 +1,9 @@
 import { getDb } from '../database.ts';
-import { normalizeAccountType, isBalanceAccount, type AccountType } from '../../src/domain/accountType';
+import {
+  normalizeAccountType,
+  isBalanceAccount,
+  type AccountType,
+} from '../../src/domain/accountType';
 import { classifyFlow } from './flowClassification.ts';
 import { summarizeReturns, type ReturnSummary } from './returns.ts';
 import { deriveTransferLinks, type TransferLink } from './transferLinks.ts';
@@ -140,19 +144,25 @@ function isInternalMoneyMove(description: string) {
   );
 }
 
-function isExternalIncome(transaction: { amount_cents: number; description: string; raw?: string | null }) {
+function isExternalIncome(transaction: {
+  amount_cents: number;
+  description: string;
+  raw?: string | null;
+}) {
   if (transaction.amount_cents <= 0) return false;
   if (isInternalMoneyMove(transaction.description)) return false;
 
   const d = transaction.description.toLowerCase();
-  if (/401\(k\) contributions|rsu vest|espp purchase|direct deposit|payroll|salary|university/.test(d)) {
+  if (
+    /401\(k\) contributions|rsu vest|espp purchase|direct deposit|payroll|salary|university/.test(d)
+  ) {
     return true;
   }
   if (/interest|dividend|cap gain/.test(d)) return true;
   if (/\bdeposit\b/.test(d)) return true;
 
   try {
-    const raw = transaction.raw ? JSON.parse(transaction.raw) as Record<string, unknown> : {};
+    const raw = transaction.raw ? (JSON.parse(transaction.raw) as Record<string, unknown>) : {};
     if (raw['section'] === 'Deposits and other additions') return true;
   } catch {
     // Fall back to description-based classification.
@@ -179,7 +189,9 @@ function incomeSourceLabel(description: string) {
 }
 
 function getAccounts(): InvestmentAccountSummary[] {
-  return getDb().prepare(`
+  return getDb()
+    .prepare(
+      `
     SELECT
       id,
       name,
@@ -195,14 +207,19 @@ function getAccounts(): InvestmentAccountSummary[] {
       reportingClosedOn AS reporting_closed_on
     FROM accounts
     ORDER BY institution, name
-  `).all().map(row => {
-    const account = row as Omit<InvestmentAccountSummary, 'type'> & { type: string };
-    return { ...account, type: normalizeAccountType(account.type) };
-  });
+  `,
+    )
+    .all()
+    .map((row) => {
+      const account = row as Omit<InvestmentAccountSummary, 'type'> & { type: string };
+      return { ...account, type: normalizeAccountType(account.type) };
+    });
 }
 
 function getLedgerTransactions(): LedgerTransactionReportRow[] {
-  return getDb().prepare(`
+  return getDb()
+    .prepare(
+      `
     SELECT
       lt.ledgerTransactionId AS id,
       lt.date,
@@ -220,11 +237,15 @@ function getLedgerTransactions(): LedgerTransactionReportRow[] {
     LEFT JOIN transactionAnnotations ta ON ta.ledgerTransactionId = lt.ledgerTransactionId
     LEFT JOIN categories c ON c.id = ta.categoryId
     ORDER BY lt.date, lt.id
-  `).all() as LedgerTransactionReportRow[];
+  `,
+    )
+    .all() as LedgerTransactionReportRow[];
 }
 
 function getLedgerBalances(): LedgerBalanceReportRow[] {
-  const rows = getDb().prepare(`
+  const rows = getDb()
+    .prepare(
+      `
     SELECT
       COALESCE(capturedAt, month || '-01') AS date,
       month,
@@ -233,9 +254,11 @@ function getLedgerBalances(): LedgerBalanceReportRow[] {
       id
     FROM ledgerBalances
     ORDER BY accountId, month, capturedAt, id
-  `).all() as Array<LedgerBalanceReportRow & { id: number }>;
+  `,
+    )
+    .all() as Array<LedgerBalanceReportRow & { id: number }>;
 
-  return rows.map(row => ({
+  return rows.map((row) => ({
     date: normalizeDate(row.date, row.month),
     month: row.month,
     account_id: row.account_id,
@@ -248,7 +271,8 @@ function getLedgerBalances(): LedgerBalanceReportRow[] {
 const accountTypeCache = new Map<number, string>();
 function getAccountType(accountId: number) {
   if (accountTypeCache.has(accountId)) return accountTypeCache.get(accountId);
-  const row = getDb().prepare('SELECT type FROM accounts WHERE id = ?').get(accountId) as { type: string } | undefined;
+  const row = getDb().prepare('SELECT type FROM accounts WHERE id = ?').get(accountId) as
+    { type: string } | undefined;
   accountTypeCache.set(accountId, row?.type || '');
   return row?.type || '';
 }
@@ -268,7 +292,10 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
   for (const tx of txs) months.add(tx.month);
   for (const balance of balanceSnapshots) {
     months.add(balance.month);
-    latestBalanceByMonthAccount.set(flowKey(balance.month, balance.account_id), balance.balance_cents);
+    latestBalanceByMonthAccount.set(
+      flowKey(balance.month, balance.account_id),
+      balance.balance_cents,
+    );
     accountsWithBalanceSnapshots.add(balance.account_id);
   }
 
@@ -290,22 +317,32 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
     for (const period of periods) {
       // The statement is authoritative for this period's total. Subtract known
       // events so overlapping activity is never added a second time.
-      const represented = txs.filter(tx => tx.account_id === account.id && tx.date.slice(0,10) >= period.from && tx.date.slice(0,10) <= period.to && classifyFlow(tx.description) === 'contribution')
+      const represented = txs
+        .filter(
+          (tx) =>
+            tx.account_id === account.id &&
+            tx.date.slice(0, 10) >= period.from &&
+            tx.date.slice(0, 10) <= period.to &&
+            classifyFlow(tx.description) === 'contribution',
+        )
         .reduce((sum, tx) => sum + tx.amount_cents, 0);
-      const key = flowKey(period.to.slice(0,7), account.id);
+      const key = flowKey(period.to.slice(0, 7), account.id);
       const flow = flows.get(key) ?? { contributions: 0, dividends: 0, interest: 0 };
       flow.contributions += period.netContributionsCents - represented;
       flows.set(key, flow);
     }
   }
   const rows: InvestmentMonthlyRow[] = [];
-  const perAccount = new Map<number, {
-    gainsByMonth: Map<string, number>;
-    contribAdjust: Map<string, number>;
-    gainsAdjust: Map<string, number>;
-    firstMonth: string | null;
-    startingAmount: number;
-  }>();
+  const perAccount = new Map<
+    number,
+    {
+      gainsByMonth: Map<string, number>;
+      contribAdjust: Map<string, number>;
+      gainsAdjust: Map<string, number>;
+      firstMonth: string | null;
+      startingAmount: number;
+    }
+  >();
 
   for (const account of accounts) {
     const gainsByMonth = new Map<string, number>();
@@ -323,8 +360,13 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
           const flow = flows.get(flowKey(gapMonth, account.id));
           if (flow) totalFlows += flow.contributions + flow.dividends + flow.interest;
         }
-        const unpricedClosure = account.reporting_closed_on && month >= account.reporting_closed_on.slice(0, 7) && endBalance === 0 &&
-          !gapMonths.some(gapMonth => (flows.get(flowKey(gapMonth, account.id))?.contributions ?? 0) < 0);
+        const unpricedClosure =
+          account.reporting_closed_on &&
+          month >= account.reporting_closed_on.slice(0, 7) &&
+          endBalance === 0 &&
+          !gapMonths.some(
+            (gapMonth) => (flows.get(flowKey(gapMonth, account.id))?.contributions ?? 0) < 0,
+          );
         // A user-confirmed zero is not evidence that the investment lost its value.
         // Keep unknown transfer-period returns unknown, including the gap months.
         const totalGains = unpricedClosure ? 0 : endBalance - prevBalance - totalFlows;
@@ -332,7 +374,8 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
         if (count > 0) {
           let distributed = 0;
           for (let index = 0; index < count; index += 1) {
-            const slice = index < count - 1 ? Math.round(totalGains / count) : totalGains - distributed;
+            const slice =
+              index < count - 1 ? Math.round(totalGains / count) : totalGains - distributed;
             gainsByMonth.set(gapMonths[index]!, (gainsByMonth.get(gapMonths[index]!) ?? 0) + slice);
             if (index < count - 1) distributed += slice;
           }
@@ -365,9 +408,21 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
       }
       const startingAmount = firstBalance - flowsThrough;
       if (startingAmount !== 0) contribAdjust.set(firstMonth, startingAmount);
-      perAccount.set(account.id, { gainsByMonth, contribAdjust, gainsAdjust, firstMonth, startingAmount });
+      perAccount.set(account.id, {
+        gainsByMonth,
+        contribAdjust,
+        gainsAdjust,
+        firstMonth,
+        startingAmount,
+      });
     } else {
-      perAccount.set(account.id, { gainsByMonth, contribAdjust, gainsAdjust, firstMonth, startingAmount: 0 });
+      perAccount.set(account.id, {
+        gainsByMonth,
+        contribAdjust,
+        gainsAdjust,
+        firstMonth,
+        startingAmount: 0,
+      });
     }
 
     if (account.flow_treatment === 'contributions' || isCashLikeAccount(account)) {
@@ -393,7 +448,7 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
           contributionAdjustments: state.contribAdjust,
           gainsByMonth: state.gainsByMonth,
         },
-      ])
+      ]),
     ),
     transactions: txs,
     confirmedTransfers: readConfirmedTransfers(),
@@ -403,11 +458,11 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
     if (!accountState) continue;
     accountState.contribAdjust.set(
       adjustment.month,
-      (accountState.contribAdjust.get(adjustment.month) ?? 0) + adjustment.contributions_cents
+      (accountState.contribAdjust.get(adjustment.month) ?? 0) + adjustment.contributions_cents,
     );
     accountState.gainsAdjust.set(
       adjustment.month,
-      (accountState.gainsAdjust.get(adjustment.month) ?? 0) + adjustment.gains_cents
+      (accountState.gainsAdjust.get(adjustment.month) ?? 0) + adjustment.gains_cents,
     );
   }
 
@@ -415,15 +470,32 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
   for (const account of accounts) {
     if (isCashLikeAccount(account)) continue;
     const closure = account.reporting_closed_on;
-    const pricedClosure = closure && txs.some(tx => tx.account_id === account.id && tx.date.slice(0,7) >= closure.slice(0,7) && classifyFlow(tx.description) === 'contribution' && tx.amount_cents < 0);
+    const pricedClosure =
+      closure &&
+      txs.some(
+        (tx) =>
+          tx.account_id === account.id &&
+          tx.date.slice(0, 7) >= closure.slice(0, 7) &&
+          classifyFlow(tx.description) === 'contribution' &&
+          tx.amount_cents < 0,
+      );
     const summary = summarizeReturns({
       account_id: account.id,
       balances: balanceSnapshots
-        .filter(balance => balance.account_id === account.id && (!closure || pricedClosure || balance.date < closure))
-        .map(balance => ({ date: balance.date, balance_cents: balance.balance_cents })),
+        .filter(
+          (balance) =>
+            balance.account_id === account.id &&
+            (!closure || pricedClosure || balance.date < closure),
+        )
+        .map((balance) => ({ date: balance.date, balance_cents: balance.balance_cents })),
       contribution_flows: txs
-        .filter(tx => tx.account_id === account.id && classifyFlow(tx.description) === 'contribution' && (!closure || pricedClosure || tx.date < closure))
-        .map(tx => ({ date: normalizeDate(tx.date), amount_cents: tx.amount_cents })),
+        .filter(
+          (tx) =>
+            tx.account_id === account.id &&
+            classifyFlow(tx.description) === 'contribution' &&
+            (!closure || pricedClosure || tx.date < closure),
+        )
+        .map((tx) => ({ date: normalizeDate(tx.date), amount_cents: tx.amount_cents })),
     });
     if (summary) returns.push(summary);
   }
@@ -454,20 +526,25 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
     }
 
     for (const month of sortedMonths) {
-      const flow = flows.get(flowKey(month, account.id)) ?? { contributions: 0, dividends: 0, interest: 0 };
+      const flow = flows.get(flowKey(month, account.id)) ?? {
+        contributions: 0,
+        dividends: 0,
+        interest: 0,
+      };
       const contributionAdjustment = accountState.contribAdjust.get(month) ?? 0;
       const gainsAdjustment = accountState.gainsAdjust.get(month) ?? 0;
       const endBalance = latestBalanceByMonthAccount.get(flowKey(month, account.id)) ?? null;
-      const gapGains = accountState.gainsByMonth.has(month) ? accountState.gainsByMonth.get(month)! : null;
+      const gapGains = accountState.gainsByMonth.has(month)
+        ? accountState.gainsByMonth.get(month)!
+        : null;
       const gains = gainsAdjustment !== 0 ? (gapGains ?? 0) + gainsAdjustment : gapGains;
-      const hasActivity = (
+      const hasActivity =
         flow.contributions !== 0 ||
         flow.dividends !== 0 ||
         flow.interest !== 0 ||
         contributionAdjustment !== 0 ||
         endBalance !== null ||
-        gains !== null
-      );
+        gains !== null;
       if (!hasActivity) continue;
 
       rows.push({
@@ -482,12 +559,18 @@ export function getInvestmentNetWorthReport(): InvestmentNetWorthReport {
     }
   }
 
-  return { accounts, rows, transfer_links: transferFacts.links, returns, income_sources: reportIncomeSources(txs) };
+  return {
+    accounts,
+    rows,
+    transfer_links: transferFacts.links,
+    returns,
+    income_sources: reportIncomeSources(txs),
+  };
 }
 
 export function getSavingsRateReport(): SavingsRateReport {
   const netWorth = getInvestmentNetWorthReport();
-  const accountById = new Map(netWorth.accounts.map(account => [account.id, account]));
+  const accountById = new Map(netWorth.accounts.map((account) => [account.id, account]));
   const txs = getLedgerTransactions();
 
   const incomeByMonth = new Map<string, number>();
@@ -545,7 +628,8 @@ export function getSavingsRateReport(): SavingsRateReport {
     };
     accountSource.amount_cents += tx.amount_cents;
     accountSource.count += 1;
-    accountSource.is_market_income = accountSource.is_market_income || isMarketIncome(tx.description);
+    accountSource.is_market_income =
+      accountSource.is_market_income || isMarketIncome(tx.description);
     sourceByAccountLabel.set(accountSourceKey, accountSource);
   }
 
@@ -567,7 +651,7 @@ export function getSavingsRateReport(): SavingsRateReport {
 
   const firstIncomeMonth = [...incomeByMonth.keys()].sort()[0] ?? null;
   const rows = [...months]
-    .filter(month => firstIncomeMonth === null || month >= firstIncomeMonth)
+    .filter((month) => firstIncomeMonth === null || month >= firstIncomeMonth)
     .sort()
     .map((month): SavingsRateMonthlyRow => {
       const income_cents = incomeByMonth.get(month) ?? 0;
@@ -587,9 +671,16 @@ export function getSavingsRateReport(): SavingsRateReport {
     });
 
   return {
-    accounts: netWorth.accounts.map(({ id, name, institution, type }) => ({ id, name, institution, type })),
+    accounts: netWorth.accounts.map(({ id, name, institution, type }) => ({
+      id,
+      name,
+      institution,
+      type,
+    })),
     rows,
-    account_months: [...accountMonths.values()].filter(row => firstIncomeMonth === null || row.month >= firstIncomeMonth),
+    account_months: [...accountMonths.values()].filter(
+      (row) => firstIncomeMonth === null || row.month >= firstIncomeMonth,
+    ),
     income_sources: [...sourceByLabel.values()].sort((a, b) => b.amount_cents - a.amount_cents),
     account_sources: [...sourceByAccountLabel.values()],
   };

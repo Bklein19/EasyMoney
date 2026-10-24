@@ -79,35 +79,39 @@ const twoProfileAccounts = [
 ];
 
 test('Vanguard connector plans independent login profiles from artifact provenance', () => {
-  const profiles = planVanguardProfiles(
-    context(twoProfileAccounts),
-    { kind: 'current', overlapDays: 7 },
-  );
+  const profiles = planVanguardProfiles(context(twoProfileAccounts), {
+    kind: 'current',
+    overlapDays: 7,
+  });
 
   expect(profiles).toEqual([
     {
       id: 'current',
       session: 'vanguard-catchup',
       accountHolder: 'Example One',
-      accounts: [{
-        accountId: 10,
-        accountKind: 'brokerage',
-        accountLast4: '1111',
-        startDate: '2026-07-24',
-        statementDates: [],
-      }],
+      accounts: [
+        {
+          accountId: 10,
+          accountKind: 'brokerage',
+          accountLast4: '1111',
+          startDate: '2026-07-24',
+          statementDates: [],
+        },
+      ],
     },
     {
       id: 'account-2',
       session: 'vanguard-account-2-catchup',
       accountHolder: 'Example Two',
-      accounts: [{
-        accountId: 20,
-        accountKind: 'roth-ira',
-        accountLast4: '2222',
-        startDate: '2026-07-24',
-        statementDates: [],
-      }],
+      accounts: [
+        {
+          accountId: 20,
+          accountKind: 'roth-ira',
+          accountLast4: '2222',
+          startDate: '2026-07-24',
+          statementDates: [],
+        },
+      ],
     },
   ]);
 });
@@ -149,60 +153,63 @@ test('Vanguard connector does not infer a profile when one holder has multiple l
       }),
     ]),
     { kind: 'current', overlapDays: 7 },
-    event => warnings.push(event.message),
+    (event) => warnings.push(event.message),
   );
 
-  expect(profiles.flatMap(profile => profile.accounts).map(plan => plan.accountId)).toEqual([10, 20]);
+  expect(profiles.flatMap((profile) => profile.accounts).map((plan) => plan.accountId)).toEqual([
+    10, 20,
+  ]);
   expect(warnings).toContain(
     'Skipped Rollover IRA 3333; its Vanguard login profile, account number, or account holder is missing',
   );
 });
 
 test('Vanguard statement planning includes only missing completed month ends', () => {
-  expect(missingVanguardMonthlyStatementDates(
-    '2026-05-25',
-    '2026-08-16',
-    ['2026-05-31', '2026-07-31'],
-  )).toEqual(['2026-06-30']);
-  expect(missingVanguardMonthlyStatementDates(
-    '2026-08-01',
-    '2026-08-16',
-    [],
-  )).toEqual([]);
+  expect(
+    missingVanguardMonthlyStatementDates('2026-05-25', '2026-08-16', ['2026-05-31', '2026-07-31']),
+  ).toEqual(['2026-06-30']);
+  expect(missingVanguardMonthlyStatementDates('2026-08-01', '2026-08-16', [])).toEqual([]);
 });
 
 test('Vanguard current planning skips covered accounts and requests only dormant-account gaps', () => {
-  const profiles = planVanguardProfiles(context([
-    account({
-      id: 10,
-      name: 'Brokerage 1111',
-      sourceAccountName: 'Individual brokerage account ending in 1111',
-      artifactFileNames: ['vanguard-current-brokerage-2026-07-24-to-2026-08-16-activity-1111.csv'],
-      latestBalanceDate: '2026-07-31',
-      balanceDates: ['2026-07-31'],
-    }),
-    account({
-      id: 20,
-      name: 'Roth IRA 2222',
-      sourceAccountName: 'Roth IRA account ending in 2222',
-      artifactFileNames: ['2026-07-31-Roth-IRA-2222---current.pdf'],
-      latestBalanceDate: '2026-07-31',
-      balanceDates: ['2026-07-31'],
-    }),
-    account({
-      id: 30,
-      name: 'Traditional IRA 3333',
-      sourceAccountName: 'Traditional IRA account ending in 3333',
-      latestBalanceDate: '2026-04-30',
-      balanceDates: ['2026-04-30'],
-    }),
-  ]), { kind: 'current', overlapDays: 7 });
+  const profiles = planVanguardProfiles(
+    context([
+      account({
+        id: 10,
+        name: 'Brokerage 1111',
+        sourceAccountName: 'Individual brokerage account ending in 1111',
+        artifactFileNames: [
+          'vanguard-current-brokerage-2026-07-24-to-2026-08-16-activity-1111.csv',
+        ],
+        latestBalanceDate: '2026-07-31',
+        balanceDates: ['2026-07-31'],
+      }),
+      account({
+        id: 20,
+        name: 'Roth IRA 2222',
+        sourceAccountName: 'Roth IRA account ending in 2222',
+        artifactFileNames: ['2026-07-31-Roth-IRA-2222---current.pdf'],
+        latestBalanceDate: '2026-07-31',
+        balanceDates: ['2026-07-31'],
+      }),
+      account({
+        id: 30,
+        name: 'Traditional IRA 3333',
+        sourceAccountName: 'Traditional IRA account ending in 3333',
+        latestBalanceDate: '2026-04-30',
+        balanceDates: ['2026-04-30'],
+      }),
+    ]),
+    { kind: 'current', overlapDays: 7 },
+  );
 
   expect(profiles).toHaveLength(1);
-  expect(profiles[0]!.accounts.map(plan => ({
-    accountId: plan.accountId,
-    statementDates: plan.statementDates,
-  }))).toEqual([
+  expect(
+    profiles[0]!.accounts.map((plan) => ({
+      accountId: plan.accountId,
+      statementDates: plan.statementDates,
+    })),
+  ).toEqual([
     { accountId: 10, statementDates: [] },
     { accountId: 20, statementDates: [] },
     { accountId: 30, statementDates: ['2026-05-31', '2026-06-30', '2026-07-31'] },
@@ -210,10 +217,10 @@ test('Vanguard current planning skips covered accounts and requests only dormant
 });
 
 test('Vanguard connection selection isolates one login without changing all-profile runs', () => {
-  const profiles = planVanguardProfiles(
-    context(twoProfileAccounts),
-    { kind: 'current', overlapDays: 7 },
-  );
+  const profiles = planVanguardProfiles(context(twoProfileAccounts), {
+    kind: 'current',
+    overlapDays: 7,
+  });
 
   expect(selectVanguardProfiles(profiles, 'account-2')).toEqual([profiles[1]]);
   expect(selectVanguardProfiles(profiles)).toEqual(profiles);
@@ -248,7 +255,7 @@ test('Vanguard connector rejects unsafe provenance and incomplete or conflicting
       }),
     ]),
     { kind: 'current', overlapDays: 7 },
-    event => warnings.push(event.message),
+    (event) => warnings.push(event.message),
   );
 
   expect(profiles).toEqual([]);
@@ -287,12 +294,14 @@ test('Vanguard identity helpers do not depend on generic shared routing', () => 
   expect(inferVanguardAccountLast4(brokerage)).toBe('1111');
   expect(inferVanguardAccountLast4(ambiguous)).toBeNull();
   expect(inferVanguardAccountLast4({ ...ambiguous, last4: '4444' })).toBe('4444');
-  expect(vanguardProfileIdFromArtifactFileNames([
-    'vanguard-login-2-traditional-ira-2026-01-01-to-2026-08-16-activity-4444.csv',
-  ])).toBe('login-2');
-  expect(vanguardProfileIdFromArtifactFileNames([
-    '2026-07-31-Trad-IRA-4444---person-derived-label.pdf',
-  ])).toBeNull();
+  expect(
+    vanguardProfileIdFromArtifactFileNames([
+      'vanguard-login-2-traditional-ira-2026-01-01-to-2026-08-16-activity-4444.csv',
+    ]),
+  ).toBe('login-2');
+  expect(
+    vanguardProfileIdFromArtifactFileNames(['2026-07-31-Trad-IRA-4444---person-derived-label.pdf']),
+  ).toBeNull();
 });
 
 test('Vanguard downloaded artifacts expose only generic routing data', () => {
@@ -306,45 +315,46 @@ test('Vanguard downloaded artifacts expose only generic routing data', () => {
     artifactType: 'activity',
   };
 
-  expect(routeVanguardArtifacts([artifact])).toEqual([{ fileName: 'activity.csv', routing: 'source' }]);
+  expect(routeVanguardArtifacts([artifact])).toEqual([
+    { fileName: 'activity.csv', routing: 'source' },
+  ]);
 });
 
 test('Vanguard connector selects one profile, translates progress, and routes artifacts', async () => {
   const configs: VanguardSyncConfig[] = [];
   const events: Array<Omit<SyncEvent, 'runId' | 'timestamp'>> = [];
-  const connector = createVanguardConnector(async (
-    config: VanguardSyncConfig,
-    progress: VanguardProgressReporter = () => {},
-  ) => {
-    configs.push(config);
-    progress({
-      profileId: 'current',
-      phase: 'authentication',
-      state: 'waiting',
-      timestamp: '2026-08-24T00:00:00.000Z',
-      message: 'Waiting for Vanguard authentication for Example One',
-      elapsedMs: 125,
-      data: { cachedAuthentication: false },
-    });
-    return [{
-      fileName: 'activity.csv',
-      accountId: 10,
-      institution: 'vanguard',
-      profileId: 'current',
-      accountKind: 'brokerage',
-      accountLast4: '1111',
-      artifactType: 'activity',
-    }];
-  });
+  const connector = createVanguardConnector(
+    async (config: VanguardSyncConfig, progress: VanguardProgressReporter = () => {}) => {
+      configs.push(config);
+      progress({
+        profileId: 'current',
+        phase: 'authentication',
+        state: 'waiting',
+        timestamp: '2026-08-24T00:00:00.000Z',
+        message: 'Waiting for Vanguard authentication for Example One',
+        elapsedMs: 125,
+        data: { cachedAuthentication: false },
+      });
+      return [
+        {
+          fileName: 'activity.csv',
+          accountId: 10,
+          institution: 'vanguard',
+          profileId: 'current',
+          accountKind: 'brokerage',
+          accountLast4: '1111',
+          artifactType: 'activity',
+        },
+      ];
+    },
+  );
 
-  await expect(connector.run(runContext(
-    twoProfileAccounts,
-    event => events.push(event),
-    'current',
-  ))).resolves.toEqual([{ fileName: 'activity.csv', routing: 'source' }]);
+  await expect(
+    connector.run(runContext(twoProfileAccounts, (event) => events.push(event), 'current')),
+  ).resolves.toEqual([{ fileName: 'activity.csv', routing: 'source' }]);
 
   expect(configs).toHaveLength(1);
-  expect(configs[0]?.profiles.map(profile => profile.id)).toEqual(['current']);
+  expect(configs[0]?.profiles.map((profile) => profile.id)).toEqual(['current']);
   expect(events).toContainEqual({
     type: 'action',
     message: 'Waiting for Vanguard authentication for Example One',

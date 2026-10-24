@@ -10,11 +10,22 @@ const { trpc } = await import('../../api/trpc');
 function renderStatus(input: { pending?: number; failed?: number; configured?: boolean } = {}) {
   const client = new QueryClient();
   client.setQueryData(trpc.transactions.automaticCategorizationStatus.queryKey(), {
-    pending: 0, failed: 0, configured: true, applied: 2, needsReview: 1, skipped: 0, revision: 'fixture', ...input,
+    pending: 0,
+    failed: 0,
+    configured: true,
+    applied: 2,
+    needsReview: 1,
+    skipped: 0,
+    revision: 'fixture',
+    ...input,
   });
-  const html = renderToStaticMarkup(<MemoryRouter><QueryClientProvider client={client}>
-    <AutomaticCategorizationStatus />
-  </QueryClientProvider></MemoryRouter>);
+  const html = renderToStaticMarkup(
+    <MemoryRouter>
+      <QueryClientProvider client={client}>
+        <AutomaticCategorizationStatus />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
   client.clear();
   return html;
 }

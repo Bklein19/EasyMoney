@@ -43,13 +43,16 @@ export interface MultiAccountSyncArtifact {
 }
 
 /** Exactly one routing form is required for every connector artifact. */
-export type RoutedSyncArtifact = SingleAccountSyncArtifact | MultiAccountSyncArtifact | {
-  fileName: string;
-  /** Destination resolution belongs to the shared parser-backed import review. */
-  routing: 'source';
-  accountId?: never;
-  accountRoutes?: never;
-};
+export type RoutedSyncArtifact =
+  | SingleAccountSyncArtifact
+  | MultiAccountSyncArtifact
+  | {
+      fileName: string;
+      /** Destination resolution belongs to the shared parser-backed import review. */
+      routing: 'source';
+      accountId?: never;
+      accountRoutes?: never;
+    };
 
 export interface SyncConnectorContext {
   today: string;

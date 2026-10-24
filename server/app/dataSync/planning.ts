@@ -29,7 +29,9 @@ export function goalWindowForCoverage(goal: SyncGoal, account: CoverageWindow, t
     };
   }
   return {
-    startDate: account.latestFactDate ? shiftDays(account.latestFactDate, -goal.overlapDays) : shiftDays(today, -365),
+    startDate: account.latestFactDate
+      ? shiftDays(account.latestFactDate, -goal.overlapDays)
+      : shiftDays(today, -365),
     endDate: today,
   };
 }

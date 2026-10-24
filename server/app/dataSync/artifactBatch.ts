@@ -31,7 +31,10 @@ export async function importSyncArtifactBatch(
       const result = await job.import();
       if (result.skippedArtifact) {
         skippedArtifacts += 1;
-        report({ type: 'import', message: `Skipped ${job.fileName}; artifact was already imported` });
+        report({
+          type: 'import',
+          message: `Skipped ${job.fileName}; artifact was already imported`,
+        });
         continue;
       }
       committedArtifacts += 1;
@@ -57,5 +60,10 @@ export async function importSyncArtifactBatch(
     }
   }
 
-  return { recordedTransactionFacts, recordedBalanceFacts, skippedTransactionDuplicates, skippedArtifacts };
+  return {
+    recordedTransactionFacts,
+    recordedBalanceFacts,
+    skippedTransactionDuplicates,
+    skippedArtifacts,
+  };
 }

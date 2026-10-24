@@ -17,7 +17,9 @@ import {
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(temporaryDirectories.splice(0).map(path => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
+  );
 });
 
 function account(overrides: Partial<SyncAccountCoverage> = {}): SyncAccountCoverage {
@@ -69,8 +71,18 @@ function artifact(overrides: Partial<RobinhoodMobileArtifact>): RobinhoodMobileA
 describe('Robinhood mobile export connector', () => {
   test('targets banking and Gold Card accounts but excludes brokerage accounts', () => {
     const banking = account();
-    const credit = account({ id: 2, name: 'Robinhood Gold Card 8904', type: 'credit', last4: '8904' });
-    const brokerage = account({ id: 3, name: 'Robinhood Individual', type: 'investment', last4: '1234' });
+    const credit = account({
+      id: 2,
+      name: 'Robinhood Gold Card 8904',
+      type: 'credit',
+      last4: '8904',
+    });
+    const brokerage = account({
+      id: 3,
+      name: 'Robinhood Individual',
+      type: 'investment',
+      last4: '1234',
+    });
 
     expect(robinhoodAccountKind(banking)).toBe('banking');
     expect(robinhoodAccountKind(credit)).toBe('credit');
@@ -78,33 +90,62 @@ describe('Robinhood mobile export connector', () => {
   });
 
   test('selects the newest activity export and every missing statement balance', () => {
-    const selected = planRobinhoodMobileArtifacts([
-      artifact({ fileName: 'old.csv', coveredTo: '2026-09-03', modifiedAtMs: 1 }),
-      artifact({ fileName: 'new.csv', coveredTo: '2026-09-05', modifiedAtMs: 2 }),
-      artifact({ fileName: 'july.pdf', kind: 'banking-statement', coveredFrom: '2026-07-01', coveredTo: '2026-07-31', accountLast4: '4429', balanceCount: 1 }),
-      artifact({ fileName: 'august.pdf', kind: 'banking-statement', coveredFrom: '2026-08-01', coveredTo: '2026-08-31', accountLast4: '4429', balanceCount: 1 }),
-    ], runContext([account()]));
+    const selected = planRobinhoodMobileArtifacts(
+      [
+        artifact({ fileName: 'old.csv', coveredTo: '2026-09-03', modifiedAtMs: 1 }),
+        artifact({ fileName: 'new.csv', coveredTo: '2026-09-05', modifiedAtMs: 2 }),
+        artifact({
+          fileName: 'july.pdf',
+          kind: 'banking-statement',
+          coveredFrom: '2026-07-01',
+          coveredTo: '2026-07-31',
+          accountLast4: '4429',
+          balanceCount: 1,
+        }),
+        artifact({
+          fileName: 'august.pdf',
+          kind: 'banking-statement',
+          coveredFrom: '2026-08-01',
+          coveredTo: '2026-08-31',
+          accountLast4: '4429',
+          balanceCount: 1,
+        }),
+      ],
+      runContext([account()]),
+    );
 
-    expect(selected.map(item => item.artifact.fileName)).toEqual(['july.pdf', 'august.pdf', 'new.csv']);
+    expect(selected.map((item) => item.artifact.fileName)).toEqual([
+      'july.pdf',
+      'august.pdf',
+      'new.csv',
+    ]);
   });
 
   test('recognizes both UUID CSV formats and excludes non-posted credit rows', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'easymoney-robinhood-exports-'));
     temporaryDirectories.push(directory);
-    await writeFile(join(directory, '11111111-1111-4111-8111-111111111111.csv'), [
-      'Date,Description,Amount',
-      '2026-09-03,Deposit,100.00',
-    ].join('\n'));
-    await writeFile(join(directory, '22222222-2222-4222-8222-222222222222.csv'), [
-      'Date,Time,Cardholder,Amount,Points,Balance,Status,Type,Merchant,Description',
-      '2026-09-04,12:00:00,Example Person,20.00,0,0,Posted,Purchase,Posted Shop,POSTED SHOP CA',
-      '2026-09-05,12:00:00,Example Person,30.00,0,0,Pending,Purchase,Pending Shop,PENDING SHOP CA',
-    ].join('\n'));
-    await writeFile(join(directory, 'not-robinhood.csv'), 'Date,Description,Amount\n2026-09-01,Other,1.00');
+    await writeFile(
+      join(directory, '11111111-1111-4111-8111-111111111111.csv'),
+      ['Date,Description,Amount', '2026-09-03,Deposit,100.00'].join('\n'),
+    );
+    await writeFile(
+      join(directory, '22222222-2222-4222-8222-222222222222.csv'),
+      [
+        'Date,Time,Cardholder,Amount,Points,Balance,Status,Type,Merchant,Description',
+        '2026-09-04,12:00:00,Example Person,20.00,0,0,Posted,Purchase,Posted Shop,POSTED SHOP CA',
+        '2026-09-05,12:00:00,Example Person,30.00,0,0,Pending,Purchase,Pending Shop,PENDING SHOP CA',
+      ].join('\n'),
+    );
+    await writeFile(
+      join(directory, 'not-robinhood.csv'),
+      'Date,Description,Amount\n2026-09-01,Other,1.00',
+    );
 
     const discovered = await discoverRobinhoodMobileExports(directory);
 
-    expect(discovered.map(item => ({ kind: item.kind, transactionCount: item.transactionCount }))).toEqual([
+    expect(
+      discovered.map((item) => ({ kind: item.kind, transactionCount: item.transactionCount })),
+    ).toEqual([
       { kind: 'banking-activity', transactionCount: 1 },
       { kind: 'credit-activity', transactionCount: 1 },
     ]);

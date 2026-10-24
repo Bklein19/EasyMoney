@@ -1,2 +1,21 @@
 [test]
 root = "server"
+
+[fmt]
+printWidth = 100
+singleQuote = true
+semi = true
+ignorePatterns = [
+  "artifacts/",
+  "build/",
+  "desktop-dist/",
+  "dist/",
+  ".hutch/",
+  ".codex/",
+  ".agents/",
+  ".playwright/",
+  ".playwright-cli/",
+  "tmp/",
+  "output/",
+  "server/app/importParsers/versions.json",
+]

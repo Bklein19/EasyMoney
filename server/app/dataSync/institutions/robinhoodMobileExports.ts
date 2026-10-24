@@ -14,10 +14,7 @@ const UUID_CSV = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\
 const MAX_ARTIFACT_BYTES = 25 * 1024 * 1024;
 
 export type RobinhoodMobileArtifactKind =
-  | 'banking-activity'
-  | 'banking-statement'
-  | 'credit-activity'
-  | 'credit-statement';
+  'banking-activity' | 'banking-statement' | 'credit-activity' | 'credit-statement';
 
 export interface RobinhoodMobileArtifact {
   fileName: string;
@@ -41,13 +38,15 @@ function candidateKind(fileName: string): RobinhoodCandidateKind | null {
 }
 
 function transactionDates(parsed: AppImportParseResult): string[] {
-  return parsed.transactions.flatMap(transaction => transaction ? [transaction.date.slice(0, 10)] : []);
+  return parsed.transactions.flatMap((transaction) =>
+    transaction ? [transaction.date.slice(0, 10)] : [],
+  );
 }
 
 function coverage(parsed: AppImportParseResult): { coveredFrom: string; coveredTo: string } {
   const dates = [
     ...transactionDates(parsed),
-    ...parsed.balances.map(balance => balance.date.slice(0, 10)),
+    ...parsed.balances.map((balance) => balance.date.slice(0, 10)),
   ].sort();
   const coveredFrom = parsed.coveredFrom?.slice(0, 10) || dates[0];
   const coveredTo = parsed.coveredTo?.slice(0, 10) || dates.at(-1);
@@ -57,10 +56,14 @@ function coverage(parsed: AppImportParseResult): { coveredFrom: string; coveredT
 
 function parsedLast4(parsed: AppImportParseResult): string | null {
   const accountNames = new Set([
-    ...parsed.transactions.flatMap(transaction => transaction?.account ? [transaction.account] : []),
-    ...parsed.balances.flatMap(balance => balance.account ? [balance.account] : []),
+    ...parsed.transactions.flatMap((transaction) =>
+      transaction?.account ? [transaction.account] : [],
+    ),
+    ...parsed.balances.flatMap((balance) => (balance.account ? [balance.account] : [])),
   ]);
-  const last4s = new Set([...accountNames].flatMap(name => name.match(/(?:^|\D)(\d{4})$/)?.[1] ?? []));
+  const last4s = new Set(
+    [...accountNames].flatMap((name) => name.match(/(?:^|\D)(\d{4})$/)?.[1] ?? []),
+  );
   return last4s.size === 1 ? [...last4s][0]! : null;
 }
 
@@ -73,18 +76,20 @@ async function parseCsvArtifact(
     header: true,
     skipEmptyLines: true,
   });
-  const fatal = csv.errors.find(error => error.type !== 'FieldMismatch');
+  const fatal = csv.errors.find((error) => error.type !== 'FieldMismatch');
   if (fatal) throw new Error(`Could not parse ${fileName}: ${fatal.message}`);
   const headers = csv.meta.fields ?? [];
   const candidates: Array<{ parser: AppImportParser; kind: RobinhoodMobileArtifactKind }> = [
     { parser: robinhoodBankingParser, kind: 'banking-activity' },
     { parser: robinhoodCreditCardCsvParser, kind: 'credit-activity' },
   ];
-  const match = candidates.find(candidate => candidate.parser.matches({
-    fileName,
-    headers,
-    sample: text.slice(0, 4096),
-  }));
+  const match = candidates.find((candidate) =>
+    candidate.parser.matches({
+      fileName,
+      headers,
+      sample: text.slice(0, 4096),
+    }),
+  );
   if (!match) throw new Error(`${fileName} is not a supported Robinhood mobile CSV export`);
   return {
     kind: match.kind,
@@ -97,21 +102,24 @@ async function parsePdfArtifact(
   fileName: string,
   kind: 'banking-statement' | 'credit-statement',
 ): Promise<AppImportParseResult> {
-  const parser = kind === 'banking-statement'
-    ? robinhoodBankingStatementParser
-    : robinhoodCreditCardStatementParser;
+  const parser =
+    kind === 'banking-statement'
+      ? robinhoodBankingStatementParser
+      : robinhoodCreditCardStatementParser;
   return parser.parse({ fileName, headers: [], rows: [], text: '', filePath: sourcePath });
 }
 
 export function robinhoodMobileExportSourceDir(): string {
-  return resolve(process.env.EASYMONEY_ROBINHOOD_EXPORT_DIR?.trim() || join(homedir(), 'Downloads'));
+  return resolve(
+    process.env.EASYMONEY_ROBINHOOD_EXPORT_DIR?.trim() || join(homedir(), 'Downloads'),
+  );
 }
 
 export async function discoverRobinhoodMobileExports(
   sourceDir = robinhoodMobileExportSourceDir(),
 ): Promise<RobinhoodMobileArtifact[]> {
   const root = resolve(sourceDir);
-  const entries = await readdir(root, { withFileTypes: true }).catch(error => {
+  const entries = await readdir(root, { withFileTypes: true }).catch((error) => {
     throw new Error(`Could not read the Robinhood mobile export folder ${root}: ${String(error)}`);
   });
   const artifacts: RobinhoodMobileArtifact[] = [];
@@ -125,10 +133,15 @@ export async function discoverRobinhoodMobileExports(
     if (info.size <= 0 || info.size > MAX_ARTIFACT_BYTES) continue;
 
     try {
-      const result = hintedKind === 'csv'
-        ? await parseCsvArtifact(sourcePath, entry.name)
-        : { kind: hintedKind, parsed: await parsePdfArtifact(sourcePath, entry.name, hintedKind) };
-      const facts = result.parsed.transactions.filter(Boolean).length + result.parsed.balances.length;
+      const result =
+        hintedKind === 'csv'
+          ? await parseCsvArtifact(sourcePath, entry.name)
+          : {
+              kind: hintedKind,
+              parsed: await parsePdfArtifact(sourcePath, entry.name, hintedKind),
+            };
+      const facts =
+        result.parsed.transactions.filter(Boolean).length + result.parsed.balances.length;
       if (facts === 0) continue;
       artifacts.push({
         fileName: entry.name,
@@ -145,8 +158,9 @@ export async function discoverRobinhoodMobileExports(
     }
   }
 
-  return artifacts.sort((left, right) =>
-    left.coveredTo.localeCompare(right.coveredTo) || left.fileName.localeCompare(right.fileName)
+  return artifacts.sort(
+    (left, right) =>
+      left.coveredTo.localeCompare(right.coveredTo) || left.fileName.localeCompare(right.fileName),
   );
 }
 

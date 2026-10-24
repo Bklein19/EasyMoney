@@ -1,16 +1,23 @@
-import js from '@eslint/js'
-import globals from 'globals'
-import reactHooks from 'eslint-plugin-react-hooks'
-import { defineConfig, globalIgnores } from 'eslint/config'
+import js from '@eslint/js';
+import globals from 'globals';
+import reactHooks from 'eslint-plugin-react-hooks';
+import { defineConfig, globalIgnores } from 'eslint/config';
 
 export default defineConfig([
-  globalIgnores(['artifacts', 'build', 'desktop-dist', 'dist', '.hutch', '.playwright', '.playwright-cli', 'tmp', 'output']),
+  globalIgnores([
+    'artifacts',
+    'build',
+    'desktop-dist',
+    'dist',
+    '.hutch',
+    '.playwright',
+    '.playwright-cli',
+    'tmp',
+    'output',
+  ]),
   {
     files: ['**/*.{js,jsx}'],
-    extends: [
-      js.configs.recommended,
-      reactHooks.configs.flat.recommended,
-    ],
+    extends: [js.configs.recommended, reactHooks.configs.flat.recommended],
     languageOptions: {
       globals: {
         ...globals.browser,
@@ -20,4 +27,4 @@ export default defineConfig([
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
   },
-])
+]);

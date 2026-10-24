@@ -1,4 +1,9 @@
-import type { AppImportParseInput, AppImportParseResult, AppImportParser, ParsedImportTransaction } from '../importTypes.ts';
+import type {
+  AppImportParseInput,
+  AppImportParseResult,
+  AppImportParser,
+  ParsedImportTransaction,
+} from '../importTypes.ts';
 import { parseAmount, parseDate } from './csvMapping.ts';
 
 export const wellsFargoGenericActivityParser: AppImportParser = {
@@ -7,19 +12,23 @@ export const wellsFargoGenericActivityParser: AppImportParser = {
   institution: 'Wells Fargo',
   sourceType: 'activity-export',
   priority: 90,
-  matches: ({ fileName, headers, sample }) => (
+  matches: ({ fileName, headers, sample }) =>
     !hasNormalizedAccountFilename(fileName) &&
-    (hasWellsFargoActivityHeaders(headers) || hasWellsFargoActivityHeaderInSample(sample))
-  ),
+    (hasWellsFargoActivityHeaders(headers) || hasWellsFargoActivityHeaderInSample(sample)),
   parse,
 };
 
 function normalizeHeader(value = '') {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }
 
 function hasNormalizedAccountFilename(fileName: string) {
-  return /^wells-fargo-(checking|savings|credit-card|autograph-visa|platinum-card)-\d{4}-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv$/i.test(fileName);
+  return /^wells-fargo-(checking|savings|credit-card|autograph-visa|platinum-card)-\d{4}-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv$/i.test(
+    fileName,
+  );
 }
 
 function hasWellsFargoActivityHeaders(headers: string[]) {
@@ -71,20 +80,25 @@ function hasWellsFargoActivityHeaderInSample(sample: string) {
   return sample
     .split(/\r?\n/)
     .slice(0, 3)
-    .some(line => hasWellsFargoActivityHeaders(parseCsvLine(line)));
+    .some((line) => hasWellsFargoActivityHeaders(parseCsvLine(line)));
 }
 
 function getRowValue(row: Record<string, string>, headers: string[], normalizedName: string) {
-  const header = headers.find(candidate => normalizeHeader(candidate) === normalizedName);
+  const header = headers.find((candidate) => normalizeHeader(candidate) === normalizedName);
   return header ? row[header] : '';
 }
 
-function parseRow(row: Record<string, string>, headers: string[], sourceRowIndex: number): ParsedImportTransaction | null {
+function parseRow(
+  row: Record<string, string>,
+  headers: string[],
+  sourceRowIndex: number,
+): ParsedImportTransaction | null {
   const dateRaw = getRowValue(row, headers, 'date')?.trim();
   const description = getRowValue(row, headers, 'description')?.replace(/\s+/g, ' ').trim();
   const amountRaw = getRowValue(row, headers, 'amount')?.trim();
   const status = getRowValue(row, headers, 'status')?.trim();
-  const checkNumber = getRowValue(row, headers, normalizeHeader('CHECK #'))?.trim() ||
+  const checkNumber =
+    getRowValue(row, headers, normalizeHeader('CHECK #'))?.trim() ||
     getRowValue(row, headers, 'checknumber')?.trim();
 
   if (!dateRaw || !description || !amountRaw) return null;

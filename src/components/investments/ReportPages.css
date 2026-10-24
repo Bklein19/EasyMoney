@@ -162,7 +162,9 @@
   font-size: var(--text-xs);
   font-weight: 800;
   text-transform: capitalize;
-  transition: background var(--transition-fast), color var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .segmented-control button:hover,
@@ -360,7 +362,10 @@
   background: var(--bg-base);
   color: var(--text-muted);
   cursor: help;
-  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast),
+    color var(--transition-fast);
 }
 
 .retirement-info__button:hover,
@@ -391,7 +396,9 @@
   opacity: 0;
   pointer-events: none;
   transform: translateY(4px);
-  transition: opacity var(--transition-fast), transform var(--transition-fast);
+  transition:
+    opacity var(--transition-fast),
+    transform var(--transition-fast);
 }
 
 .retirement-info:hover .retirement-info__bubble,

@@ -32,7 +32,13 @@ describe('sync child process options', () => {
 
 describe('persisted sync job recovery', () => {
   test('interrupted queued work fails safely, while a staged review remains pending', () => {
-    const base = { runId: 'sync-test', message: '', completedAt: null, events: [] as SyncEvent[], error: null };
+    const base = {
+      runId: 'sync-test',
+      message: '',
+      completedAt: null,
+      events: [] as SyncEvent[],
+      error: null,
+    };
     const queued = { ...base, status: 'queued' as const };
     expect(markInterruptedSyncJob(queued)).toBe(true);
     const review = { ...base, status: 'awaiting-confirmation' as const };
@@ -61,9 +67,11 @@ describe('persisted sync job recovery', () => {
       error: 'EasyMoney closed before the sync completed. Run catch up again.',
       completedAt: '2026-08-21T14:50:00.000Z',
     });
-    expect(job.events).toEqual([expect.objectContaining({
-      type: 'error',
-      message: 'EasyMoney closed before the sync completed. Run catch up again.',
-    })]);
+    expect(job.events).toEqual([
+      expect.objectContaining({
+        type: 'error',
+        message: 'EasyMoney closed before the sync completed. Run catch up again.',
+      }),
+    ]);
   });
 });

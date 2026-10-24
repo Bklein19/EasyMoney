@@ -21,8 +21,10 @@ const LOGIN_URL = 'https://connect.secure.wellsfargo.com/auth/login/present';
 const ACCOUNT_SUMMARY_URL = 'https://connect.secure.wellsfargo.com/accounts/start';
 const DEFAULT_SESSION = 'wells-fargo-catchup';
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-const ACTIVITY_FILENAME = /^wells-fargo-(checking|savings|credit-card)-(\d{4})-(\d{4}-\d{2}-\d{2})-to-(\d{4}-\d{2}-\d{2})\.csv$/i;
-const STATEMENT_FILENAME = /^wells-fargo-(checking|savings|credit-card)-(\d{4})-(\d{4}-\d{2}-\d{2})\.pdf$/i;
+const ACTIVITY_FILENAME =
+  /^wells-fargo-(checking|savings|credit-card)-(\d{4})-(\d{4}-\d{2}-\d{2})-to-(\d{4}-\d{2}-\d{2})\.csv$/i;
+const STATEMENT_FILENAME =
+  /^wells-fargo-(checking|savings|credit-card)-(\d{4})-(\d{4}-\d{2}-\d{2})\.pdf$/i;
 const STATEMENT_PATH_PREFIX = '/edocs/documents/retrieve/';
 const MAX_STATEMENT_BYTES = 25_000_000;
 const AUTHENTICATION_PROBE_TIMEOUT_MS = 10_000;
@@ -158,11 +160,7 @@ export function createWellsFargoProgress(
 ) {
   const started = new Map<string, number>();
   return (event: WellsFargoProgressInput): void => {
-    const key = [
-      event.step,
-      event.accountIndex ?? 0,
-      event.artifactIndex ?? 0,
-    ].join(':');
+    const key = [event.step, event.accountIndex ?? 0, event.artifactIndex ?? 0].join(':');
     const now = clock();
     if (event.status === 'started') started.set(key, now);
     const began = started.get(key);
@@ -205,10 +203,7 @@ type BrowserResult = {
   unavailable: WellsFargoUnavailableArtifact[];
 };
 
-function wellsFargoBrowserBindings(
-  outputDir: string,
-  onProgress: WellsFargoProgressReporter,
-) {
+function wellsFargoBrowserBindings(outputDir: string, onProgress: WellsFargoProgressReporter) {
   return {
     accountCapabilities: wellsFargoAccountCapabilities,
     discoverAccounts: discoverWellsFargoAccounts,
@@ -243,21 +238,23 @@ function assertDateRange(from: string, through: string): void {
 
 function asWellsFargoUrl(value: string, base?: string): URL {
   const url = new URL(value, base);
-  if (url.protocol !== 'https:' || url.username || url.password || !/(?:^|\.)wellsfargo\.com$/i.test(url.hostname)) {
+  if (
+    url.protocol !== 'https:' ||
+    url.username ||
+    url.password ||
+    !/(?:^|\.)wellsfargo\.com$/i.test(url.hostname)
+  ) {
     throw new Error('Wells Fargo supplied an invalid API destination');
   }
   return url;
 }
 
-export function wellsFargoStatementDocumentUrl(
-  value: string,
-  pageUrl: string,
-): string | null {
+export function wellsFargoStatementDocumentUrl(value: string, pageUrl: string): string | null {
   try {
     const pageOrigin = asWellsFargoUrl(pageUrl).origin;
     const destination = asWellsFargoUrl(value, pageUrl);
     return destination.origin === pageOrigin &&
-        destination.pathname.startsWith(STATEMENT_PATH_PREFIX)
+      destination.pathname.startsWith(STATEMENT_PATH_PREFIX)
       ? destination.toString()
       : null;
   } catch {
@@ -283,7 +280,8 @@ export async function restoreWellsFargoStatementPage(
   await page.goBack({ waitUntil: 'domcontentloaded', timeout: 10_000 }).catch(() => null);
   if (page.isClosed()) return false;
   if (isExpectedPage()) return true;
-  await page.goto(expected.toString(), { waitUntil: 'domcontentloaded', timeout: 30_000 })
+  await page
+    .goto(expected.toString(), { waitUntil: 'domcontentloaded', timeout: 30_000 })
     .catch(() => null);
   return !page.isClosed() && isExpectedPage();
 }
@@ -291,14 +289,17 @@ export async function restoreWellsFargoStatementPage(
 function accountKindFromLabel(label: string): WellsFargoAccountKind | null {
   if (/\b(?:savings|money market)\b/i.test(label)) return 'savings';
   if (/\bchecking\b/i.test(label)) return 'checking';
-  if (/\b(?:credit\s*card|card|visa|mastercard|american express|amex)\b/i.test(label)) return 'credit-card';
+  if (/\b(?:credit\s*card|card|visa|mastercard|american express|amex)\b/i.test(label))
+    return 'credit-card';
   return null;
 }
 
 export function wellsFargoAccountLast4FromLabel(label: string): string | null {
-  return label.match(
-    /(?:account(?: number)? ending in|ending in|[x*\u2022.\u2026-]{2,})[\s.\u2026\u2022*x-]*(\d{4})(?!\d)/i,
-  )?.[1] ?? null;
+  return (
+    label.match(
+      /(?:account(?: number)? ending in|ending in|[x*\u2022.\u2026-]{2,})[\s.\u2026\u2022*x-]*(\d{4})(?!\d)/i,
+    )?.[1] ?? null
+  );
 }
 
 export function parseWellsFargoAccountCandidates(
@@ -310,7 +311,8 @@ export function parseWellsFargoAccountCandidates(
     const kind = candidate.observedKind ?? accountKindFromLabel(candidate.label);
     if (!kind) continue;
     const last4 = wellsFargoAccountLast4FromLabel(candidate.label);
-    if (!last4) throw new Error('A supported Wells Fargo account did not expose its last four digits');
+    if (!last4)
+      throw new Error('A supported Wells Fargo account did not expose its last four digits');
     if (candidate.destination) asWellsFargoUrl(candidate.destination, baseUrl);
     const identity = `${kind}:${last4}`;
     if (accounts.has(identity)) {
@@ -318,7 +320,8 @@ export function parseWellsFargoAccountCandidates(
     }
     accounts.set(identity, { kind, last4 });
   }
-  if (accounts.size === 0) throw new Error('Wells Fargo did not expose a supported checking, savings, or card account');
+  if (accounts.size === 0)
+    throw new Error('Wells Fargo did not expose a supported checking, savings, or card account');
   return [...accounts.values()];
 }
 
@@ -348,9 +351,9 @@ export function mapWellsFargoAccounts(
   plannedAccounts: WellsFargoSyncAccount[],
 ): WellsFargoMappedAccount[] {
   validateWellsFargoSyncAccounts(plannedAccounts);
-  return plannedAccounts.map(planned => {
-    const matches = remoteAccounts.filter(remote =>
-      remote.kind === planned.kind && remote.last4 === planned.last4
+  return plannedAccounts.map((planned) => {
+    const matches = remoteAccounts.filter(
+      (remote) => remote.kind === planned.kind && remote.last4 === planned.last4,
     );
     if (matches.length !== 1) {
       throw new Error('A planned Wells Fargo account is unavailable in the authenticated login');
@@ -383,8 +386,11 @@ export function wellsFargoActivityRequestFromForm(
 export function isWellsFargoActivityDownloadRequest(
   request: Pick<Request, 'method' | 'postData' | 'resourceType' | 'url'>,
 ): boolean {
-  if (request.method().toUpperCase() !== 'POST' ||
-      !['fetch', 'xhr'].includes(request.resourceType())) return false;
+  if (
+    request.method().toUpperCase() !== 'POST' ||
+    !['fetch', 'xhr'].includes(request.resourceType())
+  )
+    return false;
   try {
     asWellsFargoUrl(request.url());
   } catch {
@@ -398,8 +404,11 @@ function isWellsFargoReplayableStatementRequest(
   pageUrl: string,
 ): boolean {
   const method = request.method().toUpperCase();
-  if ((method !== 'GET' && method !== 'POST') ||
-      !['document', 'fetch', 'xhr'].includes(request.resourceType())) return false;
+  if (
+    (method !== 'GET' && method !== 'POST') ||
+    !['document', 'fetch', 'xhr'].includes(request.resourceType())
+  )
+    return false;
   try {
     const destination = asWellsFargoUrl(request.url());
     return destination.origin === asWellsFargoUrl(pageUrl).origin;
@@ -412,8 +421,10 @@ export function isWellsFargoStatementDownloadRequest(
   request: Pick<Request, 'method' | 'resourceType' | 'url'>,
   pageUrl: string,
 ): boolean {
-  return isWellsFargoReplayableStatementRequest(request, pageUrl) &&
-    wellsFargoStatementDocumentUrl(request.url(), pageUrl) !== null;
+  return (
+    isWellsFargoReplayableStatementRequest(request, pageUrl) &&
+    wellsFargoStatementDocumentUrl(request.url(), pageUrl) !== null
+  );
 }
 
 function wellsFargoDocumentUrlsFromJson(body: Buffer, pageUrl: string): string[] {
@@ -434,8 +445,10 @@ function wellsFargoDocumentUrlsFromJson(body: Buffer, pageUrl: string): string[]
       if (!/^https:\/\/|^\//i.test(trimmed)) return;
       try {
         const destination = asWellsFargoUrl(trimmed, pageUrl);
-        if (destination.origin === pageOrigin &&
-            /statement|document|edocs|retrieve|download|pdf/i.test(destination.pathname)) {
+        if (
+          destination.origin === pageOrigin &&
+          /statement|document|edocs|retrieve|download|pdf/i.test(destination.pathname)
+        ) {
           urls.add(destination.toString());
         }
       } catch {
@@ -457,10 +470,24 @@ function wellsFargoDocumentUrlsFromJson(body: Buffer, pageUrl: string): string[]
 
 function monthNumber(value: string): string | null {
   const month = value.slice(0, 3).toLowerCase();
-  return ({
-    jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
-    jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
-  } as Record<string, string>)[month] ?? null;
+  return (
+    (
+      {
+        jan: '01',
+        feb: '02',
+        mar: '03',
+        apr: '04',
+        may: '05',
+        jun: '06',
+        jul: '07',
+        aug: '08',
+        sep: '09',
+        oct: '10',
+        nov: '11',
+        dec: '12',
+      } as Record<string, string>
+    )[month] ?? null
+  );
 }
 
 export function wellsFargoDateFromText(value: string): string | null {
@@ -471,7 +498,9 @@ export function wellsFargoDateFromText(value: string): string | null {
     const year = numeric[3]!.length === 2 ? `20${numeric[3]}` : numeric[3]!;
     return `${year}-${numeric[1]!.padStart(2, '0')}-${numeric[2]!.padStart(2, '0')}`;
   }
-  const named = value.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(20\d{2})\b/i);
+  const named = value.match(
+    /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),?\s+(20\d{2})\b/i,
+  );
   const month = named ? monthNumber(named[1]!) : null;
   return named && month ? `${named[3]}-${month}-${named[2]!.padStart(2, '0')}` : null;
 }
@@ -482,21 +511,35 @@ export function wellsFargoStatementDateTextVariants(value: string): string[] {
   const monthIndex = Number(month) - 1;
   const dayNumber = Number(day);
   const fullMonth = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December',
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December',
   ][monthIndex]!;
   const shortMonth = fullMonth.slice(0, 3);
-  return [...new Set([
-    value,
-    `${month}/${day}/${year}`,
-    `${Number(month)}/${dayNumber}/${year}`,
-    `${month}/${day}/${year.slice(-2)}`,
-    `${Number(month)}/${dayNumber}/${year.slice(-2)}`,
-    `${fullMonth} ${dayNumber}, ${year}`,
-    `${fullMonth} ${dayNumber} ${year}`,
-    `${shortMonth} ${dayNumber}, ${year}`,
-    `${shortMonth} ${dayNumber} ${year}`,
-  ].map(variant => variant.toLowerCase()))];
+  return [
+    ...new Set(
+      [
+        value,
+        `${month}/${day}/${year}`,
+        `${Number(month)}/${dayNumber}/${year}`,
+        `${month}/${day}/${year.slice(-2)}`,
+        `${Number(month)}/${dayNumber}/${year.slice(-2)}`,
+        `${fullMonth} ${dayNumber}, ${year}`,
+        `${fullMonth} ${dayNumber} ${year}`,
+        `${shortMonth} ${dayNumber}, ${year}`,
+        `${shortMonth} ${dayNumber} ${year}`,
+      ].map((variant) => variant.toLowerCase()),
+    ),
+  ];
 }
 
 export function selectWellsFargoStatements(
@@ -506,20 +549,23 @@ export function selectWellsFargoStatements(
 ): WellsFargoStatementCandidate[] {
   assertDateRange(from, through);
   const byDate = new Map<string, WellsFargoStatementCandidate>();
-  const requestIdentity = (request: WellsFargoApiRequest) => JSON.stringify({
-    url: request.url,
-    method: request.method,
-    headers: Object.entries(request.headers ?? {})
-      .map(([name, value]) => [name.toLowerCase(), value] as const)
-      .sort(([left], [right]) => left.localeCompare(right)),
-    bodyBase64: request.bodyBase64 ?? null,
-    body: request.body ?? null,
-  });
+  const requestIdentity = (request: WellsFargoApiRequest) =>
+    JSON.stringify({
+      url: request.url,
+      method: request.method,
+      headers: Object.entries(request.headers ?? {})
+        .map(([name, value]) => [name.toLowerCase(), value] as const)
+        .sort(([left], [right]) => left.localeCompare(right)),
+      bodyBase64: request.bodyBase64 ?? null,
+      body: request.body ?? null,
+    });
   for (const candidate of candidates) {
     assertDate(candidate.date, 'Wells Fargo statement date');
     const destination = asWellsFargoUrl(candidate.request.url);
-    if (!destination.pathname.startsWith(STATEMENT_PATH_PREFIX) &&
-        candidate.verification !== 'observed-document-response') {
+    if (
+      !destination.pathname.startsWith(STATEMENT_PATH_PREFIX) &&
+      candidate.verification !== 'observed-document-response'
+    ) {
       throw new Error('Wells Fargo statement metadata did not expose the verified document API');
     }
     if (candidate.request.method !== 'GET' && candidate.request.method !== 'POST') {
@@ -546,8 +592,8 @@ function selectWellsFargoStatementWindow<T extends { date: string }>(
   assertDateRange(from, through);
   for (const candidate of candidates) assertDate(candidate.date, 'Wells Fargo statement date');
   const all = [...candidates].sort((left, right) => left.date.localeCompare(right.date));
-  const selected = all.filter(candidate => candidate.date >= from && candidate.date <= through);
-  const opening = all.filter(candidate => candidate.date < from).at(-1);
+  const selected = all.filter((candidate) => candidate.date >= from && candidate.date <= through);
+  const opening = all.filter((candidate) => candidate.date < from).at(-1);
   if (opening) selected.unshift(opening);
   return selected;
 }
@@ -587,13 +633,21 @@ function assertParsedAccount(
   expected: WellsFargoAccountIdentity,
   records: Array<{ account?: string | null }>,
 ): void {
-  const last4s = [...new Set(records.map(record => parsedAccountLast4(record.account)).filter((value): value is string => Boolean(value)))];
+  const last4s = [
+    ...new Set(
+      records
+        .map((record) => parsedAccountLast4(record.account))
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
   if (records.length > 0 && (last4s.length !== 1 || last4s[0] !== expected.last4)) {
     throw new Error('Wells Fargo parser output did not match the artifact routing identity');
   }
 }
 
-export async function validateWellsFargoArtifact(path: string): Promise<WellsFargoValidatedArtifact> {
+export async function validateWellsFargoArtifact(
+  path: string,
+): Promise<WellsFargoValidatedArtifact> {
   const plan = wellsFargoArtifactPlanFromFilename(path);
   if (!plan) throw new Error('Wells Fargo artifact filename is not account-identifiable');
   if (extname(path).toLowerCase() !== (plan.kind === 'activity' ? '.csv' : '.pdf')) {
@@ -608,8 +662,15 @@ export async function validateWellsFargoArtifact(path: string): Promise<WellsFar
   if (plan.kind === 'activity') {
     if (bytes.includes(0)) throw new Error('Wells Fargo activity contains binary data');
     const text = new TextDecoder().decode(bytes);
-    if (!text.includes(',') || !/[\r\n]/.test(text)) throw new Error('Wells Fargo activity does not have CSV text magic');
-    if (!wellsFargoActivityParser.matches({ fileName: plan.fileName, headers: [], sample: text.slice(0, 4096) })) {
+    if (!text.includes(',') || !/[\r\n]/.test(text))
+      throw new Error('Wells Fargo activity does not have CSV text magic');
+    if (
+      !wellsFargoActivityParser.matches({
+        fileName: plan.fileName,
+        headers: [],
+        sample: text.slice(0, 4096),
+      })
+    ) {
       throw new Error('Wells Fargo activity did not match the EasyMoney parser');
     }
     const parsed = await wellsFargoActivityParser.parse({
@@ -619,7 +680,9 @@ export async function validateWellsFargoArtifact(path: string): Promise<WellsFar
       rows: [],
       text,
     });
-    const transactions = parsed.transactions.filter((value): value is NonNullable<typeof value> => Boolean(value));
+    const transactions = parsed.transactions.filter((value): value is NonNullable<typeof value> =>
+      Boolean(value),
+    );
     assertParsedAccount(plan.account, transactions);
     return {
       ...plan,
@@ -642,13 +705,21 @@ export async function validateWellsFargoArtifact(path: string): Promise<WellsFar
     rows: [],
     text: '',
   });
-  const transactions = parsed.transactions.filter((value): value is NonNullable<typeof value> => Boolean(value));
+  const transactions = parsed.transactions.filter((value): value is NonNullable<typeof value> =>
+    Boolean(value),
+  );
   const records = [...transactions, ...parsed.balances];
   assertParsedAccount(plan.account, records);
-  if (parsed.balances.length === 0) throw new Error('Wells Fargo statement parser returned no balance anchor');
-  const totalsPassed = parsed.balances.every(balance => {
+  if (parsed.balances.length === 0)
+    throw new Error('Wells Fargo statement parser returned no balance anchor');
+  const totalsPassed = parsed.balances.every((balance) => {
     const evidence = balance.raw?.statementValidation;
-    return typeof evidence === 'object' && evidence !== null && 'status' in evidence && evidence.status === 'passed';
+    return (
+      typeof evidence === 'object' &&
+      evidence !== null &&
+      'status' in evidence &&
+      evidence.status === 'passed'
+    );
   });
   return {
     ...plan,
@@ -668,53 +739,85 @@ export async function isWellsFargoAuthenticatedPage(
   const deadline = Date.now() + Math.max(1, timeoutMs);
   for (let attempt = 0; ; attempt += 1) {
     try {
-      const state = await page.waitForFunction(() => {
-        const visible = (element: Element) => {
-          const style = getComputedStyle(element);
-          return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
-        };
-        const hasAuthenticationField = Array.from(document.querySelectorAll(
-          'input[type="password"], input[autocomplete="username"]'
-        )).some(visible);
-        if (hasAuthenticationField) return 'login-required';
-        if (!/(?:^|\.)wellsfargo\.com$/i.test(location.hostname)) return 'login-required';
-        const hasAuthenticatedMarker = Array.from(document.querySelectorAll('h1, h2, a')).some(element => {
-          const text = element.textContent?.replace(/\s+/g, ' ').trim() ?? '';
-          return (/^Account Summary$/i.test(text) || /^(?:Sign Off|Sign Out)$/i.test(text)) && visible(element);
-        });
-        return hasAuthenticatedMarker ? 'authenticated' : null;
-      }, undefined, { timeout: Math.max(1, deadline - Date.now()) });
+      const state = await page.waitForFunction(
+        () => {
+          const visible = (element: Element) => {
+            const style = getComputedStyle(element);
+            return (
+              style.display !== 'none' &&
+              style.visibility !== 'hidden' &&
+              element.getClientRects().length > 0
+            );
+          };
+          const hasAuthenticationField = Array.from(
+            document.querySelectorAll('input[type="password"], input[autocomplete="username"]'),
+          ).some(visible);
+          if (hasAuthenticationField) return 'login-required';
+          if (!/(?:^|\.)wellsfargo\.com$/i.test(location.hostname)) return 'login-required';
+          const hasAuthenticatedMarker = Array.from(document.querySelectorAll('h1, h2, a')).some(
+            (element) => {
+              const text = element.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+              return (
+                (/^Account Summary$/i.test(text) || /^(?:Sign Off|Sign Out)$/i.test(text)) &&
+                visible(element)
+              );
+            },
+          );
+          return hasAuthenticatedMarker ? 'authenticated' : null;
+        },
+        undefined,
+        { timeout: Math.max(1, deadline - Date.now()) },
+      );
       try {
-        return await state.jsonValue() === 'authenticated';
+        return (await state.jsonValue()) === 'authenticated';
       } finally {
         await state.dispose();
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const navigationRace = /execution context was destroyed|cannot find context with specified id/i.test(message);
-      if (!navigationRace || attempt >= 4 || Date.now() >= deadline || page.isClosed()) return false;
-      await page.waitForLoadState('domcontentloaded', {
-        timeout: Math.max(1, deadline - Date.now()),
-      }).catch(() => {});
+      const navigationRace =
+        /execution context was destroyed|cannot find context with specified id/i.test(message);
+      if (!navigationRace || attempt >= 4 || Date.now() >= deadline || page.isClosed())
+        return false;
+      await page
+        .waitForLoadState('domcontentloaded', {
+          timeout: Math.max(1, deadline - Date.now()),
+        })
+        .catch(() => {});
     }
   }
 }
 
-export async function waitUntilWellsFargoAuthenticated(page: Page, timeoutMs: number): Promise<void> {
-  await page.waitForFunction(() => {
-    const visible = (element: Element) => {
-      const style = getComputedStyle(element);
-      return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
-    };
-    const hasAuthenticationField = Array.from(document.querySelectorAll(
-      'input[type="password"], input[autocomplete="username"]'
-    )).some(visible);
-    if (hasAuthenticationField || !/(?:^|\.)wellsfargo\.com$/i.test(location.hostname)) return false;
-    return Array.from(document.querySelectorAll('h1, h2, a')).some(element => {
-      const text = element.textContent?.replace(/\s+/g, ' ').trim() ?? '';
-      return (/^Account Summary$/i.test(text) || /^(?:Sign Off|Sign Out)$/i.test(text)) && visible(element);
-    });
-  }, undefined, { timeout: timeoutMs });
+export async function waitUntilWellsFargoAuthenticated(
+  page: Page,
+  timeoutMs: number,
+): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const visible = (element: Element) => {
+        const style = getComputedStyle(element);
+        return (
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          element.getClientRects().length > 0
+        );
+      };
+      const hasAuthenticationField = Array.from(
+        document.querySelectorAll('input[type="password"], input[autocomplete="username"]'),
+      ).some(visible);
+      if (hasAuthenticationField || !/(?:^|\.)wellsfargo\.com$/i.test(location.hostname))
+        return false;
+      return Array.from(document.querySelectorAll('h1, h2, a')).some((element) => {
+        const text = element.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+        return (
+          (/^Account Summary$/i.test(text) || /^(?:Sign Off|Sign Out)$/i.test(text)) &&
+          visible(element)
+        );
+      });
+    },
+    undefined,
+    { timeout: timeoutMs },
+  );
 }
 
 export async function ensureWellsFargoAccountSummary(page: Page): Promise<void> {
@@ -731,7 +834,12 @@ export async function ensureWellsFargoAccountSummary(page: Page): Promise<void> 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     await page.goBack({ waitUntil: 'domcontentloaded', timeout: 30_000 }).catch(() => null);
     if (!isWellsFargoOrigin(page.url())) break;
-    if (await heading.waitFor({ state: 'visible', timeout: 5_000 }).then(() => true).catch(() => false)) {
+    if (
+      await heading
+        .waitFor({ state: 'visible', timeout: 5_000 })
+        .then(() => true)
+        .catch(() => false)
+    ) {
       return;
     }
     if (await link.isVisible().catch(() => false)) {
@@ -751,9 +859,12 @@ export async function ensureWellsFargoAccountSummary(page: Page): Promise<void> 
 export async function discoverWellsFargoAccounts(page: Page): Promise<WellsFargoRemoteAccount[]> {
   await ensureWellsFargoAccountSummary(page);
   const controls = wellsFargoAccountControls(page);
-  await controls.first().waitFor({ state: 'attached', timeout: 30_000 }).catch(() => {
-    throw new Error('Wells Fargo account metadata did not load');
-  });
+  await controls
+    .first()
+    .waitFor({ state: 'attached', timeout: 30_000 })
+    .catch(() => {
+      throw new Error('Wells Fargo account metadata did not load');
+    });
   const count = await controls.count();
   const candidates: WellsFargoAccountCandidate[] = [];
   for (let index = 0; index < count; index += 1) {
@@ -761,27 +872,35 @@ export async function discoverWellsFargoAccounts(page: Page): Promise<WellsFargo
     const control = wellsFargoAccountControls(page).nth(index);
     const label = (await control.textContent())?.replace(/\s+/g, ' ').trim() ?? '';
     if (!wellsFargoAccountLast4FromLabel(label)) continue;
-    if (!await clickWellsFargoAccountControl(page, control, {
-      allowUnsupportedDestination: true,
-    })) continue;
+    if (
+      !(await clickWellsFargoAccountControl(page, control, {
+        allowUnsupportedDestination: true,
+      }))
+    )
+      continue;
     if (!isWellsFargoOrigin(page.url())) continue;
     const capabilities = await probeWellsFargoAccountCapabilities(page);
     if (!capabilities.activity && !capabilities.statements) continue;
     const observedKind = await wellsFargoAccountKindFromDetailPage(page);
     if (!observedKind) {
-      throw new Error('Wells Fargo did not expose a supported account kind on its account detail page');
+      throw new Error(
+        'Wells Fargo did not expose a supported account kind on its account detail page',
+      );
     }
     candidates.push({ label, observedKind });
   }
   return parseWellsFargoAccountCandidates(candidates);
 }
 
-export async function openWellsFargoAccount(page: Page, account: WellsFargoRemoteAccount): Promise<void> {
+export async function openWellsFargoAccount(
+  page: Page,
+  account: WellsFargoRemoteAccount,
+): Promise<void> {
   await ensureWellsFargoAccountSummary(page);
   const controls = wellsFargoAccountControls(page);
   const labels = await controls.allTextContents();
   const matchingIndices = labels.flatMap((label, index) =>
-    wellsFargoAccountLast4FromLabel(label) === account.last4 ? [index] : []
+    wellsFargoAccountLast4FromLabel(label) === account.last4 ? [index] : [],
   );
   if (matchingIndices.length !== 1) {
     throw new Error('A Wells Fargo account control has an ambiguous routing identity');
@@ -813,8 +932,8 @@ export async function clickWellsFargoAccountControl(
   if (destinationAttribute) {
     const destination = asWellsFargoUrl(destinationAttribute, page.url());
     const loginOrigin = new URL(LOGIN_URL).origin;
-    const isPrimaryAccountDestination = destination.origin === loginOrigin &&
-      !/^\/sso(?:\/|$)/i.test(destination.pathname);
+    const isPrimaryAccountDestination =
+      destination.origin === loginOrigin && !/^\/sso(?:\/|$)/i.test(destination.pathname);
     if (!isPrimaryAccountDestination) {
       if (options.allowUnsupportedDestination) return false;
       throw new Error('A Wells Fargo account control did not target an account detail page');
@@ -822,11 +941,17 @@ export async function clickWellsFargoAccountControl(
   }
   await control.click();
   const revealedAccountDetails = await Promise.any([
-    page.getByRole('button', { name: /^Download Account Activity$/i }).first()
+    page
+      .getByRole('button', { name: /^Download Account Activity$/i })
+      .first()
       .waitFor({ state: 'visible', timeout: 30_000 }),
-    page.getByRole('link', { name: /^View Statements$/i }).first()
+    page
+      .getByRole('link', { name: /^View Statements$/i })
+      .first()
       .waitFor({ state: 'visible', timeout: 30_000 }),
-  ]).then(() => true).catch(() => false);
+  ])
+    .then(() => true)
+    .catch(() => false);
   if (!revealedAccountDetails) {
     if (options.allowUnsupportedDestination) return false;
     throw new Error('A Wells Fargo account control did not reveal account details');
@@ -838,9 +963,11 @@ async function wellsFargoAccountKindFromDetailPage(
   page: Page,
 ): Promise<WellsFargoAccountKind | null> {
   const headings = await page.getByRole('heading').allTextContents();
-  const kinds = new Set(headings.map(accountKindFromLabel).filter(
-    (kind): kind is WellsFargoAccountKind => kind !== null,
-  ));
+  const kinds = new Set(
+    headings
+      .map(accountKindFromLabel)
+      .filter((kind): kind is WellsFargoAccountKind => kind !== null),
+  );
   if (kinds.size > 1) throw new Error('Wells Fargo exposed an ambiguous account kind');
   return [...kinds][0] ?? null;
 }
@@ -849,8 +976,14 @@ async function probeWellsFargoAccountCapabilities(page: Page): Promise<AccountCa
   const activity = page.getByRole('button', { name: /^Download Account Activity$/i }).first();
   const statements = page.getByRole('link', { name: /^View Statements$/i }).first();
   const [hasActivity, hasStatements] = await Promise.all([
-    activity.waitFor({ state: 'visible', timeout: 12_000 }).then(() => true).catch(() => false),
-    statements.waitFor({ state: 'visible', timeout: 12_000 }).then(() => true).catch(() => false),
+    activity
+      .waitFor({ state: 'visible', timeout: 12_000 })
+      .then(() => true)
+      .catch(() => false),
+    statements
+      .waitFor({ state: 'visible', timeout: 12_000 })
+      .then(() => true)
+      .catch(() => false),
   ]);
   return { activity: hasActivity, statements: hasStatements };
 }
@@ -875,13 +1008,21 @@ async function prepareWellsFargoActivityRequest(
   await csv.waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {
     throw new Error('Wells Fargo CSV activity option did not load');
   });
-  if (!await csv.isChecked()) await csv.check();
+  if (!(await csv.isChecked())) await csv.check();
   const download = page.getByTestId('download-button').first();
   await download.waitFor({ state: 'visible', timeout: 30_000 });
-  await page.waitForFunction(() => {
-    const button = document.querySelector('[data-testid="download-button"]');
-    return button instanceof HTMLButtonElement && !button.disabled && button.getAttribute('aria-disabled') !== 'true';
-  }, undefined, { timeout: 30_000 });
+  await page.waitForFunction(
+    () => {
+      const button = document.querySelector('[data-testid="download-button"]');
+      return (
+        button instanceof HTMLButtonElement &&
+        !button.disabled &&
+        button.getAttribute('aria-disabled') !== 'true'
+      );
+    },
+    undefined,
+    { timeout: 30_000 },
+  );
   let settleRequest: ((request: WellsFargoApiRequest) => void) | undefined;
   let rejectRequest: ((error: Error) => void) | undefined;
   const observedRequest = new Promise<WellsFargoApiRequest>((resolve, reject) => {
@@ -940,10 +1081,14 @@ export async function setWellsFargoActivityDates(
   through: string,
 ): Promise<void> {
   const fields = page.getByRole('textbox', { name: /MM\/DD\/YYYY/i });
-  await fields.nth(1).waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {
-    throw new Error('Wells Fargo activity date controls did not load');
-  });
-  if (await fields.count() !== 2) throw new Error('Wells Fargo activity date controls are ambiguous');
+  await fields
+    .nth(1)
+    .waitFor({ state: 'visible', timeout: 30_000 })
+    .catch(() => {
+      throw new Error('Wells Fargo activity date controls did not load');
+    });
+  if ((await fields.count()) !== 2)
+    throw new Error('Wells Fargo activity date controls are ambiguous');
   const displayDate = (value: string) => {
     const [year, month, day] = value.split('-');
     return `${month}/${day}/${year}`;
@@ -1025,23 +1170,51 @@ async function captureWellsFargoStatementRequest(
   const requestHandler = (request: Request): void => {
     const method = request.method().toUpperCase();
     const resourceType = request.resourceType();
-    if ((method !== 'GET' && method !== 'POST') ||
-        !['document', 'fetch', 'xhr'].includes(resourceType)) return;
+    if (
+      (method !== 'GET' && method !== 'POST') ||
+      !['document', 'fetch', 'xhr'].includes(resourceType)
+    )
+      return;
     try {
       const destination = asWellsFargoUrl(request.url());
       const allowedPathSegments = new Set([
-        'account', 'accounts', 'activity', 'api', 'auth', 'connect', 'credit-card',
-        'document', 'documents', 'download', 'edocs', 'graphql', 'index', 'login',
-        'oapi', 'online', 'pdf', 'present', 'retrieve', 'secure', 'statement',
-        'statements', 'summary', 'view', 'web',
+        'account',
+        'accounts',
+        'activity',
+        'api',
+        'auth',
+        'connect',
+        'credit-card',
+        'document',
+        'documents',
+        'download',
+        'edocs',
+        'graphql',
+        'index',
+        'login',
+        'oapi',
+        'online',
+        'pdf',
+        'present',
+        'retrieve',
+        'secure',
+        'statement',
+        'statements',
+        'summary',
+        'view',
+        'web',
       ]);
-      const pathShape = destination.pathname.split('/').map(segment => {
-        const normalized = segment.toLowerCase();
-        return !segment || allowedPathSegments.has(normalized) ||
+      const pathShape = destination.pathname
+        .split('/')
+        .map((segment) => {
+          const normalized = segment.toLowerCase();
+          return !segment ||
+            allowedPathSegments.has(normalized) ||
             /^[a-z][a-z-]{0,39}$/i.test(segment)
-          ? normalized
-          : '*';
-      }).join('/');
+            ? normalized
+            : '*';
+        })
+        .join('/');
       requestPathShapes.add(`${method}:${resourceType}:${pathShape}`);
       if (destination.origin === pageOrigin) {
         sameOriginRequestCount += 1;
@@ -1056,15 +1229,20 @@ async function captureWellsFargoStatementRequest(
           `${month}/${day}/${year}`,
           `${month}/${day}/${year?.slice(-2)}`,
         ];
-        if (dateForms.some(value => value && (
-          postData.includes(value) || postData.includes(encodeURIComponent(value))
-        ))) {
+        if (
+          dateForms.some(
+            (value) =>
+              value && (postData.includes(value) || postData.includes(encodeURIComponent(value))),
+          )
+        ) {
           dateMatchedRequestCount += 1;
         }
         try {
           const payload = JSON.parse(postData) as { operationName?: unknown };
-          if (typeof payload.operationName === 'string' &&
-              /^[A-Za-z][A-Za-z0-9]{0,79}$/.test(payload.operationName)) {
+          if (
+            typeof payload.operationName === 'string' &&
+            /^[A-Za-z][A-Za-z0-9]{0,79}$/.test(payload.operationName)
+          ) {
             operationNames.add(payload.operationName);
           }
         } catch {
@@ -1092,24 +1270,32 @@ async function captureWellsFargoStatementRequest(
     if (contentType.includes('html')) htmlResponseCount += 1;
     if (contentType.includes('octet-stream')) binaryResponseCount += 1;
     const body = await response.body().catch(() => null);
-    if (body && contentType.includes('json') &&
-        /statement|document|download|pdf/i.test(body.toString('utf8'))) {
+    if (
+      body &&
+      contentType.includes('json') &&
+      /statement|document|download|pdf/i.test(body.toString('utf8'))
+    ) {
       jsonDocumentMarkerCount += 1;
     }
-    const documentUrls = body && contentType.includes('json')
-      ? wellsFargoDocumentUrlsFromJson(body, pageUrl)
-      : [];
+    const documentUrls =
+      body && contentType.includes('json') ? wellsFargoDocumentUrlsFromJson(body, pageUrl) : [];
     jsonDocumentUrlCount += documentUrls.length;
     const capturedResponse = body
-      ? wellsFargoCapturedStatementResponse({
-          status: response.status(),
-          url: response.url(),
-          headers,
-          redirected: request.redirectedFrom() !== null,
-        }, body, pageUrl)
+      ? wellsFargoCapturedStatementResponse(
+          {
+            status: response.status(),
+            url: response.url(),
+            headers,
+            redirected: request.redirectedFrom() !== null,
+          },
+          body,
+          pageUrl,
+        )
       : null;
-    const hasPdf = Boolean(capturedResponse) ||
-      contentType.includes('pdf') || /\.pdf(?:"|;|$)/i.test(disposition);
+    const hasPdf =
+      Boolean(capturedResponse) ||
+      contentType.includes('pdf') ||
+      /\.pdf(?:"|;|$)/i.test(disposition);
     if (!capturedResponse) return;
     if (hasPdf) pdfResponseCount += 1;
     const claim = claimRequest();
@@ -1157,12 +1343,16 @@ async function captureWellsFargoStatementRequest(
           chunks.push(bytes);
         }
         const body = Buffer.concat(chunks);
-        capturedResponse = wellsFargoCapturedStatementResponse({
-          status: 200,
-          url,
-          headers: { 'content-type': 'application/pdf' },
-          redirected: false,
-        }, body, pageUrl);
+        capturedResponse = wellsFargoCapturedStatementResponse(
+          {
+            status: 200,
+            url,
+            headers: { 'content-type': 'application/pdf' },
+            redirected: false,
+          },
+          body,
+          pageUrl,
+        );
       }
     } catch {
       // Fail closed below if this is not a same-origin Wells document download.
@@ -1200,12 +1390,16 @@ async function captureWellsFargoStatementRequest(
     try {
       const capturedRequest = await captureRequest(request);
       const response = await runBrowserNativeRouteRequest(page, route, 30_000);
-      const capturedResponse = wellsFargoCapturedStatementResponse({
-        status: response.status,
-        url: response.url,
-        headers: response.headers,
-        redirected: response.redirected,
-      }, browserNativeResponseBody(response), pageUrl);
+      const capturedResponse = wellsFargoCapturedStatementResponse(
+        {
+          status: response.status,
+          url: response.url,
+          headers: response.headers,
+          redirected: response.redirected,
+        },
+        browserNativeResponseBody(response),
+        pageUrl,
+      );
       await route.abort('blockedbyclient');
       if (!capturedResponse) {
         throw new Error(
@@ -1224,29 +1418,39 @@ async function captureWellsFargoStatementRequest(
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const click = (async () => {
     const dateVariants = wellsFargoStatementDateTextVariants(statementDate);
-    const datePattern = new RegExp(dateVariants.map(variant =>
-      variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    ).join('|'), 'i');
+    const datePattern = new RegExp(
+      dateVariants.map((variant) => variant.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'),
+      'i',
+    );
     const resolutionDeadline = Date.now() + 5_000;
     let lastMatchingControlCount = 0;
     while (Date.now() < resolutionDeadline) {
       const matchingControlSets: Array<ReturnType<Page['locator']>> = [];
       let matchingControlCount = 0;
-      for (const candidatePage of context.pages().filter(item => !item.isClosed())) {
+      for (const candidatePage of context.pages().filter((item) => !item.isClosed())) {
         for (const frame of candidatePage.frames()) {
           if (statementDestination) {
             const links = frame.locator('a[href*="' + STATEMENT_PATH_PREFIX + '"]');
-            const destinations = await links.evaluateAll(elements => elements.map(element =>
-              element instanceof HTMLAnchorElement ? element.href : ''
-            )).catch(() => []);
+            const destinations = await links
+              .evaluateAll((elements) =>
+                elements.map((element) =>
+                  element instanceof HTMLAnchorElement ? element.href : '',
+                ),
+              )
+              .catch(() => []);
             for (let index = 0; index < destinations.length; index += 1) {
-              if (wellsFargoStatementDocumentUrl(destinations[index] ?? '', pageUrl) !==
-                  statementDestination) continue;
+              if (
+                wellsFargoStatementDocumentUrl(destinations[index] ?? '', pageUrl) !==
+                statementDestination
+              )
+                continue;
               matchingControlSets.push(links.nth(index));
               matchingControlCount += 1;
             }
           } else {
-            const controls = frame.locator('a[role="link"][tabindex]').filter({ hasText: datePattern });
+            const controls = frame
+              .locator('a[role="link"][tabindex]')
+              .filter({ hasText: datePattern });
             const count = await controls.count().catch(() => 0);
             if (count > 0) matchingControlSets.push(controls);
             matchingControlCount += count;
@@ -1255,14 +1459,20 @@ async function captureWellsFargoStatementRequest(
       }
       lastMatchingControlCount = matchingControlCount;
       if (matchingControlCount > 1 || matchingControlSets.length > 1) {
-        throw new Error(`Wells Fargo statement control could not be resolved (matches=${matchingControlCount})`);
+        throw new Error(
+          `Wells Fargo statement control could not be resolved (matches=${matchingControlCount})`,
+        );
       }
       if (matchingControlCount === 1 && matchingControlSets.length === 1) {
-        const clicked = await matchingControlSets[0]!.first().click({
-          force: true,
-          noWaitAfter: true,
-          timeout: 1_000,
-        }).then(() => true).catch(() => false);
+        const clicked = await matchingControlSets[0]!
+          .first()
+          .click({
+            force: true,
+            noWaitAfter: true,
+            timeout: 1_000,
+          })
+          .then(() => true)
+          .catch(() => false);
         if (clicked) return;
       }
       await page.waitForTimeout(100).catch(() => {});
@@ -1270,14 +1480,15 @@ async function captureWellsFargoStatementRequest(
     throw new Error(
       `Wells Fargo statement control could not be resolved (matches=${lastMatchingControlCount})`,
     );
-  })().catch(error => {
+  })().catch((error) => {
     const errorMessage = error instanceof Error ? error.message : '';
     const safeResolution = errorMessage.match(/\(matches=(\d+)\)$/)?.[1];
-    activationFailureReason = safeResolution !== undefined
-      ? `match-count-${safeResolution}`
-      : error instanceof Error && error.name === 'TimeoutError'
-        ? 'timeout'
-        : 'rejected';
+    activationFailureReason =
+      safeResolution !== undefined
+        ? `match-count-${safeResolution}`
+        : error instanceof Error && error.name === 'TimeoutError'
+          ? 'timeout'
+          : 'rejected';
   });
   let directLinkActivated = false;
   const postClickProbe = (async () => {
@@ -1287,77 +1498,98 @@ async function captureWellsFargoStatementRequest(
     let matchingDateControlCount = 0;
     let dialogCount = 0;
     let embeddedDocumentCount = 0;
-    for (const candidatePage of context.pages().filter(item => !item.isClosed())) {
+    for (const candidatePage of context.pages().filter((item) => !item.isClosed())) {
       for (const frame of candidatePage.frames()) {
         const dateControls = frame.locator('a[role="link"][tabindex]');
         const dateControlTexts = await dateControls.allTextContents().catch(() => []);
         for (let index = 0; index < dateControlTexts.length; index += 1) {
           if (wellsFargoDateFromText(dateControlTexts[index] ?? '') !== statementDate) continue;
           matchingDateControlCount += 1;
-          const localShape = await dateControls.nth(index).evaluate(target => {
-            const visible = (element: Element) => {
-              if (!(element instanceof HTMLElement)) return false;
-              const style = getComputedStyle(element);
-              const box = element.getBoundingClientRect();
-              return style.display !== 'none' && style.visibility !== 'hidden' &&
-                box.width > 0 && box.height > 0;
-            };
-            const classShape = (element: Element) => [...element.classList]
-              .filter(value => /^[A-Za-z_-]{1,40}$/.test(value))
-              .slice(0, 3)
-              .join('.') || 'none';
-            const controlShape = (element: Element) => {
-              const label = [
-                element.textContent ?? '',
-                element.getAttribute('aria-label') ?? '',
-                element.getAttribute('title') ?? '',
-              ].join(' ');
-              const kind = /download/i.test(label) ? 'download'
-                : /\bview\b/i.test(label) ? 'view'
-                  : /pdf/i.test(label) ? 'pdf'
-                    : /statement|document/i.test(label) ? 'document'
-                      : 'other';
+          const localShape = await dateControls
+            .nth(index)
+            .evaluate((target) => {
+              const visible = (element: Element) => {
+                if (!(element instanceof HTMLElement)) return false;
+                const style = getComputedStyle(element);
+                const box = element.getBoundingClientRect();
+                return (
+                  style.display !== 'none' &&
+                  style.visibility !== 'hidden' &&
+                  box.width > 0 &&
+                  box.height > 0
+                );
+              };
+              const classShape = (element: Element) =>
+                [...element.classList]
+                  .filter((value) => /^[A-Za-z_-]{1,40}$/.test(value))
+                  .slice(0, 3)
+                  .join('.') || 'none';
+              const controlShape = (element: Element) => {
+                const label = [
+                  element.textContent ?? '',
+                  element.getAttribute('aria-label') ?? '',
+                  element.getAttribute('title') ?? '',
+                ].join(' ');
+                const kind = /download/i.test(label)
+                  ? 'download'
+                  : /\bview\b/i.test(label)
+                    ? 'view'
+                    : /pdf/i.test(label)
+                      ? 'pdf'
+                      : /statement|document/i.test(label)
+                        ? 'document'
+                        : 'other';
+                return [
+                  element.tagName.toLowerCase(),
+                  element.getAttribute('role') ?? 'none',
+                  element instanceof HTMLInputElement ? element.type || 'text' : 'none',
+                  kind,
+                  classShape(element),
+                ].join('.');
+              };
+              const ancestorShapes: string[] = [];
+              let ancestor: Element | null = target;
+              for (let depth = 0; ancestor && depth <= 6; depth += 1) {
+                const controls = [
+                  ...(ancestor.matches(
+                    'a, button, input, [role="button"], [role="link"], [tabindex]',
+                  )
+                    ? [ancestor]
+                    : []),
+                  ...ancestor.querySelectorAll(
+                    'a, button, input, [role="button"], [role="link"], [tabindex]',
+                  ),
+                ].filter(
+                  (element, controlIndex, all) =>
+                    all.indexOf(element) === controlIndex && visible(element),
+                );
+                ancestorShapes.push(
+                  `${depth}-${ancestor.tagName.toLowerCase()}.${classShape(ancestor)}` +
+                    `[${controls.slice(0, 6).map(controlShape).join('+') || 'none'}]`,
+                );
+                ancestor = ancestor.parentElement;
+              }
               return [
-                element.tagName.toLowerCase(),
-                element.getAttribute('role') ?? 'none',
-                element instanceof HTMLInputElement ? element.type || 'text' : 'none',
-                kind,
-                classShape(element),
-              ].join('.');
-            };
-            const ancestorShapes: string[] = [];
-            let ancestor: Element | null = target;
-            for (let depth = 0; ancestor && depth <= 6; depth += 1) {
-              const controls = [
-                ...(ancestor.matches('a, button, input, [role="button"], [role="link"], [tabindex]')
-                  ? [ancestor]
-                  : []),
-                ...ancestor.querySelectorAll(
-                  'a, button, input, [role="button"], [role="link"], [tabindex]',
-                ),
-              ].filter((element, controlIndex, all) =>
-                all.indexOf(element) === controlIndex && visible(element)
-              );
-              ancestorShapes.push(
-                `${depth}-${ancestor.tagName.toLowerCase()}.${classShape(ancestor)}` +
-                `[${controls.slice(0, 6).map(controlShape).join('+') || 'none'}]`,
-              );
-              ancestor = ancestor.parentElement;
-            }
-            return [
-              `expanded=${target.getAttribute('aria-expanded') ?? 'none'}`,
-              `selected=${target.getAttribute('aria-selected') ?? 'none'}`,
-              `ancestors=${ancestorShapes.join('>')}`,
-            ].join(':');
-          }).catch(() => 'resolved=false');
+                `expanded=${target.getAttribute('aria-expanded') ?? 'none'}`,
+                `selected=${target.getAttribute('aria-selected') ?? 'none'}`,
+                `ancestors=${ancestorShapes.join('>')}`,
+              ].join(':');
+            })
+            .catch(() => 'resolved=false');
           localShapes.push(localShape);
         }
-        dialogCount += await frame.locator('[role="dialog"], [aria-modal="true"]').count().catch(() => 0);
-        embeddedDocumentCount += await frame.locator('iframe, embed[type*="pdf"], object[type*="pdf"]').count()
+        dialogCount += await frame
+          .locator('[role="dialog"], [aria-modal="true"]')
+          .count()
+          .catch(() => 0);
+        embeddedDocumentCount += await frame
+          .locator('iframe, embed[type*="pdf"], object[type*="pdf"]')
+          .count()
           .catch(() => 0);
       }
     }
-    postClickShape = `matches=${matchingDateControlCount}:` +
+    postClickShape =
+      `matches=${matchingDateControlCount}:` +
       `${localShapes.join('|') || 'none'}:dialogs=${dialogCount}:embedded=${embeddedDocumentCount}`;
     const probeDeadline = Date.now() + 12_000;
     while (settleRequest && Date.now() < probeDeadline) {
@@ -1366,39 +1598,51 @@ async function captureWellsFargoStatementRequest(
         destination: string;
         control: ReturnType<Page['locator']>;
       }> = [];
-      for (const candidatePage of context.pages().filter(item => !item.isClosed())) {
+      for (const candidatePage of context.pages().filter((item) => !item.isClosed())) {
         for (const frame of candidatePage.frames()) {
           const links = frame.locator('a[href*="' + STATEMENT_PATH_PREFIX + '"]');
-          const linkMetadata = await links.evaluateAll(elements => elements.map(element => {
-            const destination = element instanceof HTMLAnchorElement ? element.href : '';
-            const parentText = element.parentElement?.textContent ?? '';
-            return {
-              value: (element.textContent ?? '') + ' ' + parentText + ' ' + destination,
-              destination,
-            };
-          })).catch(() => []);
-          observedLinks.push(...linkMetadata.map((metadata, index) => ({
-            ...metadata,
-            control: links.nth(index),
-          })));
+          const linkMetadata = await links
+            .evaluateAll((elements) =>
+              elements.map((element) => {
+                const destination = element instanceof HTMLAnchorElement ? element.href : '';
+                const parentText = element.parentElement?.textContent ?? '';
+                return {
+                  value: (element.textContent ?? '') + ' ' + parentText + ' ' + destination,
+                  destination,
+                };
+              }),
+            )
+            .catch(() => []);
+          observedLinks.push(
+            ...linkMetadata.map((metadata, index) => ({
+              ...metadata,
+              control: links.nth(index),
+            })),
+          );
         }
       }
       directLinkCount = observedLinks.length;
-      const dateMatchedLinks = observedLinks.filter(candidate =>
-        wellsFargoDateFromText(candidate.value) === statementDate
+      const dateMatchedLinks = observedLinks.filter(
+        (candidate) => wellsFargoDateFromText(candidate.value) === statementDate,
       );
-      const selectedLink = dateMatchedLinks.length === 1
-        ? dateMatchedLinks[0]
-        : observedLinks.length === 1 ? observedLinks[0] : undefined;
+      const selectedLink =
+        dateMatchedLinks.length === 1
+          ? dateMatchedLinks[0]
+          : observedLinks.length === 1
+            ? observedLinks[0]
+            : undefined;
       if (selectedLink) {
         const destination = wellsFargoStatementDocumentUrl(selectedLink.destination, pageUrl);
         if (destination && !directLinkActivated) {
           directLinkActivated = true;
-          const activated = await selectedLink.control.click({
-            force: true,
-            noWaitAfter: true,
-            timeout: 1_000,
-          }).then(() => true).catch(() => false);
+          const activated = await selectedLink.control
+            .click({
+              force: true,
+              noWaitAfter: true,
+              timeout: 1_000,
+            })
+            .then(() => true)
+            .catch(() => false);
           if (!activated) activationFailureReason = 'direct-link-rejected';
           continue;
         }
@@ -1411,22 +1655,28 @@ async function captureWellsFargoStatementRequest(
     return await Promise.race([
       observedRequest,
       new Promise<never>((_resolve, reject) => {
-        timeout = setTimeout(() => reject(new Error(
-          'Wells Fargo statement API request was not observed ' +
-          `(activation=${activationFailureReason} post-click=${postClickShape} ` +
-          `control-shape=${statementControlShape} ` +
-          `same-origin=${sameOriginRequestCount} other-wells-origin=${otherWellsOriginRequestCount} ` +
-          `operations=${[...operationNames].sort().join(',') || 'none'} ` +
-          `path-shapes=${[...requestPathShapes].sort().join(',') || 'none'} ` +
-          `request-document-markers=${documentMarkerRequestCount} date-matched-requests=${dateMatchedRequestCount} ` +
-          `document=${documentRequestCount} fetch=${fetchRequestCount} xhr=${xhrRequestCount} ` +
-          `pdf-responses=${pdfResponseCount} json-responses=${jsonResponseCount} ` +
-          `json-document-markers=${jsonDocumentMarkerCount} json-document-urls=${jsonDocumentUrlCount} ` +
-          `html-responses=${htmlResponseCount} ` +
-          `binary-responses=${binaryResponseCount} download-events=${downloadEventCount} ` +
-          `direct-links=${directLinkCount} rejected-direct-links=${rejectedDirectLinkCount} ` +
-          `new-pages=${context.pages().filter(candidate => !existingPages.has(candidate)).length})`,
-        )), 12_000);
+        timeout = setTimeout(
+          () =>
+            reject(
+              new Error(
+                'Wells Fargo statement API request was not observed ' +
+                  `(activation=${activationFailureReason} post-click=${postClickShape} ` +
+                  `control-shape=${statementControlShape} ` +
+                  `same-origin=${sameOriginRequestCount} other-wells-origin=${otherWellsOriginRequestCount} ` +
+                  `operations=${[...operationNames].sort().join(',') || 'none'} ` +
+                  `path-shapes=${[...requestPathShapes].sort().join(',') || 'none'} ` +
+                  `request-document-markers=${documentMarkerRequestCount} date-matched-requests=${dateMatchedRequestCount} ` +
+                  `document=${documentRequestCount} fetch=${fetchRequestCount} xhr=${xhrRequestCount} ` +
+                  `pdf-responses=${pdfResponseCount} json-responses=${jsonResponseCount} ` +
+                  `json-document-markers=${jsonDocumentMarkerCount} json-document-urls=${jsonDocumentUrlCount} ` +
+                  `html-responses=${htmlResponseCount} ` +
+                  `binary-responses=${binaryResponseCount} download-events=${downloadEventCount} ` +
+                  `direct-links=${directLinkCount} rejected-direct-links=${rejectedDirectLinkCount} ` +
+                  `new-pages=${context.pages().filter((candidate) => !existingPages.has(candidate)).length})`,
+              ),
+            ),
+          12_000,
+        );
       }),
     ]);
   } finally {
@@ -1442,19 +1692,24 @@ async function captureWellsFargoStatementRequest(
     await Promise.allSettled([...pendingDownloads]);
     await Promise.race([
       click,
-      new Promise<void>(resolveTimeout => setTimeout(resolveTimeout, 2_000)),
+      new Promise<void>((resolveTimeout) => setTimeout(resolveTimeout, 2_000)),
     ]);
     await Promise.race([
       postClickProbe,
-      new Promise<void>(resolveTimeout => setTimeout(resolveTimeout, 2_000)),
+      new Promise<void>((resolveTimeout) => setTimeout(resolveTimeout, 2_000)),
     ]);
-    await Promise.allSettled(context.pages()
-      .filter(candidatePage => !existingPages.has(candidatePage) && !candidatePage.isClosed())
-      .map(candidatePage => Promise.race([
-        candidatePage.close({ runBeforeUnload: false }),
-        new Promise<void>(resolveTimeout => setTimeout(resolveTimeout, 2_000)),
-      ])));
-    if (!await restoreWellsFargoStatementPage(page, pageUrl)) {
+    await Promise.allSettled(
+      context
+        .pages()
+        .filter((candidatePage) => !existingPages.has(candidatePage) && !candidatePage.isClosed())
+        .map((candidatePage) =>
+          Promise.race([
+            candidatePage.close({ runBeforeUnload: false }),
+            new Promise<void>((resolveTimeout) => setTimeout(resolveTimeout, 2_000)),
+          ]),
+        ),
+    );
+    if (!(await restoreWellsFargoStatementPage(page, pageUrl))) {
       throw new Error('Wells Fargo statement page could not be restored after request capture');
     }
   }
@@ -1474,9 +1729,12 @@ async function discoverWellsFargoStatements(
   });
   await accountCombobox.click();
   const accountOptions = page.getByRole('option');
-  await accountOptions.first().waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {
-    throw new Error('Wells Fargo statement account options did not load');
-  });
+  await accountOptions
+    .first()
+    .waitFor({ state: 'visible', timeout: 10_000 })
+    .catch(() => {
+      throw new Error('Wells Fargo statement account options did not load');
+    });
   const matchingAccountOptions = (await accountOptions.allTextContents())
     .map((label, index) => ({ label, index }))
     .filter(({ label }) => wellsFargoAccountLast4FromLabel(label) === account.last4);
@@ -1496,39 +1754,54 @@ async function discoverWellsFargoStatements(
   if (await periodCombobox.isVisible()) {
     await periodCombobox.click();
     const periodOptions = page.getByRole('option');
-    await periodOptions.first().waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {});
+    await periodOptions
+      .first()
+      .waitFor({ state: 'visible', timeout: 10_000 })
+      .catch(() => {});
     periodOptionCount = await periodOptions.count();
     const throughYear = through.slice(0, 4);
-    const ranked = (await periodOptions.allTextContents()).map((label, index) => {
-      const normalized = label.replace(/\s+/g, ' ').trim();
-      const months = normalized.match(/\b(?:last\s+)?(\d{1,2})\s+months?\b/i);
-      const years = normalized.match(/\b(?:last\s+)?(\d{1,2})\s+years?\b/i);
-      const score = /\ball\b/i.test(normalized) ? 10_000
-        : months ? Number(months[1])
-          : years ? Number(years[1]) * 12
-            : new RegExp(`^${throughYear}$`).test(normalized) ? 12
-              : 0;
-      const kind = /\ball\b/i.test(normalized) ? 'all'
-        : months ? 'months'
-          : years ? 'years'
-            : new RegExp(`^${throughYear}$`).test(normalized) ? 'year'
-              : 'none';
-      return { index, score, kind };
-    }).filter(option => option.score > 0).sort((left, right) => right.score - left.score);
+    const ranked = (await periodOptions.allTextContents())
+      .map((label, index) => {
+        const normalized = label.replace(/\s+/g, ' ').trim();
+        const months = normalized.match(/\b(?:last\s+)?(\d{1,2})\s+months?\b/i);
+        const years = normalized.match(/\b(?:last\s+)?(\d{1,2})\s+years?\b/i);
+        const score = /\ball\b/i.test(normalized)
+          ? 10_000
+          : months
+            ? Number(months[1])
+            : years
+              ? Number(years[1]) * 12
+              : new RegExp(`^${throughYear}$`).test(normalized)
+                ? 12
+                : 0;
+        const kind = /\ball\b/i.test(normalized)
+          ? 'all'
+          : months
+            ? 'months'
+            : years
+              ? 'years'
+              : new RegExp(`^${throughYear}$`).test(normalized)
+                ? 'year'
+                : 'none';
+        return { index, score, kind };
+      })
+      .filter((option) => option.score > 0)
+      .sort((left, right) => right.score - left.score);
     if (ranked[0]) {
       await periodOptions.nth(ranked[0].index).click();
       periodChoice = ranked[0].kind;
       const selectedPeriodText = (await periodCombobox.textContent().catch(() => '')) ?? '';
-      periodSelectionConfirmed = periodChoice === 'year'
-        ? selectedPeriodText.includes(throughYear)
-        : selectedPeriodText.trim().length > 0;
+      periodSelectionConfirmed =
+        periodChoice === 'year'
+          ? selectedPeriodText.includes(throughYear)
+          : selectedPeriodText.trim().length > 0;
     } else {
       await page.keyboard.press('Escape');
     }
   }
   const applyControls = page.getByRole('button', { name: /^(?:Go|Apply|Search|View)$/i });
   const applyControlCount = await applyControls.count();
-  if (applyControlCount === 1 && await applyControls.first().isVisible()) {
+  if (applyControlCount === 1 && (await applyControls.first().isVisible())) {
     await applyControls.first().click();
   }
   const deadline = Date.now() + 30_000;
@@ -1539,120 +1812,154 @@ async function discoverWellsFargoStatements(
   while (Date.now() < deadline) {
     const observedCandidates: typeof candidates = [];
     const observedControls: typeof statementControls = [];
-    for (const candidatePage of page.context().pages().filter(item => !item.isClosed())) {
+    for (const candidatePage of page
+      .context()
+      .pages()
+      .filter((item) => !item.isClosed())) {
       for (const frame of candidatePage.frames()) {
         const links = frame.locator(`a[href*="${STATEMENT_PATH_PREFIX}"]`);
-        const frameCandidates = await links.evaluateAll(elements => elements.map(element => {
-          const destination = element instanceof HTMLAnchorElement ? element.href : '';
-          const value = `${element.textContent ?? ''} ${destination}`;
-          return { value, destination };
-        })).catch(() => []);
-        observedCandidates.push(...frameCandidates.flatMap(candidate => {
-          const destination = wellsFargoStatementDocumentUrl(
-            candidate.destination,
-            candidatePage.url(),
-          );
-          return destination ? [{ ...candidate, destination }] : [];
-        }));
-        const markedControls = await frame.locator('body').evaluate(body => {
-          const datePattern = /\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-](?:\d{2}|\d{4})|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+20\d{2})\b/i;
-          const statementIdentity = (element: Element) => [
-            element.getAttribute('class') ?? '',
-            element.getAttribute('data-testid') ?? '',
-            element.getAttribute('id') ?? '',
-          ].join(' ');
-          const visible = (element: Element) => {
-            if (!(element instanceof HTMLElement)) return false;
-            const style = getComputedStyle(element);
-            const box = element.getBoundingClientRect();
-            return style.display !== 'none' && style.visibility !== 'hidden' &&
-              box.width > 0 && box.height > 0;
-          };
-          const results: Array<{ dateText: string; shape: string }> = [];
-          const marked = new Set<Element>();
-          const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
-          let node = walker.nextNode();
-          while (node) {
-            const match = node.nodeValue?.match(datePattern);
-            const origin = node.parentElement;
-            if (match && origin) {
-              let container: Element | null = origin;
-              let distance = 0;
-              while (container && distance <= 6 &&
-                  !/statement|document/i.test(statementIdentity(container))) {
-                container = container.parentElement;
-                distance += 1;
-              }
-              if (container && distance <= 6) {
-                const nearest = origin.closest('a, button, [role="button"], [tabindex="0"]');
-                const controls = [...container.querySelectorAll(
-                  'a, button, [role="button"], [tabindex="0"]',
-                )].filter(element => visible(element) &&
-                  !/contact|support|customer service/i.test(element.textContent ?? ''));
-                const documentControls = controls.filter(element =>
-                  /download|view|statement|document|pdf/i.test([
-                    element.textContent ?? '',
-                    element.getAttribute('aria-label') ?? '',
-                    element.getAttribute('title') ?? '',
-                  ].join(' '))
-                );
-                const target = documentControls.length === 1
-                  ? documentControls[0]
-                  : nearest && container.contains(nearest) && visible(nearest) &&
-                      !/contact|support|customer service/i.test(nearest.textContent ?? '')
-                    ? nearest
-                    : controls.length === 1 ? controls[0] : null;
-                if (target && !marked.has(target)) {
-                  marked.add(target);
-                  const classShape = (element: Element) => [...element.classList]
-                    .filter(value => /^[A-Za-z_-]{1,40}$/.test(value))
-                    .slice(0, 4)
-                    .join('.') || 'none';
-                  const inputTypes = [...container.querySelectorAll('input')].map(input =>
-                    input.type || 'text'
+        const frameCandidates = await links
+          .evaluateAll((elements) =>
+            elements.map((element) => {
+              const destination = element instanceof HTMLAnchorElement ? element.href : '';
+              const value = `${element.textContent ?? ''} ${destination}`;
+              return { value, destination };
+            }),
+          )
+          .catch(() => []);
+        observedCandidates.push(
+          ...frameCandidates.flatMap((candidate) => {
+            const destination = wellsFargoStatementDocumentUrl(
+              candidate.destination,
+              candidatePage.url(),
+            );
+            return destination ? [{ ...candidate, destination }] : [];
+          }),
+        );
+        const markedControls = await frame
+          .locator('body')
+          .evaluate((body) => {
+            const datePattern =
+              /\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-](?:\d{2}|\d{4})|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+20\d{2})\b/i;
+            const statementIdentity = (element: Element) =>
+              [
+                element.getAttribute('class') ?? '',
+                element.getAttribute('data-testid') ?? '',
+                element.getAttribute('id') ?? '',
+              ].join(' ');
+            const visible = (element: Element) => {
+              if (!(element instanceof HTMLElement)) return false;
+              const style = getComputedStyle(element);
+              const box = element.getBoundingClientRect();
+              return (
+                style.display !== 'none' &&
+                style.visibility !== 'hidden' &&
+                box.width > 0 &&
+                box.height > 0
+              );
+            };
+            const results: Array<{ dateText: string; shape: string }> = [];
+            const marked = new Set<Element>();
+            const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+            let node = walker.nextNode();
+            while (node) {
+              const match = node.nodeValue?.match(datePattern);
+              const origin = node.parentElement;
+              if (match && origin) {
+                let container: Element | null = origin;
+                let distance = 0;
+                while (
+                  container &&
+                  distance <= 6 &&
+                  !/statement|document/i.test(statementIdentity(container))
+                ) {
+                  container = container.parentElement;
+                  distance += 1;
+                }
+                if (container && distance <= 6) {
+                  const nearest = origin.closest('a, button, [role="button"], [tabindex="0"]');
+                  const controls = [
+                    ...container.querySelectorAll('a, button, [role="button"], [tabindex="0"]'),
+                  ].filter(
+                    (element) =>
+                      visible(element) &&
+                      !/contact|support|customer service/i.test(element.textContent ?? ''),
                   );
-                  const ownPropertyNames = Object.getOwnPropertyNames(target);
-                  const frameworkPropsKey = ownPropertyNames.find(name =>
-                    name.startsWith('__reactProps$') || name.startsWith('__vueParentComponent')
+                  const documentControls = controls.filter((element) =>
+                    /download|view|statement|document|pdf/i.test(
+                      [
+                        element.textContent ?? '',
+                        element.getAttribute('aria-label') ?? '',
+                        element.getAttribute('title') ?? '',
+                      ].join(' '),
+                    ),
                   );
-                  const frameworkProps = frameworkPropsKey
-                    ? (target as unknown as Record<string, unknown>)[frameworkPropsKey]
-                    : undefined;
-                  const frameworkRecord = frameworkProps && typeof frameworkProps === 'object'
-                    ? frameworkProps as Record<string, unknown>
-                    : undefined;
-                  const targetStyle = getComputedStyle(target);
-                  const targetBox = target.getBoundingClientRect();
-                  results.push({
-                    dateText: match[0],
-                    shape: [
-                      `target=${target.tagName.toLowerCase()}`,
-                      `role=${target.getAttribute('role') ?? 'none'}`,
-                      `href=${target.hasAttribute('href')}`,
-                      `tabindex=${target.hasAttribute('tabindex')}`,
-                      `attrs=${target.getAttributeNames().sort().slice(0, 8).join('.') || 'none'}`,
-                      `classes=${classShape(target)}`,
-                      `container=${container.tagName.toLowerCase()}.${classShape(container)}`,
-                      `distance=${distance}`,
-                      `controls=${controls.length}`,
-                      `inputs=${inputTypes.length}`,
-                      `checkboxes=${inputTypes.filter(value => value === 'checkbox').length}`,
-                      `radios=${inputTypes.filter(value => value === 'radio').length}`,
-                      `native-click=${target instanceof HTMLElement && typeof target.onclick === 'function'}`,
-                      `framework-click=${typeof frameworkRecord?.onClick === 'function'}`,
-                      `framework-keydown=${typeof frameworkRecord?.onKeyDown === 'function'}`,
-                      `pointer=${targetStyle.pointerEvents}`,
-                      `cursor=${targetStyle.cursor}`,
-                      `box=${targetBox.width > 0 && targetBox.height > 0}`,
-                    ].join(':'),
-                  });
+                  const target =
+                    documentControls.length === 1
+                      ? documentControls[0]
+                      : nearest &&
+                          container.contains(nearest) &&
+                          visible(nearest) &&
+                          !/contact|support|customer service/i.test(nearest.textContent ?? '')
+                        ? nearest
+                        : controls.length === 1
+                          ? controls[0]
+                          : null;
+                  if (target && !marked.has(target)) {
+                    marked.add(target);
+                    const classShape = (element: Element) =>
+                      [...element.classList]
+                        .filter((value) => /^[A-Za-z_-]{1,40}$/.test(value))
+                        .slice(0, 4)
+                        .join('.') || 'none';
+                    const inputTypes = [...container.querySelectorAll('input')].map(
+                      (input) => input.type || 'text',
+                    );
+                    const ownPropertyNames = Object.getOwnPropertyNames(target);
+                    const frameworkPropsKey = ownPropertyNames.find(
+                      (name) =>
+                        name.startsWith('__reactProps$') || name.startsWith('__vueParentComponent'),
+                    );
+                    const frameworkProps = frameworkPropsKey
+                      ? (target as unknown as Record<string, unknown>)[frameworkPropsKey]
+                      : undefined;
+                    const frameworkRecord =
+                      frameworkProps && typeof frameworkProps === 'object'
+                        ? (frameworkProps as Record<string, unknown>)
+                        : undefined;
+                    const targetStyle = getComputedStyle(target);
+                    const targetBox = target.getBoundingClientRect();
+                    results.push({
+                      dateText: match[0],
+                      shape: [
+                        `target=${target.tagName.toLowerCase()}`,
+                        `role=${target.getAttribute('role') ?? 'none'}`,
+                        `href=${target.hasAttribute('href')}`,
+                        `tabindex=${target.hasAttribute('tabindex')}`,
+                        `attrs=${target.getAttributeNames().sort().slice(0, 8).join('.') || 'none'}`,
+                        `classes=${classShape(target)}`,
+                        `container=${container.tagName.toLowerCase()}.${classShape(container)}`,
+                        `distance=${distance}`,
+                        `controls=${controls.length}`,
+                        `inputs=${inputTypes.length}`,
+                        `checkboxes=${inputTypes.filter((value) => value === 'checkbox').length}`,
+                        `radios=${inputTypes.filter((value) => value === 'radio').length}`,
+                        `native-click=${target instanceof HTMLElement && typeof target.onclick === 'function'}`,
+                        `framework-click=${typeof frameworkRecord?.onClick === 'function'}`,
+                        `framework-keydown=${typeof frameworkRecord?.onKeyDown === 'function'}`,
+                        `pointer=${targetStyle.pointerEvents}`,
+                        `cursor=${targetStyle.cursor}`,
+                        `box=${targetBox.width > 0 && targetBox.height > 0}`,
+                      ].join(':'),
+                    });
+                  }
                 }
               }
+              node = walker.nextNode();
             }
-            node = walker.nextNode();
-          }
-          return results;
-        }).catch(() => []);
+            return results;
+          })
+          .catch(() => []);
         for (const markedControl of markedControls) {
           const date = wellsFargoDateFromText(markedControl.dateText);
           if (date) {
@@ -1665,8 +1972,10 @@ async function discoverWellsFargoStatements(
       }
     }
     const fingerprint = JSON.stringify({
-      directDates: observedCandidates.map(candidate => wellsFargoDateFromText(candidate.value)).sort(),
-      controlDates: observedControls.map(control => control.date).sort(),
+      directDates: observedCandidates
+        .map((candidate) => wellsFargoDateFromText(candidate.value))
+        .sort(),
+      controlDates: observedControls.map((control) => control.date).sort(),
     });
     if (observedCandidates.length === 0 && observedControls.length === 0) {
       stableFingerprint = '';
@@ -1703,45 +2012,67 @@ async function discoverWellsFargoStatements(
     let dateRowButtonCount = 0;
     let dateRowLinkCount = 0;
     let dateRowClickableCount = 0;
-    const openPages = page.context().pages().filter(item => !item.isClosed());
+    const openPages = page
+      .context()
+      .pages()
+      .filter((item) => !item.isClosed());
     for (const candidatePage of openPages) {
       for (const frame of candidatePage.frames()) {
         frameCount += 1;
-        const counts = await frame.locator('a[href]').evaluateAll(elements => ({
-          linkCount: elements.length,
-          statementLikeLinkCount: elements.filter(element => {
-            if (!(element instanceof HTMLAnchorElement)) return false;
-            try {
-              return /statement|document|edocs|\.pdf(?:$|[?#])/i.test(new URL(element.href).pathname);
-            } catch {
-              return false;
-            }
-          }).length,
-        })).catch(() => ({ linkCount: 0, statementLikeLinkCount: 0 }));
+        const counts = await frame
+          .locator('a[href]')
+          .evaluateAll((elements) => ({
+            linkCount: elements.length,
+            statementLikeLinkCount: elements.filter((element) => {
+              if (!(element instanceof HTMLAnchorElement)) return false;
+              try {
+                return /statement|document|edocs|\.pdf(?:$|[?#])/i.test(
+                  new URL(element.href).pathname,
+                );
+              } catch {
+                return false;
+              }
+            }).length,
+          }))
+          .catch(() => ({ linkCount: 0, statementLikeLinkCount: 0 }));
         linkCount += counts.linkCount;
         statementLikeLinkCount += counts.statementLikeLinkCount;
-        const controls = await frame.locator('button, [role="button"], input, select, [role="combobox"]')
-          .evaluateAll(elements => {
-            const labels = elements.map(element => [
-              element.textContent ?? '',
-              element.getAttribute('aria-label') ?? '',
-              element.getAttribute('title') ?? '',
-              element instanceof HTMLInputElement ? element.value : '',
-            ].join(' ').replace(/\s+/g, ' ').trim());
+        const controls = await frame
+          .locator('button, [role="button"], input, select, [role="combobox"]')
+          .evaluateAll((elements) => {
+            const labels = elements.map((element) =>
+              [
+                element.textContent ?? '',
+                element.getAttribute('aria-label') ?? '',
+                element.getAttribute('title') ?? '',
+                element instanceof HTMLInputElement ? element.value : '',
+              ]
+                .join(' ')
+                .replace(/\s+/g, ' ')
+                .trim(),
+            );
             return {
-              buttonCount: elements.filter(element =>
-                element instanceof HTMLButtonElement || element.getAttribute('role') === 'button'
+              buttonCount: elements.filter(
+                (element) =>
+                  element instanceof HTMLButtonElement || element.getAttribute('role') === 'button',
               ).length,
-              statementControlCount: labels.filter(label => /statement|document/i.test(label)).length,
-              downloadControlCount: labels.filter(label => /download|view|pdf/i.test(label)).length,
-              dateControlCount: labels.filter(label =>
-                /\b20\d{2}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i.test(label)
+              statementControlCount: labels.filter((label) => /statement|document/i.test(label))
+                .length,
+              downloadControlCount: labels.filter((label) => /download|view|pdf/i.test(label))
+                .length,
+              dateControlCount: labels.filter((label) =>
+                /\b20\d{2}\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/i.test(
+                  label,
+                ),
               ).length,
-              comboboxCount: elements.filter(element =>
-                element instanceof HTMLSelectElement || element.getAttribute('role') === 'combobox'
+              comboboxCount: elements.filter(
+                (element) =>
+                  element instanceof HTMLSelectElement ||
+                  element.getAttribute('role') === 'combobox',
               ).length,
             };
-          }).catch(() => ({
+          })
+          .catch(() => ({
             buttonCount: 0,
             statementControlCount: 0,
             downloadControlCount: 0,
@@ -1754,52 +2085,86 @@ async function discoverWellsFargoStatements(
         dateControlCount += controls.dateControlCount;
         comboboxCount += controls.comboboxCount;
         accountComboboxCount += await frame.getByRole('combobox', { name: /account/i }).count();
-        periodComboboxCount += await frame.getByRole('combobox', {
-          name: /year|period|date|month/i,
-        }).count();
-        const shapes = await frame.locator('select, [role="combobox"]').evaluateAll(elements =>
-          elements.map(element => {
-            const options = element instanceof HTMLSelectElement
-              ? [...element.options].map(option => option.textContent ?? '')
-              : [];
-            return [
-              element instanceof HTMLSelectElement ? 'select' : 'custom',
-              options.length,
-              options.filter(value => /\b20\d{2}\b/.test(value)).length,
-              options.filter(value => /\b\d{4}\b/.test(value)).length,
-            ].join(':');
+        periodComboboxCount += await frame
+          .getByRole('combobox', {
+            name: /year|period|date|month/i,
           })
-        ).catch(() => []);
+          .count();
+        const shapes = await frame
+          .locator('select, [role="combobox"]')
+          .evaluateAll((elements) =>
+            elements.map((element) => {
+              const options =
+                element instanceof HTMLSelectElement
+                  ? [...element.options].map((option) => option.textContent ?? '')
+                  : [];
+              return [
+                element instanceof HTMLSelectElement ? 'select' : 'custom',
+                options.length,
+                options.filter((value) => /\b20\d{2}\b/.test(value)).length,
+                options.filter((value) => /\b\d{4}\b/.test(value)).length,
+              ].join(':');
+            }),
+          )
+          .catch(() => []);
         comboboxShapes.push(...shapes);
-        const bodyText = await frame.locator('body').innerText().catch(() => '');
-        bodyDateCount += (bodyText.match(
-          /\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-](?:\d{2}|\d{4})|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+20\d{2})\b/gi,
-        )?.length ?? 0);
+        const bodyText = await frame
+          .locator('body')
+          .innerText()
+          .catch(() => '');
+        bodyDateCount +=
+          bodyText.match(
+            /\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-](?:\d{2}|\d{4})|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+20\d{2})\b/gi,
+          )?.length ?? 0;
         bodyHasNoDocuments ||= /\bno\b.{0,40}\b(?:statement|document)s?\b/i.test(bodyText);
         bodyHasPdf ||= /\bpdf\b/i.test(bodyText);
-        bodyHasSelectionPrompt ||= /\b(?:choose|select)\b.{0,40}\b(?:account|year|period|date)\b/i.test(bodyText);
-        dateBearingElementCount += await frame.locator('button, a, [role="button"], [role="row"], tr, li')
-          .evaluateAll(elements => elements.filter(element => {
-            const text = element.textContent?.replace(/\s+/g, ' ').trim() ?? '';
-            return /\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-](?:\d{2}|\d{4})|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+20\d{2})\b/i.test(text);
-          }).length).catch(() => 0);
-        statementDataElementCount += await frame.locator(
-          '[data-testid*="statement" i], [data-testid*="document" i], [class*="statement" i], [class*="document" i]',
-        ).count().catch(() => 0);
-        const dateRows = await frame.locator('[role="row"], tr, li').evaluateAll(elements => {
-          const datePattern = /\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-](?:\d{2}|\d{4})|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+20\d{2})\b/i;
-          const rows = elements.filter(element => datePattern.test(
-            element.textContent?.replace(/\s+/g, ' ').trim() ?? '',
-          ));
-          return {
-            rowCount: rows.length,
-            buttonCount: rows.reduce((count, row) => count + row.querySelectorAll('button, [role="button"]').length, 0),
-            linkCount: rows.reduce((count, row) => count + row.querySelectorAll('a[href]').length, 0),
-            clickableCount: rows.reduce((count, row) => count + row.querySelectorAll(
-              'button, [role="button"], a[href], [tabindex="0"]',
-            ).length, 0),
-          };
-        }).catch(() => ({ rowCount: 0, buttonCount: 0, linkCount: 0, clickableCount: 0 }));
+        bodyHasSelectionPrompt ||=
+          /\b(?:choose|select)\b.{0,40}\b(?:account|year|period|date)\b/i.test(bodyText);
+        dateBearingElementCount += await frame
+          .locator('button, a, [role="button"], [role="row"], tr, li')
+          .evaluateAll(
+            (elements) =>
+              elements.filter((element) => {
+                const text = element.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+                return /\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-](?:\d{2}|\d{4})|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+20\d{2})\b/i.test(
+                  text,
+                );
+              }).length,
+          )
+          .catch(() => 0);
+        statementDataElementCount += await frame
+          .locator(
+            '[data-testid*="statement" i], [data-testid*="document" i], [class*="statement" i], [class*="document" i]',
+          )
+          .count()
+          .catch(() => 0);
+        const dateRows = await frame
+          .locator('[role="row"], tr, li')
+          .evaluateAll((elements) => {
+            const datePattern =
+              /\b(?:20\d{2}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-](?:\d{2}|\d{4})|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2},?\s+20\d{2})\b/i;
+            const rows = elements.filter((element) =>
+              datePattern.test(element.textContent?.replace(/\s+/g, ' ').trim() ?? ''),
+            );
+            return {
+              rowCount: rows.length,
+              buttonCount: rows.reduce(
+                (count, row) => count + row.querySelectorAll('button, [role="button"]').length,
+                0,
+              ),
+              linkCount: rows.reduce(
+                (count, row) => count + row.querySelectorAll('a[href]').length,
+                0,
+              ),
+              clickableCount: rows.reduce(
+                (count, row) =>
+                  count +
+                  row.querySelectorAll('button, [role="button"], a[href], [tabindex="0"]').length,
+                0,
+              ),
+            };
+          })
+          .catch(() => ({ rowCount: 0, buttonCount: 0, linkCount: 0, clickableCount: 0 }));
         dateRowCount += dateRows.rowCount;
         dateRowButtonCount += dateRows.buttonCount;
         dateRowLinkCount += dateRows.linkCount;
@@ -1808,20 +2173,20 @@ async function discoverWellsFargoStatements(
     }
     throw new Error(
       'Wells Fargo statement metadata did not expose direct document links ' +
-      `(pages=${openPages.length} frames=${frameCount} links=${linkCount} statement-like=${statementLikeLinkCount} ` +
-      `buttons=${buttonCount} statement-controls=${statementControlCount} download-controls=${downloadControlCount} ` +
-      `date-controls=${dateControlCount} comboboxes=${comboboxCount} account-comboboxes=${accountComboboxCount} ` +
-      `period-comboboxes=${periodComboboxCount} account-options=${accountOptionCount} ` +
-      `period-options=${periodOptionCount} period-choice=${periodChoice} apply-controls=${applyControlCount} ` +
-      `account-selected=${accountSelectionConfirmed} period-selected=${periodSelectionConfirmed} ` +
-      `body-dates=${bodyDateCount} date-elements=${dateBearingElementCount} statement-elements=${statementDataElementCount} ` +
-      `date-rows=${dateRowCount} date-row-buttons=${dateRowButtonCount} date-row-links=${dateRowLinkCount} ` +
-      `date-row-clickables=${dateRowClickableCount} ` +
-      `no-documents=${bodyHasNoDocuments} pdf=${bodyHasPdf} selection-prompt=${bodyHasSelectionPrompt} ` +
-      `combobox-shapes=${comboboxShapes.join(',') || 'none'})`,
+        `(pages=${openPages.length} frames=${frameCount} links=${linkCount} statement-like=${statementLikeLinkCount} ` +
+        `buttons=${buttonCount} statement-controls=${statementControlCount} download-controls=${downloadControlCount} ` +
+        `date-controls=${dateControlCount} comboboxes=${comboboxCount} account-comboboxes=${accountComboboxCount} ` +
+        `period-comboboxes=${periodComboboxCount} account-options=${accountOptionCount} ` +
+        `period-options=${periodOptionCount} period-choice=${periodChoice} apply-controls=${applyControlCount} ` +
+        `account-selected=${accountSelectionConfirmed} period-selected=${periodSelectionConfirmed} ` +
+        `body-dates=${bodyDateCount} date-elements=${dateBearingElementCount} statement-elements=${statementDataElementCount} ` +
+        `date-rows=${dateRowCount} date-row-buttons=${dateRowButtonCount} date-row-links=${dateRowLinkCount} ` +
+        `date-row-clickables=${dateRowClickableCount} ` +
+        `no-documents=${bodyHasNoDocuments} pdf=${bodyHasPdf} selection-prompt=${bodyHasSelectionPrompt} ` +
+        `combobox-shapes=${comboboxShapes.join(',') || 'none'})`,
     );
   }
-  const directStatements = candidates.map(candidate => {
+  const directStatements = candidates.map((candidate) => {
     const date = wellsFargoDateFromText(candidate.value);
     if (!date) throw new Error('Wells Fargo statement metadata omitted its date');
     return {
@@ -1829,7 +2194,7 @@ async function discoverWellsFargoStatements(
       destination: candidate.destination,
     };
   });
-  const directDates = new Set(directStatements.map(candidate => candidate.date));
+  const directDates = new Set(directStatements.map((candidate) => candidate.date));
 
   const controlsByDate = new Map<string, { date: string; shape: string }>();
   for (const statementControl of statementControls) {
@@ -1841,8 +2206,8 @@ async function discoverWellsFargoStatements(
   }
   const selectedSources = selectWellsFargoStatementWindow(
     [
-      ...directStatements.map(statement => ({ date: statement.date, statement })),
-      ...[...controlsByDate.values()].map(statementControl => ({
+      ...directStatements.map((statement) => ({ date: statement.date, statement })),
+      ...[...controlsByDate.values()].map((statementControl) => ({
         date: statementControl.date,
         statementControl,
       })),
@@ -1852,9 +2217,8 @@ async function discoverWellsFargoStatements(
   );
   const capturedStatements: WellsFargoStatementCandidate[] = [];
   for (const source of selectedSources) {
-    const statementDate = 'statement' in source
-      ? source.statement.date
-      : source.statementControl.date;
+    const statementDate =
+      'statement' in source ? source.statement.date : source.statementControl.date;
     const capture = await captureWellsFargoStatementRequest(
       page,
       statementDate,
@@ -1876,29 +2240,31 @@ async function executeWellsFargoApiRequest(
   request: WellsFargoApiRequest,
 ): Promise<BrowserNativeResponse> {
   asWellsFargoUrl(request.url);
-  const encodedBody = request.bodyBase64 ?? (
-    request.method === 'POST' && request.body !== undefined
+  const encodedBody =
+    request.bodyBase64 ??
+    (request.method === 'POST' && request.body !== undefined
       ? Buffer.from(request.body, 'utf8').toString('base64')
-      : undefined
-  );
+      : undefined);
   const response = await runBrowserNativeRequest(page, {
     url: request.url,
     method: request.method,
-    ...(request.headers || request.body !== undefined ? {
-      headers: {
-        ...(request.body !== undefined ? { 'content-type': 'application/x-www-form-urlencoded' } : {}),
-        ...request.headers,
-      },
-    } : {}),
+    ...(request.headers || request.body !== undefined
+      ? {
+          headers: {
+            ...(request.body !== undefined
+              ? { 'content-type': 'application/x-www-form-urlencoded' }
+              : {}),
+            ...request.headers,
+          },
+        }
+      : {}),
     ...(encodedBody !== undefined ? { bodyBase64: encodedBody } : {}),
   });
   asWellsFargoUrl(response.url);
   return response;
 }
 
-export function wellsFargoActivityBodyFromApiResponse(
-  response: BrowserNativeResponse,
-): Buffer {
+export function wellsFargoActivityBodyFromApiResponse(response: BrowserNativeResponse): Buffer {
   if (!browserNativeResponseOk(response)) {
     throw new Error(`Wells Fargo activity API returned status ${response.status}`);
   }
@@ -1912,13 +2278,23 @@ export function wellsFargoActivityBodyFromApiResponse(
   } catch {
     throw new Error('Wells Fargo activity API returned invalid JSON');
   }
-  const download = payload && typeof payload === 'object' && 'data' in payload &&
-    payload.data && typeof payload.data === 'object' && 'downloadAccountData' in payload.data
-    ? payload.data.downloadAccountData
-    : null;
-  if (!download || typeof download !== 'object' ||
-      !('status' in download) || download.status !== true ||
-      !('activities' in download) || typeof download.activities !== 'string') {
+  const download =
+    payload &&
+    typeof payload === 'object' &&
+    'data' in payload &&
+    payload.data &&
+    typeof payload.data === 'object' &&
+    'downloadAccountData' in payload.data
+      ? payload.data.downloadAccountData
+      : null;
+  if (
+    !download ||
+    typeof download !== 'object' ||
+    !('status' in download) ||
+    download.status !== true ||
+    !('activities' in download) ||
+    typeof download.activities !== 'string'
+  ) {
     throw new Error('Wells Fargo activity API response omitted a completed download');
   }
   const raw = download.activities;
@@ -1940,8 +2316,10 @@ export function wellsFargoActivityBodyFromApiResponse(
     }
   }
   const trimmed = raw.trim();
-  const dataUri = /^data:(?:text\/csv|application\/(?:csv|octet-stream|vnd\.ms-excel))(?:;charset=[^;,]+)?;base64,([\s\S]*)$/i
-    .exec(trimmed);
+  const dataUri =
+    /^data:(?:text\/csv|application\/(?:csv|octet-stream|vnd\.ms-excel))(?:;charset=[^;,]+)?;base64,([\s\S]*)$/i.exec(
+      trimmed,
+    );
   const wrapper = dataUri ? 'data-uri' : /^data:/i.test(trimmed) ? 'other' : 'none';
   const compact = (dataUri?.[1] ?? trimmed).replace(/\s+/g, '');
   const unpadded = compact.replace(/=+$/, '');
@@ -1956,7 +2334,13 @@ export function wellsFargoActivityBodyFromApiResponse(
     `padding=${compact.endsWith('=') ? 'present' : 'none'}`,
     `length-mod-4=${remainder}`,
   ].join(' ');
-  if (wrapper === 'other' || !unpadded || hasInvalidPadding || hasInvalidAlphabet || remainder === 1) {
+  if (
+    wrapper === 'other' ||
+    !unpadded ||
+    hasInvalidPadding ||
+    hasInvalidAlphabet ||
+    remainder === 1
+  ) {
     throw new Error(`Wells Fargo activity API response contained invalid base64 (${shape})`);
   }
   const normalized = unpadded
@@ -1994,12 +2378,18 @@ function wellsFargoPdfBodyFromBytes(body: Buffer): Buffer | null {
       const compact = (dataUri?.[1] ?? trimmed).replace(/\s+/g, '');
       const unpadded = compact.replace(/=+$/, '');
       const paddingLength = compact.length - unpadded.length;
-      if (unpadded.length < 64 || /=/.test(unpadded) || paddingLength > 2 ||
-          !/^[A-Za-z0-9+/_-]+$/.test(unpadded) || unpadded.length % 4 === 1) return;
+      if (
+        unpadded.length < 64 ||
+        /=/.test(unpadded) ||
+        paddingLength > 2 ||
+        !/^[A-Za-z0-9+/_-]+$/.test(unpadded) ||
+        unpadded.length % 4 === 1
+      )
+        return;
       const normalized = unpadded
         .replace(/-/g, '+')
         .replace(/_/g, '/')
-        .padEnd(unpadded.length + ((4 - unpadded.length % 4) % 4), '=');
+        .padEnd(unpadded.length + ((4 - (unpadded.length % 4)) % 4), '=');
       const decoded = Buffer.from(normalized, 'base64');
       if (decoded.subarray(0, 5).toString('ascii') === '%PDF-') found.push(decoded);
       return;
@@ -2013,8 +2403,8 @@ function wellsFargoPdfBodyFromBytes(body: Buffer): Buffer | null {
     }
   };
   inspect(payload, 0);
-  const unique = found.filter((candidate, index) =>
-    found.findIndex(other => other.equals(candidate)) === index
+  const unique = found.filter(
+    (candidate, index) => found.findIndex((other) => other.equals(candidate)) === index,
   );
   return unique.length === 1 ? unique[0]! : null;
 }
@@ -2035,9 +2425,11 @@ export function wellsFargoCapturedStatementResponse(
     return null;
   }
   if (!wellsFargoPdfBodyFromBytes(body)) return null;
-  const headers = Object.fromEntries(Object.entries(response.headers)
-    .map(([name, value]) => [name.toLowerCase(), value] as const)
-    .filter(([name]) => name === 'content-type' || name === 'content-disposition'));
+  const headers = Object.fromEntries(
+    Object.entries(response.headers)
+      .map(([name, value]) => [name.toLowerCase(), value] as const)
+      .filter(([name]) => name === 'content-type' || name === 'content-disposition'),
+  );
   return {
     status: response.status,
     url: destination.toString(),
@@ -2047,9 +2439,7 @@ export function wellsFargoCapturedStatementResponse(
   };
 }
 
-export function wellsFargoStatementBodyFromApiResponse(
-  response: BrowserNativeResponse,
-): Buffer {
+export function wellsFargoStatementBodyFromApiResponse(response: BrowserNativeResponse): Buffer {
   if (!browserNativeResponseOk(response)) {
     throw new Error(`Wells Fargo statement API returned status ${response.status}`);
   }
@@ -2104,29 +2494,33 @@ async function downloadWellsFargoArtifact(
   request: WellsFargoApiRequest,
   capturedResponse?: BrowserNativeResponse,
 ): Promise<ArtifactDownload> {
-  if (basename(plan.fileName) !== plan.fileName || wellsFargoArtifactPlanFromFilename(plan.fileName) === null) {
+  if (
+    basename(plan.fileName) !== plan.fileName ||
+    wellsFargoArtifactPlanFromFilename(plan.fileName) === null
+  ) {
     throw new Error('Wells Fargo artifact filename is invalid');
   }
-  const response = await wellsFargoArtifactResponse(
-    page,
-    plan.kind,
-    request,
-    capturedResponse,
-  );
-  const body = plan.kind === 'activity'
-    ? wellsFargoActivityBodyFromApiResponse(response)
-    : wellsFargoStatementBodyFromApiResponse(response);
+  const response = await wellsFargoArtifactResponse(page, plan.kind, request, capturedResponse);
+  const body =
+    plan.kind === 'activity'
+      ? wellsFargoActivityBodyFromApiResponse(response)
+      : wellsFargoStatementBodyFromApiResponse(response);
   assertArtifactResponse(response, body, plan.kind);
   const path = resolve(outputDir, plan.fileName);
   await writeFile(path, body, { mode: 0o600 });
   return { ...plan, path, byteLength: body.length };
 }
 
-async function validateDownloadedWellsFargoArtifact(download: ArtifactDownload): Promise<WellsFargoDownloadedArtifact> {
+async function validateDownloadedWellsFargoArtifact(
+  download: ArtifactDownload,
+): Promise<WellsFargoDownloadedArtifact> {
   try {
     const validated = await validateWellsFargoArtifact(download.path);
-    if (validated.kind !== download.kind || validated.account.kind !== download.account.kind ||
-        validated.account.last4 !== download.account.last4) {
+    if (
+      validated.kind !== download.kind ||
+      validated.account.kind !== download.account.kind ||
+      validated.account.last4 !== download.account.last4
+    ) {
       throw new Error('Wells Fargo artifact validation changed its routing identity');
     }
     return { ...validated, accountId: download.accountId };
@@ -2137,9 +2531,8 @@ async function validateDownloadedWellsFargoArtifact(download: ArtifactDownload):
 }
 
 export function safeWellsFargoDiagnostic(error: unknown): string {
-  const sourceLines = error instanceof Error
-    ? [...(error.stack?.matchAll(/wellsFargo\.ts:(\d+):\d+/g) ?? [])]
-    : [];
+  const sourceLines =
+    error instanceof Error ? [...(error.stack?.matchAll(/wellsFargo\.ts:(\d+):\d+/g) ?? [])] : [];
   const sourceLine = sourceLines[1]?.[1] ?? sourceLines[0]?.[1];
   const rawMessage = String(error instanceof Error ? error.message : error);
   // Keep actionable copy and a bounded set of safe counters. DOM shapes and
@@ -2149,12 +2542,22 @@ export function safeWellsFargoDiagnostic(error: unknown): string {
     ? 'Wells Fargo could not open a statement download. Try updating this connection again. ' +
       'Your existing data has not changed. (statement-request-not-observed' +
       [
-        'same-origin', 'other-wells-origin', 'pdf-responses', 'json-document-urls',
-        'download-events', 'direct-links', 'rejected-direct-links', 'new-pages',
-      ].flatMap(key => {
-        const match = rawMessage.match(new RegExp(`(?:[ (])${key}=(\\d{1,9})(?=[ )])`));
-        return match ? [`${key}=${Math.min(Number(match[1]), 999)}`] : [];
-      }).map(counter => ` ${counter}`).join('') + ')'
+        'same-origin',
+        'other-wells-origin',
+        'pdf-responses',
+        'json-document-urls',
+        'download-events',
+        'direct-links',
+        'rejected-direct-links',
+        'new-pages',
+      ]
+        .flatMap((key) => {
+          const match = rawMessage.match(new RegExp(`(?:[ (])${key}=(\\d{1,9})(?=[ )])`));
+          return match ? [`${key}=${Math.min(Number(match[1]), 999)}`] : [];
+        })
+        .map((counter) => ` ${counter}`)
+        .join('') +
+      ')'
     : rawMessage;
   return `${message}${sourceLine ? ` (source-line=${sourceLine})` : ''}`
     .split('\n')[0]!
@@ -2175,7 +2578,9 @@ export function wellsFargoBrowserWindowProgress(message: string): WellsFargoProg
   };
 }
 
-export function buildWellsFargoBrowserProgram(config: Pick<WellsFargoSyncConfig, 'accounts'>): string {
+export function buildWellsFargoBrowserProgram(
+  config: Pick<WellsFargoSyncConfig, 'accounts'>,
+): string {
   return `async (page, _reportProgress, bindings) => {
     const config = ${JSON.stringify({ accounts: config.accounts })};
     const artifacts = [];
@@ -2380,7 +2785,8 @@ export async function runWellsFargoSyncInAuthenticatedPage(
   config: Pick<WellsFargoSyncConfig, 'outputDir' | 'accounts'>,
   onProgress: WellsFargoProgressReporter = () => {},
 ): Promise<WellsFargoSyncResult> {
-  if (config.accounts.length === 0) throw new Error('Wells Fargo sync requires at least one planned account');
+  if (config.accounts.length === 0)
+    throw new Error('Wells Fargo sync requires at least one planned account');
   validateWellsFargoSyncAccounts(config.accounts);
   const outputDir = resolve(config.outputDir);
   await mkdir(outputDir, { recursive: true, mode: 0o700 });
@@ -2392,11 +2798,9 @@ export async function runWellsFargoSyncInAuthenticatedPage(
     reportProgress: (message: string) => void,
     bindings: Record<string, unknown>,
   ) => Promise<unknown>;
-  const result = decodeInstitutionBrowserProgramResult<BrowserResult>(await program(
-    page,
-    () => {},
-    wellsFargoBrowserBindings(outputDir, onProgress),
-  ));
+  const result = decodeInstitutionBrowserProgramResult<BrowserResult>(
+    await program(page, () => {}, wellsFargoBrowserBindings(outputDir, onProgress)),
+  );
   if (result.status === 'login-required') {
     throw new Error('Wells Fargo authentication is required');
   }
@@ -2414,7 +2818,8 @@ export async function runWellsFargoSync(
   config: WellsFargoSyncConfig,
   onProgress: WellsFargoProgressReporter = () => {},
 ): Promise<WellsFargoSyncResult> {
-  if (config.accounts.length === 0) throw new Error('Wells Fargo sync requires at least one planned account');
+  if (config.accounts.length === 0)
+    throw new Error('Wells Fargo sync requires at least one planned account');
   validateWellsFargoSyncAccounts(config.accounts);
   const outputDir = resolve(config.outputDir);
   await mkdir(outputDir, { recursive: true, mode: 0o700 });
@@ -2423,16 +2828,18 @@ export async function runWellsFargoSync(
       name: config.session ?? DEFAULT_SESSION,
       startUrl: LOGIN_URL,
       profilePath: config.profilePath,
-      ...(config.headless === undefined ? {} : {
-        contextOptions: { headless: config.headless },
-      }),
+      ...(config.headless === undefined
+        ? {}
+        : {
+            contextOptions: { headless: config.headless },
+          }),
     },
     buildWellsFargoBrowserProgram(config),
     {
       completionDescription: 'Wells Fargo downloads are ready for review.',
       isAuthenticated: isWellsFargoAuthenticatedPage,
       waitUntilAuthenticated: waitUntilWellsFargoAuthenticated,
-      onProgress: message => onProgress(wellsFargoBrowserWindowProgress(message)),
+      onProgress: (message) => onProgress(wellsFargoBrowserWindowProgress(message)),
       programBindings: wellsFargoBrowserBindings(outputDir, onProgress),
     },
   );

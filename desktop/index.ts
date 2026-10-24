@@ -1,12 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import Electrobun, { ApplicationMenu, ContextMenu, BrowserView, BrowserWindow, Utils } from 'electrobun/main';
+import Electrobun, {
+  ApplicationMenu,
+  ContextMenu,
+  BrowserView,
+  BrowserWindow,
+  Utils,
+} from 'electrobun/main';
 import { accountContextMenu, accountIdFromMenuEvent } from './accountContextMenu';
-import {
-  callTRPCProcedure,
-  getTRPCErrorFromUnknown,
-  getTRPCErrorShape,
-} from '@trpc/server';
+import { callTRPCProcedure, getTRPCErrorFromUnknown, getTRPCErrorShape } from '@trpc/server';
 import { migrateLegacyData } from './dataMigration.ts';
 import { macApplicationMenu } from './applicationMenu.ts';
 import { windowChrome } from './windowChrome.ts';
@@ -49,8 +51,11 @@ const [databaseModule, seedModule, envModule, routerModule] = await Promise.all(
 envModule.loadLocalEnv();
 databaseModule.initDatabase();
 seedModule.seedDatabase();
-const { startAutomaticCategorizationWorker } = await import('../server/app/automaticCategorization.ts');
-void (await import('../server/app/parserRefresh')).refreshChangedParsers().finally(startAutomaticCategorizationWorker);
+const { startAutomaticCategorizationWorker } =
+  await import('../server/app/automaticCategorization.ts');
+void (await import('../server/app/parserRefresh'))
+  .refreshChangedParsers()
+  .finally(startAutomaticCategorizationWorker);
 
 const { appRouter } = routerModule;
 
@@ -116,10 +121,15 @@ const mainWindow = new BrowserWindow({
   },
 });
 
-ContextMenu.on('context-menu-clicked', event => {
+ContextMenu.on('context-menu-clicked', (event) => {
   if (event && typeof event === 'object' && 'data' in event) {
     const data = event.data;
-    if (data && typeof data === 'object' && 'action' in data && data.action === 'customize-sidebar') {
+    if (
+      data &&
+      typeof data === 'object' &&
+      'action' in data &&
+      data.action === 'customize-sidebar'
+    ) {
       rpc.send.customizeSidebar({});
       return;
     }
@@ -128,7 +138,7 @@ ContextMenu.on('context-menu-clicked', event => {
   if (accountId !== null) rpc.send.editAccount({ accountId });
 });
 
-ApplicationMenu.on('application-menu-clicked', event => {
+ApplicationMenu.on('application-menu-clicked', (event) => {
   if (!event || typeof event !== 'object' || !('data' in event)) return;
   const data = event.data;
   if (!data || typeof data !== 'object' || !('action' in data)) return;

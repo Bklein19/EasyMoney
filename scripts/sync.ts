@@ -32,9 +32,8 @@ let exitCode = 0;
 let executionPlan: SyncExecutionPlan | null = null;
 try {
   executionPlan = parseSyncExecutionPlan(await Bun.stdin.text());
-  const manifest = await runSyncExecutionPlan(
-    executionPlan,
-    event => emitForPlan(executionPlan!, event),
+  const manifest = await runSyncExecutionPlan(executionPlan, (event) =>
+    emitForPlan(executionPlan!, event),
   );
   writeMessage({
     protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
@@ -49,6 +48,6 @@ try {
 }
 
 await new Promise<void>((resolveFlush, rejectFlush) => {
-  process.stdout.write('', error => error ? rejectFlush(error) : resolveFlush());
+  process.stdout.write('', (error) => (error ? rejectFlush(error) : resolveFlush()));
 });
 process.exit(exitCode);

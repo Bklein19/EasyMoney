@@ -117,9 +117,7 @@ function safeCount(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
 }
 
-function safeEvent(
-  event: Parameters<SyncReporter>[0],
-): SafeConnectorDevelopmentEvent {
+function safeEvent(event: Parameters<SyncReporter>[0]): SafeConnectorDevelopmentEvent {
   const data = event.data ?? {};
   const safe: SafeConnectorDevelopmentEvent = { type: event.type };
   for (const key of ['step', 'status', 'accountKind', 'artifactKind'] as const) {
@@ -152,27 +150,61 @@ function safeEvent(
 function classifyFailure(error: unknown): NonNullable<ConnectorDevelopmentResult['failure']> {
   const message = String(error instanceof Error ? error.message : error).toLowerCase();
   if (/auth(?:entication)?.*tim(?:ed|e)[ -]?out/.test(message)) {
-    return { code: 'authentication-timeout', summary: 'Authentication timed out', stage: 'authentication' };
+    return {
+      code: 'authentication-timeout',
+      summary: 'Authentication timed out',
+      stage: 'authentication',
+    };
   }
   if (/auth(?:entication)?.*(?:required|login|sign[ -]?in)/.test(message)) {
-    return { code: 'authentication-required', summary: 'Authentication was not completed', stage: 'authentication' };
+    return {
+      code: 'authentication-required',
+      summary: 'Authentication was not completed',
+      stage: 'authentication',
+    };
   }
   if (/browser.*closed|closed.*browser/.test(message)) {
-    return { code: 'browser-closed', summary: 'Browser closed before the connector completed', stage: 'browser' };
+    return {
+      code: 'browser-closed',
+      summary: 'Browser closed before the connector completed',
+      stage: 'browser',
+    };
   }
   if (/request.*tim(?:ed|e)[ -]?out|tim(?:ed|e)[ -]?out.*request/.test(message)) {
-    return { code: 'request-timeout', summary: 'An authenticated request timed out', stage: 'request' };
+    return {
+      code: 'request-timeout',
+      summary: 'An authenticated request timed out',
+      stage: 'request',
+    };
   }
   if (/parser|validation/.test(message)) {
-    return { code: 'parser-validation-failed', summary: 'Artifact parser validation failed', stage: 'validation' };
+    return {
+      code: 'parser-validation-failed',
+      summary: 'Artifact parser validation failed',
+      stage: 'validation',
+    };
   }
-  if (/account.*(?:discover|mapping|ambiguous)|(?:discover|mapping|ambiguous).*account/.test(message)) {
-    return { code: 'account-discovery-failed', summary: 'Account discovery or mapping failed', stage: 'account-discovery' };
+  if (
+    /account.*(?:discover|mapping|ambiguous)|(?:discover|mapping|ambiguous).*account/.test(message)
+  ) {
+    return {
+      code: 'account-discovery-failed',
+      summary: 'Account discovery or mapping failed',
+      stage: 'account-discovery',
+    };
   }
   if (/profile.*(?:lock|lease|unavailable)|(?:lock|lease).*profile/.test(message)) {
-    return { code: 'browser-profile-unavailable', summary: 'Browser profile was unavailable', stage: 'browser-profile' };
+    return {
+      code: 'browser-profile-unavailable',
+      summary: 'Browser profile was unavailable',
+      stage: 'browser-profile',
+    };
   }
-  return { code: 'connector-run-failed', summary: 'Connector development run failed', stage: 'connector-run' };
+  return {
+    code: 'connector-run-failed',
+    summary: 'Connector development run failed',
+    stage: 'connector-run',
+  };
 }
 
 function activeFailureStage(
@@ -219,7 +251,7 @@ export async function runConnectorDevelopment(
   if (options.today !== undefined && !ISO_DATE.test(options.today)) {
     throw new Error('Development runner today must use YYYY-MM-DD');
   }
-  const sourcePlanText = await (dependencies.readSourcePlan ?? (path => readFile(path, 'utf8')))(
+  const sourcePlanText = await (dependencies.readSourcePlan ?? ((path) => readFile(path, 'utf8')))(
     resolve(options.sourcePlanPath),
   );
   const sourcePlan = parseSyncExecutionPlan(sourcePlanText);
@@ -238,16 +270,21 @@ export async function runConnectorDevelopment(
     ...(options.processId === undefined ? {} : { processId: options.processId }),
   });
   const resultPath = join(dirname(development.outputDir), 'result.json');
-  const plan: SyncExecutionPlan = (dependencies.createExecutionPlan ?? createSyncExecutionPlanFromAccounts)({
-    runId: development.runId,
-    institutionId: options.institutionId,
-    ...(sourcePlan.connectionId ? { connectionId: sourcePlan.connectionId } : {}),
-    goal: options.goal,
-  }, {
-    ...(options.today ? { today: options.today } : { now: started }),
-    accounts: sourcePlan.accounts,
-    outputDir: development.outputDir,
-  });
+  const plan: SyncExecutionPlan = (
+    dependencies.createExecutionPlan ?? createSyncExecutionPlanFromAccounts
+  )(
+    {
+      runId: development.runId,
+      institutionId: options.institutionId,
+      ...(sourcePlan.connectionId ? { connectionId: sourcePlan.connectionId } : {}),
+      goal: options.goal,
+    },
+    {
+      ...(options.today ? { today: options.today } : { now: started }),
+      accounts: sourcePlan.accounts,
+      outputDir: development.outputDir,
+    },
+  );
   const result: ConnectorDevelopmentResult = {
     version: 1,
     institutionId: options.institutionId,
@@ -269,7 +306,7 @@ export async function runConnectorDevelopment(
     resultPath,
   });
 
-  const report: SyncReporter = event => {
+  const report: SyncReporter = (event) => {
     const persistedEvent = safeEvent(event);
     result.eventCount += 1;
     result.events.push(persistedEvent);

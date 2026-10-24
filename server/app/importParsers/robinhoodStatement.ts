@@ -14,7 +14,8 @@ function isUuidPdf(fileName: string) {
 
 export const robinhoodStatementParser: AppImportParser = {
   ...adapted,
-  matches: ({ fileName, sample }) => isUuidPdf(fileName) || meta.matches({ filename: fileName, sample }),
+  matches: ({ fileName, sample }) =>
+    isUuidPdf(fileName) || meta.matches({ filename: fileName, sample }),
   parse(input: AppImportParseInput): Promise<AppImportParseResult> {
     return adapted.parse(input) as Promise<AppImportParseResult>;
   },

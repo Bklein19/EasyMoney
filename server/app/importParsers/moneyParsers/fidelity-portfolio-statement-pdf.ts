@@ -1,22 +1,24 @@
-import type { ParseResult, ParserMeta } from "./types.ts";
-import { getDocumentProxy, extractText } from "unpdf";
-import { cents, makeTx } from "./_helpers";
-import { fidelityInvestmentReportStructure } from "./fidelity-report-structure.ts";
+import type { ParseResult, ParserMeta } from './types.ts';
+import { getDocumentProxy, extractText } from 'unpdf';
+import { cents, makeTx } from './_helpers';
+import { fidelityInvestmentReportStructure } from './fidelity-report-structure.ts';
 import { checkFidelityPortfolioSections } from '../printedStatementChecks';
 
 export const meta: ParserMeta = {
-  id: "fidelity-portfolio-statement-pdf",
-  institution: "Fidelity",
-  kind: "statement",
+  id: 'fidelity-portfolio-statement-pdf',
+  institution: 'Fidelity',
+  kind: 'statement',
   priority: 50,
-  matches: ({ filename, sample }) => sample.trim()
-    ? /\.pdf$/i.test(filename) && fidelityInvestmentReportStructure(sample) === "portfolio-statement"
-    : /^\d{4}-\d{2}-.+-Fidelity-Statement\.pdf$/i.test(filename) ||
-      /^[A-Za-z]+(?:-[A-Za-z]+)? \d{4}-.+-Fidelity-Statement\.pdf$/i.test(filename),
+  matches: ({ filename, sample }) =>
+    sample.trim()
+      ? /\.pdf$/i.test(filename) &&
+        fidelityInvestmentReportStructure(sample) === 'portfolio-statement'
+      : /^\d{4}-\d{2}-.+-Fidelity-Statement\.pdf$/i.test(filename) ||
+        /^[A-Za-z]+(?:-[A-Za-z]+)? \d{4}-.+-Fidelity-Statement\.pdf$/i.test(filename),
 };
 
 const titleCase = (value: string) =>
-  value.toLowerCase().replace(/\b[a-z]/g, char => char.toUpperCase());
+  value.toLowerCase().replace(/\b[a-z]/g, (char) => char.toUpperCase());
 
 function isoLongDate(value: string): string {
   const date = new Date(`${value} UTC`);
@@ -34,24 +36,35 @@ function dateYearFor(mm: string, coveredFrom: string, coveredTo: string): string
 
 function parseAccount(text: string): string {
   const number = text.match(/Account (?:Number|#):\s*(\d{3})-(\d{6})/i);
-  if (!number) throw new Error("Could not find Fidelity portfolio account number");
+  if (!number) throw new Error('Could not find Fidelity portfolio account number');
   const digits = `${number[1]}${number[2]}`;
   const label =
-    text.match(/Account Summary\s*\n?\s*[A-Z][A-Z -]+?\s+-\s+([A-Z ]+?)(?:\s+Account Value|\s+This Period|\n)/i)?.[1] ||
-    text.match(/(?:^|\n)\s*[A-Z][A-Z -]+?\s+-\s+([A-Z ]+?)(?:\s+Account Value|\s+This Period|\n)/i)?.[1] ||
+    text.match(
+      /Account Summary\s*\n?\s*[A-Z][A-Z -]+?\s+-\s+([A-Z ]+?)(?:\s+Account Value|\s+This Period|\n)/i,
+    )?.[1] ||
+    text.match(
+      /(?:^|\n)\s*[A-Z][A-Z -]+?\s+-\s+([A-Z ]+?)(?:\s+Account Value|\s+This Period|\n)/i,
+    )?.[1] ||
     text.match(/FIDELITY\s+([A-Z ]+?)\s+[A-Z][A-Z -]+(?:\n|$)/i)?.[1] ||
-    "Portfolio Account";
-  const cleanedLabel = label.replace(/account\s*summary/i, "").trim();
+    'Portfolio Account';
+  const cleanedLabel = label.replace(/account\s*summary/i, '').trim();
   return `${titleCase(cleanedLabel)} ${digits}`;
 }
 
-function parseContributionRows(text: string, account: string, coveredFrom: string, coveredTo: string): ParseResult["transactions"] {
-  const transactions: ParseResult["transactions"] = [];
-  const section = text.match(/Contributions\s+Date Reference Description Amount\s+([\s\S]*?)Total Contributions\s+\$?[\d,]+\.\d{2}/i)?.[1];
+function parseContributionRows(
+  text: string,
+  account: string,
+  coveredFrom: string,
+  coveredTo: string,
+): ParseResult['transactions'] {
+  const transactions: ParseResult['transactions'] = [];
+  const section = text.match(
+    /Contributions\s+Date Reference Description Amount\s+([\s\S]*?)Total Contributions\s+\$?[\d,]+\.\d{2}/i,
+  )?.[1];
   if (!section) return transactions;
 
-  for (const rawLine of section.split("\n")) {
-    const line = rawLine.replace(/\s+/g, " ").trim();
+  for (const rawLine of section.split('\n')) {
+    const line = rawLine.replace(/\s+/g, ' ').trim();
     if (!line) continue;
     const match = line.match(/^(\d{2})\/(\d{2})\s+(.+?)\s+\$?([\d,]+\.\d{2})$/);
     if (!match) continue;
@@ -59,65 +72,87 @@ function parseContributionRows(text: string, account: string, coveredFrom: strin
     const date = `${dateYearFor(mm!, coveredFrom, coveredTo)}-${mm}-${dd}`;
     const amount_cents = cents(amount!);
     if (amount_cents === 0) continue;
-    transactions.push(makeTx({
-      date,
-      amount_cents,
-      description: `Fidelity contribution: ${description!.trim()}`,
-      account,
-      institution: "Fidelity",
-      raw: {
-        source: "fidelity-portfolio-statement",
-        type: "contribution",
-        period: `${coveredFrom}/${coveredTo}`,
-        description: description!.trim(),
-        amount,
-      },
-    }));
+    transactions.push(
+      makeTx({
+        date,
+        amount_cents,
+        description: `Fidelity contribution: ${description!.trim()}`,
+        account,
+        institution: 'Fidelity',
+        raw: {
+          source: 'fidelity-portfolio-statement',
+          type: 'contribution',
+          period: `${coveredFrom}/${coveredTo}`,
+          description: description!.trim(),
+          amount,
+        },
+      }),
+    );
   }
 
   return transactions;
 }
 
-function parseDistributionRows(text: string, account: string, coveredFrom: string, coveredTo: string): ParseResult["transactions"] {
-  const transactions: ParseResult["transactions"] = [];
-  const section = text.match(/Distributions\s+Date Reference Description Amount\s+([\s\S]*?)Total Distributions\s+(-|\(?-?\$?[\d,]+\.\d{2}\)?)/i)?.[1];
+function parseDistributionRows(
+  text: string,
+  account: string,
+  coveredFrom: string,
+  coveredTo: string,
+): ParseResult['transactions'] {
+  const transactions: ParseResult['transactions'] = [];
+  const section = text.match(
+    /Distributions\s+Date Reference Description Amount\s+([\s\S]*?)Total Distributions\s+(-|\(?-?\$?[\d,]+\.\d{2}\)?)/i,
+  )?.[1];
   if (!section) return transactions;
 
-  for (const rawLine of section.split("\n")) {
-    const line = rawLine.replace(/\s+/g, " ").trim();
+  for (const rawLine of section.split('\n')) {
+    const line = rawLine.replace(/\s+/g, ' ').trim();
     if (!line) continue;
-    const match = line.match(/^(\d{2})\/(\d{2})\s+(.+?)\s+(-?\$?[\d,]+\.\d{2}|\(\$?[\d,]+\.\d{2}\))$/);
+    const match = line.match(
+      /^(\d{2})\/(\d{2})\s+(.+?)\s+(-?\$?[\d,]+\.\d{2}|\(\$?[\d,]+\.\d{2}\))$/,
+    );
     if (!match) continue;
     const [, mm, dd, description, amount] = match;
     const date = `${dateYearFor(mm!, coveredFrom, coveredTo)}-${mm}-${dd}`;
     const amount_cents = -Math.abs(cents(amount!));
     if (amount_cents === 0) continue;
-    transactions.push(makeTx({
-      date,
-      amount_cents,
-      description: `Fidelity transfer out: ${description!.trim()}`,
-      account,
-      institution: "Fidelity",
-      raw: {
-        source: "fidelity-portfolio-statement",
-        type: "distribution",
-        period: `${coveredFrom}/${coveredTo}`,
-        description: description!.trim(),
-        amount,
-      },
-    }));
+    transactions.push(
+      makeTx({
+        date,
+        amount_cents,
+        description: `Fidelity transfer out: ${description!.trim()}`,
+        account,
+        institution: 'Fidelity',
+        raw: {
+          source: 'fidelity-portfolio-statement',
+          type: 'distribution',
+          period: `${coveredFrom}/${coveredTo}`,
+          description: description!.trim(),
+          amount,
+        },
+      }),
+    );
   }
 
   return transactions;
 }
 
-function parseSecuritiesTransferredOut(text: string, account: string, coveredFrom: string, coveredTo: string): ParseResult["transactions"] {
+function parseSecuritiesTransferredOut(
+  text: string,
+  account: string,
+  coveredFrom: string,
+  coveredTo: string,
+): ParseResult['transactions'] {
   // Only the dated detail table identifies individual transfers. The account
   // summary's period/year-to-date totals cannot supply an event amount or date.
-  const section = text.match(/(?:^|\n)\s*Securities Transferred Out\s*\n([\s\S]*?)Total Securities Transferred Out\b/i)?.[1];
+  const section = text.match(
+    /(?:^|\n)\s*Securities Transferred Out\s*\n([\s\S]*?)Total Securities Transferred Out\b/i,
+  )?.[1];
   if (!section) return [];
-  const transactions: ParseResult["transactions"] = [];
-  const rows = section.matchAll(/(?:^|\n)\s*(\d{2})\/(\d{2})\s+([^\n]+)([\s\S]*?)(?=\n\s*\d{2}\/\d{2}\s|$)/g);
+  const transactions: ParseResult['transactions'] = [];
+  const rows = section.matchAll(
+    /(?:^|\n)\s*(\d{2})\/(\d{2})\s+([^\n]+)([\s\S]*?)(?=\n\s*\d{2}\/\d{2}\s|$)/g,
+  );
   for (const row of rows) {
     const detail = `${row[3]}${row[4]}`;
     const value = detail.match(/VALUE OF TRANSACTION\s+\$?([\d,]+\.\d{2})/i)?.[1];
@@ -126,28 +161,30 @@ function parseSecuritiesTransferredOut(text: string, account: string, coveredFro
     if (!amount_cents) continue;
     const date = `${dateYearFor(row[1]!, coveredFrom, coveredTo)}-${row[1]}-${row[2]}`;
     const security = row[3]!.split(/\s+Transfer Of Assets\b/i)[0]!.trim();
-    transactions.push(makeTx({
-      date,
-      amount_cents,
-      description: `Fidelity transfer out: ${security}`,
-      account,
-      institution: "Fidelity",
-      raw: {
-        source: "fidelity-portfolio-statement",
-        type: "security-transfer-detail",
-        period: `${coveredFrom}/${coveredTo}`,
-        security,
-        value,
-      },
-    }));
+    transactions.push(
+      makeTx({
+        date,
+        amount_cents,
+        description: `Fidelity transfer out: ${security}`,
+        account,
+        institution: 'Fidelity',
+        raw: {
+          source: 'fidelity-portfolio-statement',
+          type: 'security-transfer-detail',
+          period: `${coveredFrom}/${coveredTo}`,
+          security,
+          value,
+        },
+      }),
+    );
   }
   return transactions;
 }
 
 export function parseFidelityPortfolioStatementText(text: string): ParseResult {
-  const fullText = text.replace(/\u00a0/g, " ");
+  const fullText = text.replace(/\u00a0/g, ' ');
   const period = fullText.match(/([A-Z][a-z]+ \d{1,2}, \d{4})\s*-\s*([A-Z][a-z]+ \d{1,2}, \d{4})/);
-  if (!period) throw new Error("Could not find Fidelity portfolio statement period");
+  if (!period) throw new Error('Could not find Fidelity portfolio statement period');
 
   const covered_from = isoLongDate(period[1]!);
   const covered_to = isoLongDate(period[2]!);
@@ -155,9 +192,9 @@ export function parseFidelityPortfolioStatementText(text: string): ParseResult {
   const balance =
     fullText.match(/Your Account Value:?\s*(-|\$[\d,]+\.\d{2})/) ||
     fullText.match(/Ending Account Value\s*\**\s*(-|\$[\d,]+\.\d{2})/);
-  if (!balance) throw new Error("Could not find Fidelity portfolio ending balance");
+  if (!balance) throw new Error('Could not find Fidelity portfolio ending balance');
 
-  const balance_cents = balance[1] === "-" ? 0 : cents(balance[1]!);
+  const balance_cents = balance[1] === '-' ? 0 : cents(balance[1]!);
   const transactions = [
     ...parseContributionRows(fullText, account, covered_from, covered_to),
     ...parseDistributionRows(fullText, account, covered_from, covered_to),
@@ -168,12 +205,20 @@ export function parseFidelityPortfolioStatementText(text: string): ParseResult {
     covered_from,
     covered_to,
     transactions,
-    balances: [{ date: covered_to, account, institution: "Fidelity", balance_cents, raw: { statementValidation: checkFidelityPortfolioSections(fullText, transactions) } }],
+    balances: [
+      {
+        date: covered_to,
+        account,
+        institution: 'Fidelity',
+        balance_cents,
+        raw: { statementValidation: checkFidelityPortfolioSections(fullText, transactions) },
+      },
+    ],
   };
 }
 
 export default async function parse(filePath: string): Promise<ParseResult> {
   const pdf = await getDocumentProxy(new Uint8Array(await Bun.file(filePath).arrayBuffer()));
   const { text } = await extractText(pdf);
-  return parseFidelityPortfolioStatementText(text.join("\n"));
+  return parseFidelityPortfolioStatementText(text.join('\n'));
 }

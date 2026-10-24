@@ -41,7 +41,13 @@ function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
-function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }: AccountDetailsProps) {
+function AccountDetails({
+  account,
+  onSave,
+  onArchiveToggle,
+  isSaving,
+  error,
+}: AccountDetailsProps) {
   const [draft, setDraft] = useState<AccountDraft>({
     name: account.name || '',
     institution: account.institution || '',
@@ -63,7 +69,7 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }: A
     draft.last4.trim() !== (account.last4 || '');
 
   const updateDraft = (field: AccountDraftField, value: string) => {
-    setDraft(current => ({ ...current, [field]: value }));
+    setDraft((current) => ({ ...current, [field]: value }));
   };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -84,12 +90,24 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }: A
       <form className="account-meta-form" onSubmit={handleSubmit}>
         <div className="account-field account-field--wide">
           <label htmlFor={`account-freshness-${account.id}`}>Statement schedule</label>
-          <select id={`account-freshness-${account.id}`} value={draft.freshnessPolicy} disabled={isSaving}
-            onChange={event => setDraft(current => ({ ...current, freshnessPolicy: event.target.value === 'on-demand' ? 'on-demand' : 'regular' }))}>
+          <select
+            id={`account-freshness-${account.id}`}
+            value={draft.freshnessPolicy}
+            disabled={isSaving}
+            onChange={(event) =>
+              setDraft((current) => ({
+                ...current,
+                freshnessPolicy: event.target.value === 'on-demand' ? 'on-demand' : 'regular',
+              }))
+            }
+          >
             <option value="regular">Regular statements</option>
             <option value="on-demand">No regular statements</option>
           </select>
-          <small>No regular statements silences routine freshness reminders. It does not verify or change the balance; you can still sync this account.</small>
+          <small>
+            No regular statements silences routine freshness reminders. It does not verify or change
+            the balance; you can still sync this account.
+          </small>
         </div>
         <div className="account-field account-field--wide">
           <label htmlFor={`account-name-${account.id}`}>Name</label>
@@ -133,7 +151,9 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }: A
             pattern="[0-9]{4}"
             inputMode="numeric"
             autoComplete="off"
-            onChange={(event) => updateDraft('last4', event.target.value.replace(/\D/g, '').slice(0, 4))}
+            onChange={(event) =>
+              updateDraft('last4', event.target.value.replace(/\D/g, '').slice(0, 4))
+            }
             disabled={isSaving}
           />
         </div>
@@ -146,8 +166,10 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }: A
             onChange={(event) => updateDraft('type', event.target.value)}
             disabled={isSaving}
           >
-            {ACCOUNT_TYPES.map(type => (
-              <option key={type} value={type}>{displayType(type)}</option>
+            {ACCOUNT_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {displayType(type)}
+              </option>
             ))}
           </select>
         </div>
@@ -160,8 +182,10 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }: A
             onChange={(event) => updateDraft('currency', event.target.value)}
             disabled={isSaving}
           >
-            {CURRENCIES.map(currency => (
-              <option key={currency} value={currency}>{currency}</option>
+            {CURRENCIES.map((currency) => (
+              <option key={currency} value={currency}>
+                {currency}
+              </option>
             ))}
           </select>
         </div>
@@ -192,8 +216,12 @@ function AccountDetails({ account, onSave, onArchiveToggle, isSaving, error }: A
         <div className="account-aliases">
           <div className="account-aliases__title">Aliases</div>
           <div className="account-aliases__chips">
-            {account.aliases.map(alias => (
-              <span className="account-alias-chip" key={alias.id} title={`${alias.institution}: ${alias.alias}`}>
+            {account.aliases.map((alias) => (
+              <span
+                className="account-alias-chip"
+                key={alias.id}
+                title={`${alias.institution}: ${alias.alias}`}
+              >
                 <span>{alias.institution}</span>
                 {alias.alias}
               </span>
@@ -209,7 +237,9 @@ export default function AccountsPage() {
   const [searchParams] = useSearchParams();
   const editId = Number(searchParams.get('edit')) || null;
   const [showArchived, setShowArchived] = useState(false);
-  const { accounts, updateAccount, archiveAccount, unarchiveAccount, isLoading } = useAccounts({ includeArchived: showArchived });
+  const { accounts, updateAccount, archiveAccount, unarchiveAccount, isLoading } = useAccounts({
+    includeArchived: showArchived,
+  });
   const [expandedAccountId, setExpandedAccountId] = useState<number | null>(editId);
   useEffect(() => {
     if (!editId || isLoading) return;
@@ -225,16 +255,16 @@ export default function AccountsPage() {
   const [errorByAccountId, setErrorByAccountId] = useState<ErrorByAccountId>({});
 
   const activeAccounts = useMemo(
-    () => accounts.filter(account => account.status !== 'archived'),
-    [accounts]
+    () => accounts.filter((account) => account.status !== 'archived'),
+    [accounts],
   );
   const totalBalance = useMemo(
     () => activeAccounts.reduce((sum, account) => sum + (account.currentBalance || 0), 0),
-    [activeAccounts]
+    [activeAccounts],
   );
 
   const setAccountError = (accountId: number, message: string) => {
-    setErrorByAccountId(current => ({ ...current, [accountId]: message }));
+    setErrorByAccountId((current) => ({ ...current, [accountId]: message }));
   };
 
   const saveAccount = async (account: AccountRow, changes: AccountMetadataChanges) => {
@@ -252,9 +282,11 @@ export default function AccountsPage() {
 
   const toggleArchive = async (account: AccountRow) => {
     const isArchived = account.status === 'archived';
-    const confirmed = window.confirm(isArchived
-      ? `Unarchive ${account.name}? It will be available for imports and reports again.`
-      : `Archive ${account.name}? Source facts and annotations will be preserved.`);
+    const confirmed = window.confirm(
+      isArchived
+        ? `Unarchive ${account.name}? It will be available for imports and reports again.`
+        : `Archive ${account.name}? Source facts and annotations will be preserved.`,
+    );
     if (!confirmed) return;
 
     setSavingAccountId(account.id);
@@ -278,7 +310,10 @@ export default function AccountsPage() {
       <header className="page__header accounts-page__header">
         <div>
           <h1 className="page__title">
-            Accounts <span className="accounts-page__count">{accounts.length} · {formatCurrency(totalBalance)}</span>
+            Accounts{' '}
+            <span className="accounts-page__count">
+              {accounts.length} · {formatCurrency(totalBalance)}
+            </span>
           </h1>
           <p className="page__subtitle">Manage imported account metadata and archive status.</p>
         </div>
@@ -299,7 +334,9 @@ export default function AccountsPage() {
         {isLoading ? (
           <div className="empty-state-simple">Loading accounts...</div>
         ) : accounts.length === 0 ? (
-          <div className="empty-state-simple">No accounts yet. Import a file to create or match an account.</div>
+          <div className="empty-state-simple">
+            No accounts yet. Import a file to create or match an account.
+          </div>
         ) : (
           <table className="accounts-table">
             <colgroup>
@@ -321,11 +358,13 @@ export default function AccountsPage() {
               </tr>
             </thead>
             <tbody>
-              {accounts.map(account => {
+              {accounts.map((account) => {
                 const isExpanded = expandedAccountId === account.id;
                 const isArchived = account.status === 'archived';
                 const isSaving = savingAccountId === account.id;
-                const latestBalanceDate = account.latestBalanceMonth || (account.updatedAt ? formatDate(account.updatedAt, 'iso') : '—');
+                const latestBalanceDate =
+                  account.latestBalanceMonth ||
+                  (account.updatedAt ? formatDate(account.updatedAt, 'iso') : '—');
 
                 return (
                   <Fragment key={account.id}>
@@ -336,21 +375,38 @@ export default function AccountsPage() {
                       <td>
                         <div className="account-row__name" title={account.name}>
                           <span>{account.name}</span>
-                          {account.last4 && <span className="account-last4-badge">•••• {account.last4}</span>}
-                          {account.accountHolder && <span className="account-owner-badge">{account.accountHolder}</span>}
+                          {account.last4 && (
+                            <span className="account-last4-badge">•••• {account.last4}</span>
+                          )}
+                          {account.accountHolder && (
+                            <span className="account-owner-badge">{account.accountHolder}</span>
+                          )}
                           {account.isClosed && <span className="account-closed-badge">Closed</span>}
                         </div>
-                        <div className="account-row__institution">{account.institution || 'No institution'}</div>
+                        <div className="account-row__institution">
+                          {account.institution || 'No institution'}
+                        </div>
                       </td>
-                      <td><span className="account-chip">{displayType(account.type)}</span></td>
+                      <td>
+                        <span className="account-chip">{displayType(account.type)}</span>
+                      </td>
                       <td>
                         <span className={`account-status-chip ${isArchived ? 'is-archived' : ''}`}>
                           {isArchived ? 'Archived' : account.isClosed ? 'Closed' : 'Active'}
                         </span>
-                        {account.reportingClosedOn && <small>Zero balance confirmed {account.reportingClosedOn}</small>}
-                        {account.closureBalanceConflict && <p role="alert">A statement reports a nonzero balance after closure. Review the account or reopen it.</p>}
+                        {account.reportingClosedOn && (
+                          <small>Zero balance confirmed {account.reportingClosedOn}</small>
+                        )}
+                        {account.closureBalanceConflict && (
+                          <p role="alert">
+                            A statement reports a nonzero balance after closure. Review the account
+                            or reopen it.
+                          </p>
+                        )}
                       </td>
-                      <td className={`account-row__balance ${account.currentBalance < 0 ? 'is-negative' : ''}`}>
+                      <td
+                        className={`account-row__balance ${account.currentBalance < 0 ? 'is-negative' : ''}`}
+                      >
                         {formatCurrency(account.currentBalance || 0)}
                       </td>
                       <td className="account-row__updated">{latestBalanceDate}</td>

@@ -40,7 +40,10 @@ export function formatPercent(value: number, decimals = 1) {
 /**
  * Format a date for display
  */
-export function formatDate(dateStr: string, style: 'short' | 'medium' | 'long' | 'month' | 'iso' = 'short') {
+export function formatDate(
+  dateStr: string,
+  style: 'short' | 'medium' | 'long' | 'month' | 'iso' = 'short',
+) {
   const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr);
   const date = dateOnly
     ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))

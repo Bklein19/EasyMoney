@@ -12,9 +12,9 @@ export function upsertImportProfile(input: {
   lastAccountId?: number | string | null;
 }) {
   const now = new Date().toISOString();
-  const existing = getDb().prepare('SELECT id FROM importProfiles WHERE headerSignature = ?').get(input.headerSignature) as
-    | { id: number }
-    | undefined;
+  const existing = getDb()
+    .prepare('SELECT id FROM importProfiles WHERE headerSignature = ?')
+    .get(input.headerSignature) as { id: number } | undefined;
 
   const row = {
     headerSignature: input.headerSignature,
@@ -30,9 +30,11 @@ export function upsertImportProfile(input: {
     return { id: existing.id };
   }
 
-  const id = Number(insertRow('importProfiles', {
-    ...row,
-    createdAt: now,
-  }));
+  const id = Number(
+    insertRow('importProfiles', {
+      ...row,
+      createdAt: now,
+    }),
+  );
   return { id };
 }

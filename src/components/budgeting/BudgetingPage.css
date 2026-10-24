@@ -350,7 +350,9 @@
 .budgeting-table__head,
 .budgeting-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1.15fr) minmax(240px, 1.4fr) minmax(110px, 0.7fr) minmax(90px, 0.55fr) minmax(110px, 0.6fr);
+  grid-template-columns:
+    minmax(180px, 1.15fr) minmax(240px, 1.4fr) minmax(110px, 0.7fr) minmax(90px, 0.55fr)
+    minmax(110px, 0.6fr);
   gap: var(--space-3);
   align-items: center;
 }
@@ -419,12 +421,12 @@
   gap: var(--space-3);
 }
 
-.budgeting-target-control input[type="range"] {
+.budgeting-target-control input[type='range'] {
   width: 100%;
   accent-color: var(--color-accent);
 }
 
-.budgeting-target-control input[type="range"]:disabled {
+.budgeting-target-control input[type='range']:disabled {
   opacity: 0.35;
 }
 
@@ -612,7 +614,7 @@
   width: 100%;
 }
 
-.budgeting-design-row input[type="range"] {
+.budgeting-design-row input[type='range'] {
   width: 100%;
   accent-color: var(--color-accent);
 }

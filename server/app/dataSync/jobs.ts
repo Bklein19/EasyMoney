@@ -29,13 +29,17 @@ import type {
   SyncRunResult,
   SyncRunReview,
 } from './types.ts';
-import {
-  parseSyncWorkerLine,
-  validateSyncArtifactManifestForPlan,
-} from './workerProtocol.ts';
+import { parseSyncWorkerLine, validateSyncArtifactManifestForPlan } from './workerProtocol.ts';
 import { stageCompletedSyncWorker } from './workerCompletion.ts';
 
-export type SyncJobStatus = 'queued' | 'running' | 'awaiting-confirmation' | 'importing' | 'complete' | 'failed' | 'cancelled';
+export type SyncJobStatus =
+  | 'queued'
+  | 'running'
+  | 'awaiting-confirmation'
+  | 'importing'
+  | 'complete'
+  | 'failed'
+  | 'cancelled';
 
 export interface SyncJob {
   runId: string;
@@ -64,7 +68,9 @@ type ManagedSyncJob = SyncJob & {
 const jobs = new Map<string, ManagedSyncJob>();
 const downloads = new SyncDownloadQueue();
 export function hasActiveSyncJobs() {
-  return [...jobs.values()].some(job => ['queued', 'running', 'importing'].includes(job.status) || job.reviewAction !== null);
+  return [...jobs.values()].some(
+    (job) => ['queued', 'running', 'importing'].includes(job.status) || job.reviewAction !== null,
+  );
 }
 const childEventTypes = new Set<SyncEvent['type']>([
   'phase',
@@ -93,13 +99,19 @@ function runFilePath(runId: string) {
 }
 
 function persistJob(job: ManagedSyncJob) {
-  job.persistence = job.persistence.catch(() => {}).then(async () => {
-    const path = runFilePath(job.runId);
-    await mkdir(dirname(path), { recursive: true });
-    const temporaryPath = `${path}.tmp`;
-    await writeFile(temporaryPath, `${JSON.stringify({ ...publicJob(job), databasePath: databaseBackupStatus().databasePath }, null, 2)}\n`, { mode: 0o600 });
-    await rename(temporaryPath, path);
-  });
+  job.persistence = job.persistence
+    .catch(() => {})
+    .then(async () => {
+      const path = runFilePath(job.runId);
+      await mkdir(dirname(path), { recursive: true });
+      const temporaryPath = `${path}.tmp`;
+      await writeFile(
+        temporaryPath,
+        `${JSON.stringify({ ...publicJob(job), databasePath: databaseBackupStatus().databasePath }, null, 2)}\n`,
+        { mode: 0o600 },
+      );
+      await rename(temporaryPath, path);
+    });
   return job.persistence;
 }
 
@@ -110,13 +122,23 @@ async function managedJob(runId: string): Promise<ManagedSyncJob | null> {
     return current;
   }
   try {
-    const saved = JSON.parse(await readFile(runFilePath(runId), 'utf8')) as Partial<SyncJob> & { databasePath?: string };
-    if (saved.databasePath && saved.databasePath !== databaseBackupStatus().databasePath) return null;
+    const saved = JSON.parse(await readFile(runFilePath(runId), 'utf8')) as Partial<SyncJob> & {
+      databasePath?: string;
+    };
+    if (saved.databasePath && saved.databasePath !== databaseBackupStatus().databasePath)
+      return null;
     // Older records predate database scoping. Only recover reviews whose files
     // demonstrably belong to this ledger, not another dev/production database.
-    if (!saved.databasePath && (!saved.review?.artifacts.length || !saved.review.artifacts.every(artifact =>
-      getDb().prepare('SELECT id FROM importFiles WHERE id = ? AND fileName = ?').get(artifact.importFileId, artifact.fileName)
-    ))) return null;
+    if (
+      !saved.databasePath &&
+      (!saved.review?.artifacts.length ||
+        !saved.review.artifacts.every((artifact) =>
+          getDb()
+            .prepare('SELECT id FROM importFiles WHERE id = ? AND fileName = ?')
+            .get(artifact.importFileId, artifact.fileName),
+        ))
+    )
+      return null;
     const loadedWhileReading = jobs.get(runId);
     if (loadedWhileReading) return loadedWhileReading;
     if (saved.runId !== runId || !saved.institutionId || !saved.goal || !saved.status) return null;
@@ -173,11 +195,12 @@ function appendEvent(job: ManagedSyncJob, event: SyncEvent) {
 }
 
 function reportForJob(job: ManagedSyncJob) {
-  return (event: Omit<SyncEvent, 'runId' | 'timestamp'>) => appendEvent(job, {
-    ...event,
-    runId: job.runId,
-    timestamp: new Date().toISOString(),
-  });
+  return (event: Omit<SyncEvent, 'runId' | 'timestamp'>) =>
+    appendEvent(job, {
+      ...event,
+      runId: job.runId,
+      timestamp: new Date().toISOString(),
+    });
 }
 
 function failJob(job: ManagedSyncJob, message: string): void {
@@ -244,38 +267,41 @@ async function finishWorker(
   if (job.status !== 'running' || job.cancelRequested) return;
 
   try {
-    const staged = await stageCompletedSyncWorker({
-      exitCode,
-      cancelled: job.cancelRequested,
-      protocolError: job.protocolError,
-      manifest: job.manifest,
-    }, async manifest => {
-      job.message = 'Downloads complete; preparing review';
-      await persistJob(job);
-      return runSerializedSyncDatabaseWork(async () => {
-        if (job.status !== 'running' || job.cancelRequested) return null;
-        const result = await stageSyncArtifactManifest(
-          manifest,
-          plan.outputDir,
-          event => {
-            if (job.status === 'running' && !job.cancelRequested) reportForJob(job)(event);
-          },
-          () => job.status === 'running' && !job.cancelRequested,
-        );
-        if (job.status !== 'running' || job.cancelRequested) {
-          discardSyncPreviewIds(result.createdImportFileIds);
-          return null;
-        }
-        appendEvent(job, {
-          runId: job.runId,
-          timestamp: new Date().toISOString(),
-          type: 'review',
-          message: 'Downloads are ready to review',
-          data: { review: result.review },
+    const staged = await stageCompletedSyncWorker(
+      {
+        exitCode,
+        cancelled: job.cancelRequested,
+        protocolError: job.protocolError,
+        manifest: job.manifest,
+      },
+      async (manifest) => {
+        job.message = 'Downloads complete; preparing review';
+        await persistJob(job);
+        return runSerializedSyncDatabaseWork(async () => {
+          if (job.status !== 'running' || job.cancelRequested) return null;
+          const result = await stageSyncArtifactManifest(
+            manifest,
+            plan.outputDir,
+            (event) => {
+              if (job.status === 'running' && !job.cancelRequested) reportForJob(job)(event);
+            },
+            () => job.status === 'running' && !job.cancelRequested,
+          );
+          if (job.status !== 'running' || job.cancelRequested) {
+            discardSyncPreviewIds(result.createdImportFileIds);
+            return null;
+          }
+          appendEvent(job, {
+            runId: job.runId,
+            timestamp: new Date().toISOString(),
+            type: 'review',
+            message: 'Downloads are ready to review',
+            data: { review: result.review },
+          });
+          return result;
         });
-        return result;
-      });
-    });
+      },
+    );
     if (!staged) return;
   } catch (error) {
     if (job.cancelRequested) return;
@@ -289,10 +315,11 @@ export async function startSyncJob(input: {
   goal: SyncGoal;
 }): Promise<SyncJob> {
   await listSyncJobs();
-  const active = [...jobs.values()].find(job =>
-    job.institutionId === input.institutionId &&
-    (!job.connectionId || !input.connectionId || job.connectionId === input.connectionId) &&
-    ['queued', 'running', 'awaiting-confirmation', 'importing'].includes(job.status)
+  const active = [...jobs.values()].find(
+    (job) =>
+      job.institutionId === input.institutionId &&
+      (!job.connectionId || !input.connectionId || job.connectionId === input.connectionId) &&
+      ['queued', 'running', 'awaiting-confirmation', 'importing'].includes(job.status),
   );
   if (active) return publicJob(active);
 
@@ -322,37 +349,41 @@ export async function startSyncJob(input: {
   jobs.set(runId, job);
   void persistJob(job);
 
-  void downloads.enqueue(input.institutionId, async () => {
-    if (job.cancelRequested) return;
-    job.status = 'running';
-    job.message = 'Starting update';
-    await persistJob(job);
-    if (job.cancelRequested) return;
-    try {
-      const child = Bun.spawn(commandForSyncWorker(), syncChildProcessOptions());
-      job.process = child;
-      sendSyncExecutionPlan(child, executionPlan);
+  void downloads
+    .enqueue(input.institutionId, async () => {
+      if (job.cancelRequested) return;
+      job.status = 'running';
+      job.message = 'Starting update';
+      await persistJob(job);
+      if (job.cancelRequested) return;
+      try {
+        const child = Bun.spawn(commandForSyncWorker(), syncChildProcessOptions());
+        job.process = child;
+        sendSyncExecutionPlan(child, executionPlan);
 
-      const stdout = readLines(child.stdout, line => acceptWorkerMessage(job, executionPlan, line));
-      const stderr = readLines(child.stderr, line => {
-        appendEvent(job, {
-          runId,
-          timestamp: new Date().toISOString(),
-          type: 'warning',
-          message: line,
+        const stdout = readLines(child.stdout, (line) =>
+          acceptWorkerMessage(job, executionPlan, line),
+        );
+        const stderr = readLines(child.stderr, (line) => {
+          appendEvent(job, {
+            runId,
+            timestamp: new Date().toISOString(),
+            type: 'warning',
+            message: line,
+          });
         });
-      });
-      await child.exited.then(async exitCode => {
-        await Promise.allSettled([stdout, stderr]);
+        await child.exited.then(async (exitCode) => {
+          await Promise.allSettled([stdout, stderr]);
+          job.process = null;
+          await finishWorker(job, executionPlan, exitCode);
+        });
+      } catch (error) {
+        job.process?.kill();
         job.process = null;
-        await finishWorker(job, executionPlan, exitCode);
-      });
-    } catch (error) {
-      job.process?.kill();
-      job.process = null;
-      failJob(job, error instanceof Error ? error.message : String(error));
-    }
-  }).catch(error => failJob(job, error instanceof Error ? error.message : String(error)));
+        failJob(job, error instanceof Error ? error.message : String(error));
+      }
+    })
+    .catch((error) => failJob(job, error instanceof Error ? error.message : String(error)));
 
   return publicJob(job);
 }
@@ -368,7 +399,9 @@ export async function listSyncJobs(): Promise<SyncJob[]> {
     const entries = await readdir(syncApplicationDataRoot(), { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory() || !/^sync-[A-Za-z0-9_-]+$/.test(entry.name)) continue;
-      try { await managedJob(entry.name); } catch (error) {
+      try {
+        await managedJob(entry.name);
+      } catch (error) {
         // A damaged historical record must not hide other recoverable reviews.
         if (!(error instanceof SyntaxError)) throw error;
       }
@@ -377,9 +410,13 @@ export async function listSyncJobs(): Promise<SyncJob[]> {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
   return [...jobs.values()]
-    .filter(job => ['queued', 'running', 'awaiting-confirmation', 'importing'].includes(job.status)
-      || Date.now() - Date.parse(job.completedAt || job.startedAt) < 86_400_000)
-    .map(publicJob).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+    .filter(
+      (job) =>
+        ['queued', 'running', 'awaiting-confirmation', 'importing'].includes(job.status) ||
+        Date.now() - Date.parse(job.completedAt || job.startedAt) < 86_400_000,
+    )
+    .map(publicJob)
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
 export async function cancelSyncJob(runId: string): Promise<SyncJob> {
@@ -417,7 +454,7 @@ export async function confirmSyncJob(
   try {
     await persistJob(job);
     const result = await runSerializedSyncDatabaseWork(() =>
-      commitSyncReview(job.review!, report, accountMappings, outcomeRevision)
+      commitSyncReview(job.review!, report, accountMappings, outcomeRevision),
     );
     job.reviewAction = null;
     appendEvent(job, {

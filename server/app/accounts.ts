@@ -44,7 +44,9 @@ function toAccountSummary(row: AccountRow, aliases: AccountAliasSummary[]): Acco
     type: normalizeAccountType(row.type),
     balance: row.balanceCents === null ? 0 : row.balanceCents / 100,
     latestBalanceMonth: row.latestBalanceMonth,
-    isClosed: status === 'closed' || (status !== 'archived' && row.balanceCents === 0 && row.latestBalanceMonth !== null),
+    isClosed:
+      status === 'closed' ||
+      (status !== 'archived' && row.balanceCents === 0 && row.latestBalanceMonth !== null),
     currency: row.currency ?? 'USD',
     accountHolder: row.accountHolder,
     last4: row.last4,
@@ -59,15 +61,24 @@ function toAccountSummary(row: AccountRow, aliases: AccountAliasSummary[]): Acco
 }
 
 function normalizeAccountMetadata(changes: Record<string, unknown>) {
-  const allowed = new Set(['name', 'institution', 'type', 'currency', 'accountHolder', 'last4', 'freshnessPolicy']);
-  const unsupported = Object.keys(changes).filter(field => !allowed.has(field));
+  const allowed = new Set([
+    'name',
+    'institution',
+    'type',
+    'currency',
+    'accountHolder',
+    'last4',
+    'freshnessPolicy',
+  ]);
+  const unsupported = Object.keys(changes).filter((field) => !allowed.has(field));
   if (unsupported.length) {
     throw new Error(`Accounts only support metadata updates: ${unsupported.join(', ')}`);
   }
 
   const normalized: Record<string, string | null> = {};
   if ('freshnessPolicy' in changes) {
-    if (changes.freshnessPolicy !== 'regular' && changes.freshnessPolicy !== 'on-demand') throw new Error('Invalid freshness policy');
+    if (changes.freshnessPolicy !== 'regular' && changes.freshnessPolicy !== 'on-demand')
+      throw new Error('Invalid freshness policy');
     normalized.freshnessPolicy = changes.freshnessPolicy;
   }
   if ('name' in changes) {
@@ -76,9 +87,10 @@ function normalizeAccountMetadata(changes: Record<string, unknown>) {
     normalized.name = name;
   }
   if ('institution' in changes) {
-    const institution = changes.institution === null || changes.institution === undefined
-      ? null
-      : String(changes.institution).trim() || null;
+    const institution =
+      changes.institution === null || changes.institution === undefined
+        ? null
+        : String(changes.institution).trim() || null;
     normalized.institution = institution;
   }
   if ('type' in changes) {
@@ -87,14 +99,17 @@ function normalizeAccountMetadata(changes: Record<string, unknown>) {
     normalized.type = normalizeAccountType(type);
   }
   if ('currency' in changes) {
-    const currency = String(changes.currency || '').trim().toUpperCase();
+    const currency = String(changes.currency || '')
+      .trim()
+      .toUpperCase();
     if (!currency) throw new Error('Account currency is required.');
     normalized.currency = currency;
   }
   if ('accountHolder' in changes) {
-    const accountHolder = changes.accountHolder === null || changes.accountHolder === undefined
-      ? null
-      : String(changes.accountHolder).trim() || null;
+    const accountHolder =
+      changes.accountHolder === null || changes.accountHolder === undefined
+        ? null
+        : String(changes.accountHolder).trim() || null;
     normalized.accountHolder = accountHolder;
   }
   if ('last4' in changes) {
@@ -105,7 +120,8 @@ function normalizeAccountMetadata(changes: Record<string, unknown>) {
 }
 
 function assertAccountExists(id: number) {
-  const account = getDb().prepare('SELECT id FROM accounts WHERE id = ?').get(id) as { id: number } | undefined;
+  const account = getDb().prepare('SELECT id FROM accounts WHERE id = ?').get(id) as
+    { id: number } | undefined;
   if (!account) throw new Error(`Account not found: ${id}`);
 }
 
@@ -147,18 +163,22 @@ export function listAccounts(options: ListAccountsOptions = {}): AccountListResp
          a.updatedAt
        FROM accounts a
        ${where}
-       ORDER BY a.name ASC, a.id ASC`
+       ORDER BY a.name ASC, a.id ASC`,
     )
     .all() as AccountRow[];
 
   const aliasesByAccountId = new Map<number, AccountAliasSummary[]>();
   if (rows.length) {
-    const aliases = getDb().prepare(`
+    const aliases = getDb()
+      .prepare(
+        `
       SELECT id, institution, alias, accountId
       FROM accountAliases
       WHERE accountId IN (${rows.map(() => '?').join(', ')})
       ORDER BY institution ASC, alias ASC, id ASC
-    `).all(...rows.map(row => row.id)) as AccountAliasRow[];
+    `,
+      )
+      .all(...rows.map((row) => row.id)) as AccountAliasRow[];
 
     for (const alias of aliases) {
       const accountAliases = aliasesByAccountId.get(alias.accountId) ?? [];
@@ -171,7 +191,9 @@ export function listAccounts(options: ListAccountsOptions = {}): AccountListResp
     }
   }
 
-  return { accounts: rows.map(row => toAccountSummary(row, aliasesByAccountId.get(row.id) ?? [])) };
+  return {
+    accounts: rows.map((row) => toAccountSummary(row, aliasesByAccountId.get(row.id) ?? [])),
+  };
 }
 
 export function updateAccountMetadata(id: number | string, changes: Record<string, unknown>) {
@@ -182,18 +204,27 @@ export function updateAccountMetadata(id: number | string, changes: Record<strin
   if (!Object.keys(metadata).length) return { ok: true, accountId };
 
   getDb().transaction(() => {
-    const priorType = getDb().prepare('SELECT type FROM accounts WHERE id = ?').get(accountId)?.type;
-    getDb().prepare(`
+    const priorType = getDb()
+      .prepare('SELECT type FROM accounts WHERE id = ?')
+      .get(accountId)?.type;
+    getDb()
+      .prepare(
+        `
       UPDATE accounts
-      SET ${Object.keys(metadata).map(field => `${field} = @${field}`).join(', ')},
+      SET ${Object.keys(metadata)
+        .map((field) => `${field} = @${field}`)
+        .join(', ')},
           updatedAt = @updatedAt
       WHERE id = @id
-    `).run({
-      ...metadata,
-      updatedAt: new Date().toISOString(),
-      id: accountId,
-    });
-    if (metadata.type !== undefined && metadata.type !== priorType) rebuildLedgerForAccounts([accountId]);
+    `,
+      )
+      .run({
+        ...metadata,
+        updatedAt: new Date().toISOString(),
+        id: accountId,
+      });
+    if (metadata.type !== undefined && metadata.type !== priorType)
+      rebuildLedgerForAccounts([accountId]);
   })();
 
   return { ok: true, accountId };
@@ -204,40 +235,57 @@ export function archiveAccount(id: number | string) {
   if (!Number.isFinite(accountId)) throw new Error('Invalid account id');
   assertAccountExists(accountId);
   const now = new Date().toISOString();
-  getDb().prepare(`
+  getDb()
+    .prepare(
+      `
     UPDATE accounts
     SET status = 'archived',
         archivedAt = COALESCE(archivedAt, @now),
         updatedAt = @now
     WHERE id = @id
-  `).run({ id: accountId, now });
+  `,
+    )
+    .run({ id: accountId, now });
   return { ok: true, accountId };
 }
 
-export function closeAccount(id: number | string, closedOn?: string, destinationAccountId?: number) {
+export function closeAccount(
+  id: number | string,
+  closedOn?: string,
+  destinationAccountId?: number,
+) {
   const accountId = Number(id);
   if (!Number.isFinite(accountId)) throw new Error('Invalid account id');
   assertAccountExists(accountId);
   if (destinationAccountId !== undefined) {
-    if (!closedOn || destinationAccountId === accountId) throw new Error('Choose a different destination and a closure date.');
+    if (!closedOn || destinationAccountId === accountId)
+      throw new Error('Choose a different destination and a closure date.');
     assertAccountExists(destinationAccountId);
   }
-  if (closedOn !== undefined && (!/^\d{4}-\d{2}-\d{2}$/.test(closedOn) ||
-    Number.isNaN(Date.parse(`${closedOn}T00:00:00Z`)) ||
-    new Date(`${closedOn}T00:00:00Z`).toISOString().slice(0,10) !== closedOn || closedOn > localCalendarDate())) {
+  if (
+    closedOn !== undefined &&
+    (!/^\d{4}-\d{2}-\d{2}$/.test(closedOn) ||
+      Number.isNaN(Date.parse(`${closedOn}T00:00:00Z`)) ||
+      new Date(`${closedOn}T00:00:00Z`).toISOString().slice(0, 10) !== closedOn ||
+      closedOn > localCalendarDate())
+  ) {
     throw new Error('Closure date must be a valid date on or before today.');
   }
   getDb().transaction(() => {
-  getDb().prepare(`
+    getDb()
+      .prepare(
+        `
     UPDATE accounts
     SET status = 'closed',
         reportingClosedOn = COALESCE(@closedOn, reportingClosedOn),
         archivedAt = NULL,
         updatedAt = @now
     WHERE id = @id
-  `).run({ id: accountId, closedOn: closedOn ?? null, now: new Date().toISOString() });
-  if (closedOn) confirmClosureTransfer(accountId, closedOn, destinationAccountId ?? null);
-  if (closedOn) rebuildLedgerForAccounts([accountId]);
+  `,
+      )
+      .run({ id: accountId, closedOn: closedOn ?? null, now: new Date().toISOString() });
+    if (closedOn) confirmClosureTransfer(accountId, closedOn, destinationAccountId ?? null);
+    if (closedOn) rebuildLedgerForAccounts([accountId]);
   })();
   return { ok: true, accountId };
 }
@@ -247,17 +295,23 @@ export function unarchiveAccount(id: number | string) {
   if (!Number.isFinite(accountId)) throw new Error('Invalid account id');
   assertAccountExists(accountId);
   getDb().transaction(() => {
-  const hadClosure = getDb().prepare('SELECT reportingClosedOn FROM accounts WHERE id=?').get(accountId)?.reportingClosedOn;
-  getDb().prepare(`
+    const hadClosure = getDb()
+      .prepare('SELECT reportingClosedOn FROM accounts WHERE id=?')
+      .get(accountId)?.reportingClosedOn;
+    getDb()
+      .prepare(
+        `
     UPDATE accounts
     SET status = 'active',
         reportingClosedOn = NULL,
         archivedAt = NULL,
         updatedAt = @now
     WHERE id = @id
-  `).run({ id: accountId, now: new Date().toISOString() });
-  revokeClosureTransfer(accountId);
-  if (hadClosure) rebuildLedgerForAccounts([accountId]);
+  `,
+      )
+      .run({ id: accountId, now: new Date().toISOString() });
+    revokeClosureTransfer(accountId);
+    if (hadClosure) rebuildLedgerForAccounts([accountId]);
   })();
   return { ok: true, accountId };
 }

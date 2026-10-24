@@ -40,7 +40,7 @@ type HeaderMap = {
 };
 
 function matchingHeader(headers: string[], candidates: string[]): string | null {
-  const index = headers.findIndex(header => candidates.includes(normalizedHeader(header)));
+  const index = headers.findIndex((header) => candidates.includes(normalizedHeader(header)));
   return index >= 0 ? headers[index]! : null;
 }
 
@@ -71,7 +71,9 @@ function parseTransaction(
   const amount = parseAmount(rawAmount);
   const type = headers.type ? row[headers.type]?.replace(/\s+/g, ' ').trim() : '';
   const detail = headers.description ? row[headers.description]?.replace(/\s+/g, ' ').trim() : '';
-  const description = [type, detail].filter((value, index, values) => value && values.indexOf(value) === index).join(': ');
+  const description = [type, detail]
+    .filter((value, index, values) => value && values.indexOf(value) === index)
+    .join(': ');
   if (!date || amount === null || amount === 0 || !description) return null;
 
   return {
@@ -91,8 +93,9 @@ function parseTransaction(
 
 export function parseSequoiaFundActivity(input: AppImportParseInput): AppImportParseResult {
   const rows = parseCsvRows(input.text);
-  const headerIndex = rows.findIndex(row => headerMap(row) !== null);
-  if (headerIndex < 0) throw new Error('Sequoia Fund activity CSV has no recognizable transaction header');
+  const headerIndex = rows.findIndex((row) => headerMap(row) !== null);
+  if (headerIndex < 0)
+    throw new Error('Sequoia Fund activity CSV has no recognizable transaction header');
   const headers = rows[headerIndex]!;
   const mappedHeaders = headerMap(headers)!;
   return {

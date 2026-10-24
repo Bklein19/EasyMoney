@@ -1,15 +1,17 @@
-import { basename } from "node:path";
-import type { ParseResult, ParserMeta } from "./types.ts";
-import { cents, makeTx, pdfToText } from "./_helpers";
+import { basename } from 'node:path';
+import type { ParseResult, ParserMeta } from './types.ts';
+import { cents, makeTx, pdfToText } from './_helpers';
 import { checkCashStatement } from '../printedStatementChecks';
 
 export const meta: ParserMeta = {
-  id: "bofa-statement-pdf",
-  institution: "Bank of America",
-  kind: "statement",
+  id: 'bofa-statement-pdf',
+  institution: 'Bank of America',
+  kind: 'statement',
   priority: 50,
   matches: ({ filename, sample }) =>
-    /^bofa-(checking|savings|deposit|credit-card)-\d{4}-\d{4}-(?:\d{2}|[a-z]+)-statement\.pdf$/i.test(filename) ||
+    /^bofa-(checking|savings|deposit|credit-card)-\d{4}-\d{4}-(?:\d{2}|[a-z]+)-statement\.pdf$/i.test(
+      filename,
+    ) ||
     (/Bank of America/.test(sample) &&
       (/Your Adv Plus Banking/.test(sample) ||
         /Your Bank of America Advantage Savings/.test(sample) ||
@@ -18,34 +20,36 @@ export const meta: ParserMeta = {
 };
 
 const MONTHS = new Map([
-  ["january", 1],
-  ["february", 2],
-  ["march", 3],
-  ["april", 4],
-  ["may", 5],
-  ["june", 6],
-  ["july", 7],
-  ["august", 8],
-  ["september", 9],
-  ["october", 10],
-  ["november", 11],
-  ["december", 12],
+  ['january', 1],
+  ['february', 2],
+  ['march', 3],
+  ['april', 4],
+  ['may', 5],
+  ['june', 6],
+  ['july', 7],
+  ['august', 8],
+  ['september', 9],
+  ['october', 10],
+  ['november', 11],
+  ['december', 12],
 ]);
 
 function isoDate(monthName: string, dayRaw: string, yearRaw: string): string {
   const month = MONTHS.get(monthName.toLowerCase());
   const day = Number(dayRaw);
   const year = Number(yearRaw);
-  if (!month || !day || !year) throw new Error(`Invalid BofA statement date: ${monthName} ${dayRaw}, ${yearRaw}`);
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  if (!month || !day || !year)
+    throw new Error(`Invalid BofA statement date: ${monthName} ${dayRaw}, ${yearRaw}`);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 function isoNumericDate(monthRaw: string, dayRaw: string, yearRaw: string): string {
   const month = Number(monthRaw);
   const day = Number(dayRaw);
   const year = Number(yearRaw.length === 2 ? `20${yearRaw}` : yearRaw);
-  if (!month || !day || !year) throw new Error(`Invalid BofA numeric date: ${monthRaw}/${dayRaw}/${yearRaw}`);
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  if (!month || !day || !year)
+    throw new Error(`Invalid BofA numeric date: ${monthRaw}/${dayRaw}/${yearRaw}`);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 function isoCardDate(monthRaw: string, dayRaw: string, coveredTo: string): string {
@@ -55,39 +59,41 @@ function isoCardDate(monthRaw: string, dayRaw: string, coveredTo: string): strin
   const endMonth = Number(coveredTo.slice(5, 7));
   const year = month > endMonth ? endYear - 1 : endYear;
   if (!month || !day || !year) throw new Error(`Invalid BofA card date: ${monthRaw}/${dayRaw}`);
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 function accountLast4(text: string): string {
   const m = text.match(/Account\s*(?:number|Number|#):?\s*(?:\d{4}\s+)*(\d{4})/);
-  if (!m) throw new Error("Could not find BofA account number");
+  if (!m) throw new Error('Could not find BofA account number');
   return m[1]!;
 }
 
 function filenameLast4(filePath: string): string | undefined {
-  return basename(filePath).match(/^bofa-(?:checking|savings|deposit|credit-card)-(\d{4})-\d{4}-/i)?.[1];
+  return basename(filePath).match(
+    /^bofa-(?:checking|savings|deposit|credit-card)-(\d{4})-\d{4}-/i,
+  )?.[1];
 }
 
-function filenameDepositType(filePath: string): "checking" | "savings" | "deposit" | undefined {
-  return basename(filePath).match(/^bofa-(checking|savings|deposit)-(?:\d{4}-)?\d{4}-/i)?.[1]?.toLowerCase() as
-    | "checking"
-    | "savings"
-    | "deposit"
-    | undefined;
+function filenameDepositType(filePath: string): 'checking' | 'savings' | 'deposit' | undefined {
+  return basename(filePath)
+    .match(/^bofa-(checking|savings|deposit)-(?:\d{4}-)?\d{4}-/i)?.[1]
+    ?.toLowerCase() as 'checking' | 'savings' | 'deposit' | undefined;
 }
 
 function cleanDescription(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
+  return value.replace(/\s+/g, ' ').trim();
 }
 
 function isLayoutContinuationLine(value: string): boolean {
-  return /^Page \d+/i.test(value) ||
+  return (
+    /^Page \d+/i.test(value) ||
     /^continued on (?:the )?next page/i.test(value) ||
-    /continued on (?:the )?next page$/i.test(value);
+    /continued on (?:the )?next page$/i.test(value)
+  );
 }
 
-function depositStatementTransactions(text: string, account: string): ParseResult["transactions"] {
-  const transactions: ParseResult["transactions"] = [];
+function depositStatementTransactions(text: string, account: string): ParseResult['transactions'] {
+  const transactions: ParseResult['transactions'] = [];
   const lines = text.split(/\n/);
   let current:
     | {
@@ -97,7 +103,7 @@ function depositStatementTransactions(text: string, account: string): ParseResul
         section: string;
       }
     | undefined;
-  let section = "";
+  let section = '';
 
   const flush = () => {
     if (!current) return;
@@ -108,24 +114,31 @@ function depositStatementTransactions(text: string, account: string): ParseResul
           amount_cents: current.amount_cents,
           description: cleanDescription(current.description),
           account,
-          institution: "Bank of America",
-          raw: { source: "bofa-statement", type: "deposit-activity", section: current.section },
-        })
+          institution: 'Bank of America',
+          raw: { source: 'bofa-statement', type: 'deposit-activity', section: current.section },
+        }),
       );
     }
     current = undefined;
   };
 
   for (const rawLine of lines) {
-    const line = rawLine.replace(/\s+$/g, "");
+    const line = rawLine.replace(/\s+$/g, '');
     const trimmed = line.trim();
 
-    if (/^(Deposits and other additions|Withdrawals and other subtractions|Other subtractions|Checks|Service fees)$/.test(trimmed)) {
+    if (
+      /^(Deposits and other additions|Withdrawals and other subtractions|Other subtractions|Checks|Service fees)$/.test(
+        trimmed,
+      )
+    ) {
       flush();
       section = trimmed;
       continue;
     }
-    if (/^Total (deposits|withdrawals|other subtractions|checks|service fees)/i.test(trimmed) || isLayoutContinuationLine(trimmed)) {
+    if (
+      /^Total (deposits|withdrawals|other subtractions|checks|service fees)/i.test(trimmed) ||
+      isLayoutContinuationLine(trimmed)
+    ) {
       flush();
       continue;
     }
@@ -134,15 +147,27 @@ function depositStatementTransactions(text: string, account: string): ParseResul
       flush();
       // Printed checks can be two independent tables side by side. A whole-line
       // match consumes the first check as description and loses its amount.
-      const checks = [...line.matchAll(/(\d{2})\/(\d{2})\/(\d{2})\s+(?:(\d+\*?)\s+)?(-?\$?[\d,]+\.\d{2})/g)];
-      for (const check of checks) transactions.push(makeTx({ date: isoNumericDate(check[1]!, check[2]!, check[3]!), amount_cents: cents(check[5]!), description: check[4] ? `Check ${check[4]}` : 'Check', account, institution: 'Bank of America', raw: { source: 'bofa-statement', type: 'deposit-activity', section } }));
+      const checks = [
+        ...line.matchAll(/(\d{2})\/(\d{2})\/(\d{2})\s+(?:(\d+\*?)\s+)?(-?\$?[\d,]+\.\d{2})/g),
+      ];
+      for (const check of checks)
+        transactions.push(
+          makeTx({
+            date: isoNumericDate(check[1]!, check[2]!, check[3]!),
+            amount_cents: cents(check[5]!),
+            description: check[4] ? `Check ${check[4]}` : 'Check',
+            account,
+            institution: 'Bank of America',
+            raw: { source: 'bofa-statement', type: 'deposit-activity', section },
+          }),
+        );
       continue;
     }
     const row = line.match(/^(\d{2})\/(\d{2})\/(\d{2})\s+(.+?)\s+(-?\$?[\d,]+\.\d{2})\s*$/);
     if (row && section) {
       flush();
       const rawDescription = cleanDescription(row[4]!);
-      const description = section === "Checks" ? `Check ${rawDescription}` : rawDescription;
+      const description = section === 'Checks' ? `Check ${rawDescription}` : rawDescription;
       current = {
         date: isoNumericDate(row[1]!, row[2]!, row[3]!),
         description,
@@ -152,7 +177,12 @@ function depositStatementTransactions(text: string, account: string): ParseResul
       continue;
     }
 
-    if (current && /^\s{8,}\S/.test(line) && !isLayoutContinuationLine(trimmed) && !/^Total /.test(trimmed)) {
+    if (
+      current &&
+      /^\s{8,}\S/.test(line) &&
+      !isLayoutContinuationLine(trimmed) &&
+      !/^Total /.test(trimmed)
+    ) {
       current.description += ` ${trimmed}`;
     }
   }
@@ -164,8 +194,9 @@ function depositStatementTransactions(text: string, account: string): ParseResul
 function parseDeposit(text: string, filePath: string): ParseResult {
   const last4 = accountLast4(text);
   const type = filenameDepositType(filePath);
-  const isSavings = type === "savings" || (!type && /Your Bank of America Advantage Savings/.test(text));
-  const isChecking = type === "checking" || (!type && /Your Adv Plus Banking/.test(text));
+  const isSavings =
+    type === 'savings' || (!type && /Your Bank of America Advantage Savings/.test(text));
+  const isChecking = type === 'checking' || (!type && /Your Adv Plus Banking/.test(text));
   const account = isSavings
     ? `Advantage Savings - ${last4}`
     : isChecking
@@ -174,23 +205,29 @@ function parseDeposit(text: string, filePath: string): ParseResult {
 
   const period =
     text.match(/for ([A-Za-z]+) (\d{1,2}), (\d{4}) to ([A-Za-z]+) (\d{1,2}), (\d{4})/) ||
-    text.match(/Account # [\d\s]+ ! ([A-Za-z]+) (\d{1,2}), (\d{4}) to ([A-Za-z]+) (\d{1,2}), (\d{4})/);
-  if (!period) throw new Error("Could not find BofA deposit statement period");
+    text.match(
+      /Account # [\d\s]+ ! ([A-Za-z]+) (\d{1,2}), (\d{4}) to ([A-Za-z]+) (\d{1,2}), (\d{4})/,
+    );
+  if (!period) throw new Error('Could not find BofA deposit statement period');
 
   const covered_from = isoDate(period[1]!, period[2]!, period[3]!);
   const covered_to = isoDate(period[4]!, period[5]!, period[6]!);
   const balance = text.match(/Ending balance on [A-Za-z]+ \d{1,2}, \d{4}\s+\$?([\d,]+\.\d{2})/);
-  if (!balance) throw new Error("Could not find BofA deposit ending balance");
+  if (!balance) throw new Error('Could not find BofA deposit ending balance');
 
   const transactions = depositStatementTransactions(text, account);
-  const validation = checkCashStatement('bofa-deposit', text, transactions.map(t => t.amount_cents));
+  const validation = checkCashStatement(
+    'bofa-deposit',
+    text,
+    transactions.map((t) => t.amount_cents),
+  );
   return {
     transactions,
     balances: [
       {
         date: covered_to,
         account,
-        institution: "Bank of America",
+        institution: 'Bank of America',
         balance_cents: cents(balance[1]!),
         raw: { statementValidation: validation },
       },
@@ -200,10 +237,14 @@ function parseDeposit(text: string, filePath: string): ParseResult {
   };
 }
 
-function cardStatementTransactions(text: string, account: string, coveredTo: string): ParseResult["transactions"] {
-  const transactions: ParseResult["transactions"] = [];
+function cardStatementTransactions(
+  text: string,
+  account: string,
+  coveredTo: string,
+): ParseResult['transactions'] {
+  const transactions: ParseResult['transactions'] = [];
   const lines = text.split(/\n/);
-  let section = "";
+  let section = '';
   let current:
     | {
         date: string;
@@ -222,9 +263,9 @@ function cardStatementTransactions(text: string, account: string, coveredTo: str
           amount_cents: current.amount_cents,
           description: cleanDescription(current.description),
           account,
-          institution: "Bank of America",
-          raw: { source: "bofa-statement", type: "credit-card-activity", section: current.section },
-        })
+          institution: 'Bank of America',
+          raw: { source: 'bofa-statement', type: 'credit-card-activity', section: current.section },
+        }),
       );
     }
     current = undefined;
@@ -236,10 +277,12 @@ function cardStatementTransactions(text: string, account: string, coveredTo: str
   };
 
   for (const rawLine of lines) {
-    const line = rawLine.replace(/\s+$/g, "");
+    const line = rawLine.replace(/\s+$/g, '');
     const trimmed = line.trim();
 
-    if (/^(Payments and Other Credits|Purchases and Adjustments|Fees|Interest Charged)$/.test(trimmed)) {
+    if (
+      /^(Payments and Other Credits|Purchases and Adjustments|Fees|Interest Charged)$/.test(trimmed)
+    ) {
       flush();
       section = trimmed;
       continue;
@@ -250,7 +293,7 @@ function cardStatementTransactions(text: string, account: string, coveredTo: str
     }
 
     const row = line.match(
-      /^(\d{2})\/(\d{2})\s+(\d{2})\/(\d{2})\s+(.+?)\s+(?:\d{4}\s+)?(?:(?:Virtual Card|\d{4})\s+)?(-?\$?[\d,]+\.\d{2})\s*$/
+      /^(\d{2})\/(\d{2})\s+(\d{2})\/(\d{2})\s+(.+?)\s+(?:\d{4}\s+)?(?:(?:Virtual Card|\d{4})\s+)?(-?\$?[\d,]+\.\d{2})\s*$/,
     );
     if (row && section) {
       flush();
@@ -263,7 +306,12 @@ function cardStatementTransactions(text: string, account: string, coveredTo: str
       continue;
     }
 
-    if (current && /^\s{8,}\S/.test(line) && !isLayoutContinuationLine(trimmed) && !/^TOTAL /.test(trimmed)) {
+    if (
+      current &&
+      /^\s{8,}\S/.test(line) &&
+      !isLayoutContinuationLine(trimmed) &&
+      !/^TOTAL /.test(trimmed)
+    ) {
       current.description += ` ${trimmed}`;
     }
   }
@@ -277,10 +325,11 @@ function parseCreditCard(text: string, filePath: string): ParseResult {
   const account = `Customized Cash Rewards Visa Signature - ${last4}`;
 
   const period =
-    text.match(/Account# [\d\s]+(?:\d{4})\s+([A-Za-z]+) (\d{1,2}) - ([A-Za-z]+) (\d{1,2}), (\d{4})/) ||
-    text.match(/([A-Za-z]+) (\d{1,2}) - ([A-Za-z]+) (\d{1,2}), (\d{4})/);
+    text.match(
+      /Account# [\d\s]+(?:\d{4})\s+([A-Za-z]+) (\d{1,2}) - ([A-Za-z]+) (\d{1,2}), (\d{4})/,
+    ) || text.match(/([A-Za-z]+) (\d{1,2}) - ([A-Za-z]+) (\d{1,2}), (\d{4})/);
   const closingDate = text.match(/Statement Closing Date\s+(\d{2})\/(\d{2})\/(\d{4})/);
-  if (!period && !closingDate) throw new Error("Could not find BofA credit card statement date");
+  if (!period && !closingDate) throw new Error('Could not find BofA credit card statement date');
 
   let covered_from: string | undefined;
   let covered_to: string;
@@ -299,17 +348,21 @@ function parseCreditCard(text: string, filePath: string): ParseResult {
   const balance =
     text.match(/New Balance Total\s+\$?([\d,]+\.\d{2})/) ||
     text.match(/New Balance Total\s+Current Payment Due[\s\S]{0,120}?\$?([\d,]+\.\d{2})/);
-  if (!balance) throw new Error("Could not find BofA credit card new balance");
+  if (!balance) throw new Error('Could not find BofA credit card new balance');
 
   const transactions = cardStatementTransactions(text, account, covered_to);
-  const validation = checkCashStatement('bofa-card', text, transactions.map(t => -t.amount_cents));
+  const validation = checkCashStatement(
+    'bofa-card',
+    text,
+    transactions.map((t) => -t.amount_cents),
+  );
   return {
     transactions,
     balances: [
       {
         date: covered_to,
         account,
-        institution: "Bank of America",
+        institution: 'Bank of America',
         balance_cents: -Math.abs(cents(balance[1]!)),
         raw: { statementValidation: validation },
       },
@@ -326,7 +379,10 @@ export function parseBofaDepositStatementText(text: string, filePath: string): P
 export default async function parse(filePath: string): Promise<ParseResult> {
   const text = await pdfToText(filePath, true);
   const filename = basename(filePath);
-  if (/^bofa-credit-card-/i.test(filename) || (/Payment Information/.test(text) && /New Balance Total/.test(text))) {
+  if (
+    /^bofa-credit-card-/i.test(filename) ||
+    (/Payment Information/.test(text) && /New Balance Total/.test(text))
+  ) {
     return parseCreditCard(text, filePath);
   }
   return parseDeposit(text, filePath);

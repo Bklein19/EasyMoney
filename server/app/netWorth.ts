@@ -20,7 +20,6 @@ function dollarsFromCents(cents: number) {
 }
 
 export function getNetWorthReport(): NetWorthReport {
-
   const currentRows = getDb()
     .prepare(
       `SELECT
@@ -34,14 +33,16 @@ export function getNetWorthReport(): NetWorthReport {
          ) AS balanceCents
        FROM accounts a
        WHERE COALESCE(a.status, 'active') != 'archived'
-       ORDER BY a.id ASC`
+       ORDER BY a.id ASC`,
     )
     .all() as CurrentLedgerBalanceRow[];
 
-  const currentNetWorth = dollarsFromCents(currentRows.reduce((total, account) => {
-    const balance = account.balanceCents ?? 0;
-    return total + (isCreditType(account.type) ? -Math.abs(balance) : balance);
-  }, 0));
+  const currentNetWorth = dollarsFromCents(
+    currentRows.reduce((total, account) => {
+      const balance = account.balanceCents ?? 0;
+      return total + (isCreditType(account.type) ? -Math.abs(balance) : balance);
+    }, 0),
+  );
 
   const history = getDb()
     .prepare(
@@ -55,19 +56,22 @@ export function getNetWorthReport(): NetWorthReport {
        JOIN accounts a ON a.id = lb.accountId
        WHERE COALESCE(a.status, 'active') != 'archived'
        GROUP BY lb.month
-       ORDER BY lb.month ASC`
+       ORDER BY lb.month ASC`,
     )
     .all() as LedgerBalanceRow[];
 
-  const points = history.map(point => ({
+  const points = history.map((point) => ({
     month: point.month,
     netWorth: dollarsFromCents(point.netWorthCents),
   }));
 
   const previous = points.at(-1)?.netWorth ?? 0;
-  const percentChange = points.length < 1 || previous === 0
-    ? currentNetWorth > 0 && previous === 0 ? 100 : 0
-    : ((currentNetWorth - previous) / Math.abs(previous)) * 100;
+  const percentChange =
+    points.length < 1 || previous === 0
+      ? currentNetWorth > 0 && previous === 0
+        ? 100
+        : 0
+      : ((currentNetWorth - previous) / Math.abs(previous)) * 100;
 
   return {
     currentNetWorth,

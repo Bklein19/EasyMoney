@@ -15,7 +15,15 @@ export function syncApplicationDataRoot(
     return pathApi.join(home, 'Library', 'Application Support', 'EasyMoney', 'sync-runs');
   }
   if (platform === 'win32') {
-    return pathApi.join(env.LOCALAPPDATA ?? pathApi.join(home, 'AppData', 'Local'), 'EasyMoney', 'sync-runs');
+    return pathApi.join(
+      env.LOCALAPPDATA ?? pathApi.join(home, 'AppData', 'Local'),
+      'EasyMoney',
+      'sync-runs',
+    );
   }
-  return pathApi.join(env.XDG_STATE_HOME ?? pathApi.join(home, '.local', 'state'), 'easymoney', 'sync-runs');
+  return pathApi.join(
+    env.XDG_STATE_HOME ?? pathApi.join(home, '.local', 'state'),
+    'easymoney',
+    'sync-runs',
+  );
 }

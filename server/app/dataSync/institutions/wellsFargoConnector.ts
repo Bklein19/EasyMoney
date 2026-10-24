@@ -61,9 +61,7 @@ export function inferWellsFargoAccountLast4(account: SyncAccountCoverage): strin
   return candidates.size === 1 ? [...candidates][0]! : null;
 }
 
-export function planWellsFargoAccounts(
-  context: SyncConnectorRunContext,
-): WellsFargoSyncAccount[] {
+export function planWellsFargoAccounts(context: SyncConnectorRunContext): WellsFargoSyncAccount[] {
   const plans: WellsFargoSyncAccount[] = [];
   const identities = new Set<string>();
 
@@ -86,10 +84,14 @@ export function planWellsFargoAccounts(
     identities.add(identity);
 
     const activityWindow = goalWindowForCoverage(context.goal, account, context.today);
-    const statementWindow = goalWindowForCoverage(context.goal, {
-      latestFactDate: account.latestBalanceDate,
-      earliestFactDate: account.earliestBalanceDate,
-    }, context.today);
+    const statementWindow = goalWindowForCoverage(
+      context.goal,
+      {
+        latestFactDate: account.latestBalanceDate,
+        earliestFactDate: account.earliestBalanceDate,
+      },
+      context.today,
+    );
     plans.push({
       accountId: account.id,
       kind,
@@ -108,12 +110,14 @@ export function routeWellsFargoArtifacts(
   artifacts: readonly WellsFargoDownloadedArtifact[],
   plannedAccounts: readonly WellsFargoSyncAccount[],
 ): RoutedSyncArtifact[] {
-  const plannedById = new Map(plannedAccounts.map(account => [account.accountId, account]));
-  return artifacts.map(artifact => {
+  const plannedById = new Map(plannedAccounts.map((account) => [account.accountId, account]));
+  return artifacts.map((artifact) => {
     const planned = plannedById.get(artifact.accountId);
-    if (!planned ||
-        planned.kind !== artifact.account.kind ||
-        planned.last4 !== artifact.account.last4) {
+    if (
+      !planned ||
+      planned.kind !== artifact.account.kind ||
+      planned.last4 !== artifact.account.last4
+    ) {
       throw new Error('A Wells Fargo artifact did not match its planned local account');
     }
     return { fileName: artifact.fileName, routing: 'source' };
@@ -126,11 +130,7 @@ export function reportWellsFargoProgress(
 ): void {
   const { message, ...data } = event;
   context.report({
-    type: event.status === 'waiting'
-      ? 'action'
-      : event.status === 'failed'
-        ? 'warning'
-        : 'phase',
+    type: event.status === 'waiting' ? 'action' : event.status === 'failed' ? 'warning' : 'phase',
     message,
     data,
   });
@@ -156,11 +156,14 @@ export function createWellsFargoConnector(
         message: 'Opening Wells Fargo',
         data: { goal: context.goal.kind, accountCount: accounts.length },
       });
-      const result = await syncRunner({
-        outputDir: context.outputDir,
-        accounts,
-        session: 'wells-fargo-catchup',
-      }, event => reportWellsFargoProgress(context, event));
+      const result = await syncRunner(
+        {
+          outputDir: context.outputDir,
+          accounts,
+          session: 'wells-fargo-catchup',
+        },
+        (event) => reportWellsFargoProgress(context, event),
+      );
       context.report({
         type: 'phase',
         message: `Validated ${result.artifacts.length} new artifact${result.artifacts.length === 1 ? '' : 's'}`,

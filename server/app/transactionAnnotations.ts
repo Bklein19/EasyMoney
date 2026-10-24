@@ -7,23 +7,33 @@ interface AnnotationChanges {
 
 export function ensureLedgerTransactionId(transactionId: number | string) {
   const db = getDb();
-  const direct = db.prepare('SELECT ledgerTransactionId FROM ledgerTransactions WHERE ledgerTransactionId = ?').get(String(transactionId)) as
-    { ledgerTransactionId: string } | undefined;
+  const direct = db
+    .prepare('SELECT ledgerTransactionId FROM ledgerTransactions WHERE ledgerTransactionId = ?')
+    .get(String(transactionId)) as { ledgerTransactionId: string } | undefined;
   if (direct) return direct.ledgerTransactionId;
   const numericId = Number(transactionId);
-  if (!Number.isSafeInteger(numericId)) throw new Error('Transaction not found in the active ledger.');
-  const row = db.prepare('SELECT ledgerTransactionId FROM ledgerTransactions WHERE COALESCE(legacyTransactionId, id) = ?').get(numericId) as
-    { ledgerTransactionId: string } | undefined;
+  if (!Number.isSafeInteger(numericId))
+    throw new Error('Transaction not found in the active ledger.');
+  const row = db
+    .prepare(
+      'SELECT ledgerTransactionId FROM ledgerTransactions WHERE COALESCE(legacyTransactionId, id) = ?',
+    )
+    .get(numericId) as { ledgerTransactionId: string } | undefined;
   if (!row) throw new Error('Transaction not found in the active ledger.');
   return row.ledgerTransactionId;
 }
 
-export function upsertTransactionAnnotation(transactionId: number | string, changes: AnnotationChanges, categoryOrigin: 'manual' | 'automatic' = 'manual') {
+export function upsertTransactionAnnotation(
+  transactionId: number | string,
+  changes: AnnotationChanges,
+  categoryOrigin: 'manual' | 'automatic' = 'manual',
+) {
   const ledgerTransactionId = ensureLedgerTransactionId(transactionId);
   const now = new Date().toISOString();
   const db = getDb();
 
-  db.prepare(`
+  db.prepare(
+    `
     INSERT INTO transactionAnnotations (ledgerTransactionId, categoryId, categoryOrigin, notes, createdAt, updatedAt)
     VALUES (@ledgerTransactionId, @categoryId, @categoryOrigin, @notes, @createdAt, @updatedAt)
     ON CONFLICT(ledgerTransactionId) DO UPDATE SET
@@ -31,7 +41,8 @@ export function upsertTransactionAnnotation(transactionId: number | string, chan
       categoryOrigin = CASE WHEN @hasCategoryId THEN excluded.categoryOrigin ELSE transactionAnnotations.categoryOrigin END,
       notes = CASE WHEN @hasNotes THEN excluded.notes ELSE transactionAnnotations.notes END,
       updatedAt = excluded.updatedAt
-  `).run({
+  `,
+  ).run({
     ledgerTransactionId,
     categoryId: changes.categoryId === undefined ? null : changes.categoryId,
     categoryOrigin: changes.categoryId === undefined ? null : categoryOrigin,
@@ -62,6 +73,7 @@ export function splitTransactionAnnotationChanges(changes: Record<string, unknow
   return {
     transactionChanges,
     annotationChanges,
-    hasAnnotationChanges: Object.hasOwn(annotationChanges, 'categoryId') || Object.hasOwn(annotationChanges, 'notes'),
+    hasAnnotationChanges:
+      Object.hasOwn(annotationChanges, 'categoryId') || Object.hasOwn(annotationChanges, 'notes'),
   };
 }

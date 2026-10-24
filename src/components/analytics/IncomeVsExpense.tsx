@@ -6,7 +6,7 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend
+  Legend,
 } from 'recharts';
 import PeriodClickOverlay, { type AnalyticsPeriodRow } from './PeriodClickOverlay';
 
@@ -42,11 +42,17 @@ interface TooltipProps {
 
 function getActivePeriodPayload(state: unknown) {
   if (!state || typeof state !== 'object') return null;
-  const activePayload = (state as { activePayload?: Array<{ payload?: AnalyticsPeriodRow }> }).activePayload;
+  const activePayload = (state as { activePayload?: Array<{ payload?: AnalyticsPeriodRow }> })
+    .activePayload;
   return activePayload?.[0]?.payload ?? null;
 }
 
-const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val);
+const formatCurrency = (val: number) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+  }).format(val);
 
 const CustomTooltip = ({ active, payload }: TooltipProps) => {
   if (active && payload && payload.length) {
@@ -56,7 +62,9 @@ const CustomTooltip = ({ active, payload }: TooltipProps) => {
         {payload.map((entry, index) => (
           <div key={index} className="value-row">
             <span style={{ color: entry.color }}>{entry.name}:</span>
-            <span className={`amount ${entry.name === 'Income' ? 'amount--positive' : 'amount--negative'}`}>
+            <span
+              className={`amount ${entry.name === 'Income' ? 'amount--positive' : 'amount--negative'}`}
+            >
               {formatCurrency(entry.value)}
             </span>
           </div>
@@ -68,7 +76,7 @@ const CustomTooltip = ({ active, payload }: TooltipProps) => {
 };
 
 export default function IncomeVsExpense({ rows = [], onSelectPeriod }: IncomeVsExpenseProps) {
-  const data = rows.map(row => ({
+  const data = rows.map((row) => ({
     ...row,
     timeKey: row.key,
     displayLabel: row.label,
@@ -127,7 +135,9 @@ export default function IncomeVsExpense({ rows = [], onSelectPeriod }: IncomeVsE
             radius={[4, 4, 0, 0]}
             maxBarSize={40}
             cursor="pointer"
-            onClick={(entry: { payload?: AnalyticsPeriodRow }) => entry.payload && onSelectPeriod?.(entry.payload)}
+            onClick={(entry: { payload?: AnalyticsPeriodRow }) =>
+              entry.payload && onSelectPeriod?.(entry.payload)
+            }
           />
           <Bar
             dataKey="Expense"
@@ -135,7 +145,9 @@ export default function IncomeVsExpense({ rows = [], onSelectPeriod }: IncomeVsE
             radius={[4, 4, 0, 0]}
             maxBarSize={40}
             cursor="pointer"
-            onClick={(entry: { payload?: AnalyticsPeriodRow }) => entry.payload && onSelectPeriod?.(entry.payload)}
+            onClick={(entry: { payload?: AnalyticsPeriodRow }) =>
+              entry.payload && onSelectPeriod?.(entry.payload)
+            }
           />
           <PeriodClickOverlay data={data} onSelectPeriod={onSelectPeriod} />
         </BarChart>

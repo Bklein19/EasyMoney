@@ -1,4 +1,9 @@
-import type { AppImportParseInput, AppImportParseResult, AppImportParser, ParsedImportTransaction } from '../importTypes.ts';
+import type {
+  AppImportParseInput,
+  AppImportParseResult,
+  AppImportParser,
+  ParsedImportTransaction,
+} from '../importTypes.ts';
 import { parseAmount, parseDate } from './csvMapping.ts';
 import { robinhoodBankingCrossSourceIdentity } from './robinhoodCrossSourceIdentity.ts';
 
@@ -8,10 +13,8 @@ export const robinhoodBankingParser: AppImportParser = {
   institution: 'Robinhood',
   sourceType: 'activity-export',
   priority: 90,
-  matches: ({ fileName, headers }) => (
-    isUuidCsv(fileName) &&
-    hasExactHeaders(headers, ['Date', 'Description', 'Amount'])
-  ),
+  matches: ({ fileName, headers }) =>
+    isUuidCsv(fileName) && hasExactHeaders(headers, ['Date', 'Description', 'Amount']),
   parse,
 };
 
@@ -21,10 +24,15 @@ function isUuidCsv(fileName: string) {
 
 function hasExactHeaders(headers: string[], expected: string[]) {
   if (headers.length !== expected.length) return false;
-  return expected.every((header, index) => headers[index]?.trim().toLowerCase() === header.toLowerCase());
+  return expected.every(
+    (header, index) => headers[index]?.trim().toLowerCase() === header.toLowerCase(),
+  );
 }
 
-function parseRow(row: Record<string, string>, sourceRowIndex: number): ParsedImportTransaction | null {
+function parseRow(
+  row: Record<string, string>,
+  sourceRowIndex: number,
+): ParsedImportTransaction | null {
   const dateRaw = row.Date?.trim();
   const description = row.Description?.replace(/\s+/g, ' ').trim();
   const amountRaw = row.Amount?.trim();

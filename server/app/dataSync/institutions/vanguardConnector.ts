@@ -31,9 +31,11 @@ function identityTexts(account: SyncAccountCoverage): string[] {
 function exactIsoDate(value: string): Date {
   const dateOnly = value.slice(0, 10);
   const parsed = new Date(`${dateOnly}T00:00:00Z`);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) ||
-      Number.isNaN(parsed.getTime()) ||
-      parsed.toISOString().slice(0, 10) !== value) {
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
+    Number.isNaN(parsed.getTime()) ||
+    parsed.toISOString().slice(0, 10) !== value
+  ) {
     throw new Error(`Invalid Vanguard statement date: ${value}`);
   }
   return parsed;
@@ -57,9 +59,7 @@ function profileIdFromFileName(fileName: string): string | null {
   );
   if (isSafeProfileId(activity?.[1])) return activity[1];
 
-  const legacyRoth = normalized.match(
-    /^vanguard-roth-ira-([a-z0-9-]+)-\d{4}-\d{2}-\d{2}-to-/,
-  );
+  const legacyRoth = normalized.match(/^vanguard-roth-ira-([a-z0-9-]+)-\d{4}-\d{2}-\d{2}-to-/);
   if (isSafeProfileId(legacyRoth?.[1])) return legacyRoth[1];
 
   return /^vanguard-brokerage-\d{4}-/.test(normalized) ? 'current' : null;
@@ -69,9 +69,7 @@ export function matchesVanguardAccount(account: SyncAccountCoverage): boolean {
   return /\bvanguard\b/i.test(account.institution?.trim() ?? '');
 }
 
-export function inferVanguardAccountKind(
-  account: SyncAccountCoverage,
-): VanguardAccountKind | null {
+export function inferVanguardAccountKind(account: SyncAccountCoverage): VanguardAccountKind | null {
   const text = identityTexts(account).join(' ').toLowerCase();
   if (/roth\s*(?:-|\s)*ira/.test(text)) return 'roth-ira';
   if (/\bira\b/.test(text)) return 'traditional-ira';
@@ -95,7 +93,9 @@ export function inferVanguardAccountLast4(account: SyncAccountCoverage): string 
   return candidates.size === 1 ? [...candidates][0]! : null;
 }
 
-export function vanguardProfileIdFromArtifactFileNames(fileNames: readonly string[]): string | null {
+export function vanguardProfileIdFromArtifactFileNames(
+  fileNames: readonly string[],
+): string | null {
   for (const fileName of fileNames) {
     const profileId = profileIdFromFileName(fileName);
     if (profileId) return profileId;
@@ -111,7 +111,7 @@ export function missingVanguardMonthlyStatementDates(
   const start = exactIsoDate(startDate);
   const end = exactIsoDate(endDate);
   if (start > end) return [];
-  const existing = new Set([...existingDates].map(date => isoDate(exactIsoDate(date))));
+  const existing = new Set([...existingDates].map((date) => isoDate(exactIsoDate(date))));
   const missing: string[] = [];
 
   for (
@@ -136,7 +136,7 @@ export function planVanguardProfiles(
   goal: SyncGoal,
   report: SyncReporter = () => {},
 ): VanguardSyncProfile[] {
-  const candidates = context.accounts.filter(matchesVanguardAccount).map(account => ({
+  const candidates = context.accounts.filter(matchesVanguardAccount).map((account) => ({
     account,
     profileId: vanguardProfileIdFromArtifactFileNames(account.artifactFileNames),
     accountKind: inferVanguardAccountKind(account),
@@ -184,7 +184,7 @@ export function planVanguardProfiles(
       if (matchingProfiles?.size === 1) profileId = matchingProfiles.values().next().value!;
     }
     const accountHolder = profileId
-      ? holderByProfile.get(profileId)?.display ?? candidate.accountHolder
+      ? (holderByProfile.get(profileId)?.display ?? candidate.accountHolder)
       : candidate.accountHolder;
     if (!profileId || !accountKind || !accountLast4 || !accountHolder) {
       report({
@@ -196,7 +196,9 @@ export function planVanguardProfiles(
     }
 
     const existingProfile = profiles.get(profileId);
-    if (existingProfile?.accounts.some(accountPlan => accountPlan.accountLast4 === accountLast4)) {
+    if (
+      existingProfile?.accounts.some((accountPlan) => accountPlan.accountLast4 === accountLast4)
+    ) {
       profiles.delete(profileId);
       invalidProfiles.add(profileId);
       report({
@@ -207,10 +209,14 @@ export function planVanguardProfiles(
     }
 
     const activityWindow = goalWindowForCoverage(goal, account, context.today);
-    const statementWindow = goalWindowForCoverage(goal, {
-      latestFactDate: account.latestBalanceDate,
-      earliestFactDate: account.earliestBalanceDate,
-    }, context.today);
+    const statementWindow = goalWindowForCoverage(
+      goal,
+      {
+        latestFactDate: account.latestBalanceDate,
+        earliestFactDate: account.earliestBalanceDate,
+      },
+      context.today,
+    );
     const profile = existingProfile ?? {
       id: profileId,
       session: profileId === 'current' ? 'vanguard-catchup' : `vanguard-${profileId}-catchup`,
@@ -238,18 +244,16 @@ export function selectVanguardProfiles(
   profiles: readonly VanguardSyncProfile[],
   connectionId?: string,
 ): VanguardSyncProfile[] {
-  return connectionId
-    ? profiles.filter(profile => profile.id === connectionId)
-    : [...profiles];
+  return connectionId ? profiles.filter((profile) => profile.id === connectionId) : [...profiles];
 }
 
 export function vanguardTargetsForProfiles(
   profiles: readonly VanguardSyncProfile[],
 ): SyncConnectorTarget[] {
-  return profiles.map(profile => ({
+  return profiles.map((profile) => ({
     connectionId: profile.id,
     label: `Vanguard (${profile.accountHolder})`,
-    accountIds: profile.accounts.map(account => account.accountId),
+    accountIds: profile.accounts.map((account) => account.accountId),
   }));
 }
 
@@ -276,9 +280,7 @@ export function reportVanguardProgress(
   });
 }
 
-export function createVanguardConnector(
-  runSync: VanguardSyncRunner = runVanguardSync,
-) {
+export function createVanguardConnector(runSync: VanguardSyncRunner = runVanguardSync) {
   return {
     id: 'vanguard',
     label: 'Vanguard',
@@ -298,11 +300,11 @@ export function createVanguardConnector(
       context.report({
         type: 'phase',
         message: `Opening ${profiles.length} Vanguard login${profiles.length === 1 ? '' : 's'}`,
-        data: { goal: context.goal.kind, profiles: profiles.map(profile => profile.id) },
+        data: { goal: context.goal.kind, profiles: profiles.map((profile) => profile.id) },
       });
       const downloaded = await runSync(
         { outputDir: context.outputDir, through: context.today, profiles },
-        event => reportVanguardProgress(context, event),
+        (event) => reportVanguardProgress(context, event),
       );
       context.report({
         type: 'phase',

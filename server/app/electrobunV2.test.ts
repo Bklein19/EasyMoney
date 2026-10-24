@@ -26,10 +26,7 @@ describe('Electrobun 2 packaging contract', () => {
     expect(clientBuild).toContain("'--react-compiler'");
 
     const webHtml = fs.readFileSync(path.join(projectRoot, 'index.html'), 'utf8');
-    const desktopHtml = fs.readFileSync(
-      path.join(projectRoot, 'desktop', 'index.html'),
-      'utf8',
-    );
+    const desktopHtml = fs.readFileSync(path.join(projectRoot, 'desktop', 'index.html'), 'utf8');
     expect(webHtml).not.toContain('easymoney-desktop');
     expect(desktopHtml).toContain('<body class="easymoney-desktop">');
 
@@ -43,10 +40,7 @@ describe('Electrobun 2 packaging contract', () => {
   test('uses the native v2 icon pipeline and audits every standard build', () => {
     expect(electrobunConfig.build?.mac?.icons).toBe('assets/icon.iconset');
 
-    const wrapper = fs.readFileSync(
-      path.join(projectRoot, 'scripts', 'electrobun.ts'),
-      'utf8',
-    );
+    const wrapper = fs.readFileSync(path.join(projectRoot, 'scripts', 'electrobun.ts'), 'utf8');
     expect(wrapper).toContain('EASYMONEY_BUN_EXECUTABLE ||= process.execPath');
     expect(wrapper).toContain('EASYMONEY_LEGACY_DB_PATH ||= developmentDatabasePath()');
     expect(wrapper).not.toContain('EASYMONEY_DB_PATH ||= developmentDatabasePath()');
@@ -55,13 +49,7 @@ describe('Electrobun 2 packaging contract', () => {
 
   test('keeps generated files and mutable development data out of the rebuild watcher', () => {
     const ignoredPaths = new Set(electrobunConfig.build?.watchIgnore ?? []);
-    for (const pathPattern of [
-      'dist/**',
-      'desktop-dist/**',
-      'data/**',
-      '.env.local',
-      '.git/**',
-    ]) {
+    for (const pathPattern of ['dist/**', 'desktop-dist/**', 'data/**', '.env.local', '.git/**']) {
       expect(ignoredPaths.has(pathPattern)).toBeTrue();
     }
   });

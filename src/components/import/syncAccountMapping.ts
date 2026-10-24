@@ -24,12 +24,13 @@ export interface AccountMappingCandidate {
 export function formatAccountMappingCandidate(candidate: AccountMappingCandidate): string {
   const last4 = candidate.last4?.trim();
   const last4Label = last4 ? `ending in ${last4}` : 'last four missing';
-  const balanceLabel = candidate.latestBalanceMonth === null
-    ? 'no imported balance'
-    : `ledger balance ${new Intl.NumberFormat('en-US', {
-        style: 'currency',
-        currency: candidate.currency || 'USD',
-      }).format(candidate.currentBalance)}`;
+  const balanceLabel =
+    candidate.latestBalanceMonth === null
+      ? 'no imported balance'
+      : `ledger balance ${new Intl.NumberFormat('en-US', {
+          style: 'currency',
+          currency: candidate.currency || 'USD',
+        }).format(candidate.currentBalance)}`;
   return `${candidate.name} · ${last4Label} · ${balanceLabel}`;
 }
 
@@ -42,20 +43,27 @@ export function groupSyncAccountClaims(claims: SyncAccountClaim[]): SyncAccountC
   }
   return [...groups].map(([identityKey, groupedClaims]) => {
     const datedBalances = groupedClaims
-      .filter(claim => claim.latestBalanceDate && claim.latestBalanceCents !== null && claim.latestBalanceCents !== undefined)
+      .filter(
+        (claim) =>
+          claim.latestBalanceDate &&
+          claim.latestBalanceCents !== null &&
+          claim.latestBalanceCents !== undefined,
+      )
       .sort((left, right) => right.latestBalanceDate!.localeCompare(left.latestBalanceDate!));
     const latestBalanceDate = datedBalances[0]?.latestBalanceDate ?? null;
-    const latestBalances = latestBalanceDate === null
-      ? []
-      : datedBalances.filter(claim => claim.latestBalanceDate === latestBalanceDate);
-    const latestBalanceAmounts = new Set(latestBalances.map(claim => claim.latestBalanceCents));
+    const latestBalances =
+      latestBalanceDate === null
+        ? []
+        : datedBalances.filter((claim) => claim.latestBalanceDate === latestBalanceDate);
+    const latestBalanceAmounts = new Set(latestBalances.map((claim) => claim.latestBalanceCents));
     return {
       identityKey,
       claims: groupedClaims,
       transactionCount: groupedClaims.reduce((sum, claim) => sum + claim.transactionCount, 0),
       balanceCount: groupedClaims.reduce((sum, claim) => sum + claim.balanceCount, 0),
       latestBalanceDate,
-      latestBalanceCents: latestBalanceAmounts.size === 1 ? latestBalances[0]!.latestBalanceCents ?? null : null,
+      latestBalanceCents:
+        latestBalanceAmounts.size === 1 ? (latestBalances[0]!.latestBalanceCents ?? null) : null,
     };
   });
 }
@@ -67,14 +75,24 @@ export function syncAccountGroupAutoDestination(claims: SyncAccountClaim[]): num
 export const syncAccountGroupRecommendedDestination = commonRecommendedSyncAccountDestination;
 
 // Only connector-verified identities with one safe destination share a control.
-export function syncAccountAggregateSummary(claims: SyncAccountClaim[]): SyncAccountClaimGroup | null {
-  if (new Set(claims.map(claim => claim.remoteAccountId)).size < 2 ||
-      !claims.every(claim => claim.resolution === 'connector')) return null;
+export function syncAccountAggregateSummary(
+  claims: SyncAccountClaim[],
+): SyncAccountClaimGroup | null {
+  if (
+    new Set(claims.map((claim) => claim.remoteAccountId)).size < 2 ||
+    !claims.every((claim) => claim.resolution === 'connector')
+  )
+    return null;
   const destination = commonSafeSyncAccountDestination(claims);
   if (destination === null) return null;
-  return groupSyncAccountClaims(claims.map(claim => ({
-    ...claim, remoteAccountId: `destination:${destination}`,
-  })))[0] ?? null;
+  return (
+    groupSyncAccountClaims(
+      claims.map((claim) => ({
+        ...claim,
+        remoteAccountId: `destination:${destination}`,
+      })),
+    )[0] ?? null
+  );
 }
 
 export function applySyncGroupMappingChoice<T>(
@@ -82,38 +100,53 @@ export function applySyncGroupMappingChoice<T>(
   groups: readonly SyncAccountClaimGroup[],
   choice: T,
 ): Record<string, T> {
-  return { ...previous, ...Object.fromEntries(groups.map(group => [group.identityKey, choice])) };
+  return { ...previous, ...Object.fromEntries(groups.map((group) => [group.identityKey, choice])) };
 }
 
 export function syncAccountGroupClaim(claims: SyncAccountClaim[]): SyncAccountClaim {
   const firstClaim = claims[0];
   if (!firstClaim) throw new Error('A sync account group must contain at least one claim.');
-  const knownLast4s = new Set(claims
-    .map(claim => claim.last4)
-    .filter((last4): last4 is string => Boolean(last4)));
+  const knownLast4s = new Set(
+    claims.map((claim) => claim.last4).filter((last4): last4 is string => Boolean(last4)),
+  );
   const last4 = knownLast4s.size === 1 ? [...knownLast4s][0]! : null;
   const withGroupLast4 = (claim: SyncAccountClaim): SyncAccountClaim => ({ ...claim, last4 });
 
   const autoDestination = syncAccountGroupAutoDestination(claims);
   if (autoDestination !== null) {
-    return withGroupLast4(claims.find(claim => claim.resolvedAccountId === autoDestination) ?? firstClaim);
+    return withGroupLast4(
+      claims.find((claim) => claim.resolvedAccountId === autoDestination) ?? firstClaim,
+    );
   }
 
-  const archivedMatches = claims.filter(claim =>
-    claim.resolution === 'archived-match' && claim.resolvedAccountId !== null
+  const archivedMatches = claims.filter(
+    (claim) => claim.resolution === 'archived-match' && claim.resolvedAccountId !== null,
   );
-  if (claims.some(claim => claim.resolution === 'identifier') &&
-      (claims.some(claim => !claim.resolvedAccountId || claim.resolution === 'ambiguous' || claim.resolution === 'archived-match') ||
-       new Set(claims.map(claim => claim.resolvedAccountId)).size !== 1)) {
-    return { ...withGroupLast4(firstClaim), resolvedAccountId: null, resolvedAccountName: null,
-      resolvedAccountStatus: null, resolution: 'ambiguous', requiresExplicitMapping: true };
+  if (
+    claims.some((claim) => claim.resolution === 'identifier') &&
+    (claims.some(
+      (claim) =>
+        !claim.resolvedAccountId ||
+        claim.resolution === 'ambiguous' ||
+        claim.resolution === 'archived-match',
+    ) ||
+      new Set(claims.map((claim) => claim.resolvedAccountId)).size !== 1)
+  ) {
+    return {
+      ...withGroupLast4(firstClaim),
+      resolvedAccountId: null,
+      resolvedAccountName: null,
+      resolvedAccountStatus: null,
+      resolution: 'ambiguous',
+      requiresExplicitMapping: true,
+    };
   }
-  const archivedAccountIds = new Set(archivedMatches.map(claim => claim.resolvedAccountId));
+  const archivedAccountIds = new Set(archivedMatches.map((claim) => claim.resolvedAccountId));
   if (archivedAccountIds.size === 1) {
     return { ...withGroupLast4(archivedMatches[0]!), requiresExplicitMapping: true };
   }
 
-  const representative = claims.find(claim => claim.resolution !== 'archived-match');
+  const representative = claims.find((claim) => claim.resolution !== 'archived-match');
   if (representative) return { ...withGroupLast4(representative), requiresExplicitMapping: true };
 
   return {

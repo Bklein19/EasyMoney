@@ -28,33 +28,35 @@ function normalizeAmount(value: string | number | null | undefined) {
 }
 
 export function getHeaderSignature(headers: string[] = []) {
-  return headers.map(header => normalizeText(header)).join('|');
+  return headers.map((header) => normalizeText(header)).join('|');
 }
 
-export function getTransactionFingerprint(transaction: TransactionIdentityInput, accountId: string | number | null | undefined) {
+export function getTransactionFingerprint(
+  transaction: TransactionIdentityInput,
+  accountId: string | number | null | undefined,
+) {
   const text = normalizeText(
-    transaction.originalDescription ||
-    transaction.description ||
-    transaction.merchant ||
-    ''
+    transaction.originalDescription || transaction.description || transaction.merchant || '',
   );
   return [
     accountId,
     normalizeDate(transaction.date),
     normalizeAmount(transaction.amount),
-    text
+    text,
   ].join('|');
 }
 
 export function splitDuplicateTransactions<T extends TransactionIdentityInput>(
   transactions: T[],
   existingTransactions: TransactionIdentityInput[],
-  accountId: string | number | null | undefined
+  accountId: string | number | null | undefined,
 ) {
   const seen = new Set(
-    existingTransactions.map(transaction =>
-      transaction.fingerprint || getTransactionFingerprint(transaction, transaction.accountId || accountId)
-    )
+    existingTransactions.map(
+      (transaction) =>
+        transaction.fingerprint ||
+        getTransactionFingerprint(transaction, transaction.accountId || accountId),
+    ),
   );
 
   const unique = [];

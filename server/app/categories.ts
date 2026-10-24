@@ -26,7 +26,9 @@ function toCategorySummary(row: CategoryRow): CategorySummary {
 }
 
 function definedFields<T extends Record<string, unknown>>(value: T) {
-  return Object.fromEntries(Object.entries(value).filter(([, fieldValue]) => fieldValue !== undefined));
+  return Object.fromEntries(
+    Object.entries(value).filter(([, fieldValue]) => fieldValue !== undefined),
+  );
 }
 
 export function listCategories(): CategoryListResponse {
@@ -34,7 +36,7 @@ export function listCategories(): CategoryListResponse {
     .prepare(
       `SELECT id, name, parentId, type, categoryGroup, description, color, icon
        FROM categories
-       ORDER BY name ASC, id ASC`
+       ORDER BY name ASC, id ASC`,
     )
     .all() as CategoryRow[];
 
@@ -45,17 +47,24 @@ type CategoryMutationInput = Omit<Partial<CategorySummary>, 'parentId'> & {
   parentId?: number | string | null;
 };
 
-function validateParent(parentId: number | string | null | undefined, categoryId?: number | string) {
+function validateParent(
+  parentId: number | string | null | undefined,
+  categoryId?: number | string,
+) {
   if (parentId == null) return parentId;
   const id = Number(parentId);
   if (!Number.isInteger(id) || id <= 0) throw new Error('Parent category not found.');
-  const parents = getDb().prepare('SELECT id, parentId FROM categories').all() as Array<{ id: number; parentId: number | null }>;
-  const byId = new Map(parents.map(parent => [parent.id, parent.parentId]));
+  const parents = getDb().prepare('SELECT id, parentId FROM categories').all() as Array<{
+    id: number;
+    parentId: number | null;
+  }>;
+  const byId = new Map(parents.map((parent) => [parent.id, parent.parentId]));
   if (!byId.has(id)) throw new Error('Parent category not found.');
   const seen = new Set<number>(categoryId === undefined ? [] : [Number(categoryId)]);
   let ancestor: number | null | undefined = id;
   while (ancestor != null) {
-    if (seen.has(ancestor)) throw new Error('A category cannot be nested inside itself or its descendants.');
+    if (seen.has(ancestor))
+      throw new Error('A category cannot be nested inside itself or its descendants.');
     seen.add(ancestor);
     ancestor = byId.get(ancestor);
   }
@@ -68,44 +77,62 @@ export function createCategory(category: CategoryMutationInput) {
   if (getDb().prepare('SELECT id FROM categories WHERE lower(name) = lower(?)').get(name)) {
     throw new Error('A category with this name already exists.');
   }
-  const id = Number(insertRow('categories', {
-    name,
-    parentId: validateParent(category.parentId) ?? null,
-    type: category.type ?? null,
-    categoryGroup: category.categoryGroup ?? null,
-    description: category.description ?? null,
-    color: category.color ?? null,
-    icon: category.icon ?? null,
-  }));
+  const id = Number(
+    insertRow('categories', {
+      name,
+      parentId: validateParent(category.parentId) ?? null,
+      type: category.type ?? null,
+      categoryGroup: category.categoryGroup ?? null,
+      description: category.description ?? null,
+      color: category.color ?? null,
+      icon: category.icon ?? null,
+    }),
+  );
   return { id };
 }
 
 export function updateCategory(id: number | string, changes: CategoryMutationInput) {
-  const current = getDb().prepare('SELECT name, type FROM categories WHERE id = ?').get(id) as { name: string; type: string | null } | undefined;
+  const current = getDb().prepare('SELECT name, type FROM categories WHERE id = ?').get(id) as
+    { name: string; type: string | null } | undefined;
   if (!current) throw new Error('Category not found.');
   const name = changes.name?.trim();
   if (changes.name !== undefined && !name) throw new Error('Category name is required.');
-  if (current.name === 'Uncategorized' && ((name !== undefined && name !== current.name) || (changes.type !== undefined && changes.type !== current.type))) {
+  if (
+    current.name === 'Uncategorized' &&
+    ((name !== undefined && name !== current.name) ||
+      (changes.type !== undefined && changes.type !== current.type))
+  ) {
     throw new Error('Uncategorized cannot be renamed or have its type changed.');
   }
-  if (name && getDb().prepare('SELECT id FROM categories WHERE lower(name) = lower(?) AND id != ?').get(name, id)) {
+  if (
+    name &&
+    getDb()
+      .prepare('SELECT id FROM categories WHERE lower(name) = lower(?) AND id != ?')
+      .get(name, id)
+  ) {
     throw new Error('A category with this name already exists.');
   }
-  updateRow('categories', id, definedFields({
-    name,
-    parentId: validateParent(changes.parentId, id),
-    type: changes.type,
-    categoryGroup: changes.categoryGroup,
-    description: changes.description,
-    color: changes.color,
-    icon: changes.icon,
-  }));
+  updateRow(
+    'categories',
+    id,
+    definedFields({
+      name,
+      parentId: validateParent(changes.parentId, id),
+      type: changes.type,
+      categoryGroup: changes.categoryGroup,
+      description: changes.description,
+      color: changes.color,
+      icon: changes.icon,
+    }),
+  );
   return { ok: true };
 }
 
 export function deleteCategory(id: number | string) {
   const db = getDb();
-  const uncategorized = db.prepare("SELECT id FROM categories WHERE name = 'Uncategorized'").get() as { id: number } | undefined;
+  const uncategorized = db
+    .prepare("SELECT id FROM categories WHERE name = 'Uncategorized'")
+    .get() as { id: number } | undefined;
   if (uncategorized && String(uncategorized.id) === String(id)) {
     throw new Error('Uncategorized cannot be deleted.');
   }
@@ -114,7 +141,10 @@ export function deleteCategory(id: number | string) {
     // Deleting a grouping category must not leave children pointing to a missing parent.
     db.prepare('UPDATE categories SET parentId = NULL WHERE parentId = ?').run(id);
     if (uncategorized) {
-      db.prepare('UPDATE transactionAnnotations SET categoryId = ? WHERE categoryId = ?').run(uncategorized.id, id);
+      db.prepare('UPDATE transactionAnnotations SET categoryId = ? WHERE categoryId = ?').run(
+        uncategorized.id,
+        id,
+      );
     }
     db.prepare('DELETE FROM categorizationRules WHERE categoryId = ?').run(id);
     db.prepare('DELETE FROM categories WHERE id = ?').run(id);

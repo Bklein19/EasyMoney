@@ -29,66 +29,97 @@ function response(overrides: Partial<AuthenticatedHttpResponse> = {}): Authentic
 
 describe('authenticated HTTP transport', () => {
   test('resolves relative URLs and rejects insecure or cross-origin targets', () => {
-    expect(authenticatedHttpSameOriginUrl(
-      '../activity?range=year',
-      'https://application.example.test/history/current',
-    ).toString()).toBe('https://application.example.test/activity?range=year');
-    expect(() => authenticatedHttpSameOriginUrl(
-      'https://outside.example.test/activity',
-      'https://application.example.test/history',
-    )).toThrow('stay on the open application origin');
-    expect(() => authenticatedHttpSameOriginUrl(
-      '/activity',
-      'http://application.example.test/history',
-    )).toThrow('must be secure');
-    expect(authenticatedHttpSameOriginUrl(
-      '/activity',
-      'http://127.0.0.1:3100/history',
-    ).toString()).toBe('http://127.0.0.1:3100/activity');
+    expect(
+      authenticatedHttpSameOriginUrl(
+        '../activity?range=year',
+        'https://application.example.test/history/current',
+      ).toString(),
+    ).toBe('https://application.example.test/activity?range=year');
+    expect(() =>
+      authenticatedHttpSameOriginUrl(
+        'https://outside.example.test/activity',
+        'https://application.example.test/history',
+      ),
+    ).toThrow('stay on the open application origin');
+    expect(() =>
+      authenticatedHttpSameOriginUrl('/activity', 'http://application.example.test/history'),
+    ).toThrow('must be secure');
+    expect(
+      authenticatedHttpSameOriginUrl('/activity', 'http://127.0.0.1:3100/history').toString(),
+    ).toBe('http://127.0.0.1:3100/activity');
   });
 
   test('validates status, content type, body size, signature, and custom structure', () => {
     const csv = response();
     expect(authenticatedHttpContentType(csv)).toBe('text/csv');
     expect(assertAuthenticatedHttpContentType(csv, ['text/csv', /excel/])).toBe('text/csv');
-    expect(assertAuthenticatedHttpBody(csv, {
-      minimumBytes: 10,
-      startsWith: ['Date,'],
-      validate: body => body.includes(Buffer.from('Amount')),
-    })).toBe(csv.body);
-    expect(assertAuthenticatedHttpResponse(csv, {
-      status: [200, 206],
-      contentTypes: [/csv/],
-      body: { minimumBytes: 10, startsWith: ['Date,'] },
-    })).toBe(csv.body);
+    expect(
+      assertAuthenticatedHttpBody(csv, {
+        minimumBytes: 10,
+        startsWith: ['Date,'],
+        validate: (body) => body.includes(Buffer.from('Amount')),
+      }),
+    ).toBe(csv.body);
+    expect(
+      assertAuthenticatedHttpResponse(csv, {
+        status: [200, 206],
+        contentTypes: [/csv/],
+        body: { minimumBytes: 10, startsWith: ['Date,'] },
+      }),
+    ).toBe(csv.body);
 
     expect(() => assertAuthenticatedHttpStatus(response({ status: 500 }))).toThrow('status 500');
-    expect(() => assertAuthenticatedHttpContentType(response({
-      headers: { 'content-type': 'text/html' },
-    }), ['text/csv'])).toThrow('content type "text/html" was not accepted');
-    expect(() => assertAuthenticatedHttpBody(response({ body: Buffer.alloc(0) }))).toThrow('too small');
+    expect(() =>
+      assertAuthenticatedHttpContentType(
+        response({
+          headers: { 'content-type': 'text/html' },
+        }),
+        ['text/csv'],
+      ),
+    ).toThrow('content type "text/html" was not accepted');
+    expect(() => assertAuthenticatedHttpBody(response({ body: Buffer.alloc(0) }))).toThrow(
+      'too small',
+    );
     expect(() => assertAuthenticatedHttpBody(csv, { startsWith: ['%PDF-'] })).toThrow('signature');
-    expect(() => assertAuthenticatedHttpBody(csv, { validate: () => false })).toThrow('body was not accepted');
+    expect(() => assertAuthenticatedHttpBody(csv, { validate: () => false })).toThrow(
+      'body was not accepted',
+    );
   });
 
   test('recognizes authentication status and any login URL in the redirect chain', () => {
     const isLoginUrl = (url: URL) => url.pathname === '/login';
-    expect(authenticatedHttpResponseIsLoginRedirect(response({ status: 401 }), isLoginUrl)).toBe(true);
-    expect(authenticatedHttpResponseIsLoginRedirect(response({
-      redirects: [{
-        status: 302,
-        fromUrl: 'https://application.example.test/activity',
-        toUrl: 'https://application.example.test/login',
-      }],
-    }), isLoginUrl)).toBe(true);
+    expect(authenticatedHttpResponseIsLoginRedirect(response({ status: 401 }), isLoginUrl)).toBe(
+      true,
+    );
+    expect(
+      authenticatedHttpResponseIsLoginRedirect(
+        response({
+          redirects: [
+            {
+              status: 302,
+              fromUrl: 'https://application.example.test/activity',
+              toUrl: 'https://application.example.test/login',
+            },
+          ],
+        }),
+        isLoginUrl,
+      ),
+    ).toBe(true);
     expect(authenticatedHttpResponseIsLoginRedirect(response(), isLoginUrl)).toBe(false);
-    expect(() => assertAuthenticatedHttpResponse(response({
-      redirects: [{
-        status: 302,
-        fromUrl: 'https://application.example.test/activity',
-        toUrl: 'https://application.example.test/login',
-      }],
-    }), { isLoginUrl })).toThrow('requires authentication');
+    expect(() =>
+      assertAuthenticatedHttpResponse(
+        response({
+          redirects: [
+            {
+              status: 302,
+              fromUrl: 'https://application.example.test/activity',
+              toUrl: 'https://application.example.test/login',
+            },
+          ],
+        }),
+        { isLoginUrl },
+      ),
+    ).toThrow('requires authentication');
   });
 
   test('shares cookies, follows same-origin redirects, and blocks cross-origin redirects before sending them', async () => {
@@ -105,7 +136,7 @@ describe('authenticated HTTP transport', () => {
     const server = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,
-      fetch: async request => {
+      fetch: async (request) => {
         const url = new URL(request.url);
         if (url.pathname === '/folder/export') {
           observations.push({
@@ -148,11 +179,13 @@ describe('authenticated HTTP transport', () => {
     const browser = await chromium.launch({ channel: 'chrome', headless: true });
     try {
       const context = await browser.newContext();
-      await context.addCookies([{
-        name: 'authenticated',
-        value: 'yes',
-        url: origin,
-      }]);
+      await context.addCookies([
+        {
+          name: 'authenticated',
+          value: 'yes',
+          url: origin,
+        },
+      ]);
       const page = {
         request: context.request,
         url: () => `${origin}/history`,
@@ -176,11 +209,13 @@ describe('authenticated HTTP transport', () => {
         status: 200,
         statusText: 'OK',
         headers: { 'content-type': 'text/csv; charset=utf-8' },
-        redirects: [{
-          status: 302,
-          fromUrl: `${origin}/folder/export`,
-          toUrl: `${origin}/folder/download`,
-        }],
+        redirects: [
+          {
+            status: 302,
+            fromUrl: `${origin}/folder/export`,
+            toUrl: `${origin}/folder/download`,
+          },
+        ],
       });
       expect(csv.body).toEqual(Buffer.from('Date,Description,Amount\n'));
       expect(observations).toEqual([
@@ -199,12 +234,15 @@ describe('authenticated HTTP transport', () => {
           referrer: `${origin}/folder/export`,
         },
       ]);
-      expect((await context.cookies(origin)).some(cookie =>
-        cookie.name === 'rotated' && cookie.value === 'accepted'
-      )).toBe(true);
+      expect(
+        (await context.cookies(origin)).some(
+          (cookie) => cookie.name === 'rotated' && cookie.value === 'accepted',
+        ),
+      ).toBe(true);
 
-      await expect(runAuthenticatedHttpRequest(page, { url: '/outside' }))
-        .rejects.toThrow('stay on the open application origin');
+      await expect(runAuthenticatedHttpRequest(page, { url: '/outside' })).rejects.toThrow(
+        'stay on the open application origin',
+      );
       expect(outsideRequests).toBe(0);
     } finally {
       await browser.close();

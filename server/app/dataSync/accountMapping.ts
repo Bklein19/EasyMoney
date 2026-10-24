@@ -23,7 +23,7 @@ export function syncAccountMappingWarning(claim: SyncAccountClaim): string | nul
 
 export function commonSafeSyncAccountDestination(claims: SyncAccountClaim[]): number | null {
   if (claims.length === 0) return null;
-  const accountIds = claims.map(claim => {
+  const accountIds = claims.map((claim) => {
     if (
       syncClaimRequiresExplicitMapping(claim) ||
       !claim.resolvedAccountId ||
@@ -35,17 +35,24 @@ export function commonSafeSyncAccountDestination(claims: SyncAccountClaim[]): nu
     }
     return claim.resolvedAccountId;
   });
-  if (accountIds.some(accountId => accountId === null)) return null;
+  if (accountIds.some((accountId) => accountId === null)) return null;
   const uniqueAccountIds = [...new Set(accountIds as number[])];
   return uniqueAccountIds.length === 1 ? uniqueAccountIds[0]! : null;
 }
 
 // Preselection is an editable review draft. Confirm import remains the approval.
 export function commonRecommendedSyncAccountDestination(claims: SyncAccountClaim[]): number | null {
-  if (claims.length === 0 || claims.some(claim =>
-    !claim.resolvedAccountId || claim.resolvedAccountStatus === 'archived' || claim.hasHolderConflict ||
-    !['linked', 'alias', 'exact', 'identifier', 'connector'].includes(claim.resolution)
-  )) return null;
-  const destinations = new Set(claims.map(claim => claim.resolvedAccountId));
+  if (
+    claims.length === 0 ||
+    claims.some(
+      (claim) =>
+        !claim.resolvedAccountId ||
+        claim.resolvedAccountStatus === 'archived' ||
+        claim.hasHolderConflict ||
+        !['linked', 'alias', 'exact', 'identifier', 'connector'].includes(claim.resolution),
+    )
+  )
+    return null;
+  const destinations = new Set(claims.map((claim) => claim.resolvedAccountId));
   return destinations.size === 1 ? claims[0]!.resolvedAccountId : null;
 }

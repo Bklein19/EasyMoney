@@ -91,66 +91,91 @@ describe('Marcus connector', () => {
     expect(matchesMarcusAccount(marcus)).toBe(true);
     expect(matchesMarcusAccount(goldman)).toBe(true);
     expect(matchesMarcusAccount(other)).toBe(false);
-    expect(marcusConnector.listTargets(connectorContext([marcus, goldman, other])))
-      .toEqual([{ label: 'Marcus' }]);
+    expect(marcusConnector.listTargets(connectorContext([marcus, goldman, other]))).toEqual([
+      { label: 'Marcus' },
+    ]);
     expect(marcusConnector.listTargets(connectorContext([other]))).toEqual([]);
   });
 
   test('infers supported account identity from durable source names and aliases', () => {
     expect(inferMarcusAccountKind(account())).toBe('savings');
-    expect(inferMarcusAccountKind(account({
-      name: 'Account 2222',
-      type: 'asset',
-      sourceAccountName: 'High-Yield CD - 2222',
-    }))).toBe('deposit');
+    expect(
+      inferMarcusAccountKind(
+        account({
+          name: 'Account 2222',
+          type: 'asset',
+          sourceAccountName: 'High-Yield CD - 2222',
+        }),
+      ),
+    ).toBe('deposit');
     expect(inferMarcusAccountLast4(account())).toBe('1111');
-    expect(inferMarcusAccountLast4(account({
-      sourceAccountName: null,
-      name: 'Savings without suffix',
-      accountAliases: ['Online Savings 2222', 'Online Savings 3333'],
-    }))).toBeNull();
-    expect(inferMarcusAccountLast4(account({
-      name: 'Savings 2222',
-      sourceAccountName: 'Online Savings Account ending in 1111',
-    }))).toBeNull();
-    expect(inferMarcusAccountLast4(account({
-      name: 'Savings 2222',
-      sourceAccountName: 'Online Savings Account ending in 1111',
-      last4: '3333',
-    }))).toBe('3333');
-    expect(inferMarcusAccountKind(account({
-      accountAliases: ['High-Yield CD - 1111'],
-    }))).toBeNull();
+    expect(
+      inferMarcusAccountLast4(
+        account({
+          sourceAccountName: null,
+          name: 'Savings without suffix',
+          accountAliases: ['Online Savings 2222', 'Online Savings 3333'],
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      inferMarcusAccountLast4(
+        account({
+          name: 'Savings 2222',
+          sourceAccountName: 'Online Savings Account ending in 1111',
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      inferMarcusAccountLast4(
+        account({
+          name: 'Savings 2222',
+          sourceAccountName: 'Online Savings Account ending in 1111',
+          last4: '3333',
+        }),
+      ),
+    ).toBe('3333');
+    expect(
+      inferMarcusAccountKind(
+        account({
+          accountAliases: ['High-Yield CD - 1111'],
+        }),
+      ),
+    ).toBeNull();
   });
 
   test('plans every parser-supported savings account with independent coverage windows', () => {
     const events: Array<Omit<SyncEvent, 'runId' | 'timestamp'>> = [];
-    const plans = planMarcusAccounts(connectorContext([
-      account({ id: 10, name: 'Savings 1111', latestFactDate: '2026-07-31' }),
-      account({
-        id: 20,
-        name: 'Savings 2222',
-        sourceAccountName: 'Online Savings - 2222',
-        latestFactDate: '2026-06-30',
-      }),
-      account({
-        id: 30,
-        name: 'CD 3333',
-        type: 'deposit',
-        sourceAccountName: 'High-Yield CD - 3333',
-      }),
-      account({
-        id: 40,
-        name: 'Savings without suffix',
-        sourceAccountName: null,
-      }),
-    ]), { kind: 'current', overlapDays: 7 }, event => events.push(event));
+    const plans = planMarcusAccounts(
+      connectorContext([
+        account({ id: 10, name: 'Savings 1111', latestFactDate: '2026-07-31' }),
+        account({
+          id: 20,
+          name: 'Savings 2222',
+          sourceAccountName: 'Online Savings - 2222',
+          latestFactDate: '2026-06-30',
+        }),
+        account({
+          id: 30,
+          name: 'CD 3333',
+          type: 'deposit',
+          sourceAccountName: 'High-Yield CD - 3333',
+        }),
+        account({
+          id: 40,
+          name: 'Savings without suffix',
+          sourceAccountName: null,
+        }),
+      ]),
+      { kind: 'current', overlapDays: 7 },
+      (event) => events.push(event),
+    );
 
     expect(plans).toEqual([
       { accountId: 10, kind: 'savings', last4: '1111', startDate: '2026-07-24' },
       { accountId: 20, kind: 'savings', last4: '2222', startDate: '2026-06-23' },
     ]);
-    expect(events.filter(event => event.type === 'warning').map(event => event.data)).toEqual([
+    expect(events.filter((event) => event.type === 'warning').map((event) => event.data)).toEqual([
       { accountId: 30, reason: 'unsupported-account-kind' },
       { accountId: 40, reason: 'missing-identity' },
     ]);
@@ -163,10 +188,11 @@ describe('Marcus connector', () => {
       return completeResult();
     });
 
-    await expect(connector.run(runContext([
-      account({ id: 10 }),
-      account({ id: 20, name: 'Second savings 1111' }),
-    ]))).rejects.toThrow('share one routing identity');
+    await expect(
+      connector.run(
+        runContext([account({ id: 10 }), account({ id: 20, name: 'Second savings 1111' })]),
+      ),
+    ).rejects.toThrow('share one routing identity');
     expect(called).toBe(false);
   });
 
@@ -195,12 +221,14 @@ describe('Marcus connector', () => {
       return completeResult([artifact]);
     });
 
-    await expect(connector.run(runContext([
-      account({ id: 10 }),
-    ], event => events.push(event)))).resolves.toEqual([{
-      fileName: artifact.fileName,
-      routing: 'source',
-    }]);
+    await expect(
+      connector.run(runContext([account({ id: 10 })], (event) => events.push(event))),
+    ).resolves.toEqual([
+      {
+        fileName: artifact.fileName,
+        routing: 'source',
+      },
+    ]);
     expect(capturedConfig).toEqual({
       outputDir: '/tmp/easymoney-marcus-connector-test',
       through: '2026-08-20',
@@ -222,17 +250,27 @@ describe('Marcus connector', () => {
       accounts: [],
       artifacts: [],
     }));
-    await expect(authConnector.run(runContext([account({ id: 10 })])))
-      .rejects.toThrow('authentication is required');
+    await expect(authConnector.run(runContext([account({ id: 10 })]))).rejects.toThrow(
+      'authentication is required',
+    );
 
-    expect(() => routeMarcusArtifacts([{
-      fileName: 'statement.pdf',
-      accountId: 99,
-    }], [{
-      accountId: 10,
-      kind: 'savings',
-      last4: '1111',
-      startDate: '2026-07-24',
-    }])).toThrow('unplanned local account');
+    expect(() =>
+      routeMarcusArtifacts(
+        [
+          {
+            fileName: 'statement.pdf',
+            accountId: 99,
+          },
+        ],
+        [
+          {
+            accountId: 10,
+            kind: 'savings',
+            last4: '1111',
+            startDate: '2026-07-24',
+          },
+        ],
+      ),
+    ).toThrow('unplanned local account');
   });
 });

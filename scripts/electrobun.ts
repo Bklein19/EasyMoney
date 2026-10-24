@@ -16,8 +16,11 @@ function databaseFromMainWorktree() {
   if (result.exitCode !== 0) return null;
 
   const records = result.stdout.toString().trim().split(/\n\n+/);
-  const main = records.find(record => record.includes('\nbranch refs/heads/main'));
-  const root = main?.split('\n').find(line => line.startsWith('worktree '))?.slice('worktree '.length);
+  const main = records.find((record) => record.includes('\nbranch refs/heads/main'));
+  const root = main
+    ?.split('\n')
+    .find((line) => line.startsWith('worktree '))
+    ?.slice('worktree '.length);
   return root ? path.join(root, 'data', 'easymoney.sqlite') : null;
 }
 
@@ -27,8 +30,10 @@ function developmentDatabasePath() {
     databaseFromMainWorktree(),
   ].filter((candidate): candidate is string => Boolean(candidate && fs.existsSync(candidate)));
 
-  return candidates.sort((left, right) => fs.statSync(right).size - fs.statSync(left).size)[0]
-    ?? path.join(projectRoot, 'data', 'easymoney.sqlite');
+  return (
+    candidates.sort((left, right) => fs.statSync(right).size - fs.statSync(left).size)[0] ??
+    path.join(projectRoot, 'data', 'easymoney.sqlite')
+  );
 }
 
 if (args[0] === 'dev' || args[0] === 'run') {
@@ -50,18 +55,22 @@ process.on('SIGTERM', () => child.kill('SIGTERM'));
 const exitCode = await child.exited;
 
 if (exitCode === 0 && args[0] === 'build') {
-  const environmentArgument = args.find(argument => argument.startsWith('--env=')) ?? '--env=stable';
-  const verifier = Bun.spawn([
-    process.execPath,
-    path.join(projectRoot, 'scripts', 'verify-electrobun-bundle.ts'),
-    environmentArgument,
-  ], {
-    cwd: projectRoot,
-    env: environment,
-    stdin: 'inherit',
-    stdout: 'inherit',
-    stderr: 'inherit',
-  });
+  const environmentArgument =
+    args.find((argument) => argument.startsWith('--env=')) ?? '--env=stable';
+  const verifier = Bun.spawn(
+    [
+      process.execPath,
+      path.join(projectRoot, 'scripts', 'verify-electrobun-bundle.ts'),
+      environmentArgument,
+    ],
+    {
+      cwd: projectRoot,
+      env: environment,
+      stdin: 'inherit',
+      stdout: 'inherit',
+      stderr: 'inherit',
+    },
+  );
   process.exit(await verifier.exited);
 }
 

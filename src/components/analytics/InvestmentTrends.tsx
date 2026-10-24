@@ -1,12 +1,4 @@
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis
-} from 'recharts';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import type { AnalyticsPeriodRow } from './PeriodClickOverlay';
 
 interface InvestmentTrendRow {
@@ -38,15 +30,17 @@ interface TooltipProps {
 
 function getActivePeriodPayload(state: unknown) {
   if (!state || typeof state !== 'object') return null;
-  const activePayload = (state as { activePayload?: Array<{ payload?: AnalyticsPeriodRow }> }).activePayload;
+  const activePayload = (state as { activePayload?: Array<{ payload?: AnalyticsPeriodRow }> })
+    .activePayload;
   return activePayload?.[0]?.payload ?? null;
 }
 
-const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  maximumFractionDigits: 0
-}).format(val);
+const formatCurrency = (val: number) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+  }).format(val);
 
 const CustomTooltip = ({ active, payload }: TooltipProps) => {
   if (active && payload && payload.length) {
@@ -64,7 +58,7 @@ const CustomTooltip = ({ active, payload }: TooltipProps) => {
 };
 
 export default function InvestmentTrends({ rows = [], onSelectPeriod }: InvestmentTrendsProps) {
-  const data = rows.map(row => ({
+  const data = rows.map((row) => ({
     ...row,
     timeKey: row.key,
     displayLabel: row.label,
@@ -75,7 +69,9 @@ export default function InvestmentTrends({ rows = [], onSelectPeriod }: Investme
     return (
       <div className="empty-state">
         <div className="empty-state__icon">$</div>
-        <p className="empty-state__description">No investment transfers to display for this period.</p>
+        <p className="empty-state__description">
+          No investment transfers to display for this period.
+        </p>
       </div>
     );
   }
@@ -111,7 +107,12 @@ export default function InvestmentTrends({ rows = [], onSelectPeriod }: Investme
             width={72}
           />
           <Tooltip content={<CustomTooltip />} cursor={{ fill: 'var(--chart-cursor)' }} />
-          <Bar dataKey="Investments" fill="var(--data-investment)" radius={[4, 4, 0, 0]} maxBarSize={44} />
+          <Bar
+            dataKey="Investments"
+            fill="var(--data-investment)"
+            radius={[4, 4, 0, 0]}
+            maxBarSize={44}
+          />
         </BarChart>
       </ResponsiveContainer>
     </div>

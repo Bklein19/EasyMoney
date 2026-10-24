@@ -30,12 +30,20 @@ test('ledger transaction duplicate occurrence assignment is input-order independ
   const forward = assignLedgerTransactionIdentities(duplicateTransactions);
   const reversed = assignLedgerTransactionIdentities([...duplicateTransactions].reverse());
 
-  expect(new Map(forward.map(item => [item.transaction.stableSourceId, item.occurrenceIndex]))).toEqual(
-    new Map(reversed.map(item => [item.transaction.stableSourceId, item.occurrenceIndex]))
+  expect(
+    new Map(forward.map((item) => [item.transaction.stableSourceId, item.occurrenceIndex])),
+  ).toEqual(
+    new Map(reversed.map((item) => [item.transaction.stableSourceId, item.occurrenceIndex])),
   );
-  expect(new Map(forward.map(item => [item.transaction.stableSourceId, item.ledgerTransactionId]))).toEqual(
-    new Map(reversed.map(item => [item.transaction.stableSourceId, item.ledgerTransactionId]))
+  expect(
+    new Map(forward.map((item) => [item.transaction.stableSourceId, item.ledgerTransactionId])),
+  ).toEqual(
+    new Map(reversed.map((item) => [item.transaction.stableSourceId, item.ledgerTransactionId])),
   );
-  expect(forward.find(item => item.transaction.stableSourceId === 'source-a')?.occurrenceIndex).toBe(0);
-  expect(forward.find(item => item.transaction.stableSourceId === 'source-b')?.occurrenceIndex).toBe(1);
+  expect(
+    forward.find((item) => item.transaction.stableSourceId === 'source-a')?.occurrenceIndex,
+  ).toBe(0);
+  expect(
+    forward.find((item) => item.transaction.stableSourceId === 'source-b')?.occurrenceIndex,
+  ).toBe(1);
 });

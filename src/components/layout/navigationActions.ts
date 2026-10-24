@@ -20,7 +20,12 @@ export function installNavigationActions(target: Window, navigate: (delta: numbe
     if (event.defaultPrevented || event.isComposing) return;
     // Option-arrow is a text-editing command on macOS. Preserve it in fields.
     const element = event.target;
-    if (event.altKey && element instanceof HTMLElement && element.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+    if (
+      event.altKey &&
+      element instanceof HTMLElement &&
+      element.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
+    )
+      return;
     const delta = navigationDelta(event);
     if (delta === null) return;
     // Desktop Command-brackets are owned by the native Go menu.

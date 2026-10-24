@@ -16,13 +16,26 @@ export type AccountRow = ReturnType<typeof fromAppAccount>;
 
 export function useAccounts(options: { includeArchived?: boolean } = {}) {
   const includeArchived = Boolean(options.includeArchived);
-  const accountsQuery = useQuery(trpc.accounts.list.queryOptions({ includeArchived }, {
-    select: data => data.accounts.map(fromAppAccount),
-  }));
+  const accountsQuery = useQuery(
+    trpc.accounts.list.queryOptions(
+      { includeArchived },
+      {
+        select: (data) => data.accounts.map(fromAppAccount),
+      },
+    ),
+  );
 
   async function updateAccount(id: number | string, changes: AccountMetadataChanges) {
-    const allowed = new Set(['name', 'institution', 'type', 'currency', 'accountHolder', 'last4', 'freshnessPolicy']);
-    const unsupported = Object.keys(changes).filter(field => !allowed.has(field));
+    const allowed = new Set([
+      'name',
+      'institution',
+      'type',
+      'currency',
+      'accountHolder',
+      'last4',
+      'freshnessPolicy',
+    ]);
+    const unsupported = Object.keys(changes).filter((field) => !allowed.has(field));
     if (unsupported.length) {
       throw new Error(`Accounts only support metadata updates: ${unsupported.join(', ')}`);
     }

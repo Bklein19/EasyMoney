@@ -91,7 +91,9 @@ body.sidebar-resizing .app-content {
   font-size: 13px;
 }
 
-.automatic-categorization-status > span:first-child { flex: 1; }
+.automatic-categorization-status > span:first-child {
+  flex: 1;
+}
 
 @media (max-width: 768px) {
   .sidebar-peek-zone {

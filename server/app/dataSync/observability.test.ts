@@ -8,7 +8,7 @@ test('sync step observability reports elapsed time around successful work', asyn
   const times = [100, 246];
 
   const result = await reportSyncStep(
-    event => events.push(event),
+    (event) => events.push(event),
     {
       step: 'download-statements',
       message: 'Downloading statements',
@@ -47,12 +47,16 @@ test('sync step observability records failed duration and preserves the error', 
   const times = [10, 35];
   const failure = new Error('remote request failed');
 
-  await expect(reportSyncStep(
-    event => events.push(event),
-    { step: 'download-activity', message: 'Downloading activity' },
-    async () => { throw failure; },
-    () => times.shift()!,
-  )).rejects.toBe(failure);
+  await expect(
+    reportSyncStep(
+      (event) => events.push(event),
+      { step: 'download-activity', message: 'Downloading activity' },
+      async () => {
+        throw failure;
+      },
+      () => times.shift()!,
+    ),
+  ).rejects.toBe(failure);
 
   expect(events.at(-1)).toEqual({
     type: 'action',

@@ -21,9 +21,17 @@ export async function generateParserVersions() {
       seen.set(filePath, content);
       for (const dependency of scanner.scanImports(content)) {
         if (!dependency.path.startsWith('.')) {
-          const name = dependency.path.startsWith('@') ? dependency.path.split('/').slice(0, 2).join('/') : dependency.path.split('/')[0]!;
-          const installed = await readFile(resolve(root, 'node_modules', name, 'package.json'), 'utf8').catch(() => null);
-          seen.set(`package:${name}`, installed ? JSON.parse(installed).version : dependencies[name] || 'builtin');
+          const name = dependency.path.startsWith('@')
+            ? dependency.path.split('/').slice(0, 2).join('/')
+            : dependency.path.split('/')[0]!;
+          const installed = await readFile(
+            resolve(root, 'node_modules', name, 'package.json'),
+            'utf8',
+          ).catch(() => null);
+          seen.set(
+            `package:${name}`,
+            installed ? JSON.parse(installed).version : dependencies[name] || 'builtin',
+          );
           continue;
         }
         let target = resolve(dirname(filePath), dependency.path);
@@ -32,15 +40,30 @@ export async function generateParserVersions() {
       }
     }
     await visit(file);
-    const hash = createHash('sha256').update(JSON.stringify([...seen].map(([name, content]) => [name.startsWith('package:') ? name : relative(root, name), content]).sort())).digest('hex');
+    const hash = createHash('sha256')
+      .update(
+        JSON.stringify(
+          [...seen]
+            .map(([name, content]) => [
+              name.startsWith('package:') ? name : relative(root, name),
+              content,
+            ])
+            .sort(),
+        ),
+      )
+      .digest('hex');
     const module = await import(file);
     for (const value of Object.values(module).flat()) {
-      if (value && typeof value === 'object' && 'id' in value && 'parse' in value) versions[String(value.id)] = hash;
+      if (value && typeof value === 'object' && 'id' in value && 'parse' in value)
+        versions[String(value.id)] = hash;
     }
   }
   return Object.fromEntries(Object.entries(versions).sort());
 }
 
 if (import.meta.main) {
-  await writeFile(resolve(root, 'server/app/importParsers/versions.json'), JSON.stringify(await generateParserVersions(), null, 2) + '\n');
+  await writeFile(
+    resolve(root, 'server/app/importParsers/versions.json'),
+    JSON.stringify(await generateParserVersions(), null, 2) + '\n',
+  );
 }

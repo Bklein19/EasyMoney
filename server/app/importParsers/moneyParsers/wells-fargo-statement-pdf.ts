@@ -1,17 +1,20 @@
-import { basename } from "node:path";
-import type { ParseResult, ParserMeta } from "./types.ts";
-import { cents, makeTx, pdfToText } from "./_helpers";
+import { basename } from 'node:path';
+import type { ParseResult, ParserMeta } from './types.ts';
+import { cents, makeTx, pdfToText } from './_helpers';
 import { StatementValidationError, validateStatementTotals } from '../statementValidation';
 import { checkCashStatement } from '../printedStatementChecks';
 
 export const meta: ParserMeta = {
-  id: "wells-fargo-statement-pdf",
-  institution: "Wells Fargo",
-  kind: "statement",
+  id: 'wells-fargo-statement-pdf',
+  institution: 'Wells Fargo',
+  kind: 'statement',
   priority: 50,
   matches: ({ filename, sample }) =>
-    /^wells-fargo-(checking|savings|credit-card|autograph-visa|platinum-card)-\d{4}-\d{4}-\d{2}-\d{2}\.pdf$/i.test(filename) ||
-    (/\.pdf$/i.test(filename) && /Wells Fargo/i.test(sample) &&
+    /^wells-fargo-(checking|savings|credit-card|autograph-visa|platinum-card)-\d{4}-\d{4}-\d{2}-\d{2}\.pdf$/i.test(
+      filename,
+    ) ||
+    (/\.pdf$/i.test(filename) &&
+      /Wells Fargo/i.test(sample) &&
       (/Wells Fargo Everyday Checking/.test(sample) ||
         /Wells Fargo[^\n]*Savings/i.test(sample) ||
         /WELLS FARGO AUTOGRAPH VISA/i.test(sample) ||
@@ -19,12 +22,14 @@ export const meta: ParserMeta = {
 };
 
 function cleanDescription(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
+  return value.replace(/\s+/g, ' ').trim();
 }
 
 function filenameAccount(filePath: string): { slug?: string; last4?: string; date?: string } {
-  const filename = basename(filePath).replace(/^[0-9a-f]{64}-/, "");
-  const m = filename.match(/wells-fargo-(checking|savings|credit-card|autograph-visa|platinum-card)(?:-(\d{4}))?(?:-statement)?-(\d{4}-\d{2}-\d{2})\.pdf$/i);
+  const filename = basename(filePath).replace(/^[0-9a-f]{64}-/, '');
+  const m = filename.match(
+    /wells-fargo-(checking|savings|credit-card|autograph-visa|platinum-card)(?:-(\d{4}))?(?:-statement)?-(\d{4}-\d{2}-\d{2})\.pdf$/i,
+  );
   return { slug: m?.[1]?.toLowerCase(), last4: m?.[2], date: m?.[3] };
 }
 
@@ -32,8 +37,9 @@ function isoNumericDate(monthRaw: string, dayRaw: string, yearRaw: string): stri
   const month = Number(monthRaw);
   const day = Number(dayRaw);
   const year = Number(yearRaw);
-  if (!month || !day || !year) throw new Error(`Invalid Wells Fargo date: ${monthRaw}/${dayRaw}/${yearRaw}`);
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  if (!month || !day || !year)
+    throw new Error(`Invalid Wells Fargo date: ${monthRaw}/${dayRaw}/${yearRaw}`);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 function isoStatementMonthDate(monthRaw: string, dayRaw: string, coveredTo: string): string {
@@ -42,8 +48,9 @@ function isoStatementMonthDate(monthRaw: string, dayRaw: string, coveredTo: stri
   const endYear = Number(coveredTo.slice(0, 4));
   const endMonth = Number(coveredTo.slice(5, 7));
   const year = month > endMonth ? endYear - 1 : endYear;
-  if (!month || !day || !year) throw new Error(`Invalid Wells Fargo statement date: ${monthRaw}/${dayRaw}`);
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  if (!month || !day || !year)
+    throw new Error(`Invalid Wells Fargo statement date: ${monthRaw}/${dayRaw}`);
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 function accountLast4(text: string, filePath: string): string {
@@ -53,33 +60,37 @@ function accountLast4(text: string, filePath: string): string {
     text.match(/Account number:\s*\d*(\d{4})/i)?.[1] ??
     text.match(/Account Number\s+(?:\d{4}\s+){3}(\d{4})/i)?.[1];
   if (fromFilename && fromText && fromFilename !== fromText) {
-    throw new Error("Wells Fargo statement account number does not match its filename");
+    throw new Error('Wells Fargo statement account number does not match its filename');
   }
   const last4 = fromFilename ?? fromText;
-  if (!last4) throw new Error("Could not find Wells Fargo account number");
+  if (!last4) throw new Error('Could not find Wells Fargo account number');
   return last4;
 }
 
 function depositAccountName(text: string, filePath: string): string {
   const { slug } = filenameAccount(filePath);
   const last4 = accountLast4(text, filePath);
-  if (slug === "savings" || (!slug && /\bSavings\b/i.test(text))) return `Savings - ${last4}`;
+  if (slug === 'savings' || (!slug && /\bSavings\b/i.test(text))) return `Savings - ${last4}`;
   return `Checking - ${last4}`;
 }
 
 function cardAccountName(text: string, filePath: string): string {
   const { slug } = filenameAccount(filePath);
   const last4 = accountLast4(text, filePath);
-  if (slug === "autograph-visa" || /AUTOGRAPH VISA/i.test(text)) return `Autograph Visa - ${last4}`;
-  if (slug === "platinum-card" || /PLATINUM CARD/i.test(text)) return `Platinum Card - ${last4}`;
+  if (slug === 'autograph-visa' || /AUTOGRAPH VISA/i.test(text)) return `Autograph Visa - ${last4}`;
+  if (slug === 'platinum-card' || /PLATINUM CARD/i.test(text)) return `Platinum Card - ${last4}`;
   return `Wells Fargo Credit Card - ${last4}`;
 }
 
-function parseDepositPeriod(text: string, filePath: string): { covered_from: string; covered_to: string } {
+function parseDepositPeriod(
+  text: string,
+  filePath: string,
+): { covered_from: string; covered_to: string } {
   const filenameDate = filenameAccount(filePath).date;
   const ending = text.match(/Ending balance on\s+(\d{1,2})\/(\d{1,2})\s+\$?[\d,]+\.\d{2}/);
   const beginning = text.match(/Beginning balance on\s+(\d{1,2})\/(\d{1,2})\s+\$?[\d,]+\.\d{2}/);
-  if (!filenameDate || !ending || !beginning) throw new Error("Could not find Wells Fargo deposit statement period");
+  if (!filenameDate || !ending || !beginning)
+    throw new Error('Could not find Wells Fargo deposit statement period');
 
   const covered_to = filenameDate;
   const covered_from = isoStatementMonthDate(beginning[1]!, beginning[2]!, covered_to);
@@ -87,8 +98,10 @@ function parseDepositPeriod(text: string, filePath: string): { covered_from: str
 }
 
 function parseCardPeriod(text: string): { covered_from: string; covered_to: string } {
-  const period = text.match(/Statement Period\s+(\d{2})\/(\d{2})\/(\d{4})\s+to\s+(\d{2})\/(\d{2})\/(\d{4})/);
-  if (!period) throw new Error("Could not find Wells Fargo credit card statement period");
+  const period = text.match(
+    /Statement Period\s+(\d{2})\/(\d{2})\/(\d{4})\s+to\s+(\d{2})\/(\d{2})\/(\d{4})/,
+  );
+  if (!period) throw new Error('Could not find Wells Fargo credit card statement period');
   return {
     covered_from: isoNumericDate(period[1]!, period[2]!, period[3]!),
     covered_to: isoNumericDate(period[4]!, period[5]!, period[6]!),
@@ -108,7 +121,9 @@ function inferDepositSign(description: string): 1 | -1 {
     return 1;
   }
   if (
-    /\b(payment|debits?|creditcard|utilitypay|ach pmt|purchase|withdrawal|rent)\b/.test(normalized) ||
+    /\b(payment|debits?|creditcard|utilitypay|ach pmt|purchase|withdrawal|rent)\b/.test(
+      normalized,
+    ) ||
     /\bzelle to\b/.test(normalized) ||
     /\btransfer .* to\b/.test(normalized)
   ) {
@@ -120,17 +135,17 @@ function inferDepositSign(description: string): 1 | -1 {
 function parseDepositTransactions(
   text: string,
   account: string,
-  coveredTo: string
-): ParseResult["transactions"] {
+  coveredTo: string,
+): ParseResult['transactions'] {
   const lines = text.split(/\n/);
   const header = lines.find((line) => /Deposits\/\s+Withdrawals\/\s+Ending daily/i.test(line));
-  const depositCol = header?.indexOf("Deposits/") ?? 105;
-  const withdrawalCol = header?.indexOf("Withdrawals/") ?? 124;
-  const endingCol = header?.indexOf("Ending daily") ?? 145;
+  const depositCol = header?.indexOf('Deposits/') ?? 105;
+  const withdrawalCol = header?.indexOf('Withdrawals/') ?? 124;
+  const endingCol = header?.indexOf('Ending daily') ?? 145;
   const beginning = text.match(/Beginning balance on\s+\d{1,2}\/\d{1,2}\s+\$?([\d,]+\.\d{2})/);
   let runningBalance = beginning ? cents(beginning[1]!) : null;
 
-  const transactions: ParseResult["transactions"] = [];
+  const transactions: ParseResult['transactions'] = [];
   let inHistory = false;
 
   type UnsignedTransaction = {
@@ -148,9 +163,9 @@ function parseDepositTransactions(
         amount_cents: current.amount_cents,
         description: cleanDescription(current.description),
         account,
-        institution: "Wells Fargo",
-        raw: { source: "wells-fargo-statement", type: "checking-activity" },
-      })
+        institution: 'Wells Fargo',
+        raw: { source: 'wells-fargo-statement', type: 'checking-activity' },
+      }),
     );
   };
 
@@ -161,7 +176,8 @@ function parseDepositTransactions(
 
   const resolveUnbalancedRows = (endingBalance: number, current: UnsignedTransaction) => {
     if (runningBalance === null) {
-      for (const transaction of unresolved.splice(0)) addTransaction(inferredTransaction(transaction));
+      for (const transaction of unresolved.splice(0))
+        addTransaction(inferredTransaction(transaction));
       addTransaction(inferredTransaction(current));
       runningBalance = endingBalance;
       return;
@@ -174,10 +190,11 @@ function parseDepositTransactions(
     let bestDistance = Number.POSITIVE_INFINITY;
 
     for (let mask = 0; mask < totalCombinations; mask += 1) {
-      const signs = candidates.map((_, index) => (mask & (1 << index)) ? 1 : -1);
-      const sum = candidates.reduce((total, transaction, index) => (
-        total + signs[index]! * Math.abs(transaction.amount_cents)
-      ), 0);
+      const signs = candidates.map((_, index) => (mask & (1 << index) ? 1 : -1));
+      const sum = candidates.reduce(
+        (total, transaction, index) => total + signs[index]! * Math.abs(transaction.amount_cents),
+        0,
+      );
       const distance = Math.abs(sum - targetDelta);
       if (distance < bestDistance) {
         bestDistance = distance;
@@ -204,7 +221,7 @@ function parseDepositTransactions(
   const parseLogicalRow = (dateMonth: string, dateDay: string, parts: string[]) => {
     // Only the trailing amount columns are financial values. A description can
     // contain its own amount (for example cash back) before the actual debit.
-    const moneyMatches = parts.flatMap(part => {
+    const moneyMatches = parts.flatMap((part) => {
       const columns = part.match(/(?:^|\s+)(\$?[\d,]+\.\d{2}(?:\s+\$?[\d,]+\.\d{2})*)\s*$/);
       return columns ? [...columns[1]!.matchAll(/\$?[\d,]+\.\d{2}/g)] : [];
     });
@@ -213,9 +230,7 @@ function parseDepositTransactions(
     const firstMoney = moneyMatches[0]!;
     const lastMoney = moneyMatches[moneyMatches.length - 1]!;
     const firstMoneyCol = parts[0]?.indexOf(firstMoney[0]) ?? 0;
-    const isEndingBalanceOnly =
-      firstMoneyCol >= endingCol - 4 &&
-      moneyMatches.length === 1;
+    const isEndingBalanceOnly = firstMoneyCol >= endingCol - 4 && moneyMatches.length === 1;
     if (isEndingBalanceOnly) return;
 
     const amount = cents(firstMoney[0]);
@@ -223,9 +238,11 @@ function parseDepositTransactions(
     // Amount columns may precede a wrapped description line in PDF reading order.
     // Remove trailing numeric columns per line instead of truncating the logical
     // row at its first amount, which silently dropped names and transfer details.
-    const description = cleanDescription(parts.map(part => part.replace(
-      /(?:^|\s+)\$?[\d,]+\.\d{2}(?:\s+\$?[\d,]+\.\d{2})*\s*$/, ""
-    )).join(" "));
+    const description = cleanDescription(
+      parts
+        .map((part) => part.replace(/(?:^|\s+)\$?[\d,]+\.\d{2}(?:\s+\$?[\d,]+\.\d{2})*\s*$/, ''))
+        .join(' '),
+    );
     const transaction = {
       date: isoStatementMonthDate(dateMonth, dateDay, coveredTo),
       description,
@@ -254,21 +271,28 @@ function parseDepositTransactions(
   };
 
   for (const rawLine of lines) {
-    const line = rawLine.replace(/\s+$/g, "");
+    const line = rawLine.replace(/\s+$/g, '');
     const trimmed = line.trim();
     if (/^Transaction history(?: \(continued\))?$/i.test(trimmed)) {
       inHistory = true;
       continue;
     }
     if (!inHistory) continue;
-    if (/^Totals\b/i.test(trimmed) || /^Monthly service fee summary$/i.test(trimmed) || /^Ending balance on\b/i.test(trimmed)) {
+    if (
+      /^Totals\b/i.test(trimmed) ||
+      /^Monthly service fee summary$/i.test(trimmed) ||
+      /^Ending balance on\b/i.test(trimmed)
+    ) {
       flushPending();
       break;
     }
     // Repeated page furniture is not a continuation of the preceding purchase.
-    if (/\bPage \d+ of \d+\s*$/i.test(trimmed) ||
+    if (
+      /\bPage \d+ of \d+\s*$/i.test(trimmed) ||
       /^(?:Check\s+)?Date\s+(?:Number\s+)?Description\b/i.test(trimmed) ||
-      /^(?:Deposits\/|Withdrawals\/|Ending daily|Number\s+Description|Check)\s*$/i.test(trimmed)) continue;
+      /^(?:Deposits\/|Withdrawals\/|Ending daily|Number\s+Description|Check)\s*$/i.test(trimmed)
+    )
+      continue;
 
     const row = line.match(/^\s*(\d{1,2})\/(\d{1,2})\s+(.*)$/);
     if (row) {
@@ -283,7 +307,7 @@ function parseDepositTransactions(
 
     if (pending && trimmed && !/^Page \d+/.test(trimmed)) {
       const cutAt = Math.min(
-        ...[depositCol, withdrawalCol, endingCol].filter((n) => n > 0 && n < line.length)
+        ...[depositCol, withdrawalCol, endingCol].filter((n) => n > 0 && n < line.length),
       );
       pending.parts.push(line.slice(0, cutAt).trim());
     }
@@ -294,10 +318,14 @@ function parseDepositTransactions(
   return transactions;
 }
 
-function parseCardTransactions(text: string, account: string, coveredTo: string): ParseResult["transactions"] {
-  const transactions: ParseResult["transactions"] = [];
+function parseCardTransactions(
+  text: string,
+  account: string,
+  coveredTo: string,
+): ParseResult['transactions'] {
+  const transactions: ParseResult['transactions'] = [];
   const lines = text.split(/\n/);
-  let section = "";
+  let section = '';
 
   const signForSection = (value: number, currentSection: string): number => {
     if (/Payments|Other Credits/i.test(currentSection)) return -Math.abs(value);
@@ -305,19 +333,28 @@ function parseCardTransactions(text: string, account: string, coveredTo: string)
   };
 
   for (const rawLine of lines) {
-    const line = rawLine.replace(/\s+$/g, "");
+    const line = rawLine.replace(/\s+$/g, '');
     const trimmed = line.trim();
 
-    if (/^(Payments|Other Credits|Purchases, Balance Transfers & Other Charges|Cash Advances|Fees Charged|Interest Charged)$/.test(trimmed)) {
+    if (
+      /^(Payments|Other Credits|Purchases, Balance Transfers & Other Charges|Cash Advances|Fees Charged|Interest Charged)$/.test(
+        trimmed,
+      )
+    ) {
       section = trimmed;
       continue;
     }
-    if (!section || /^TOTAL\b/i.test(trimmed) || /^202\d Totals Year-to-Date$/i.test(trimmed)) continue;
+    if (!section || /^TOTAL\b/i.test(trimmed) || /^202\d Totals Year-to-Date$/i.test(trimmed))
+      continue;
 
     // PDF columns can touch: the reference may immediately follow the post date.
     // Credits can carry the same four-digit card prefix as purchases.
-    const payment = line.match(/^\s*(?:\d{4}\s+)?(\d{2})\/(\d{2})\s+(\d{2})\/(\d{2})\s*([A-Z0-9]+)\s+(.+?)\s+([\d,]+\.\d{2})\s*$/);
-    const charge = line.match(/^\s*\d{4}\s+(\d{2})\/(\d{2})\s+(\d{2})\/(\d{2})\s*([A-Z0-9]+)\s+(.+?)\s+([\d,]+\.\d{2})\s*$/);
+    const payment = line.match(
+      /^\s*(?:\d{4}\s+)?(\d{2})\/(\d{2})\s+(\d{2})\/(\d{2})\s*([A-Z0-9]+)\s+(.+?)\s+([\d,]+\.\d{2})\s*$/,
+    );
+    const charge = line.match(
+      /^\s*\d{4}\s+(\d{2})\/(\d{2})\s+(\d{2})\/(\d{2})\s*([A-Z0-9]+)\s+(.+?)\s+([\d,]+\.\d{2})\s*$/,
+    );
     const interest = line.match(/^\s*(INTEREST CHARGE .+?)\s+([\d,]+\.\d{2})\s*$/);
 
     if (payment && /Payments|Other Credits/i.test(section)) {
@@ -329,9 +366,14 @@ function parseCardTransactions(text: string, account: string, coveredTo: string)
           amount_cents: signForSection(amount, section),
           description: cleanDescription(payment[6]!),
           account,
-          institution: "Wells Fargo",
-          raw: { source: "wells-fargo-statement", type: "credit-card-activity", section, reference: payment[5] },
-        })
+          institution: 'Wells Fargo',
+          raw: {
+            source: 'wells-fargo-statement',
+            type: 'credit-card-activity',
+            section,
+            reference: payment[5],
+          },
+        }),
       );
       continue;
     }
@@ -345,9 +387,14 @@ function parseCardTransactions(text: string, account: string, coveredTo: string)
           amount_cents: signForSection(amount, section),
           description: cleanDescription(charge[6]!),
           account,
-          institution: "Wells Fargo",
-          raw: { source: "wells-fargo-statement", type: "credit-card-activity", section, reference: charge[5] },
-        })
+          institution: 'Wells Fargo',
+          raw: {
+            source: 'wells-fargo-statement',
+            type: 'credit-card-activity',
+            section,
+            reference: charge[5],
+          },
+        }),
       );
       continue;
     }
@@ -361,9 +408,9 @@ function parseCardTransactions(text: string, account: string, coveredTo: string)
           amount_cents: Math.abs(amount),
           description: cleanDescription(interest[1]!),
           account,
-          institution: "Wells Fargo",
-          raw: { source: "wells-fargo-statement", type: "credit-card-activity", section },
-        })
+          institution: 'Wells Fargo',
+          raw: { source: 'wells-fargo-statement', type: 'credit-card-activity', section },
+        }),
       );
     }
   }
@@ -375,17 +422,21 @@ function parseDeposit(text: string, filePath: string): ParseResult {
   const account = depositAccountName(text, filePath);
   const { covered_from, covered_to } = parseDepositPeriod(text, filePath);
   const balance = text.match(/Ending balance on\s+\d{1,2}\/\d{1,2}\s+\$?([\d,]+\.\d{2})/);
-  if (!balance) throw new Error("Could not find Wells Fargo deposit ending balance");
+  if (!balance) throw new Error('Could not find Wells Fargo deposit ending balance');
 
   const transactions = parseDepositTransactions(text, account, covered_to);
-  const validation = checkCashStatement('wells-deposit', text, transactions.map(t => t.amount_cents));
+  const validation = checkCashStatement(
+    'wells-deposit',
+    text,
+    transactions.map((t) => t.amount_cents),
+  );
   return {
     transactions,
     balances: [
       {
         date: covered_to,
         account,
-        institution: "Wells Fargo",
+        institution: 'Wells Fargo',
         balance_cents: cents(balance[1]!),
         raw: { statementValidation: validation },
       },
@@ -399,25 +450,34 @@ function parseCreditCard(text: string, filePath: string): ParseResult {
   const account = cardAccountName(text, filePath);
   const { covered_from, covered_to } = parseCardPeriod(text);
   const balance = text.match(/New Balance\s+\$?([\d,]+\.\d{2})/);
-  if (!balance) throw new Error("Could not find Wells Fargo credit card new balance");
+  if (!balance) throw new Error('Could not find Wells Fargo credit card new balance');
 
   const transactions = parseCardTransactions(text, account, covered_to);
   // Only recognized complete summaries can assert confidence. Old fixtures and
   // unsupported layouts without a summary are not represented as validated.
   let validation;
   if (/Account Summary/i.test(text)) {
-    const summary = text.slice(text.search(/Account Summary/i)).split(/Wells Fargo Rewards Summary|\bTransactions\b|Interest Charge Calculation/i)[0]!;
+    const summary = text
+      .slice(text.search(/Account Summary/i))
+      .split(/Wells Fargo Rewards Summary|\bTransactions\b|Interest Charge Calculation/i)[0]!;
     const amount = (label: string) => {
       const match = summary.match(new RegExp(label + '\\s+\\$?([\\d,]+\\.\\d{2})'));
       if (!match) throw new StatementValidationError('invalid-evidence');
       return cents(match[1]!);
     };
-    validation = validateStatementTotals({
-      openingBalanceCents: -amount('Previous Balance'),
-      closingBalanceCents: -amount('New Balance'),
-      creditsCents: amount('Payments') + amount('Other Credits'),
-      debitsCents: amount('Cash Advances') + amount('Purchases, Balance Transfers &(?:\\s+Other Charges)?') + amount('Fees Charged') + amount('Interest Charged'),
-    }, transactions.map(transaction => -transaction.amount_cents));
+    validation = validateStatementTotals(
+      {
+        openingBalanceCents: -amount('Previous Balance'),
+        closingBalanceCents: -amount('New Balance'),
+        creditsCents: amount('Payments') + amount('Other Credits'),
+        debitsCents:
+          amount('Cash Advances') +
+          amount('Purchases, Balance Transfers &(?:\\s+Other Charges)?') +
+          amount('Fees Charged') +
+          amount('Interest Charged'),
+      },
+      transactions.map((transaction) => -transaction.amount_cents),
+    );
   }
   return {
     transactions,
@@ -425,9 +485,11 @@ function parseCreditCard(text: string, filePath: string): ParseResult {
       {
         date: covered_to,
         account,
-        institution: "Wells Fargo",
+        institution: 'Wells Fargo',
         balance_cents: -Math.abs(cents(balance[1]!)),
-        raw: { statementValidation: validation ?? { status: 'unavailable', reason: 'summary-not-found' } },
+        raw: {
+          statementValidation: validation ?? { status: 'unavailable', reason: 'summary-not-found' },
+        },
       },
     ],
     covered_from,
@@ -437,7 +499,11 @@ function parseCreditCard(text: string, filePath: string): ParseResult {
 
 export function parseWellsFargoStatementText(text: string, filePath: string): ParseResult {
   const slug = filenameAccount(filePath).slug;
-  if (slug === "checking" || slug === "savings" || /Wells Fargo[^\n]*(?:Checking|Savings)/i.test(text)) {
+  if (
+    slug === 'checking' ||
+    slug === 'savings' ||
+    /Wells Fargo[^\n]*(?:Checking|Savings)/i.test(text)
+  ) {
     return parseDeposit(text, filePath);
   }
   return parseCreditCard(text, filePath);

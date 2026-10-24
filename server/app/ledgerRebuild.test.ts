@@ -2,10 +2,19 @@ import { beforeEach, expect, test } from 'bun:test';
 import os from 'node:os';
 import path from 'node:path';
 
-process.env.EASYMONEY_DB_PATH = path.join(os.tmpdir(), `easymoney-ledger-rebuild-${process.pid}.sqlite`);
+process.env.EASYMONEY_DB_PATH = path.join(
+  os.tmpdir(),
+  `easymoney-ledger-rebuild-${process.pid}.sqlite`,
+);
 
 const { getDb, initDatabase, insertRow } = await import('../database.ts');
-const { buildLedgerFromSourceFacts, ledgerFingerprint, materializeLedger, rebuildLedgerForAccounts, LEDGER_REBUILD_POLICY_VERSION } = await import('./ledgerRebuild.ts');
+const {
+  buildLedgerFromSourceFacts,
+  ledgerFingerprint,
+  materializeLedger,
+  rebuildLedgerForAccounts,
+  LEDGER_REBUILD_POLICY_VERSION,
+} = await import('./ledgerRebuild.ts');
 const { upsertTransactionAnnotation } = await import('./transactionAnnotations.ts');
 const { getTransactionDetails } = await import('./transactionDetails.ts');
 const { overlapOccurrenceKey, recordDistinctOverlap } = await import('./reviewedOverlap');
@@ -58,30 +67,34 @@ function insertCommittedSourceFile({
   institution: string;
 }) {
   const now = new Date().toISOString();
-  const importFileId = Number(insertRow('importFiles', {
-    fileName,
-    contentHash: `${fileName}-hash`,
-    parserName,
-    sourceType,
-    parserPriority: priority,
-    institution,
-    rowCount: 0,
-    status: 'committed',
-    committedAt: now,
-    createdAt: now,
-  }));
-  const sourceFileId = Number(insertRow('sourceFiles', {
-    importFileId,
-    fileName,
-    contentHash: `${fileName}-hash`,
-    parserName,
-    sourceType,
-    parserPriority: priority,
-    institution,
-    status: 'committed',
-    committedAt: now,
-    createdAt: now,
-  }));
+  const importFileId = Number(
+    insertRow('importFiles', {
+      fileName,
+      contentHash: `${fileName}-hash`,
+      parserName,
+      sourceType,
+      parserPriority: priority,
+      institution,
+      rowCount: 0,
+      status: 'committed',
+      committedAt: now,
+      createdAt: now,
+    }),
+  );
+  const sourceFileId = Number(
+    insertRow('sourceFiles', {
+      importFileId,
+      fileName,
+      contentHash: `${fileName}-hash`,
+      parserName,
+      sourceType,
+      parserPriority: priority,
+      institution,
+      status: 'committed',
+      committedAt: now,
+      createdAt: now,
+    }),
+  );
 
   return { importFileId, sourceFileId };
 }
@@ -96,17 +109,19 @@ function insertSourceAccount(
   }: {
     institution?: string;
     sourceAccountName?: string;
-  } = {}
+  } = {},
 ) {
-  return Number(insertRow('sourceAccounts', {
-    sourceFileId,
-    accountId,
-    institution,
-    sourceAccountKey,
-    sourceAccountName,
-    rawJson: JSON.stringify({ account: sourceAccountName }),
-    createdAt: new Date().toISOString(),
-  }));
+  return Number(
+    insertRow('sourceAccounts', {
+      sourceFileId,
+      accountId,
+      institution,
+      sourceAccountKey,
+      sourceAccountName,
+      rawJson: JSON.stringify({ account: sourceAccountName }),
+      createdAt: new Date().toISOString(),
+    }),
+  );
 }
 
 function insertSourceTransaction({
@@ -130,18 +145,20 @@ function insertSourceTransaction({
   priority: number;
   raw?: Record<string, unknown>;
 }) {
-  return Number(insertRow('sourceTransactions', {
-    sourceFileId,
-    sourceAccountId,
-    stableSourceId,
-    date,
-    amountCents,
-    description,
-    sourceRole,
-    priority,
-    rawJson: JSON.stringify(raw),
-    createdAt: new Date().toISOString(),
-  }));
+  return Number(
+    insertRow('sourceTransactions', {
+      sourceFileId,
+      sourceAccountId,
+      stableSourceId,
+      date,
+      amountCents,
+      description,
+      sourceRole,
+      priority,
+      rawJson: JSON.stringify(raw),
+      createdAt: new Date().toISOString(),
+    }),
+  );
 }
 
 function insertSourceBalance({
@@ -157,15 +174,17 @@ function insertSourceBalance({
   balanceCents: number;
   priority: number;
 }) {
-  return Number(insertRow('sourceBalances', {
-    sourceFileId,
-    sourceAccountId,
-    date,
-    balanceCents,
-    priority,
-    rawJson: JSON.stringify({ source: 'sanitized-vanguard-statement' }),
-    createdAt: new Date().toISOString(),
-  }));
+  return Number(
+    insertRow('sourceBalances', {
+      sourceFileId,
+      sourceAccountId,
+      date,
+      balanceCents,
+      priority,
+      rawJson: JSON.stringify({ source: 'sanitized-vanguard-statement' }),
+      createdAt: new Date().toISOString(),
+    }),
+  );
 }
 
 beforeEach(() => {
@@ -175,43 +194,96 @@ beforeEach(() => {
 test('existing databases gain indexed import-row lookups without changing source occurrences', () => {
   const db = getDb();
   const accountId = Number(insertRow('accounts', { name: 'Index fixture', type: 'checking' }));
-  const source = insertCommittedSourceFile({ fileName: 'index.csv', parserName: 'fixture', sourceType: 'activity-export', priority: 100, institution: 'Fixture' });
+  const source = insertCommittedSourceFile({
+    fileName: 'index.csv',
+    parserName: 'fixture',
+    sourceType: 'activity-export',
+    priority: 100,
+    institution: 'Fixture',
+  });
   const sourceAccountId = insertSourceAccount(source.sourceFileId, accountId, 'index-fixture');
-  const importRowId = Number(insertRow('importRows', { importFileId: source.importFileId, rowIndex: 0, rawJson: '{}', normalizedJson: '{}' }));
+  const importRowId = Number(
+    insertRow('importRows', {
+      importFileId: source.importFileId,
+      rowIndex: 0,
+      rawJson: '{}',
+      normalizedJson: '{}',
+    }),
+  );
   for (let occurrence = 0; occurrence < 3; occurrence++) {
-    const id = insertSourceTransaction({ ...source, sourceAccountId, stableSourceId: `occurrence-${occurrence}`, date: '2026-09-01', amountCents: -1000, description: 'Repeated purchase', priority: 100 });
+    const id = insertSourceTransaction({
+      ...source,
+      sourceAccountId,
+      stableSourceId: `occurrence-${occurrence}`,
+      date: '2026-09-01',
+      amountCents: -1000,
+      description: 'Repeated purchase',
+      priority: 100,
+    });
     // The lookup is deliberately non-unique; absent references are valid too.
-    if (occurrence < 2) db.prepare('UPDATE sourceTransactions SET importRowId = ? WHERE id = ?').run(importRowId, id);
+    if (occurrence < 2)
+      db.prepare('UPDATE sourceTransactions SET importRowId = ? WHERE id = ?').run(importRowId, id);
   }
   const before = buildLedgerFromSourceFacts(db);
   const sourceRows = db.prepare('SELECT * FROM sourceTransactions ORDER BY id').all();
   db.exec('DROP INDEX idx_source_transactions_import_row');
-  db.prepare('DELETE FROM schemaMigrations WHERE name = ?').run('2026-09-24-source-transaction-import-row-index');
+  db.prepare('DELETE FROM schemaMigrations WHERE name = ?').run(
+    '2026-09-24-source-transaction-import-row-index',
+  );
 
   initDatabase();
   initDatabase();
 
-  const plan = db.prepare('EXPLAIN QUERY PLAN SELECT id FROM sourceTransactions WHERE importRowId = ? LIMIT 1').all(importRowId);
-  expect(plan.some(row => String(row.detail).includes('SEARCH sourceTransactions USING COVERING INDEX idx_source_transactions_import_row'))).toBe(true);
+  const plan = db
+    .prepare('EXPLAIN QUERY PLAN SELECT id FROM sourceTransactions WHERE importRowId = ? LIMIT 1')
+    .all(importRowId);
+  expect(
+    plan.some((row) =>
+      String(row.detail).includes(
+        'SEARCH sourceTransactions USING COVERING INDEX idx_source_transactions_import_row',
+      ),
+    ),
+  ).toBe(true);
   expect(db.prepare('SELECT * FROM sourceTransactions ORDER BY id').all()).toEqual(sourceRows);
   expect(buildLedgerFromSourceFacts(db)).toEqual(before);
   expect(before.transactions).toHaveLength(3);
 });
 
 test('legacy source identity matching preserves occurrences alongside document imports', () => {
-  const accountId = Number(insertRow('accounts', { name: 'Mixed source fixture', type: 'checking' }));
-  for (const [index, sourceType, count] of [[0, 'legacy', 2], [1, 'legacy', 1], [2, 'activity-export', 1]] as const) {
-    const source = insertCommittedSourceFile({ fileName: `mixed-${index}`, parserName: 'fixture', sourceType, priority: 100, institution: 'Fixture' });
+  const accountId = Number(
+    insertRow('accounts', { name: 'Mixed source fixture', type: 'checking' }),
+  );
+  for (const [index, sourceType, count] of [
+    [0, 'legacy', 2],
+    [1, 'legacy', 1],
+    [2, 'activity-export', 1],
+  ] as const) {
+    const source = insertCommittedSourceFile({
+      fileName: `mixed-${index}`,
+      parserName: 'fixture',
+      sourceType,
+      priority: 100,
+      institution: 'Fixture',
+    });
     const sourceAccountId = insertSourceAccount(source.sourceFileId, accountId, `mixed-${index}`);
     for (let occurrence = 0; occurrence < count; occurrence++) {
-      insertSourceTransaction({ ...source, sourceAccountId, stableSourceId: `${index}-${occurrence}`, date: '2026-09-01', amountCents: -1000, description: 'Repeated purchase', priority: 100, raw: { moneyId: 'shared-parser-id' } });
+      insertSourceTransaction({
+        ...source,
+        sourceAccountId,
+        stableSourceId: `${index}-${occurrence}`,
+        date: '2026-09-01',
+        amountCents: -1000,
+        description: 'Repeated purchase',
+        priority: 100,
+        raw: { moneyId: 'shared-parser-id' },
+      });
     }
   }
 
   const ledger = buildLedgerFromSourceFacts(getDb());
   expect(ledger.transactions).toHaveLength(3);
   expect(ledger.provenance).toHaveLength(4);
-  expect(ledger.provenance?.filter(row => !row.selected).map(row => row.reason)).toEqual([
+  expect(ledger.provenance?.filter((row) => !row.selected).map((row) => row.reason)).toEqual([
     'Same parser source identity matched by file occurrence; largest occurrence count retained.',
   ]);
 });
@@ -219,29 +291,75 @@ test('legacy source identity matching preserves occurrences alongside document i
 test('dated reporting closure survives rebuilds, preserves evidence, and yields to later statements', async () => {
   const { closeAccount, unarchiveAccount, listAccounts } = await import('./accounts');
   const accountId = Number(insertRow('accounts', { name: 'Closure fixture', type: 'investment' }));
-  const source = insertCommittedSourceFile({ fileName: 'closure-fixture.pdf', parserName: 'fixture', sourceType: 'statement', priority: 50, institution: 'Fixture' });
+  const source = insertCommittedSourceFile({
+    fileName: 'closure-fixture.pdf',
+    parserName: 'fixture',
+    sourceType: 'statement',
+    priority: 50,
+    institution: 'Fixture',
+  });
   const sourceAccountId = insertSourceAccount(source.sourceFileId, accountId, 'closure-fixture');
-  insertSourceBalance({ ...source, sourceAccountId, date: '2026-06-30', balanceCents: 10000, priority: 50 });
-  insertSourceTransaction({ ...source, sourceAccountId, stableSourceId: 'original', date: '2026-06-01', amountCents: 10000, description: 'Original', priority: 50 });
+  insertSourceBalance({
+    ...source,
+    sourceAccountId,
+    date: '2026-06-30',
+    balanceCents: 10000,
+    priority: 50,
+  });
+  insertSourceTransaction({
+    ...source,
+    sourceAccountId,
+    stableSourceId: 'original',
+    date: '2026-06-01',
+    amountCents: 10000,
+    description: 'Original',
+    priority: 50,
+  });
   materializeLedger();
   const original = buildLedgerFromSourceFacts();
-  getDb().prepare('INSERT INTO transactionAnnotations (ledgerTransactionId,notes) VALUES (?,?)').run(original.transactions[0]!.ledgerTransactionId, 'Keep this note');
+  getDb()
+    .prepare('INSERT INTO transactionAnnotations (ledgerTransactionId,notes) VALUES (?,?)')
+    .run(original.transactions[0]!.ledgerTransactionId, 'Keep this note');
   expect(() => closeAccount(accountId, '2026-02-30')).toThrow();
   expect(() => closeAccount(accountId, '2099-01-01')).toThrow();
   closeAccount(accountId, '2026-08-19');
-  expect(getDb().prepare('SELECT id,status FROM transferRecords').get()).toEqual({id:`closure:${accountId}`,status:'confirmed'});
+  expect(getDb().prepare('SELECT id,status FROM transferRecords').get()).toEqual({
+    id: `closure:${accountId}`,
+    status: 'confirmed',
+  });
   const closed = buildLedgerFromSourceFacts();
   expect(closed.transactions).toEqual(original.transactions);
   expect(closed.balanceSnapshots).toEqual([
     original.balanceSnapshots[0]!,
-    { accountId, month: '2026-08', balance: 0, capturedAt: '2026-08-19T00:00:00.000Z', sourceBalanceId: null },
+    {
+      accountId,
+      month: '2026-08',
+      balance: 0,
+      capturedAt: '2026-08-19T00:00:00.000Z',
+      sourceBalanceId: null,
+    },
   ]);
   materializeLedger();
   expect(buildLedgerFromSourceFacts()).toEqual(closed);
-  expect(listAccounts().accounts[0]).toMatchObject({ balance: 0, reportingClosedOn: '2026-08-19', closureBalanceConflict: false });
-  expect(getDb().prepare('SELECT notes FROM transactionAnnotations').get()?.notes).toBe('Keep this note');
-  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id=?').get(sourceAccountId)?.accountId).toBe(accountId);
-  insertSourceBalance({ ...source, sourceAccountId, date: '2026-08-31', balanceCents: 500, priority: 50 });
+  expect(listAccounts().accounts[0]).toMatchObject({
+    balance: 0,
+    reportingClosedOn: '2026-08-19',
+    closureBalanceConflict: false,
+  });
+  expect(getDb().prepare('SELECT notes FROM transactionAnnotations').get()?.notes).toBe(
+    'Keep this note',
+  );
+  expect(
+    getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id=?').get(sourceAccountId)
+      ?.accountId,
+  ).toBe(accountId);
+  insertSourceBalance({
+    ...source,
+    sourceAccountId,
+    date: '2026-08-31',
+    balanceCents: 500,
+    priority: 50,
+  });
   materializeLedger();
   expect(listAccounts().accounts[0]).toMatchObject({ balance: 5, closureBalanceConflict: true });
   getDb().prepare("UPDATE sourceBalances SET balanceCents=0 WHERE date='2026-08-31'").run();
@@ -251,20 +369,28 @@ test('dated reporting closure survives rebuilds, preserves evidence, and yields 
   unarchiveAccount(accountId);
   expect(getDb().prepare('SELECT status FROM transferRecords').get()?.status).toBe('revoked');
   expect(buildLedgerFromSourceFacts()).toEqual(original);
-  expect(listAccounts().accounts[0]).toMatchObject({ balance: 100, status: 'active', reportingClosedOn: null });
+  expect(listAccounts().accounts[0]).toMatchObject({
+    balance: 100,
+    status: 'active',
+    reportingClosedOn: null,
+  });
 });
 
 test('sanitized Vanguard source facts rebuild investment activity and statement balances', () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'A Roth IRA',
-    institution: 'Vanguard',
-    type: 'investment',
-    currentBalance: 0,
-  }));
-  const categoryId = Number(insertRow('categories', {
-    name: 'Investing',
-    type: 'investment',
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'A Roth IRA',
+      institution: 'Vanguard',
+      type: 'investment',
+      currentBalance: 0,
+    }),
+  );
+  const categoryId = Number(
+    insertRow('categories', {
+      name: 'Investing',
+      type: 'investment',
+    }),
+  );
 
   const activity = insertCommittedSourceFile({
     fileName: 'sanitized-vanguard-activity.pdf',
@@ -280,8 +406,16 @@ test('sanitized Vanguard source facts rebuild investment activity and statement 
     priority: 50,
     institution: 'Vanguard',
   });
-  const activityAccountId = insertSourceAccount(activity.sourceFileId, accountId, 'vanguard-roth-0000');
-  const statementAccountId = insertSourceAccount(statement.sourceFileId, accountId, 'vanguard-roth-0000');
+  const activityAccountId = insertSourceAccount(
+    activity.sourceFileId,
+    accountId,
+    'vanguard-roth-0000',
+  );
+  const statementAccountId = insertSourceAccount(
+    statement.sourceFileId,
+    accountId,
+    'vanguard-roth-0000',
+  );
 
   insertSourceTransaction({
     sourceFileId: activity.sourceFileId,
@@ -322,7 +456,7 @@ test('sanitized Vanguard source facts rebuild investment activity and statement 
   });
 
   const ledger = buildLedgerFromSourceFacts(getDb());
-  expect(ledger.transactions.map(transaction => transaction.description).sort()).toEqual([
+  expect(ledger.transactions.map((transaction) => transaction.description).sort()).toEqual([
     'Buy VTSAX',
     'Contribution',
     'Dividend received',
@@ -340,7 +474,9 @@ test('sanitized Vanguard source facts rebuild investment activity and statement 
   const fingerprint = ledgerFingerprint(ledger);
   materializeLedger(getDb(), ledger);
 
-  const contribution = getDb().prepare("SELECT id, ledgerTransactionId FROM transactions WHERE description = 'Contribution'").get() as {
+  const contribution = getDb()
+    .prepare("SELECT id, ledgerTransactionId FROM transactions WHERE description = 'Contribution'")
+    .get() as {
     id: number;
     ledgerTransactionId: string;
   };
@@ -358,12 +494,16 @@ test('sanitized Vanguard source facts rebuild investment activity and statement 
   expect(ledgerFingerprint(rebuilt)).toBe(fingerprint);
   materializeLedger(getDb(), rebuilt);
 
-  const annotationJoin = getDb().prepare(`
+  const annotationJoin = getDb()
+    .prepare(
+      `
     SELECT t.description, ta.categoryId, ta.notes
     FROM transactions t
     JOIN transactionAnnotations ta ON ta.ledgerTransactionId = t.ledgerTransactionId
     WHERE t.description = 'Contribution'
-  `).get() as {
+  `,
+    )
+    .get() as {
     description: string;
     categoryId: number;
     notes: string;
@@ -374,23 +514,28 @@ test('sanitized Vanguard source facts rebuild investment activity and statement 
     notes: 'sanitized vanguard contribution',
   });
   expect(
-    (getDb().prepare('SELECT COUNT(*) AS count FROM balanceSnapshots').get() as { count: number }).count
+    (getDb().prepare('SELECT COUNT(*) AS count FROM balanceSnapshots').get() as { count: number })
+      .count,
   ).toBe(1);
   expect(
-    (getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get() as { count: number }).count
+    (getDb().prepare('SELECT COUNT(*) AS count FROM ledgerTransactions').get() as { count: number })
+      .count,
   ).toBe(3);
   expect(
-    (getDb().prepare('SELECT COUNT(*) AS count FROM ledgerBalances').get() as { count: number }).count
+    (getDb().prepare('SELECT COUNT(*) AS count FROM ledgerBalances').get() as { count: number })
+      .count,
   ).toBe(1);
 });
 
 test('source rebuild prefers statement balances over activity running balances in the same month', () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'BofA Checking',
-    institution: 'Bank of America',
-    type: 'checking',
-    currentBalance: 0,
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'BofA Checking',
+      institution: 'Bank of America',
+      type: 'checking',
+      currentBalance: 0,
+    }),
+  );
 
   const activity = insertCommittedSourceFile({
     fileName: 'bofa-activity.csv',
@@ -407,14 +552,24 @@ test('source rebuild prefers statement balances over activity running balances i
     institution: 'Bank of America',
   });
 
-  const activityAccountId = insertSourceAccount(activity.sourceFileId, accountId, 'bofa-checking-5013', {
-    institution: 'Bank of America',
-    sourceAccountName: 'Adv Plus Banking - 5013',
-  });
-  const statementAccountId = insertSourceAccount(statement.sourceFileId, accountId, 'bofa-checking-5013', {
-    institution: 'Bank of America',
-    sourceAccountName: 'Adv Plus Banking - 5013',
-  });
+  const activityAccountId = insertSourceAccount(
+    activity.sourceFileId,
+    accountId,
+    'bofa-checking-5013',
+    {
+      institution: 'Bank of America',
+      sourceAccountName: 'Adv Plus Banking - 5013',
+    },
+  );
+  const statementAccountId = insertSourceAccount(
+    statement.sourceFileId,
+    accountId,
+    'bofa-checking-5013',
+    {
+      institution: 'Bank of America',
+      sourceAccountName: 'Adv Plus Banking - 5013',
+    },
+  );
 
   insertSourceBalance({
     sourceFileId: statement.sourceFileId,
@@ -445,12 +600,22 @@ test('source rebuild prefers statement balances over activity running balances i
 });
 
 test('parser hash collisions preserve occurrences across overlapping exports, statements and accounts', () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Synthetic card', institution: 'Wells Fargo', type: 'credit', currentBalance: 0,
-  }));
-  const otherAccountId = Number(insertRow('accounts', {
-    name: 'Other synthetic card', institution: 'Wells Fargo', type: 'credit', currentBalance: 0,
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Synthetic card',
+      institution: 'Wells Fargo',
+      type: 'credit',
+      currentBalance: 0,
+    }),
+  );
+  const otherAccountId = Number(
+    insertRow('accounts', {
+      name: 'Other synthetic card',
+      institution: 'Wells Fargo',
+      type: 'credit',
+      currentBalance: 0,
+    }),
+  );
   const files: number[] = [];
   for (const [index, count, destination, sourceType] of [
     [0, 2, accountId, 'activity-export'],
@@ -459,43 +624,62 @@ test('parser hash collisions preserve occurrences across overlapping exports, st
     [3, 1, otherAccountId, 'activity-export'],
   ] as const) {
     const file = insertCommittedSourceFile({
-      fileName: `synthetic-${index}`, parserName: 'synthetic-parser', sourceType,
-      priority: 90, institution: 'Wells Fargo',
+      fileName: `synthetic-${index}`,
+      parserName: 'synthetic-parser',
+      sourceType,
+      priority: 90,
+      institution: 'Wells Fargo',
     });
     files.push(file.sourceFileId);
     const sourceAccountId = insertSourceAccount(file.sourceFileId, destination, `account-${index}`);
     for (let occurrence = 0; occurrence < count; occurrence++) {
       insertSourceTransaction({
-        sourceFileId: file.sourceFileId, sourceAccountId,
-        stableSourceId: `file-${index}-row-${occurrence}`, date: '2026-06-18',
-        amountCents: -500, description: 'SYNTHETIC COFFEE', priority: 90,
+        sourceFileId: file.sourceFileId,
+        sourceAccountId,
+        stableSourceId: `file-${index}-row-${occurrence}`,
+        date: '2026-06-18',
+        amountCents: -500,
+        description: 'SYNTHETIC COFFEE',
+        priority: 90,
         raw: { moneyId: 'same-content-hash', reference: `reference-${occurrence}` },
       });
     }
   }
   const ledger = buildLedgerFromSourceFacts(getDb());
-  expect(ledger.transactions.filter(t => t.accountId === accountId)).toHaveLength(3);
-  expect(ledger.transactions.filter(t => t.accountId === otherAccountId)).toHaveLength(1);
+  expect(ledger.transactions.filter((t) => t.accountId === accountId)).toHaveLength(3);
+  expect(ledger.transactions.filter((t) => t.accountId === otherAccountId)).toHaveLength(1);
   expect(ledger.provenance).toHaveLength(9);
-  const ids = ledger.transactions.filter(t => t.accountId === accountId).map(t => t.ledgerTransactionId);
+  const ids = ledger.transactions
+    .filter((t) => t.accountId === accountId)
+    .map((t) => t.ledgerTransactionId);
   materializeLedger(getDb(), ledger);
   upsertTransactionAnnotation(ids[0]!, { notes: 'Preserve repeated purchase note' });
   // Removing the larger export leaves three statement occurrences, not one.
-  getDb().prepare("UPDATE sourceFiles SET status = 'unimported' WHERE id IN (?, ?)").run(files[0], files[1]);
+  getDb()
+    .prepare("UPDATE sourceFiles SET status = 'unimported' WHERE id IN (?, ?)")
+    .run(files[0], files[1]);
   const rebuilt = buildLedgerFromSourceFacts(getDb());
-  expect(rebuilt.transactions.filter(t => t.accountId === accountId).map(t => t.ledgerTransactionId)).toEqual(ids);
+  expect(
+    rebuilt.transactions.filter((t) => t.accountId === accountId).map((t) => t.ledgerTransactionId),
+  ).toEqual(ids);
   materializeLedger(getDb(), rebuilt);
   expect(getTransactionDetails(ids[0]!).transaction.notes).toBe('Preserve repeated purchase note');
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM sourceAccounts WHERE accountId = ?').get(accountId)?.count).toBe(3);
+  expect(
+    getDb()
+      .prepare('SELECT COUNT(*) AS count FROM sourceAccounts WHERE accountId = ?')
+      .get(accountId)?.count,
+  ).toBe(3);
 });
 
 test('source rebuild de-duplicates overlapping activity exports by source-file multiplicity', () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'WF Checking',
-    institution: 'Wells Fargo',
-    type: 'checking',
-    currentBalance: 0,
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'WF Checking',
+      institution: 'Wells Fargo',
+      type: 'checking',
+      currentBalance: 0,
+    }),
+  );
   const exportA = insertCommittedSourceFile({
     fileName: 'checking-a.csv',
     parserName: 'wells-fargo-generic-activity-csv',
@@ -540,34 +724,50 @@ test('source rebuild de-duplicates overlapping activity exports by source-file m
 
   const ledger = buildLedgerFromSourceFacts(getDb());
 
-  expect(ledger.transactions.map(transaction => transaction.description)).toEqual([
+  expect(ledger.transactions.map((transaction) => transaction.description)).toEqual([
     'STARBUCKS STORE 123',
   ]);
   expect(ledger.provenance).toHaveLength(2);
-  expect(ledger.provenance?.filter(item => item.selected)).toHaveLength(1);
-  expect(ledger.provenance?.find(item => !item.selected)?.reason).toContain('occurrence');
+  expect(ledger.provenance?.filter((item) => item.selected)).toHaveLength(1);
+  expect(ledger.provenance?.find((item) => !item.selected)?.reason).toContain('occurrence');
   materializeLedger(getDb(), ledger);
-  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerProvenance').get()).toEqual({ count: 2 });
-  expect(getDb().prepare('SELECT sourceTransactionId FROM ledgerTransactions').get()?.sourceTransactionId).toBeGreaterThan(0);
+  expect(getDb().prepare('SELECT COUNT(*) AS count FROM ledgerProvenance').get()).toEqual({
+    count: 2,
+  });
+  expect(
+    getDb().prepare('SELECT sourceTransactionId FROM ledgerTransactions').get()
+      ?.sourceTransactionId,
+  ).toBeGreaterThan(0);
   const detail = getTransactionDetails(ledger.transactions[0]!.ledgerTransactionId);
-  expect(detail.sources.map(source => source.fileName).sort()).toEqual(['checking-a.csv', 'checking-b.csv']);
-  expect(detail.sources.every(source => source.mappedAccountName === 'WF Checking')).toBe(true);
-  upsertTransactionAnnotation(ledger.transactions[0]!.ledgerTransactionId, { notes: 'Preserve this note' });
-  getDb().prepare("UPDATE sourceFiles SET status = 'unimported' WHERE id = ?").run(exportA.sourceFileId);
+  expect(detail.sources.map((source) => source.fileName).sort()).toEqual([
+    'checking-a.csv',
+    'checking-b.csv',
+  ]);
+  expect(detail.sources.every((source) => source.mappedAccountName === 'WF Checking')).toBe(true);
+  upsertTransactionAnnotation(ledger.transactions[0]!.ledgerTransactionId, {
+    notes: 'Preserve this note',
+  });
+  getDb()
+    .prepare("UPDATE sourceFiles SET status = 'unimported' WHERE id = ?")
+    .run(exportA.sourceFileId);
   materializeLedger(getDb(), buildLedgerFromSourceFacts(getDb()));
   const remaining = getTransactionDetails(ledger.transactions[0]!.ledgerTransactionId);
   expect(remaining.transaction.notes).toBe('Preserve this note');
-  expect(remaining.sources.map(source => source.fileName)).toEqual(['checking-b.csv']);
-  expect(getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(accountA)?.accountId).toBe(accountId);
+  expect(remaining.sources.map((source) => source.fileName)).toEqual(['checking-b.csv']);
+  expect(
+    getDb().prepare('SELECT accountId FROM sourceAccounts WHERE id = ?').get(accountA)?.accountId,
+  ).toBe(accountId);
 });
 
 test('source rebuild preserves same-day identical transactions seen multiple times in one activity export', () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'WF Checking',
-    institution: 'Wells Fargo',
-    type: 'checking',
-    currentBalance: 0,
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'WF Checking',
+      institution: 'Wells Fargo',
+      type: 'checking',
+      currentBalance: 0,
+    }),
+  );
   const exportA = insertCommittedSourceFile({
     fileName: 'checking-a.csv',
     parserName: 'wells-fargo-generic-activity-csv',
@@ -614,20 +814,24 @@ test('source rebuild preserves same-day identical transactions seen multiple tim
 
   const ledger = buildLedgerFromSourceFacts(getDb());
 
-  expect(ledger.transactions.map(transaction => transaction.description)).toEqual([
+  expect(ledger.transactions.map((transaction) => transaction.description)).toEqual([
     'STARBUCKS STORE 123',
     'STARBUCKS STORE 123',
   ]);
-  expect(ledger.transactions.map(transaction => transaction.occurrenceIndex).sort()).toEqual([0, 1]);
+  expect(ledger.transactions.map((transaction) => transaction.occurrenceIndex).sort()).toEqual([
+    0, 1,
+  ]);
 });
 
 test('source rebuild reconciles statement posting-date drift without collapsing duplicate occurrences', () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Example Credit Card',
-    institution: 'Example Bank',
-    type: 'credit',
-    currentBalance: 0,
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Example Credit Card',
+      institution: 'Example Bank',
+      type: 'credit',
+      currentBalance: 0,
+    }),
+  );
   const activity = insertCommittedSourceFile({
     fileName: 'credit-card.csv',
     parserName: 'credit-card-csv',
@@ -701,26 +905,34 @@ test('source rebuild reconciles statement posting-date drift without collapsing 
   }
 
   const ledger = buildLedgerFromSourceFacts(getDb());
-  const pact = ledger.transactions.filter(transaction => transaction.description.includes('WEAR PACT'));
-  const rent = ledger.transactions.filter(transaction => transaction.description.includes('RENTAPPLICATION'));
-  const coffee = ledger.transactions.filter(transaction => transaction.description === 'EXAMPLE COFFEE');
+  const pact = ledger.transactions.filter((transaction) =>
+    transaction.description.includes('WEAR PACT'),
+  );
+  const rent = ledger.transactions.filter((transaction) =>
+    transaction.description.includes('RENTAPPLICATION'),
+  );
+  const coffee = ledger.transactions.filter(
+    (transaction) => transaction.description === 'EXAMPLE COFFEE',
+  );
 
-  expect(pact.map(transaction => transaction.date)).toEqual(['2026-06-04']);
+  expect(pact.map((transaction) => transaction.date)).toEqual(['2026-06-04']);
   expect(rent).toHaveLength(2);
-  expect(rent.map(transaction => transaction.occurrenceIndex).sort()).toEqual([0, 1]);
-  expect(coffee.map(transaction => transaction.date).sort()).toEqual([
+  expect(rent.map((transaction) => transaction.occurrenceIndex).sort()).toEqual([0, 1]);
+  expect(coffee.map((transaction) => transaction.date).sort()).toEqual([
     '2026-06-15',
     '2026-06-19',
   ]);
 });
 
 test('source rebuild uses parser-provided Robinhood identities across CSV and statement descriptions', () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Robinhood Gold Card',
-    institution: 'Robinhood',
-    type: 'credit',
-    currentBalance: 0,
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Robinhood Gold Card',
+      institution: 'Robinhood',
+      type: 'credit',
+      currentBalance: 0,
+    }),
+  );
   const activity = insertCommittedSourceFile({
     fileName: 'robinhood.csv',
     parserName: 'robinhood-credit-card-csv',
@@ -735,8 +947,15 @@ test('source rebuild uses parser-provided Robinhood identities across CSV and st
     priority: 50,
     institution: 'Robinhood',
   });
-  const activityAccount = insertSourceAccount(activity.sourceFileId, accountId, 'activity-card', { institution: 'Robinhood' });
-  const statementAccount = insertSourceAccount(statement.sourceFileId, accountId, 'statement-card', { institution: 'Robinhood' });
+  const activityAccount = insertSourceAccount(activity.sourceFileId, accountId, 'activity-card', {
+    institution: 'Robinhood',
+  });
+  const statementAccount = insertSourceAccount(
+    statement.sourceFileId,
+    accountId,
+    'statement-card',
+    { institution: 'Robinhood' },
+  );
 
   insertSourceTransaction({
     sourceFileId: activity.sourceFileId,
@@ -766,12 +985,14 @@ test('source rebuild uses parser-provided Robinhood identities across CSV and st
 });
 
 test('source rebuild keeps the larger multiplicity from uneven overlapping activity exports', () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'WF Checking',
-    institution: 'Wells Fargo',
-    type: 'checking',
-    currentBalance: 0,
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'WF Checking',
+      institution: 'Wells Fargo',
+      type: 'checking',
+      currentBalance: 0,
+    }),
+  );
   const exportA = insertCommittedSourceFile({
     fileName: 'checking-a.csv',
     parserName: 'wells-fargo-generic-activity-csv',
@@ -818,19 +1039,21 @@ test('source rebuild keeps the larger multiplicity from uneven overlapping activ
 
   const ledger = buildLedgerFromSourceFacts(getDb());
 
-  expect(ledger.transactions.map(transaction => transaction.description)).toEqual([
+  expect(ledger.transactions.map((transaction) => transaction.description)).toEqual([
     'STARBUCKS STORE 123',
     'STARBUCKS STORE 123',
   ]);
 });
 
 test('same-account/date/amount cross-format overlap uses source priority despite different descriptions', () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Vanguard',
-    institution: 'Vanguard',
-    type: 'investment',
-    currentBalance: 0,
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Vanguard',
+      institution: 'Vanguard',
+      type: 'investment',
+      currentBalance: 0,
+    }),
+  );
   const activity = insertCommittedSourceFile({
     fileName: 'vanguard-activity.pdf',
     parserName: 'vanguard-activity-pdf',
@@ -845,8 +1068,16 @@ test('same-account/date/amount cross-format overlap uses source priority despite
     priority: 50,
     institution: 'Vanguard',
   });
-  const activityAccountId = insertSourceAccount(activity.sourceFileId, accountId, 'vanguard-activity-account');
-  const statementAccountId = insertSourceAccount(statement.sourceFileId, accountId, 'vanguard-statement-account');
+  const activityAccountId = insertSourceAccount(
+    activity.sourceFileId,
+    accountId,
+    'vanguard-activity-account',
+  );
+  const statementAccountId = insertSourceAccount(
+    statement.sourceFileId,
+    accountId,
+    'vanguard-statement-account',
+  );
 
   insertSourceTransaction({
     sourceFileId: activity.sourceFileId,
@@ -878,134 +1109,282 @@ test('same-account/date/amount cross-format overlap uses source priority despite
   });
 
   const ledger = buildLedgerFromSourceFacts(getDb());
-  expect(ledger.transactions.map(transaction => transaction.description).sort()).toEqual([
+  expect(ledger.transactions.map((transaction) => transaction.description).sort()).toEqual([
     'Buy VTSAX',
     'In-kind transfer',
   ]);
   expect(ledger.ambiguities).toHaveLength(0);
-  expect(ledger.provenance?.filter(item => !item.selected)).toHaveLength(1);
+  expect(ledger.provenance?.filter((item) => !item.selected)).toHaveLength(1);
 });
 
 test('priority matching preserves excess document occurrences including blank descriptions', () => {
-  const accountId = Number(insertRow('accounts', { name: 'Example', institution: 'Example', type: 'credit', currentBalance: 0 }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Example',
+      institution: 'Example',
+      type: 'credit',
+      currentBalance: 0,
+    }),
+  );
   const sources = ['activity-export', 'statement'].map((sourceType, index) => {
-    const file = insertCommittedSourceFile({ fileName: `occurrences-${index}`, parserName: 'example', sourceType, priority: index ? 1 : 100, institution: 'Example' });
-    return { ...file, sourceAccountId: insertSourceAccount(file.sourceFileId, accountId, `account-${index}`) };
+    const file = insertCommittedSourceFile({
+      fileName: `occurrences-${index}`,
+      parserName: 'example',
+      sourceType,
+      priority: index ? 1 : 100,
+      institution: 'Example',
+    });
+    return {
+      ...file,
+      sourceAccountId: insertSourceAccount(file.sourceFileId, accountId, `account-${index}`),
+    };
   });
   for (const [index, source] of sources.entries()) {
     for (let occurrence = 0; occurrence < index + 1; occurrence++) {
-      insertSourceTransaction({ ...source, stableSourceId: `${index}-${occurrence}`, date: '2026-05-01', amountCents: -500, description: 'COFFEE', priority: index ? 1 : 100 });
+      insertSourceTransaction({
+        ...source,
+        stableSourceId: `${index}-${occurrence}`,
+        date: '2026-05-01',
+        amountCents: -500,
+        description: 'COFFEE',
+        priority: index ? 1 : 100,
+      });
     }
-    insertSourceTransaction({ ...source, stableSourceId: `${index}-blank`, date: '2026-05-01', amountCents: -700, description: '', priority: index ? 1 : 100 });
+    insertSourceTransaction({
+      ...source,
+      stableSourceId: `${index}-blank`,
+      date: '2026-05-01',
+      amountCents: -700,
+      description: '',
+      priority: index ? 1 : 100,
+    });
   }
   const ledger = buildLedgerFromSourceFacts(getDb());
-  expect(ledger.transactions.filter(row => row.amount === -5)).toHaveLength(2);
-  expect(ledger.transactions.filter(row => row.amount === -7)).toHaveLength(1);
+  expect(ledger.transactions.filter((row) => row.amount === -5)).toHaveLength(2);
+  expect(ledger.transactions.filter((row) => row.amount === -7)).toHaveLength(1);
   expect(ledger.provenance).toHaveLength(5);
-  expect(ledger.provenance?.filter(row => !row.selected)).toHaveLength(2);
+  expect(ledger.provenance?.filter((row) => !row.selected)).toHaveLength(2);
   expect(ledger.ambiguities).toHaveLength(0);
 });
 
 test('equidistant posting dates are ambiguous instead of arbitrarily selected', () => {
-  const accountId = Number(insertRow('accounts', { name: 'Example', institution: 'Example', type: 'credit', currentBalance: 0 }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Example',
+      institution: 'Example',
+      type: 'credit',
+      currentBalance: 0,
+    }),
+  );
   for (const [index, sourceType] of ['activity-export', 'statement'].entries()) {
-    const source = insertCommittedSourceFile({ fileName: `drift-${index}`, parserName: 'example', sourceType, priority: 50, institution: 'Example' });
+    const source = insertCommittedSourceFile({
+      fileName: `drift-${index}`,
+      parserName: 'example',
+      sourceType,
+      priority: 50,
+      institution: 'Example',
+    });
     const sourceAccountId = insertSourceAccount(source.sourceFileId, accountId, `account-${index}`);
     for (const date of index ? ['2026-05-02'] : ['2026-05-01', '2026-05-03']) {
-      insertSourceTransaction({ ...source, sourceAccountId, stableSourceId: `${index}-${date}`, date, amountCents: -500, description: 'COFFEE', priority: 50 });
+      insertSourceTransaction({
+        ...source,
+        sourceAccountId,
+        stableSourceId: `${index}-${date}`,
+        date,
+        amountCents: -500,
+        description: 'COFFEE',
+        priority: 50,
+      });
     }
   }
   const ledger = buildLedgerFromSourceFacts(getDb());
   expect(ledger.transactions).toHaveLength(3);
   expect(ledger.ambiguities).toHaveLength(3);
-  expect(ledger.provenance?.every(row => row.selected)).toBe(true);
+  expect(ledger.provenance?.every((row) => row.selected)).toBe(true);
   expect(buildLedgerFromSourceFacts(getDb())).toEqual(ledger);
 });
 
 test('cross-format occurrence budgets use original documents before same-format dedupe', () => {
-  const accountId = Number(insertRow('accounts', { name:'Example', institution:'Example', type:'checking' }));
-  const descriptions = [['A','A','B'], ['A','B','B'], ['Statement detail','Statement detail','Statement detail']];
+  const accountId = Number(
+    insertRow('accounts', { name: 'Example', institution: 'Example', type: 'checking' }),
+  );
+  const descriptions = [
+    ['A', 'A', 'B'],
+    ['A', 'B', 'B'],
+    ['Statement detail', 'Statement detail', 'Statement detail'],
+  ];
   for (const [index, rows] of descriptions.entries()) {
-    const file = insertCommittedSourceFile({fileName:`budget-${index}`,parserName:'example',sourceType:index===2?'statement':'activity-export',priority:100,institution:'Example'});
-    const sourceAccountId = insertSourceAccount(file.sourceFileId,accountId,`account-${index}`);
-    for (const [occurrence, description] of rows.entries()) insertSourceTransaction({...file,sourceAccountId,stableSourceId:`${index}-${occurrence}`,date:'2026-05-01',amountCents:-500,description,priority:100});
+    const file = insertCommittedSourceFile({
+      fileName: `budget-${index}`,
+      parserName: 'example',
+      sourceType: index === 2 ? 'statement' : 'activity-export',
+      priority: 100,
+      institution: 'Example',
+    });
+    const sourceAccountId = insertSourceAccount(file.sourceFileId, accountId, `account-${index}`);
+    for (const [occurrence, description] of rows.entries())
+      insertSourceTransaction({
+        ...file,
+        sourceAccountId,
+        stableSourceId: `${index}-${occurrence}`,
+        date: '2026-05-01',
+        amountCents: -500,
+        description,
+        priority: 100,
+      });
   }
   const ledger = buildLedgerFromSourceFacts(getDb());
   expect(ledger.transactions).toHaveLength(3);
   expect(ledger.provenance).toHaveLength(9);
-  expect(ledger.provenance?.filter(row=>!row.selected)).toHaveLength(6);
+  expect(ledger.provenance?.filter((row) => !row.selected)).toHaveLength(6);
   expect(ledger.ambiguities).toHaveLength(0);
   expect(buildLedgerFromSourceFacts(getDb())).toEqual(ledger);
 });
 
 test('same-day excess occurrences cannot be consumed again by posting-date drift matching', () => {
-  const accountId = Number(insertRow('accounts', { name:'Example', institution:'Example', type:'checking' }));
-  for (const [index, dates] of [['2026-05-01','2026-05-02'],['2026-05-01','2026-05-01']].entries()) {
-    const file = insertCommittedSourceFile({fileName:`double-match-${index}`,parserName:'example',sourceType:index?'statement':'activity-export',priority:100,institution:'Example'});
-    const sourceAccountId = insertSourceAccount(file.sourceFileId,accountId,`account-${index}`);
-    for (const [occurrence,date] of dates.entries()) insertSourceTransaction({...file,sourceAccountId,stableSourceId:`${index}-${occurrence}`,date,amountCents:-500,description:'Coffee',priority:100});
+  const accountId = Number(
+    insertRow('accounts', { name: 'Example', institution: 'Example', type: 'checking' }),
+  );
+  for (const [index, dates] of [
+    ['2026-05-01', '2026-05-02'],
+    ['2026-05-01', '2026-05-01'],
+  ].entries()) {
+    const file = insertCommittedSourceFile({
+      fileName: `double-match-${index}`,
+      parserName: 'example',
+      sourceType: index ? 'statement' : 'activity-export',
+      priority: 100,
+      institution: 'Example',
+    });
+    const sourceAccountId = insertSourceAccount(file.sourceFileId, accountId, `account-${index}`);
+    for (const [occurrence, date] of dates.entries())
+      insertSourceTransaction({
+        ...file,
+        sourceAccountId,
+        stableSourceId: `${index}-${occurrence}`,
+        date,
+        amountCents: -500,
+        description: 'Coffee',
+        priority: 100,
+      });
   }
   const ledger = buildLedgerFromSourceFacts(getDb());
   expect(ledger.transactions).toHaveLength(3);
-  expect(ledger.transactions.filter(row=>row.date.startsWith('2026-05-01'))).toHaveLength(2);
+  expect(ledger.transactions.filter((row) => row.date.startsWith('2026-05-01'))).toHaveLength(2);
 });
 
-test.each(['same','security','quantity','action','settlement','missing'] as const)('structured trade matching uses both dates and full identity: %s', difference => {
-  const accountId = Number(insertRow('accounts', {name:'Trade test',institution:'Example',type:'investment'}));
-  for (const [index,sourceType] of ['activity-export','statement'].entries()) {
-    const file=insertCommittedSourceFile({fileName:`trade-${index}`,parserName:'example',sourceType,priority:100,institution:'Example'});
-    const sourceAccountId=insertSourceAccount(file.sourceFileId,accountId,`account-${index}`);
-    const trade={tradeDate:'2026-05-01',settlementDate:'2026-05-04',symbol:'TEST',quantity:'2.50',action:'buy'};
-    if(index) {
-      if(difference==='security')trade.symbol='OTHER';
-      if(difference==='quantity')trade.quantity='3';
-      if(difference==='action')trade.action='sell';
-      if(difference==='settlement')trade.settlementDate='2026-05-05';
+test.each(['same', 'security', 'quantity', 'action', 'settlement', 'missing'] as const)(
+  'structured trade matching uses both dates and full identity: %s',
+  (difference) => {
+    const accountId = Number(
+      insertRow('accounts', { name: 'Trade test', institution: 'Example', type: 'investment' }),
+    );
+    for (const [index, sourceType] of ['activity-export', 'statement'].entries()) {
+      const file = insertCommittedSourceFile({
+        fileName: `trade-${index}`,
+        parserName: 'example',
+        sourceType,
+        priority: 100,
+        institution: 'Example',
+      });
+      const sourceAccountId = insertSourceAccount(file.sourceFileId, accountId, `account-${index}`);
+      const trade = {
+        tradeDate: '2026-05-01',
+        settlementDate: '2026-05-04',
+        symbol: 'TEST',
+        quantity: '2.50',
+        action: 'buy',
+      };
+      if (index) {
+        if (difference === 'security') trade.symbol = 'OTHER';
+        if (difference === 'quantity') trade.quantity = '3';
+        if (difference === 'action') trade.action = 'sell';
+        if (difference === 'settlement') trade.settlementDate = '2026-05-05';
+      }
+      for (let occurrence = 0; occurrence < (index ? 1 : 2); occurrence++)
+        insertSourceTransaction({
+          ...file,
+          sourceAccountId,
+          stableSourceId: `trade-${index}-${occurrence}`,
+          date: index ? '2026-05-04' : '2026-05-01',
+          amountCents: -10000,
+          description: index ? 'Statement wording' : 'Activity wording',
+          priority: 100,
+          raw: index && difference === 'missing' ? {} : { securityTrade: trade },
+        });
     }
-    for(let occurrence=0;occurrence<(index?1:2);occurrence++) insertSourceTransaction({...file,sourceAccountId,stableSourceId:`trade-${index}-${occurrence}`,date:index?'2026-05-04':'2026-05-01',amountCents:-10000,description:index?'Statement wording':'Activity wording',priority:100,raw:index&&difference==='missing'?{}:{securityTrade:trade}});
-  }
-  const ledger=buildLedgerFromSourceFacts(getDb());
-  expect(ledger.transactions).toHaveLength(difference==='same'?2:3);
-  expect(ledger.provenance?.filter(p=>!p.selected)).toHaveLength(difference==='same'?1:0);
-  if(difference==='same') {
-    expect(ledger.transactions.every(t=>t.date==='2026-05-01')).toBe(true);
-    expect(ledger.ambiguities).toHaveLength(0);
-  }
-});
+    const ledger = buildLedgerFromSourceFacts(getDb());
+    expect(ledger.transactions).toHaveLength(difference === 'same' ? 2 : 3);
+    expect(ledger.provenance?.filter((p) => !p.selected)).toHaveLength(
+      difference === 'same' ? 1 : 0,
+    );
+    if (difference === 'same') {
+      expect(ledger.transactions.every((t) => t.date === '2026-05-01')).toBe(true);
+      expect(ledger.ambiguities).toHaveLength(0);
+    }
+  },
+);
 
 test('four airline bag fees remain four purchases while the statement/export copies reconcile', () => {
-  const accountId=Number(insertRow('accounts',{name:'Card',institution:'Example',type:'credit'}));
-  for(const [index,sourceType,date,description] of [
-    [0,'statement','2026-03-19','Airline A bags'],
-    [1,'activity-export','2026-03-20','Airline B bags'],
-    [2,'statement','2026-03-20','Airline B bags itinerary detail'],
-  ] as const){
-    const file=insertCommittedSourceFile({fileName:`bags-${index}`,parserName:'example',sourceType,priority:100,institution:'Example'});
-    const sourceAccountId=insertSourceAccount(file.sourceFileId,accountId,`account-${index}`);
-    for(let occurrence=0;occurrence<2;occurrence++)insertSourceTransaction({...file,sourceAccountId,stableSourceId:`${index}-${occurrence}`,date,amountCents:-3500,description,priority:100});
+  const accountId = Number(
+    insertRow('accounts', { name: 'Card', institution: 'Example', type: 'credit' }),
+  );
+  for (const [index, sourceType, date, description] of [
+    [0, 'statement', '2026-03-19', 'Airline A bags'],
+    [1, 'activity-export', '2026-03-20', 'Airline B bags'],
+    [2, 'statement', '2026-03-20', 'Airline B bags itinerary detail'],
+  ] as const) {
+    const file = insertCommittedSourceFile({
+      fileName: `bags-${index}`,
+      parserName: 'example',
+      sourceType,
+      priority: 100,
+      institution: 'Example',
+    });
+    const sourceAccountId = insertSourceAccount(file.sourceFileId, accountId, `account-${index}`);
+    for (let occurrence = 0; occurrence < 2; occurrence++)
+      insertSourceTransaction({
+        ...file,
+        sourceAccountId,
+        stableSourceId: `${index}-${occurrence}`,
+        date,
+        amountCents: -3500,
+        description,
+        priority: 100,
+      });
   }
-  const ledger=buildLedgerFromSourceFacts(getDb());
+  const ledger = buildLedgerFromSourceFacts(getDb());
   expect(ledger.transactions).toHaveLength(4);
-  expect(ledger.transactions.filter(t=>t.date.startsWith('2026-03-19'))).toHaveLength(2);
-  expect(ledger.transactions.filter(t=>t.date.startsWith('2026-03-20'))).toHaveLength(2);
+  expect(ledger.transactions.filter((t) => t.date.startsWith('2026-03-19'))).toHaveLength(2);
+  expect(ledger.transactions.filter((t) => t.date.startsWith('2026-03-20'))).toHaveLength(2);
   expect(ledger.ambiguities!.length).toBeGreaterThan(0);
-  for(const warning of ledger.ambiguities!) for(const candidateId of warning.candidateSourceTransactionIds) {
-    recordDistinctOverlap(getDb(),overlapOccurrenceKey(getDb(),warning.sourceTransactionId),overlapOccurrenceKey(getDb(),candidateId),'Source review confirmed four distinct bag charges.');
-  }
-  const reviewed=buildLedgerFromSourceFacts(getDb());
+  for (const warning of ledger.ambiguities!)
+    for (const candidateId of warning.candidateSourceTransactionIds) {
+      recordDistinctOverlap(
+        getDb(),
+        overlapOccurrenceKey(getDb(), warning.sourceTransactionId),
+        overlapOccurrenceKey(getDb(), candidateId),
+        'Source review confirmed four distinct bag charges.',
+      );
+    }
+  const reviewed = buildLedgerFromSourceFacts(getDb());
   expect(reviewed.ambiguities).toHaveLength(0);
   expect(ledgerFingerprint(reviewed)).toBe(ledgerFingerprint(ledger));
-  getDb().prepare('UPDATE sourceTransactions SET description=? WHERE id=?').run('Changed source evidence',ledger.ambiguities![0]!.sourceTransactionId);
+  getDb()
+    .prepare('UPDATE sourceTransactions SET description=? WHERE id=?')
+    .run('Changed source evidence', ledger.ambiguities![0]!.sourceTransactionId);
   expect(buildLedgerFromSourceFacts(getDb()).ambiguities!.length).toBeGreaterThan(0);
 });
 
 test('source rebuild excludes legacy statement summaries even without corresponding detail', () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Merrill Lynch',
-    institution: 'Merrill',
-    type: 'investment',
-    currentBalance: 0,
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Merrill Lynch',
+      institution: 'Merrill',
+      type: 'investment',
+      currentBalance: 0,
+    }),
+  );
   const activity = insertCommittedSourceFile({
     fileName: 'merrill-activity.csv',
     parserName: 'merrill-activity-csv',
@@ -1020,14 +1399,24 @@ test('source rebuild excludes legacy statement summaries even without correspond
     priority: 50,
     institution: 'Merrill',
   });
-  const activityAccountId = insertSourceAccount(activity.sourceFileId, accountId, 'merrill-activity-account', {
-    institution: 'Merrill',
-    sourceAccountName: 'CMA-Edge - 11W-22222',
-  });
-  const statementAccountId = insertSourceAccount(statement.sourceFileId, accountId, 'merrill-statement-account', {
-    institution: 'Merrill',
-    sourceAccountName: 'CMA-Edge - 11W-22222',
-  });
+  const activityAccountId = insertSourceAccount(
+    activity.sourceFileId,
+    accountId,
+    'merrill-activity-account',
+    {
+      institution: 'Merrill',
+      sourceAccountName: 'CMA-Edge - 11W-22222',
+    },
+  );
+  const statementAccountId = insertSourceAccount(
+    statement.sourceFileId,
+    accountId,
+    'merrill-statement-account',
+    {
+      institution: 'Merrill',
+      sourceAccountName: 'CMA-Edge - 11W-22222',
+    },
+  );
 
   insertSourceTransaction({
     sourceFileId: activity.sourceFileId,
@@ -1067,7 +1456,7 @@ test('source rebuild excludes legacy statement summaries even without correspond
   });
 
   const ledger = buildLedgerFromSourceFacts(getDb());
-  expect(ledger.transactions.map(transaction => transaction.description).sort()).toEqual([
+  expect(ledger.transactions.map((transaction) => transaction.description).sort()).toEqual([
     'Funds transferred out',
   ]);
   expect(ledger.exclusions).toHaveLength(2);
@@ -1075,11 +1464,30 @@ test('source rebuild excludes legacy statement summaries even without correspond
 });
 
 test('conflicting equal-rank same-date balances have no arbitrary winner and block materialization', () => {
-  const accountId = Number(insertRow('accounts', { name: 'Example', institution: 'Example', type: 'investment', currentBalance: 0 }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Example',
+      institution: 'Example',
+      type: 'investment',
+      currentBalance: 0,
+    }),
+  );
   for (const [index, balanceCents] of [10000, 11000].entries()) {
-    const source = insertCommittedSourceFile({ fileName: `balance-${index}`, parserName: 'example', sourceType: 'statement', priority: 50, institution: 'Example' });
+    const source = insertCommittedSourceFile({
+      fileName: `balance-${index}`,
+      parserName: 'example',
+      sourceType: 'statement',
+      priority: 50,
+      institution: 'Example',
+    });
     const sourceAccountId = insertSourceAccount(source.sourceFileId, accountId, `account-${index}`);
-    insertSourceBalance({ ...source, sourceAccountId, date: index ? '2026-05-31T00:00:00.000Z' : '2026-05-31', balanceCents, priority: 50 });
+    insertSourceBalance({
+      ...source,
+      sourceAccountId,
+      date: index ? '2026-05-31T00:00:00.000Z' : '2026-05-31',
+      balanceCents,
+      priority: 50,
+    });
   }
   const ledger = buildLedgerFromSourceFacts(getDb());
   expect(ledger.balanceSnapshots).toHaveLength(0);
@@ -1094,58 +1502,131 @@ test('conflicting equal-rank same-date balances have no arbitrary winner and blo
 });
 
 test('all legacy aggregate transaction shapes are excluded without deleting source facts', () => {
-  const accountId = Number(insertRow('accounts', { name: 'Example', institution: 'Example', type: 'investment', currentBalance: 0 }));
-  const source = insertCommittedSourceFile({ fileName: 'summary.pdf', parserName: 'example', sourceType: 'statement', priority: 50, institution: 'Example' });
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Example',
+      institution: 'Example',
+      type: 'investment',
+      currentBalance: 0,
+    }),
+  );
+  const source = insertCommittedSourceFile({
+    fileName: 'summary.pdf',
+    parserName: 'example',
+    sourceType: 'statement',
+    priority: 50,
+    institution: 'Example',
+  });
   const sourceAccountId = insertSourceAccount(source.sourceFileId, accountId, 'account');
   const rawShapes = [
-    { source: 'tiaa-statement-summary' }, { source: '401k-statement-summary' },
+    { source: 'tiaa-statement-summary' },
+    { source: '401k-statement-summary' },
     { source: 'fidelity-netbenefits-statement-summary' },
     { source: 'fidelity-portfolio-statement', type: 'securities-transferred-out' },
   ];
-  rawShapes.forEach((raw, index) => insertSourceTransaction({ ...source, sourceAccountId, stableSourceId: `summary-${index}`, date: '2026-05-31', amountCents: 100, description: 'Aggregate', priority: 50, raw }));
+  rawShapes.forEach((raw, index) =>
+    insertSourceTransaction({
+      ...source,
+      sourceAccountId,
+      stableSourceId: `summary-${index}`,
+      date: '2026-05-31',
+      amountCents: 100,
+      description: 'Aggregate',
+      priority: 50,
+      raw,
+    }),
+  );
   const ledger = buildLedgerFromSourceFacts(getDb());
   expect(ledger.transactions).toHaveLength(0);
   expect(ledger.exclusions).toHaveLength(4);
-  expect((getDb().prepare('SELECT COUNT(*) AS count FROM sourceTransactions').get() as { count: number }).count).toBe(4);
+  expect(
+    (getDb().prepare('SELECT COUNT(*) AS count FROM sourceTransactions').get() as { count: number })
+      .count,
+  ).toBe(4);
 });
 
 test('overlapping statement documents keep maximum identical occurrence count, never the sum', () => {
-  const accountId = Number(insertRow('accounts', { name: 'Example', institution: 'Example', type: 'credit', currentBalance: 0 }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Example',
+      institution: 'Example',
+      type: 'credit',
+      currentBalance: 0,
+    }),
+  );
   for (const [index, count] of [2, 3].entries()) {
-    const source = insertCommittedSourceFile({ fileName: `statement-${index}`, parserName: 'example', sourceType: 'statement', priority: 50, institution: 'Example' });
+    const source = insertCommittedSourceFile({
+      fileName: `statement-${index}`,
+      parserName: 'example',
+      sourceType: 'statement',
+      priority: 50,
+      institution: 'Example',
+    });
     const sourceAccountId = insertSourceAccount(source.sourceFileId, accountId, `account-${index}`);
     for (let occurrence = 0; occurrence < count; occurrence++) {
-      insertSourceTransaction({ ...source, sourceAccountId, stableSourceId: `${index}-${occurrence}`, date: index ? '2026-05-01T00:00:00.000Z' : '2026-05-01', amountCents: -500, description: 'COFFEE', priority: 50 });
+      insertSourceTransaction({
+        ...source,
+        sourceAccountId,
+        stableSourceId: `${index}-${occurrence}`,
+        date: index ? '2026-05-01T00:00:00.000Z' : '2026-05-01',
+        amountCents: -500,
+        description: 'COFFEE',
+        priority: 50,
+      });
     }
   }
   const ledger = buildLedgerFromSourceFacts(getDb());
   expect(ledger.transactions).toHaveLength(3);
-  expect(ledger.transactions.every(row => row.date === '2026-05-01')).toBe(true);
+  expect(ledger.transactions.every((row) => row.date === '2026-05-01')).toBe(true);
   expect(ledger.provenance).toHaveLength(5);
 });
 
 test('maximum multiplicity uses original document rows before shared parser identities and ignores priority', () => {
-  const accountId = Number(insertRow('accounts', { name: 'Example', institution: 'Example', type: 'credit', currentBalance: 0 }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Example',
+      institution: 'Example',
+      type: 'credit',
+      currentBalance: 0,
+    }),
+  );
   for (const [index, count] of [2, 5].entries()) {
-    const source = insertCommittedSourceFile({ fileName: `original-${index}`, parserName: 'example', sourceType: 'activity-export', priority: index ? 1 : 100, institution: 'Example' });
+    const source = insertCommittedSourceFile({
+      fileName: `original-${index}`,
+      parserName: 'example',
+      sourceType: 'activity-export',
+      priority: index ? 1 : 100,
+      institution: 'Example',
+    });
     const sourceAccountId = insertSourceAccount(source.sourceFileId, accountId, `account-${index}`);
     for (let occurrence = 0; occurrence < count; occurrence++) {
-      insertSourceTransaction({ ...source, sourceAccountId, stableSourceId: `${index}-${occurrence}`, date: '2026-05-01', amountCents: -500, description: 'COFFEE', priority: index ? 1 : 100, raw: { moneyId: `identity-${occurrence}` } });
+      insertSourceTransaction({
+        ...source,
+        sourceAccountId,
+        stableSourceId: `${index}-${occurrence}`,
+        date: '2026-05-01',
+        amountCents: -500,
+        description: 'COFFEE',
+        priority: index ? 1 : 100,
+        raw: { moneyId: `identity-${occurrence}` },
+      });
     }
   }
   const ledger = buildLedgerFromSourceFacts(getDb());
   expect(ledger.transactions).toHaveLength(5);
   expect(ledger.provenance).toHaveLength(7);
-  expect(ledger.provenance?.filter(row => !row.selected)).toHaveLength(2);
+  expect(ledger.provenance?.filter((row) => !row.selected)).toHaveLength(2);
 });
 
 test('source rebuild de-duplicates parser-stable money ids across duplicate files', () => {
-  const accountId = Number(insertRow('accounts', {
-    name: 'Sequoia',
-    institution: 'Sequoia Fund',
-    type: 'investment',
-    currentBalance: 0,
-  }));
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Sequoia',
+      institution: 'Sequoia Fund',
+      type: 'investment',
+      currentBalance: 0,
+    }),
+  );
   const first = insertCommittedSourceFile({
     fileName: 'sequoia-fund-2026-03-31.pdf',
     parserName: 'sequoia-fund-pdf',
@@ -1197,35 +1678,84 @@ test('source rebuild de-duplicates parser-stable money ids across duplicate file
 
 function scopedFixture() {
   const db = getDb();
-  const accounts = [0, 1, 2].map(index => Number(insertRow('accounts', { name: `Scoped ${index}`, type: 'checking' })));
+  const accounts = [0, 1, 2].map((index) =>
+    Number(insertRow('accounts', { name: `Scoped ${index}`, type: 'checking' })),
+  );
   const files = accounts.map((accountId, index) => {
-    const file = insertCommittedSourceFile({ fileName: `scoped-${index}.csv`, parserName: 'fixture', sourceType: 'activity-export', priority: 100, institution: 'Fixture' });
+    const file = insertCommittedSourceFile({
+      fileName: `scoped-${index}.csv`,
+      parserName: 'fixture',
+      sourceType: 'activity-export',
+      priority: 100,
+      institution: 'Fixture',
+    });
     const sourceAccountId = insertSourceAccount(file.sourceFileId, accountId, `scoped-${index}`);
     for (let occurrence = 0; occurrence < 2; occurrence++) {
-      const id = insertSourceTransaction({ ...file, sourceAccountId, stableSourceId: `scoped-${index}-${occurrence}`, date: `2026-0${index + 1}-01`, amountCents: -1000, description: 'Repeated purchase', priority: 100 });
-      const importRowId = Number(insertRow('importRows', { importFileId: file.importFileId, rowIndex: occurrence, rawJson: '{}' }));
+      const id = insertSourceTransaction({
+        ...file,
+        sourceAccountId,
+        stableSourceId: `scoped-${index}-${occurrence}`,
+        date: `2026-0${index + 1}-01`,
+        amountCents: -1000,
+        description: 'Repeated purchase',
+        priority: 100,
+      });
+      const importRowId = Number(
+        insertRow('importRows', {
+          importFileId: file.importFileId,
+          rowIndex: occurrence,
+          rawJson: '{}',
+        }),
+      );
       db.prepare('UPDATE sourceTransactions SET importRowId = ? WHERE id = ?').run(importRowId, id);
     }
-    insertSourceBalance({ ...file, sourceAccountId, date: `2026-0${index + 1}-28`, balanceCents: 10000, priority: 100 });
+    insertSourceBalance({
+      ...file,
+      sourceAccountId,
+      date: `2026-0${index + 1}-28`,
+      balanceCents: 10000,
+      priority: 100,
+    });
     return { ...file, sourceAccountId };
   });
   materializeLedger(db);
-  const transaction = db.prepare('SELECT ledgerTransactionId FROM ledgerTransactions ORDER BY ledgerTransactionId LIMIT 1').get()!;
-  insertRow('transactionAnnotations', { ledgerTransactionId: transaction.ledgerTransactionId, notes: 'Preserve my note' });
+  const transaction = db
+    .prepare(
+      'SELECT ledgerTransactionId FROM ledgerTransactions ORDER BY ledgerTransactionId LIMIT 1',
+    )
+    .get()!;
+  insertRow('transactionAnnotations', {
+    ledgerTransactionId: transaction.ledgerTransactionId,
+    notes: 'Preserve my note',
+  });
   return { db, accounts, files };
 }
 
 function materializedContents() {
   const db = getDb();
-  const read = (table: string, order: string, omitted: string[]) => db.prepare(`SELECT * FROM ${table} ORDER BY ${order}`).all()
-    .map(row => Object.fromEntries(Object.entries(row).filter(([key]) => !omitted.includes(key))));
+  const read = (table: string, order: string, omitted: string[]) =>
+    db
+      .prepare(`SELECT * FROM ${table} ORDER BY ${order}`)
+      .all()
+      .map((row) =>
+        Object.fromEntries(Object.entries(row).filter(([key]) => !omitted.includes(key))),
+      );
   return {
-    transactions: read('ledgerTransactions', 'ledgerTransactionId', ['id', 'legacyTransactionId', 'createdAt', 'updatedAt']),
+    transactions: read('ledgerTransactions', 'ledgerTransactionId', [
+      'id',
+      'legacyTransactionId',
+      'createdAt',
+      'updatedAt',
+    ]),
     balances: read('ledgerBalances', 'accountId, month', ['id', 'createdAt', 'updatedAt']),
     provenance: read('ledgerProvenance', 'ledgerTransactionId, sourceTransactionId', []),
     legacyTransactions: read('transactions', 'ledgerTransactionId', ['id', 'createdAt']),
     legacyBalances: read('balanceSnapshots', 'accountId, month', ['id']),
-    pointers: db.prepare('SELECT ir.id, t.ledgerTransactionId FROM importRows ir LEFT JOIN transactions t ON t.id = ir.transactionId ORDER BY ir.id').all(),
+    pointers: db
+      .prepare(
+        'SELECT ir.id, t.ledgerTransactionId FROM importRows ir LEFT JOIN transactions t ON t.id = ir.transactionId ORDER BY ir.id',
+      )
+      .all(),
   };
 }
 
@@ -1243,48 +1773,112 @@ function expectSameAsFullRebuild() {
 
 test('scoped rebuild matches full history for overlapping occurrences and preserves unrelated rows', () => {
   const { db, accounts, files } = scopedFixture();
-  const untouched = db.prepare('SELECT * FROM ledgerTransactions WHERE accountId = ? ORDER BY id').all(accounts[2]);
-  const legacyUntouched = db.prepare('SELECT * FROM transactions WHERE accountId = ? ORDER BY id').all(accounts[2]);
+  const untouched = db
+    .prepare('SELECT * FROM ledgerTransactions WHERE accountId = ? ORDER BY id')
+    .all(accounts[2]);
+  const legacyUntouched = db
+    .prepare('SELECT * FROM transactions WHERE accountId = ? ORDER BY id')
+    .all(accounts[2]);
   const annotations = db.prepare('SELECT * FROM transactionAnnotations').all();
   const mappings = db.prepare('SELECT id, accountId FROM sourceAccounts ORDER BY id').all();
-  const overlap = insertCommittedSourceFile({ fileName: 'overlap.csv', parserName: 'fixture', sourceType: 'activity-export', priority: 100, institution: 'Fixture' });
+  const overlap = insertCommittedSourceFile({
+    fileName: 'overlap.csv',
+    parserName: 'fixture',
+    sourceType: 'activity-export',
+    priority: 100,
+    institution: 'Fixture',
+  });
   const overlapAccount = insertSourceAccount(overlap.sourceFileId, accounts[0]!, 'overlap');
-  for (let i = 0; i < 3; i++) insertSourceTransaction({ ...overlap, sourceAccountId: overlapAccount, stableSourceId: `overlap-${i}`, date: '2026-01-01', amountCents: -1000, description: 'Repeated purchase', priority: 100 });
-  const statement = insertCommittedSourceFile({ fileName: 'posting-drift.pdf', parserName: 'fixture', sourceType: 'statement', priority: 50, institution: 'Fixture' });
+  for (let i = 0; i < 3; i++)
+    insertSourceTransaction({
+      ...overlap,
+      sourceAccountId: overlapAccount,
+      stableSourceId: `overlap-${i}`,
+      date: '2026-01-01',
+      amountCents: -1000,
+      description: 'Repeated purchase',
+      priority: 100,
+    });
+  const statement = insertCommittedSourceFile({
+    fileName: 'posting-drift.pdf',
+    parserName: 'fixture',
+    sourceType: 'statement',
+    priority: 50,
+    institution: 'Fixture',
+  });
   const statementAccount = insertSourceAccount(statement.sourceFileId, accounts[0]!, 'statement');
-  insertSourceTransaction({ ...statement, sourceAccountId: statementAccount, stableSourceId: 'posted', date: '2026-01-02', amountCents: -1000, description: 'Repeated purchase', priority: 50 });
+  insertSourceTransaction({
+    ...statement,
+    sourceAccountId: statementAccount,
+    stableSourceId: 'posted',
+    date: '2026-01-02',
+    amountCents: -1000,
+    description: 'Repeated purchase',
+    priority: 50,
+  });
 
   rebuildLedgerForAccounts([accounts[0]!, accounts[0]!]);
-  expect(db.prepare('SELECT COUNT(*) n FROM ledgerTransactions WHERE accountId = ?').get(accounts[0])).toEqual({ n: 3 });
+  expect(
+    db.prepare('SELECT COUNT(*) n FROM ledgerTransactions WHERE accountId = ?').get(accounts[0]),
+  ).toEqual({ n: 3 });
   expectSameAsFullRebuild();
   // Remove the largest document: the two original occurrences must reappear.
   db.prepare("UPDATE sourceFiles SET status = 'unimported' WHERE id = ?").run(overlap.sourceFileId);
   rebuildLedgerForAccounts([accounts[0]!]);
-  expect(db.prepare('SELECT COUNT(*) n FROM ledgerTransactions WHERE accountId = ?').get(accounts[0])).toEqual({ n: 2 });
+  expect(
+    db.prepare('SELECT COUNT(*) n FROM ledgerTransactions WHERE accountId = ?').get(accounts[0]),
+  ).toEqual({ n: 2 });
   expectSameAsFullRebuild();
   db.prepare("UPDATE sourceFiles SET status = 'committed' WHERE id = ?").run(overlap.sourceFileId);
   rebuildLedgerForAccounts([accounts[0]!]);
   expectSameAsFullRebuild();
-  expect(db.prepare('SELECT * FROM ledgerTransactions WHERE accountId = ? ORDER BY id').all(accounts[2])).toEqual(untouched);
-  expect(db.prepare('SELECT * FROM transactions WHERE accountId = ? ORDER BY id').all(accounts[2])).toEqual(legacyUntouched);
+  expect(
+    db.prepare('SELECT * FROM ledgerTransactions WHERE accountId = ? ORDER BY id').all(accounts[2]),
+  ).toEqual(untouched);
+  expect(
+    db.prepare('SELECT * FROM transactions WHERE accountId = ? ORDER BY id').all(accounts[2]),
+  ).toEqual(legacyUntouched);
   expect(db.prepare('SELECT * FROM transactionAnnotations').all()).toEqual(annotations);
-  expect(db.prepare('SELECT id, accountId FROM sourceAccounts WHERE id IN (?, ?, ?) ORDER BY id').all(...files.map(file => file.sourceAccountId))).toEqual(mappings);
+  expect(
+    db
+      .prepare('SELECT id, accountId FROM sourceAccounts WHERE id IN (?, ?, ?) ORDER BY id')
+      .all(...files.map((file) => file.sourceAccountId)),
+  ).toEqual(mappings);
 });
 
 test('consolidated remapping rebuilds old and new destinations including an emptied account', async () => {
   const { getImportLedgerAccountIds } = await import('./imports');
   const { db, accounts, files } = scopedFixture();
-  const consolidatedAccount = insertSourceAccount(files[0]!.sourceFileId, accounts[1]!, 'consolidated-second');
-  insertSourceTransaction({ ...files[0]!, sourceAccountId: consolidatedAccount, stableSourceId: 'consolidated', date: '2026-04-01', amountCents: -2500, description: 'Second account purchase', priority: 100 });
+  const consolidatedAccount = insertSourceAccount(
+    files[0]!.sourceFileId,
+    accounts[1]!,
+    'consolidated-second',
+  );
+  insertSourceTransaction({
+    ...files[0]!,
+    sourceAccountId: consolidatedAccount,
+    stableSourceId: 'consolidated',
+    date: '2026-04-01',
+    amountCents: -2500,
+    description: 'Second account purchase',
+    priority: 100,
+  });
   rebuildLedgerForAccounts([accounts[0]!, accounts[1]!]);
   const before = getImportLedgerAccountIds([files[0]!.importFileId]);
   expect(before).toEqual(accounts.slice(0, 2));
-  db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(accounts[1], files[0]!.sourceAccountId);
+  db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(
+    accounts[1],
+    files[0]!.sourceAccountId,
+  );
   const affected = getImportLedgerAccountIds([files[0]!.importFileId]);
   expect(affected).toEqual(before); // Prior ledger provenance still owns the old account.
   rebuildLedgerForAccounts(affected);
-  expect(db.prepare('SELECT COUNT(*) n FROM ledgerTransactions WHERE accountId = ?').get(accounts[0])).toEqual({ n: 0 });
-  expect(db.prepare('SELECT COUNT(*) n FROM ledgerBalances WHERE accountId = ?').get(accounts[0])).toEqual({ n: 0 });
+  expect(
+    db.prepare('SELECT COUNT(*) n FROM ledgerTransactions WHERE accountId = ?').get(accounts[0]),
+  ).toEqual({ n: 0 });
+  expect(
+    db.prepare('SELECT COUNT(*) n FROM ledgerBalances WHERE accountId = ?').get(accounts[0]),
+  ).toEqual({ n: 0 });
   expectSameAsFullRebuild();
 });
 
@@ -1292,35 +1886,60 @@ test('empty scopes are no-ops and scoped payloads cannot overwrite other account
   const { db, accounts } = scopedFixture();
   const before = db.prepare('SELECT * FROM ledgerTransactions ORDER BY id').all();
   expect(rebuildLedgerForAccounts([])).toEqual({ transactionCount: 0, balanceSnapshotCount: 0 });
-  expect(() => materializeLedger(db, { ...buildLedgerFromSourceFacts(db), accountIds: [accounts[0]!] })).toThrow('outside its rebuild accounts');
+  expect(() =>
+    materializeLedger(db, { ...buildLedgerFromSourceFacts(db), accountIds: [accounts[0]!] }),
+  ).toThrow('outside its rebuild accounts');
   expect(() => rebuildLedgerForAccounts([Number.NaN])).toThrow('safe integers');
   expect(db.prepare('SELECT * FROM ledgerTransactions ORDER BY id').all()).toEqual(before);
 });
 
-for (const policy of [null, 'old-policy']) test(`scoped rebuild falls back to full when policy is ${policy}`, () => {
-  const { db, accounts, files } = scopedFixture();
-  db.exec('DELETE FROM ledgerRebuildState');
-  if (policy) db.prepare('INSERT INTO ledgerRebuildState VALUES (1, ?)').run(policy);
-  db.prepare('UPDATE sourceTransactions SET amountCents = -2000 WHERE sourceAccountId = ?').run(files[1]!.sourceAccountId);
-  rebuildLedgerForAccounts([accounts[0]!]);
-  expectSameAsFullRebuild();
-  expect(db.prepare('SELECT policyVersion FROM ledgerRebuildState WHERE id = 1').get()).toEqual({ policyVersion: LEDGER_REBUILD_POLICY_VERSION });
-});
+for (const policy of [null, 'old-policy'])
+  test(`scoped rebuild falls back to full when policy is ${policy}`, () => {
+    const { db, accounts, files } = scopedFixture();
+    db.exec('DELETE FROM ledgerRebuildState');
+    if (policy) db.prepare('INSERT INTO ledgerRebuildState VALUES (1, ?)').run(policy);
+    db.prepare('UPDATE sourceTransactions SET amountCents = -2000 WHERE sourceAccountId = ?').run(
+      files[1]!.sourceAccountId,
+    );
+    rebuildLedgerForAccounts([accounts[0]!]);
+    expectSameAsFullRebuild();
+    expect(db.prepare('SELECT policyVersion FROM ledgerRebuildState WHERE id = 1').get()).toEqual({
+      policyVersion: LEDGER_REBUILD_POLICY_VERSION,
+    });
+  });
 
 test('failed scoped unimport rolls back source statuses, pointers, and all read models', async () => {
   const { unimportFile } = await import('./imports');
   const { db, files, accounts } = scopedFixture();
-  const overlap = insertCommittedSourceFile({ fileName: 'remaining.csv', parserName: 'fixture', sourceType: 'activity-export', priority: 100, institution: 'Fixture' });
+  const overlap = insertCommittedSourceFile({
+    fileName: 'remaining.csv',
+    parserName: 'fixture',
+    sourceType: 'activity-export',
+    priority: 100,
+    institution: 'Fixture',
+  });
   const sourceAccountId = insertSourceAccount(overlap.sourceFileId, accounts[0]!, 'remaining');
-  insertSourceTransaction({ ...overlap, sourceAccountId, stableSourceId: 'remaining', date: '2026-01-01', amountCents: -1000, description: 'Repeated purchase', priority: 100 });
+  insertSourceTransaction({
+    ...overlap,
+    sourceAccountId,
+    stableSourceId: 'remaining',
+    date: '2026-01-01',
+    amountCents: -1000,
+    description: 'Repeated purchase',
+    priority: 100,
+  });
   rebuildLedgerForAccounts([accounts[0]!]);
   const before = materializedContents();
   const sources = db.prepare('SELECT * FROM sourceFiles ORDER BY id').all();
   const imports = db.prepare('SELECT * FROM importFiles ORDER BY id').all();
-  db.exec("CREATE TEMP TRIGGER fail_scoped_write BEFORE INSERT ON ledgerTransactions BEGIN SELECT RAISE(ABORT, 'injected scoped failure'); END");
+  db.exec(
+    "CREATE TEMP TRIGGER fail_scoped_write BEFORE INSERT ON ledgerTransactions BEGIN SELECT RAISE(ABORT, 'injected scoped failure'); END",
+  );
   try {
     expect(() => unimportFile(files[0]!.importFileId)).toThrow('injected scoped failure');
-  } finally { db.exec('DROP TRIGGER fail_scoped_write'); }
+  } finally {
+    db.exec('DROP TRIGGER fail_scoped_write');
+  }
   expect(materializedContents()).toEqual(before);
   expect(db.prepare('SELECT * FROM sourceFiles ORDER BY id').all()).toEqual(sources);
   expect(db.prepare('SELECT * FROM importFiles ORDER BY id').all()).toEqual(imports);
@@ -1329,16 +1948,26 @@ test('failed scoped unimport rolls back source statuses, pointers, and all read 
 test('account type and reporting closure rebuild only the changed account', async () => {
   const { updateAccountMetadata, closeAccount, unarchiveAccount } = await import('./accounts');
   const { db, accounts, files } = scopedFixture();
-  db.prepare('UPDATE sourceTransactions SET amountCents = 1000 WHERE sourceAccountId = ?').run(files[0]!.sourceAccountId);
+  db.prepare('UPDATE sourceTransactions SET amountCents = 1000 WHERE sourceAccountId = ?').run(
+    files[0]!.sourceAccountId,
+  );
   rebuildLedgerForAccounts([accounts[0]!]);
-  const untouched = db.prepare('SELECT * FROM ledgerTransactions WHERE accountId = ? ORDER BY id').all(accounts[2]);
+  const untouched = db
+    .prepare('SELECT * FROM ledgerTransactions WHERE accountId = ? ORDER BY id')
+    .all(accounts[2]);
   updateAccountMetadata(accounts[0]!, { type: 'credit' });
-  expect(db.prepare('SELECT DISTINCT transactionKind FROM ledgerTransactions WHERE accountId = ?').all(accounts[0])).toEqual([{ transactionKind: 'card_payment' }]);
+  expect(
+    db
+      .prepare('SELECT DISTINCT transactionKind FROM ledgerTransactions WHERE accountId = ?')
+      .all(accounts[0]),
+  ).toEqual([{ transactionKind: 'card_payment' }]);
   closeAccount(accounts[0]!, '2026-04-01');
   expectSameAsFullRebuild();
   unarchiveAccount(accounts[0]!);
   expectSameAsFullRebuild();
-  expect(db.prepare('SELECT * FROM ledgerTransactions WHERE accountId = ? ORDER BY id').all(accounts[2])).toEqual(untouched);
+  expect(
+    db.prepare('SELECT * FROM ledgerTransactions WHERE accountId = ? ORDER BY id').all(accounts[2]),
+  ).toEqual(untouched);
 });
 
 test('balance-only remapping finds the prior account from materialized balance provenance', async () => {
@@ -1346,10 +1975,15 @@ test('balance-only remapping finds the prior account from materialized balance p
   const { db, files, accounts } = scopedFixture();
   db.prepare('DELETE FROM sourceTransactions WHERE sourceFileId = ?').run(files[0]!.sourceFileId);
   materializeLedger();
-  db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(accounts[1], files[0]!.sourceAccountId);
+  db.prepare('UPDATE sourceAccounts SET accountId = ? WHERE id = ?').run(
+    accounts[1],
+    files[0]!.sourceAccountId,
+  );
   const affected = getImportLedgerAccountIds([files[0]!.importFileId]);
   expect(affected).toEqual(accounts.slice(0, 2));
   rebuildLedgerForAccounts(affected);
-  expect(db.prepare('SELECT COUNT(*) n FROM ledgerBalances WHERE accountId = ?').get(accounts[0])).toEqual({ n: 0 });
+  expect(
+    db.prepare('SELECT COUNT(*) n FROM ledgerBalances WHERE accountId = ?').get(accounts[0]),
+  ).toEqual({ n: 0 });
   expectSameAsFullRebuild();
 });

@@ -90,11 +90,11 @@
     margin-left: 0;
     padding: 0 var(--space-4);
   }
-  
+
   .topbar-mobile-menu {
     display: block;
   }
-  
+
   .topbar-title {
     font-size: var(--text-base);
   }

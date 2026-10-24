@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AlertTriangle, ChevronRight, FileText, Folder, LoaderCircle, RotateCcw, Search, Trash2 } from 'lucide-react';
+import {
+  AlertTriangle,
+  ChevronRight,
+  FileText,
+  Folder,
+  LoaderCircle,
+  RotateCcw,
+  Search,
+  Trash2,
+} from 'lucide-react';
 import { useCSVImport, type ImportPreviewResult } from '../../hooks/useCSVImport';
 import { buildCustomProfile, mappingFromProfile } from '../../utils/csvMapping';
 import { useImportProfiles } from '../../hooks/useImportProfiles';
@@ -80,7 +89,10 @@ function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
-function asCsvColumnMapping(profile: ImportPreviewResult['profile'], headers: string[]): Partial<CsvColumnMapping> {
+function asCsvColumnMapping(
+  profile: ImportPreviewResult['profile'],
+  headers: string[],
+): Partial<CsvColumnMapping> {
   return mappingFromProfile(profile, headers) as Partial<CsvColumnMapping>;
 }
 
@@ -107,7 +119,7 @@ export default function ImportPage() {
   const { importProfiles } = useImportProfiles();
   const typedImportProfiles = importProfiles as ImportProfileSummary[];
   const batchCancelRef = useRef(false);
-  
+
   const [stage, setStage] = useState<ImportStage>('upload');
   const [currentFile, setCurrentFile] = useState<File | null>(null);
   const [importResult, setImportResult] = useState<ImportPreviewResult | null>(null);
@@ -168,7 +180,8 @@ export default function ImportPage() {
   const queueTotal = importQueue.length;
   const isBatchImport = queueTotal > 1;
 
-  const getFileLabel = (file?: File | null) => file?.webkitRelativePath || file?.name || 'selected file';
+  const getFileLabel = (file?: File | null) =>
+    file?.webkitRelativePath || file?.name || 'selected file';
 
   const applySavedProfile = async (
     file: File,
@@ -180,7 +193,9 @@ export default function ImportPage() {
     if (result.alreadyImported) return result;
 
     const headerSignature = getHeaderSignature(result.headers);
-    const savedProfile = typedImportProfiles.find(profile => profile.headerSignature === headerSignature);
+    const savedProfile = typedImportProfiles.find(
+      (profile) => profile.headerSignature === headerSignature,
+    );
     if (savedProfile?.profileJson) {
       const profile = JSON.parse(savedProfile.profileJson);
       const remapped = await processImport(file, profile, options);
@@ -198,33 +213,36 @@ export default function ImportPage() {
 
   const canCommitAutomatically = (result: ImportPreviewResult | null) => {
     const accountMappings = result?.accountMappings || [];
-    const hasImportableFacts = (result?.transactions?.length || 0) > 0 || (result?.balanceRowIds?.length || 0) > 0;
+    const hasImportableFacts =
+      (result?.transactions?.length || 0) > 0 || (result?.balanceRowIds?.length || 0) > 0;
     return Boolean(
       result &&
       !result.alreadyImported &&
       !result.requiresMapping &&
       hasImportableFacts &&
       accountMappings.length > 0 &&
-      accountMappings.every(mapping =>
-        mapping.resolvedAccountId &&
-        mapping.resolvedAccountStatus !== 'archived' &&
-        mapping.resolution !== 'archived-match'
-      )
+      accountMappings.every(
+        (mapping) =>
+          mapping.resolvedAccountId &&
+          mapping.resolvedAccountStatus !== 'archived' &&
+          mapping.resolution !== 'archived-match',
+      ),
     );
   };
 
-  const buildAutoAccountMappings = (result: ImportPreviewResult) => (result.accountMappings || []).map(mapping => ({
-    sourceAccountId: mapping.sourceAccountId,
-    mode: 'auto' as const,
-    last4: mapping.last4 || null,
-  }));
+  const buildAutoAccountMappings = (result: ImportPreviewResult) =>
+    (result.accountMappings || []).map((mapping) => ({
+      sourceAccountId: mapping.sourceAccountId,
+      mode: 'auto' as const,
+      last4: mapping.last4 || null,
+    }));
 
   const commitPreviewResult = async (result: ImportPreviewResult): Promise<CommitImportResult> => {
     const accountMappings = buildAutoAccountMappings(result);
     return trpcClient.imports.commit.mutate({
       accountId: null,
       importFileId: result.importFileId,
-      importRowIds: (result.transactions || []).map(transaction => transaction.importRowId),
+      importRowIds: (result.transactions || []).map((transaction) => transaction.importRowId),
       forceImportRowIds: [],
       balanceRowIds: result.balanceRowIds || [],
       accountMappings,
@@ -246,7 +264,7 @@ export default function ImportPage() {
     setQueueIndex(index);
     setQueueMessage('');
     let result = await previewFile(file);
-    
+
     if (result) {
       setImportResult(result);
       if (result.requiresMapping) {
@@ -286,7 +304,7 @@ export default function ImportPage() {
     if (!currentFile) return;
     const customProfile = buildCustomProfile(mapping);
     const result = await processImport(currentFile, customProfile);
-    
+
     if (result && !result.requiresMapping) {
       setImportResult({ ...result, mapping });
       setStage('preview');
@@ -366,14 +384,14 @@ export default function ImportPage() {
     for (let index = startIndex; index < files.length; index += 1) {
       if (batchCancelRef.current) {
         setAutoImportAll(false);
-        setBatchState(previous => previous ? { ...previous, status: 'cancelled' } : previous);
+        setBatchState((previous) => (previous ? { ...previous, status: 'cancelled' } : previous));
         return;
       }
 
       const file = files[index];
       setCurrentFile(file);
       setQueueIndex(index);
-      setBatchState(previous => ({
+      setBatchState((previous) => ({
         ...(previous ?? getBatchStateFallback(files, index, nextImportedCount, nextSkippedCount)),
         status: 'running',
         total: files.length,
@@ -384,13 +402,15 @@ export default function ImportPage() {
       }));
 
       try {
-        const result = index === startIndex && initialResult
-          ? initialResult
-          : await previewFile(file, { throwOnError: true });
+        const result =
+          index === startIndex && initialResult
+            ? initialResult
+            : await previewFile(file, { throwOnError: true });
 
         if (result?.alreadyImported) {
-          setBatchState(previous => ({
-            ...(previous ?? getBatchStateFallback(files, index, nextImportedCount, nextSkippedCount)),
+          setBatchState((previous) => ({
+            ...(previous ??
+              getBatchStateFallback(files, index, nextImportedCount, nextSkippedCount)),
             completedFiles: index + 1,
           }));
           continue;
@@ -410,7 +430,7 @@ export default function ImportPage() {
         setQueueSkippedDuplicateCount(nextSkippedCount);
         setImportedCount(nextImportedCount);
         setSkippedDuplicateCount(nextSkippedCount);
-        setBatchState(previous => ({
+        setBatchState((previous) => ({
           ...(previous ?? getBatchStateFallback(files, index, nextImportedCount, nextSkippedCount)),
           importedCount: nextImportedCount,
           skippedDuplicateCount: nextSkippedCount,
@@ -419,7 +439,7 @@ export default function ImportPage() {
       } catch (batchError) {
         const message = errorMessage(batchError, `${getFileLabel(file)}: Import failed`);
         setQueueMessage(message);
-        setBatchState(previous => ({
+        setBatchState((previous) => ({
           ...(previous ?? getBatchStateFallback(files, index, nextImportedCount, nextSkippedCount)),
           status: 'error',
           total: files.length,
@@ -455,7 +475,9 @@ export default function ImportPage() {
   };
 
   const handleUnimport = async (item: ImportHistoryItem) => {
-    const confirmed = window.confirm(`Unimport ${item.fileName}? This removes transactions and balances created by that import.`);
+    const confirmed = window.confirm(
+      `Unimport ${item.fileName}? This removes transactions and balances created by that import.`,
+    );
     if (!confirmed) return;
 
     setUnimportingId(item.id);
@@ -472,7 +494,9 @@ export default function ImportPage() {
   };
 
   const handleReimport = async (item: ImportHistoryItem) => {
-    const confirmed = window.confirm(`Reimport ${item.fileName}? This restores saved source facts from this file.`);
+    const confirmed = window.confirm(
+      `Reimport ${item.fileName}? This restores saved source facts from this file.`,
+    );
     if (!confirmed) return;
 
     setReimportingId(item.id);
@@ -490,13 +514,15 @@ export default function ImportPage() {
 
   const handleBulkUnimport = async (items: ImportHistoryItem[]) => {
     if (items.length === 0) return;
-    const confirmed = window.confirm(`Unimport ${items.length} import${items.length === 1 ? '' : 's'}? This removes their transactions and balances from the ledger.`);
+    const confirmed = window.confirm(
+      `Unimport ${items.length} import${items.length === 1 ? '' : 's'}? This removes their transactions and balances from the ledger.`,
+    );
     if (!confirmed) return;
 
     setHistoryBulkAction('unimport');
     setHistoryError('');
     try {
-      await trpcClient.imports.bulkUnimport.mutate({ importFileIds: items.map(item => item.id) });
+      await trpcClient.imports.bulkUnimport.mutate({ importFileIds: items.map((item) => item.id) });
       await invalidateImportDependents();
       await loadImportHistory();
     } catch (bulkError) {
@@ -508,13 +534,15 @@ export default function ImportPage() {
 
   const handleBulkReimport = async (items: ImportHistoryItem[]) => {
     if (items.length === 0) return;
-    const confirmed = window.confirm(`Reimport ${items.length} import${items.length === 1 ? '' : 's'}? This restores saved source facts and rebuilds the ledger.`);
+    const confirmed = window.confirm(
+      `Reimport ${items.length} import${items.length === 1 ? '' : 's'}? This restores saved source facts and rebuilds the ledger.`,
+    );
     if (!confirmed) return;
 
     setHistoryBulkAction('reimport');
     setHistoryError('');
     try {
-      await trpcClient.imports.bulkReimport.mutate({ importFileIds: items.map(item => item.id) });
+      await trpcClient.imports.bulkReimport.mutate({ importFileIds: items.map((item) => item.id) });
       await invalidateImportDependents();
       await loadImportHistory();
     } catch (bulkError) {
@@ -529,7 +557,9 @@ export default function ImportPage() {
       <header className="page__header import-page__header">
         <div>
           <h1 className="page__title">Import Data</h1>
-          <p className="page__subtitle">Keep your accounts up to date and review what’s been imported.</p>
+          <p className="page__subtitle">
+            Keep your accounts up to date and review what’s been imported.
+          </p>
         </div>
         {stage === 'upload' && (
           <FileDropZone
@@ -576,8 +606,8 @@ export default function ImportPage() {
             autoImportAll={autoImportAll}
           />
           <BankDetector requiresMapping={true} profileUsed={importResult.profileUsed} />
-          <ColumnMapper 
-            headers={importResult.headers} 
+          <ColumnMapper
+            headers={importResult.headers}
             initialMapping={asCsvColumnMapping(importResult.profile, importResult.headers)}
             onComplete={handleMappingComplete}
             onCancel={resetImport}
@@ -602,13 +632,15 @@ export default function ImportPage() {
               onReviewMapping={handleReviewMapping}
             />
           )}
-          <ImportPreview 
+          <ImportPreview
             transactions={importResult.transactions}
             importMeta={{
               importFileId: importResult.importFileId,
               headers: importResult.headers,
               profile: importResult.profile,
-              mapping: importResult.mapping || mappingFromProfile(importResult.profile, importResult.headers),
+              mapping:
+                importResult.mapping ||
+                mappingFromProfile(importResult.profile, importResult.headers),
               profileName: importResult.profileUsed || importResult.profile?.name || 'Custom',
               savedImportProfile: importResult.savedImportProfile,
               accountMappings: importResult.accountMappings || [],
@@ -645,7 +677,10 @@ export default function ImportPage() {
           <p>Successfully imported {importedCount} transactions.</p>
           {isBatchImport && <p>Processed {queueTotal} files.</p>}
           {skippedDuplicateCount > 0 && (
-            <p>Skipped {skippedDuplicateCount} duplicate transaction{skippedDuplicateCount === 1 ? '' : 's'}.</p>
+            <p>
+              Skipped {skippedDuplicateCount} duplicate transaction
+              {skippedDuplicateCount === 1 ? '' : 's'}.
+            </p>
           )}
           <div className="success-actions">
             <button className="btn btn-primary" onClick={resetImport}>
@@ -658,7 +693,14 @@ export default function ImportPage() {
   );
 }
 
-function ImportQueueStatus({ files, currentIndex, isBatchImport, currentFile, message, autoImportAll }: ImportQueueStatusProps) {
+function ImportQueueStatus({
+  files,
+  currentIndex,
+  isBatchImport,
+  currentFile,
+  message,
+  autoImportAll,
+}: ImportQueueStatusProps) {
   if (!isBatchImport || !currentFile) return null;
 
   const currentLabel = currentFile.webkitRelativePath || currentFile.name;
@@ -667,14 +709,16 @@ function ImportQueueStatus({ files, currentIndex, isBatchImport, currentFile, me
   return (
     <div className="import-queue glass-card">
       <div className="import-queue__summary">
-        <strong>File {currentIndex + 1} of {files.length}</strong>
+        <strong>
+          File {currentIndex + 1} of {files.length}
+        </strong>
         <span>{currentLabel}</span>
         {message && <em>{message}</em>}
       </div>
       {nextFiles.length > 0 && (
         <div className="import-queue__next">
           <span>{autoImportAll ? 'Auto importing' : 'Next up'}</span>
-          {nextFiles.map(file => (
+          {nextFiles.map((file) => (
             <small key={file.webkitRelativePath || file.name}>
               {file.webkitRelativePath || file.name}
             </small>
@@ -689,7 +733,8 @@ function BatchImportProgress({ state, message, onCancel, onReset }: BatchImportP
   const total = state.total || 0;
   const completed = Math.min(state.completedFiles || 0, total);
   const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-  const currentLabel = state.currentFile?.webkitRelativePath || state.currentFile?.name || 'Preparing import';
+  const currentLabel =
+    state.currentFile?.webkitRelativePath || state.currentFile?.name || 'Preparing import';
   const hasError = state.status === 'error';
   const cancelled = state.status === 'cancelled';
 
@@ -697,10 +742,18 @@ function BatchImportProgress({ state, message, onCancel, onReset }: BatchImportP
     <div className="batch-import glass-card">
       <div className="batch-import__header">
         <div>
-          <h2>{hasError ? 'Batch Import Paused' : cancelled ? 'Batch Import Stopped' : 'Importing Files'}</h2>
+          <h2>
+            {hasError
+              ? 'Batch Import Paused'
+              : cancelled
+                ? 'Batch Import Stopped'
+                : 'Importing Files'}
+          </h2>
           <p>{hasError ? state.error : message || currentLabel}</p>
         </div>
-        <strong>{completed} / {total}</strong>
+        <strong>
+          {completed} / {total}
+        </strong>
       </div>
 
       <div className="batch-import__bar" aria-label="Import progress">
@@ -781,7 +834,7 @@ function ImportHistoryFolder({
     <details
       className={`import-history__folder import-history__depth-${depth}`}
       open={open}
-      onToggle={event => {
+      onToggle={(event) => {
         if (!forceOpen) setExpanded(event.currentTarget.open);
       }}
       data-folder-id={id}
@@ -825,9 +878,9 @@ function ImportHistory({
     [imports, normalizedSearch],
   );
   const groups = useMemo(() => groupImportHistory(filteredImports), [filteredImports]);
-  const committedImports = filteredImports.filter(item => item.status === 'committed');
-  const reimportableImports = filteredImports.filter(item =>
-    item.status === 'unimported' && item.unresolvedSourceAccountCount === 0
+  const committedImports = filteredImports.filter((item) => item.status === 'committed');
+  const reimportableImports = filteredImports.filter(
+    (item) => item.status === 'unimported' && item.unresolvedSourceAccountCount === 0,
   );
   const hasSearch = normalizedSearch.length > 0;
 
@@ -835,7 +888,9 @@ function ImportHistory({
     <section className="import-history" aria-busy={loading}>
       <div className="import-history__header">
         <h3>Import history</h3>
-        <button className="btn btn--text btn--sm" onClick={() => setBrowseAll(!browseAll)}>{browseAll ? 'Recent imports' : 'Browse by account'}</button>
+        <button className="btn btn--text btn--sm" onClick={() => setBrowseAll(!browseAll)}>
+          {browseAll ? 'Recent imports' : 'Browse by account'}
+        </button>
       </div>
 
       <div className="import-history__toolbar">
@@ -844,31 +899,40 @@ function ImportHistory({
           <input
             type="search"
             value={searchTerm}
-            onChange={event => setSearchTerm(event.target.value)}
+            onChange={(event) => setSearchTerm(event.target.value)}
             placeholder="Search imports"
             aria-label="Search imports"
           />
         </label>
-        {browseAll && <details><summary>Manage imports</summary><div className="import-history__bulk-actions">
-          <button
-            type="button"
-            className="btn btn-secondary import-history__bulk-btn"
-            onClick={() => onBulkUnimport(committedImports)}
-            disabled={bulkAction !== null || committedImports.length === 0}
-          >
-            <Trash2 size={16} />
-            {bulkAction === 'unimport' ? 'Unimporting...' : `Unimport All${committedImports.length ? ` (${committedImports.length})` : ''}`}
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary import-history__bulk-btn"
-            onClick={() => onBulkReimport(reimportableImports)}
-            disabled={bulkAction !== null || reimportableImports.length === 0}
-          >
-            <RotateCcw size={16} />
-            {bulkAction === 'reimport' ? 'Reimporting...' : `Reimport All${reimportableImports.length ? ` (${reimportableImports.length})` : ''}`}
-          </button>
-        </div></details>}
+        {browseAll && (
+          <details>
+            <summary>Manage imports</summary>
+            <div className="import-history__bulk-actions">
+              <button
+                type="button"
+                className="btn btn-secondary import-history__bulk-btn"
+                onClick={() => onBulkUnimport(committedImports)}
+                disabled={bulkAction !== null || committedImports.length === 0}
+              >
+                <Trash2 size={16} />
+                {bulkAction === 'unimport'
+                  ? 'Unimporting...'
+                  : `Unimport All${committedImports.length ? ` (${committedImports.length})` : ''}`}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary import-history__bulk-btn"
+                onClick={() => onBulkReimport(reimportableImports)}
+                disabled={bulkAction !== null || reimportableImports.length === 0}
+              >
+                <RotateCcw size={16} />
+                {bulkAction === 'reimport'
+                  ? 'Reimporting...'
+                  : `Reimport All${reimportableImports.length ? ` (${reimportableImports.length})` : ''}`}
+              </button>
+            </div>
+          </details>
+        )}
       </div>
 
       {error && <div className="import-history__error">{error}</div>}
@@ -884,31 +948,90 @@ function ImportHistory({
         <div className="import-history__empty">No imports match "{searchTerm}".</div>
       ) : !browseAll ? (
         <div className="recent-imports">
-          {filteredImports.slice(0, recentLimit).map(item => <details className="recent-import" key={item.id}>
-            <summary>
-              <span><strong>{item.accounts.map(account => account.name || 'Unmapped account').join(', ') || item.institution || 'Imported file'}</strong>
-                <small>{[...new Set(item.accounts.map(account => account.accountHolder).filter(Boolean))].join(', ')} · {item.sourceKind === 'statements' ? 'Statement' : item.sourceKind === 'activity' ? 'Activity' : 'Import'}{item.coveredFrom && item.coveredTo ? ` · ${item.coveredFrom} – ${item.coveredTo}` : ''}</small></span>
-              <span>{formatImportStatus(item.status)}<small>{formatImportDate(item.committedAt || item.createdAt)}</small></span>
-              <ChevronRight size={15} />
-            </summary>
-            <div className="recent-import__details">
-              <p>{item.transactionCount.toLocaleString()} transactions · {item.balanceCount.toLocaleString()} balances represented in your ledger</p>
-              <p>{item.fileName}</p>
-              {item.status === 'committed' && <button className="btn btn-secondary btn--sm" disabled={bulkAction !== null || unimportingId === item.id} onClick={() => onUnimport(item)}>Unimport file</button>}
-              {item.status === 'unimported' && <button className="btn btn-secondary btn--sm" disabled={bulkAction !== null || reimportingId === item.id || item.unresolvedSourceAccountCount > 0} onClick={() => onReimport(item)}>Reimport file</button>}
-            </div>
-          </details>)}
-          {filteredImports.length > recentLimit && <button className="btn btn--text" onClick={() => setRecentLimit(recentLimit + 20)}>Show more imports</button>}
+          {filteredImports.slice(0, recentLimit).map((item) => (
+            <details className="recent-import" key={item.id}>
+              <summary>
+                <span>
+                  <strong>
+                    {item.accounts
+                      .map((account) => account.name || 'Unmapped account')
+                      .join(', ') ||
+                      item.institution ||
+                      'Imported file'}
+                  </strong>
+                  <small>
+                    {[
+                      ...new Set(
+                        item.accounts.map((account) => account.accountHolder).filter(Boolean),
+                      ),
+                    ].join(', ')}{' '}
+                    ·{' '}
+                    {item.sourceKind === 'statements'
+                      ? 'Statement'
+                      : item.sourceKind === 'activity'
+                        ? 'Activity'
+                        : 'Import'}
+                    {item.coveredFrom && item.coveredTo
+                      ? ` · ${item.coveredFrom} – ${item.coveredTo}`
+                      : ''}
+                  </small>
+                </span>
+                <span>
+                  {formatImportStatus(item.status)}
+                  <small>{formatImportDate(item.committedAt || item.createdAt)}</small>
+                </span>
+                <ChevronRight size={15} />
+              </summary>
+              <div className="recent-import__details">
+                <p>
+                  {item.transactionCount.toLocaleString()} transactions ·{' '}
+                  {item.balanceCount.toLocaleString()} balances represented in your ledger
+                </p>
+                <p>{item.fileName}</p>
+                {item.status === 'committed' && (
+                  <button
+                    className="btn btn-secondary btn--sm"
+                    disabled={bulkAction !== null || unimportingId === item.id}
+                    onClick={() => onUnimport(item)}
+                  >
+                    Unimport file
+                  </button>
+                )}
+                {item.status === 'unimported' && (
+                  <button
+                    className="btn btn-secondary btn--sm"
+                    disabled={
+                      bulkAction !== null ||
+                      reimportingId === item.id ||
+                      item.unresolvedSourceAccountCount > 0
+                    }
+                    onClick={() => onReimport(item)}
+                  >
+                    Reimport file
+                  </button>
+                )}
+              </div>
+            </details>
+          ))}
+          {filteredImports.length > recentLimit && (
+            <button className="btn btn--text" onClick={() => setRecentLimit(recentLimit + 20)}>
+              Show more imports
+            </button>
+          )}
         </div>
       ) : (
         <div className="import-history__tree-wrap">
           {hasSearch && (
             <div className="import-history__result-count">
-              Showing {filteredImports.length.toLocaleString()} of {imports.length.toLocaleString()} files
+              Showing {filteredImports.length.toLocaleString()} of {imports.length.toLocaleString()}{' '}
+              files
             </div>
           )}
           <div className="import-history__tree">
-            <div className="import-history__tree-row import-history__tree-header" aria-hidden="true">
+            <div
+              className="import-history__tree-row import-history__tree-header"
+              aria-hidden="true"
+            >
               <span>Owner / account / file</span>
               <span>Status</span>
               <span className="num">Transactions</span>
@@ -916,7 +1039,7 @@ function ImportHistory({
               <span>Imported</span>
               <span />
             </div>
-            {groups.map(holder => (
+            {groups.map((holder) => (
               <ImportHistoryFolder
                 key={holder.id}
                 id={holder.id}
@@ -924,74 +1047,101 @@ function ImportHistory({
                 summary={holder.summary}
                 depth={0}
                 forceOpen={hasSearch}
-                renderChildren={() => holder.accounts.map(account => (
-                  <ImportHistoryFolder
-                    key={account.id}
-                    id={account.id}
-                    label={account.label}
-                    summary={account.summary}
-                    depth={1}
-                    forceOpen={hasSearch}
-                    renderChildren={() => account.sources.map(source => (
-                      <ImportHistoryFolder
-                        key={source.id}
-                        id={source.id}
-                        label={source.label}
-                        summary={source.summary}
-                        depth={2}
-                        forceOpen={hasSearch}
-                        renderChildren={() => source.imports.map(item => {
-                          const committed = item.status === 'committed';
-                          const unimported = item.status === 'unimported';
-                          const date = item.committedAt || item.createdAt;
-                          return (
-                            <div className="import-history__tree-row import-history__file-row" key={item.id}>
-                              <span className="import-history__tree-name import-history__file">
-                                <FileText size={15} aria-hidden="true" />
-                                <span>
-                                  <strong title={item.fileName}>{item.fileName}</strong>
-                                  <small>{item.institution || 'Unknown source'}</small>
-                                </span>
-                              </span>
-                              <span>
-                                <span className={`import-history__status ${committed ? 'committed' : ''}`}>
-                                  {formatImportStatus(item.status)}
-                                </span>
-                              </span>
-                              <span className="num">{(item.transactionCount || 0).toLocaleString()}</span>
-                              <span className="num">{(item.balanceCount || 0).toLocaleString()}</span>
-                              <span className="import-history__date">{formatImportDate(date)}</span>
-                              <span className="import-history__actions">
-                                {committed && (
-                                  <button
-                                    type="button"
-                                    className="icon-btn delete-btn"
-                                    title="Unimport file"
-                                    onClick={() => onUnimport(item)}
-                                    disabled={bulkAction !== null || unimportingId === item.id}
+                renderChildren={() =>
+                  holder.accounts.map((account) => (
+                    <ImportHistoryFolder
+                      key={account.id}
+                      id={account.id}
+                      label={account.label}
+                      summary={account.summary}
+                      depth={1}
+                      forceOpen={hasSearch}
+                      renderChildren={() =>
+                        account.sources.map((source) => (
+                          <ImportHistoryFolder
+                            key={source.id}
+                            id={source.id}
+                            label={source.label}
+                            summary={source.summary}
+                            depth={2}
+                            forceOpen={hasSearch}
+                            renderChildren={() =>
+                              source.imports.map((item) => {
+                                const committed = item.status === 'committed';
+                                const unimported = item.status === 'unimported';
+                                const date = item.committedAt || item.createdAt;
+                                return (
+                                  <div
+                                    className="import-history__tree-row import-history__file-row"
+                                    key={item.id}
                                   >
-                                    <Trash2 size={16} />
-                                  </button>
-                                )}
-                                {unimported && (
-                                  <button
-                                    type="button"
-                                    className="icon-btn"
-                                    title={item.unresolvedSourceAccountCount > 0 ? 'Resolve source accounts before reimporting' : 'Reimport file'}
-                                    onClick={() => onReimport(item)}
-                                    disabled={bulkAction !== null || reimportingId === item.id || item.unresolvedSourceAccountCount > 0}
-                                  >
-                                    <RotateCcw size={16} />
-                                  </button>
-                                )}
-                              </span>
-                            </div>
-                          );
-                        })}
-                      />
-                    ))}
-                  />
-                ))}
+                                    <span className="import-history__tree-name import-history__file">
+                                      <FileText size={15} aria-hidden="true" />
+                                      <span>
+                                        <strong title={item.fileName}>{item.fileName}</strong>
+                                        <small>{item.institution || 'Unknown source'}</small>
+                                      </span>
+                                    </span>
+                                    <span>
+                                      <span
+                                        className={`import-history__status ${committed ? 'committed' : ''}`}
+                                      >
+                                        {formatImportStatus(item.status)}
+                                      </span>
+                                    </span>
+                                    <span className="num">
+                                      {(item.transactionCount || 0).toLocaleString()}
+                                    </span>
+                                    <span className="num">
+                                      {(item.balanceCount || 0).toLocaleString()}
+                                    </span>
+                                    <span className="import-history__date">
+                                      {formatImportDate(date)}
+                                    </span>
+                                    <span className="import-history__actions">
+                                      {committed && (
+                                        <button
+                                          type="button"
+                                          className="icon-btn delete-btn"
+                                          title="Unimport file"
+                                          onClick={() => onUnimport(item)}
+                                          disabled={
+                                            bulkAction !== null || unimportingId === item.id
+                                          }
+                                        >
+                                          <Trash2 size={16} />
+                                        </button>
+                                      )}
+                                      {unimported && (
+                                        <button
+                                          type="button"
+                                          className="icon-btn"
+                                          title={
+                                            item.unresolvedSourceAccountCount > 0
+                                              ? 'Resolve source accounts before reimporting'
+                                              : 'Reimport file'
+                                          }
+                                          onClick={() => onReimport(item)}
+                                          disabled={
+                                            bulkAction !== null ||
+                                            reimportingId === item.id ||
+                                            item.unresolvedSourceAccountCount > 0
+                                          }
+                                        >
+                                          <RotateCcw size={16} />
+                                        </button>
+                                      )}
+                                    </span>
+                                  </div>
+                                );
+                              })
+                            }
+                          />
+                        ))
+                      }
+                    />
+                  ))
+                }
               />
             ))}
           </div>

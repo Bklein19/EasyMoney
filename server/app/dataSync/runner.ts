@@ -21,7 +21,8 @@ function artifactPath(outputDir: string, fileName: string): string {
   }
   const outputRoot = resolve(outputDir);
   const path = resolve(outputRoot, fileName);
-  if (dirname(path) !== outputRoot) throw new Error('Connector artifact escaped its output directory');
+  if (dirname(path) !== outputRoot)
+    throw new Error('Connector artifact escaped its output directory');
   return path;
 }
 
@@ -29,7 +30,7 @@ async function manifestEntry(
   plan: SyncExecutionPlan,
   artifact: RoutedSyncArtifact,
 ): Promise<SyncArtifactManifestEntry> {
-  const plannedAccountIds = new Set(plan.accounts.map(account => account.id));
+  const plannedAccountIds = new Set(plan.accounts.map((account) => account.id));
   const hasAccountId = typeof artifact.accountId === 'number';
   const hasAccountRoutes = Array.isArray(artifact.accountRoutes);
   const sourceRouting = 'routing' in artifact && artifact.routing === 'source';
@@ -45,9 +46,12 @@ async function manifestEntry(
   const remoteAccountIds = new Set<string>();
   for (const route of artifact.accountRoutes ?? []) {
     const remoteAccountId = route.remoteAccountId.trim();
-    if (!remoteAccountId) throw new Error('Connector account routes require a remote account identity');
+    if (!remoteAccountId)
+      throw new Error('Connector account routes require a remote account identity');
     if (remoteAccountIds.has(remoteAccountId)) {
-      throw new Error(`Connector account routes repeat remote account identity: ${remoteAccountId}`);
+      throw new Error(
+        `Connector account routes repeat remote account identity: ${remoteAccountId}`,
+      );
     }
     remoteAccountIds.add(remoteAccountId);
     if (route.accountId !== undefined && !plannedAccountIds.has(route.accountId)) {
@@ -88,7 +92,7 @@ export async function runSyncExecutionPlan(
       report(event);
     },
   });
-  const fileNames = artifacts.map(artifact => artifact.fileName);
+  const fileNames = artifacts.map((artifact) => artifact.fileName);
   if (new Set(fileNames).size !== fileNames.length) {
     throw new Error('Connector returned the same artifact more than once');
   }
@@ -96,6 +100,6 @@ export async function runSyncExecutionPlan(
     protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
     runId: plan.runId,
     institutionId: plan.institutionId,
-    artifacts: await Promise.all(artifacts.map(artifact => manifestEntry(plan, artifact))),
+    artifacts: await Promise.all(artifacts.map((artifact) => manifestEntry(plan, artifact))),
   };
 }

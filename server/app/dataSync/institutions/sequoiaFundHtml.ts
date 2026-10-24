@@ -16,7 +16,8 @@ function decodedHtmlText(value: string): string {
     const hexadecimal = entity[1]?.toLowerCase() === 'x';
     const digits = entity.slice(hexadecimal ? 2 : 1);
     const codePoint = Number.parseInt(digits, hexadecimal ? 16 : 10);
-    if (!Number.isSafeInteger(codePoint) || codePoint <= 0 || codePoint > 0x10ffff) return reference;
+    if (!Number.isSafeInteger(codePoint) || codePoint <= 0 || codePoint > 0x10ffff)
+      return reference;
     try {
       return String.fromCodePoint(codePoint);
     } catch {
@@ -35,7 +36,7 @@ function uniqueValue(target: string[], value: string): void {
 
 export function parseSequoiaFundStatementHtml(html: string): SequoiaFundStatementHtml {
   const scriptTokens = [...html.matchAll(/\bactiveCSRFtoken\s*=\s*(['"])(.*?)\1/gi)]
-    .map(match => decodedHtmlText(match[2] ?? '').trim())
+    .map((match) => decodedHtmlText(match[2] ?? '').trim())
     .filter(Boolean);
   const inputTokens: string[] = [];
   const metaTokens: string[] = [];

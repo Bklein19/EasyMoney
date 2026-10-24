@@ -1,18 +1,10 @@
-import React, { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import "./ReportPages.css";
-import { trpc } from "../../api/trpc";
+import React, { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import './ReportPages.css';
+import { trpc } from '../../api/trpc';
 
-type Period = "month" | "quarter" | "year";
+type Period = 'month' | 'quarter' | 'year';
 
 interface SavingsRateMonthlyRow {
   month: string;
@@ -58,7 +50,11 @@ interface SavingsRateReport {
 
 // Mirror of the server's periodAllocation: poof/net_retained are non-additive across
 // accounts, so we recompute them after summing the selected accounts' components.
-function periodAllocation(income_cents: number, investment_delta_cents: number, cash_delta_cents: number) {
+function periodAllocation(
+  income_cents: number,
+  investment_delta_cents: number,
+  cash_delta_cents: number,
+) {
   const net_retained_cents = investment_delta_cents + cash_delta_cents;
   return {
     investment_change_cents: investment_delta_cents,
@@ -84,40 +80,48 @@ interface PeriodRow {
 }
 
 const fmtUsd = (v: number) =>
-  v.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  v.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 
 const fmtPct = (v: number | null) =>
   v === null
-    ? "—"
-    : v.toLocaleString("en-US", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    ? '—'
+    : v.toLocaleString('en-US', {
+        style: 'percent',
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+      });
 
 const fmtUsdAxis = (v: number) =>
   Math.abs(v) >= 999_500
-    ? `$${(v / 1_000_000).toFixed(Math.abs(v) >= 10_000_000 ? 0 : 1).replace(/\.0$/, "")}M`
+    ? `$${(v / 1_000_000).toFixed(Math.abs(v) >= 10_000_000 ? 0 : 1).replace(/\.0$/, '')}M`
     : Math.abs(v) >= 1000
       ? `$${(v / 1000).toFixed(0)}k`
       : `$${v.toFixed(0)}`;
 
-const retainedColor = "var(--series-retained)";
-const poofColor = "var(--series-poof)";
+const retainedColor = 'var(--series-retained)';
+const poofColor = 'var(--series-poof)';
 const chartTheme = {
-  axis: "var(--chart-axis)",
-  grid: "var(--chart-grid)",
-  tooltipContent: { background: "var(--tooltip-bg)", border: "1px solid var(--tooltip-border)", borderRadius: 8 },
-  tooltipLabel: { color: "var(--text-muted)" },
+  axis: 'var(--chart-axis)',
+  grid: 'var(--chart-grid)',
+  tooltipContent: {
+    background: 'var(--tooltip-bg)',
+    border: '1px solid var(--tooltip-border)',
+    borderRadius: 8,
+  },
+  tooltipLabel: { color: 'var(--text-muted)' },
 };
 
 const periodKey = (month: string, period: Period) => {
-  if (period === "month") return month;
+  if (period === 'month') return month;
   const year = month.slice(0, 4);
-  if (period === "year") return year;
+  if (period === 'year') return year;
   return `${year} Q${Math.ceil(Number(month.slice(5, 7)) / 3)}`;
 };
 
 export function SavingsRatePage({ selectedIds: selectedIdsProp }: { selectedIds?: Set<number> }) {
   const reportQuery = useQuery(trpc.reports.savingsRate.queryOptions());
   const report = (reportQuery.data || null) as SavingsRateReport | null;
-  const [period, setPeriod] = useState<Period>("year");
+  const [period, setPeriod] = useState<Period>('year');
 
   const allAccountIds = useMemo(
     () => new Set(report?.account_months.map((row) => row.account_id) ?? []),
@@ -129,7 +133,10 @@ export function SavingsRatePage({ selectedIds: selectedIdsProp }: { selectedIds?
   // accounts, then run the (non-additive) savings-rate allocation per month.
   const monthlyRows = useMemo<SavingsRateMonthlyRow[]>(() => {
     if (!report) return [];
-    const byMonth = new Map<string, { income: number; market: number; inv: number; cash: number }>();
+    const byMonth = new Map<
+      string,
+      { income: number; market: number; inv: number; cash: number }
+    >();
     for (const am of report.account_months) {
       if (!selectedIds.has(am.account_id)) continue;
       const m = byMonth.get(am.month) ?? { income: 0, market: 0, inv: 0, cash: 0 };
@@ -191,7 +198,12 @@ export function SavingsRatePage({ selectedIds: selectedIdsProp }: { selectedIds?
     const byLabel = new Map<string, SavingsRateIncomeSource>();
     for (const s of report.account_sources) {
       if (!selectedIds.has(s.account_id)) continue;
-      const existing = byLabel.get(s.label) ?? { label: s.label, amount_cents: 0, count: 0, is_market_income: s.is_market_income };
+      const existing = byLabel.get(s.label) ?? {
+        label: s.label,
+        amount_cents: 0,
+        count: 0,
+        is_market_income: s.is_market_income,
+      };
       existing.amount_cents += s.amount_cents;
       existing.count += s.count;
       existing.is_market_income = existing.is_market_income || s.is_market_income;
@@ -220,22 +232,39 @@ export function SavingsRatePage({ selectedIds: selectedIdsProp }: { selectedIds?
     };
   }, [rows]);
 
-  if (reportQuery.error) return <div className="page page-wide"><div className="meta import-error">{String(reportQuery.error)}</div></div>;
-  if (!report) return <div className="page page-wide"><div className="empty-state">Loading…</div></div>;
+  if (reportQuery.error)
+    return (
+      <div className="page page-wide">
+        <div className="meta import-error">{String(reportQuery.error)}</div>
+      </div>
+    );
+  if (!report)
+    return (
+      <div className="page page-wide">
+        <div className="empty-state">Loading…</div>
+      </div>
+    );
 
   return (
     <div className="page page-savings-rate">
       <div className="page__header report-page__header">
         <div>
           <h1 className="page__title">Savings Rate</h1>
-          <p className="page__subtitle">Income excluding investment income, split into retained wealth and spending.</p>
+          <p className="page__subtitle">
+            Income excluding investment income, split into retained wealth and spending.
+          </p>
         </div>
       </div>
 
       <div className="report-toolbar">
         <div className="segmented-control" role="group" aria-label="Savings rate period">
-          {(["month", "quarter", "year"] as const).map((p) => (
-            <button key={p} type="button" className={period === p ? "active" : ""} onClick={() => setPeriod(p)}>
+          {(['month', 'quarter', 'year'] as const).map((p) => (
+            <button
+              key={p}
+              type="button"
+              className={period === p ? 'active' : ''}
+              onClick={() => setPeriod(p)}
+            >
               {p}
             </button>
           ))}
@@ -270,7 +299,7 @@ export function SavingsRatePage({ selectedIds: selectedIdsProp }: { selectedIds?
           <BarChart
             data={rows}
             stackOffset="sign"
-            barCategoryGap={period === "month" ? "18%" : "32%"}
+            barCategoryGap={period === 'month' ? '18%' : '32%'}
             barGap={3}
             margin={{ top: 8, right: 24, bottom: 8, left: 8 }}
           >
@@ -282,14 +311,28 @@ export function SavingsRatePage({ selectedIds: selectedIdsProp }: { selectedIds?
               contentStyle={chartTheme.tooltipContent}
               labelStyle={chartTheme.tooltipLabel}
             />
-            <Bar dataKey="retainedPositive" name="Net retained" stackId="flow" fill={retainedColor} />
+            <Bar
+              dataKey="retainedPositive"
+              name="Net retained"
+              stackId="flow"
+              fill={retainedColor}
+            />
             <Bar dataKey="poofOut" name="Poof" stackId="flow" fill={poofColor} />
-            <Bar dataKey="retainedNegative" name="Net retained" stackId="flow" fill={retainedColor} />
+            <Bar
+              dataKey="retainedNegative"
+              name="Net retained"
+              stackId="flow"
+              fill={retainedColor}
+            />
           </BarChart>
         </ResponsiveContainer>
         <div className="returns-account-legend">
-          <div className="returns-account-legend-item"><span style={{ background: retainedColor }} /> Net retained</div>
-          <div className="returns-account-legend-item"><span style={{ background: poofColor }} /> Poof</div>
+          <div className="returns-account-legend-item">
+            <span style={{ background: retainedColor }} /> Net retained
+          </div>
+          <div className="returns-account-legend-item">
+            <span style={{ background: poofColor }} /> Poof
+          </div>
         </div>
       </div>
 
@@ -320,7 +363,9 @@ export function SavingsRatePage({ selectedIds: selectedIdsProp }: { selectedIds?
                     <td className="num">{fmtUsd(row.investment)}</td>
                     <td className="num">{fmtUsd(row.cash)}</td>
                     <td className="num">{fmtUsd(row.poof)}</td>
-                    <td className="num return-rate">{fmtPct(row.income > 0 ? row.retained / row.income : null)}</td>
+                    <td className="num return-rate">
+                      {fmtPct(row.income > 0 ? row.retained / row.income : null)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -343,7 +388,7 @@ export function SavingsRatePage({ selectedIds: selectedIdsProp }: { selectedIds?
                 {incomeSources.slice(0, 12).map((source) => (
                   <tr key={source.label}>
                     <td>{source.label}</td>
-                    <td>{source.is_market_income ? "Investment" : "Income"}</td>
+                    <td>{source.is_market_income ? 'Investment' : 'Income'}</td>
                     <td className="num">{source.count}</td>
                     <td className="num">{fmtUsd(source.amount_cents / 100)}</td>
                   </tr>

@@ -9,10 +9,10 @@ interface EmptyStateProps {
 }
 
 const EmptyState = ({
-  icon: Icon = Search, 
-  title = 'No results found', 
-  description = 'Try adjusting your search or filters.', 
-  action 
+  icon: Icon = Search,
+  title = 'No results found',
+  description = 'Try adjusting your search or filters.',
+  action,
 }: EmptyStateProps) => {
   return (
     <div className="empty-state">

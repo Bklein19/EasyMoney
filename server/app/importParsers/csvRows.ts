@@ -5,13 +5,16 @@ export function parseCsvRows(text: string): string[][] {
     header: false,
     skipEmptyLines: true,
   });
-  const fatalError = result.errors.find(error => error.type !== 'FieldMismatch');
+  const fatalError = result.errors.find((error) => error.type !== 'FieldMismatch');
   if (fatalError) throw new Error(fatalError.message);
   return result.data;
 }
 
 export function normalizedHeader(value = '') {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }
 
 export function rowRecord(headers: string[], row: string[]) {

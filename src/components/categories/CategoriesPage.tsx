@@ -2,8 +2,16 @@ import { Fragment, useMemo, useState, type FormEvent } from 'react';
 import { Check, ChevronRight, Trash2 } from 'lucide-react';
 import { useSearchParams } from 'react-router';
 import { useCategories } from '../../hooks/useCategories';
-import { CATEGORY_GROUP_LABELS, CATEGORY_GROUPS, categoryGroupKey } from '../../utils/categoryGroups';
-import { categoryPath, categoryPathLabel, compareCategoryPaths } from '../../utils/categoryHierarchy';
+import {
+  CATEGORY_GROUP_LABELS,
+  CATEGORY_GROUPS,
+  categoryGroupKey,
+} from '../../utils/categoryGroups';
+import {
+  categoryPath,
+  categoryPathLabel,
+  compareCategoryPaths,
+} from '../../utils/categoryHierarchy';
 import './CategoriesPage.css';
 
 interface Category {
@@ -25,11 +33,19 @@ interface CategoryChanges {
   description: string | null;
 }
 
-const CATEGORY_TYPES = ['expense', 'income', 'transfer', 'internal_transfer', 'investment'] as const;
+const CATEGORY_TYPES = [
+  'expense',
+  'income',
+  'transfer',
+  'internal_transfer',
+  'investment',
+] as const;
 
 function labelFor(value: string | null | undefined, labels: Record<string, string> = {}) {
   if (!value) return 'None';
-  return labels[value] ?? value.replace(/[_-]+/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+  return (
+    labels[value] ?? value.replace(/[_-]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase())
+  );
 }
 
 function CategoryDetails({
@@ -61,15 +77,29 @@ function CategoryDetails({
   const [name, setName] = useState(category.name);
   const [type, setType] = useState(category.type || '');
   const [group, setGroup] = useState(category.categoryGroup || '');
-  const [parentId, setParentId] = useState(category.parentId == null ? '' : String(category.parentId));
+  const [parentId, setParentId] = useState(
+    category.parentId == null ? '' : String(category.parentId),
+  );
   const currentDescription = category.description || '';
-  const isDirty = isNew || description.trim() !== currentDescription || name.trim() !== category.name || type !== (category.type || '') || group !== (category.categoryGroup || '') || parentId !== (category.parentId == null ? '' : String(category.parentId));
+  const isDirty =
+    isNew ||
+    description.trim() !== currentDescription ||
+    name.trim() !== category.name ||
+    type !== (category.type || '') ||
+    group !== (category.categoryGroup || '') ||
+    parentId !== (category.parentId == null ? '' : String(category.parentId));
   const isProtected = category.name === 'Uncategorized';
   const canDelete = !isNew && !isProtected;
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    onSave({ name: name.trim(), parentId: parentId ? Number(parentId) : null, type: type || null, categoryGroup: group || null, description: description.trim() || null });
+    onSave({
+      name: name.trim(),
+      parentId: parentId ? Number(parentId) : null,
+      type: type || null,
+      categoryGroup: group || null,
+      description: description.trim() || null,
+    });
   };
 
   return (
@@ -77,34 +107,82 @@ function CategoryDetails({
       <form className="category-meta-form" onSubmit={submit}>
         <div className="category-field">
           <label htmlFor={`category-name-${category.id}`}>Name</label>
-          <input id={`category-name-${category.id}`} required value={name} disabled={isSaving || isProtected} onChange={event => setName(event.target.value)} placeholder="e.g. Gifts received" />
+          <input
+            id={`category-name-${category.id}`}
+            required
+            value={name}
+            disabled={isSaving || isProtected}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="e.g. Gifts received"
+          />
         </div>
         <div className="category-field">
           <label htmlFor={`category-type-${category.id}`}>Type</label>
-          <select id={`category-type-${category.id}`} value={type} disabled={isSaving || isProtected} onChange={event => setType(event.target.value)}>
+          <select
+            id={`category-type-${category.id}`}
+            value={type}
+            disabled={isSaving || isProtected}
+            onChange={(event) => setType(event.target.value)}
+          >
             <option value="">None</option>
-            {type && !CATEGORY_TYPES.some(value => value === type) && <option value={type}>{labelFor(type)}</option>}
-            {CATEGORY_TYPES.map(value => <option key={value} value={value}>{labelFor(value)}</option>)}
+            {type && !CATEGORY_TYPES.some((value) => value === type) && (
+              <option value={type}>{labelFor(type)}</option>
+            )}
+            {CATEGORY_TYPES.map((value) => (
+              <option key={value} value={value}>
+                {labelFor(value)}
+              </option>
+            ))}
           </select>
         </div>
         <div className="category-field">
           <label htmlFor={`category-group-${category.id}`}>Group</label>
-          <select id={`category-group-${category.id}`} value={group} disabled={isSaving} onChange={event => setGroup(event.target.value)}>
+          <select
+            id={`category-group-${category.id}`}
+            value={group}
+            disabled={isSaving}
+            onChange={(event) => setGroup(event.target.value)}
+          >
             <option value="">None</option>
-            {group && !CATEGORY_GROUPS.some(value => value.key === group) && <option value={group}>{labelFor(group)}</option>}
-            {CATEGORY_GROUPS.map(value => <option key={value.key} value={value.key}>{value.label}</option>)}
+            {group && !CATEGORY_GROUPS.some((value) => value.key === group) && (
+              <option value={group}>{labelFor(group)}</option>
+            )}
+            {CATEGORY_GROUPS.map((value) => (
+              <option key={value.key} value={value.key}>
+                {value.label}
+              </option>
+            ))}
           </select>
         </div>
         <div className="category-field">
           <label htmlFor={`category-parent-${category.id}`}>Parent category</label>
-          <select id={`category-parent-${category.id}`} value={parentId} disabled={isSaving || isProtected} onChange={event => setParentId(event.target.value)}>
+          <select
+            id={`category-parent-${category.id}`}
+            value={parentId}
+            disabled={isSaving || isProtected}
+            onChange={(event) => setParentId(event.target.value)}
+          >
             <option value="">None (top level)</option>
-            {categories.filter(candidate => !categoryPath(candidate, categories).some(ancestor => ancestor.id === category.id))
+            {categories
+              .filter(
+                (candidate) =>
+                  !categoryPath(candidate, categories).some(
+                    (ancestor) => ancestor.id === category.id,
+                  ),
+              )
               .sort((a, b) => compareCategoryPaths(a, b, categories))
-              .map(candidate => <option key={candidate.id} value={candidate.id}>{categoryPathLabel(candidate, categories)}</option>)}
+              .map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {categoryPathLabel(candidate, categories)}
+                </option>
+              ))}
           </select>
         </div>
-        <p className="category-form-help">Parent organizes subcategories; Type controls reporting, and Group organizes budgeting. Income subcategories should use Income as their type, group, and parent. Changing a type affects transactions already in this category.</p>
+        <p className="category-form-help">
+          Parent organizes subcategories; Type controls reporting, and Group organizes budgeting.
+          Income subcategories should use Income as their type, group, and parent. Changing a type
+          affects transactions already in this category.
+        </p>
         <div className="category-field category-field--wide">
           <label htmlFor={`category-description-${category.id}`}>Description</label>
           <textarea
@@ -125,10 +203,23 @@ function CategoryDetails({
             <Check size={14} />
             {isSaving ? 'Saving...' : isNew ? 'Create category' : 'Save'}
           </button>
-          {isNew && <button className="btn btn--ghost btn--sm" type="button" disabled={isSaving} onClick={onCancelDelete}>Cancel</button>}
-          {canDelete && (
-            isConfirmingDelete ? (
-              <div className="category-delete-confirm" role="group" aria-label={`Confirm deleting ${category.name}`}>
+          {isNew && (
+            <button
+              className="btn btn--ghost btn--sm"
+              type="button"
+              disabled={isSaving}
+              onClick={onCancelDelete}
+            >
+              Cancel
+            </button>
+          )}
+          {canDelete &&
+            (isConfirmingDelete ? (
+              <div
+                className="category-delete-confirm"
+                role="group"
+                aria-label={`Confirm deleting ${category.name}`}
+              >
                 <span>Move annotations to Uncategorized and delete?</span>
                 <button
                   className="btn btn--danger btn--sm"
@@ -157,8 +248,7 @@ function CategoryDetails({
                 <Trash2 size={14} />
                 Delete
               </button>
-            )
-          )}
+            ))}
         </div>
         {error && <div className="category-details-error">{error}</div>}
       </form>
@@ -177,20 +267,27 @@ export default function CategoriesPage() {
   const [errorByCategoryId, setErrorByCategoryId] = useState<Record<number, string>>({});
 
   const selectedGroup = searchParams.get('group') || '';
-  const selectedGroupLabel = CATEGORY_GROUPS.find(group => group.key === selectedGroup)?.label ?? '';
+  const selectedGroupLabel =
+    CATEGORY_GROUPS.find((group) => group.key === selectedGroup)?.label ?? '';
   const sortedCategories = useMemo(
-    () => [...categories]
-      .filter((category: Category) => !selectedGroup || categoryGroupKey(category.categoryGroup) === selectedGroup)
-      .sort((a: Category, b: Category) =>
-        labelFor(a.categoryGroup, CATEGORY_GROUP_LABELS).localeCompare(labelFor(b.categoryGroup, CATEGORY_GROUP_LABELS)) ||
-        compareCategoryPaths(a, b, categories)
-      ),
-    [categories, selectedGroup]
+    () =>
+      [...categories]
+        .filter(
+          (category: Category) =>
+            !selectedGroup || categoryGroupKey(category.categoryGroup) === selectedGroup,
+        )
+        .sort(
+          (a: Category, b: Category) =>
+            labelFor(a.categoryGroup, CATEGORY_GROUP_LABELS).localeCompare(
+              labelFor(b.categoryGroup, CATEGORY_GROUP_LABELS),
+            ) || compareCategoryPaths(a, b, categories),
+        ),
+    [categories, selectedGroup],
   );
 
   const saveCategory = async (category: Category, changes: CategoryChanges) => {
     setSavingCategoryId(category.id);
-    setErrorByCategoryId(current => ({ ...current, [category.id]: '' }));
+    setErrorByCategoryId((current) => ({ ...current, [category.id]: '' }));
     try {
       if (category.id === 0) {
         await addCategory({ ...changes });
@@ -199,9 +296,10 @@ export default function CategoriesPage() {
         await updateCategory(category.id, { ...changes });
       }
     } catch (saveError) {
-      setErrorByCategoryId(current => ({
+      setErrorByCategoryId((current) => ({
         ...current,
-        [category.id]: saveError instanceof Error ? saveError.message : 'Could not update category.',
+        [category.id]:
+          saveError instanceof Error ? saveError.message : 'Could not update category.',
       }));
     } finally {
       setSavingCategoryId(null);
@@ -210,15 +308,16 @@ export default function CategoriesPage() {
 
   const removeCategory = async (category: Category) => {
     setDeletingCategoryId(category.id);
-    setErrorByCategoryId(current => ({ ...current, [category.id]: '' }));
+    setErrorByCategoryId((current) => ({ ...current, [category.id]: '' }));
     try {
       await deleteCategory(category.id);
-      setExpandedCategoryId(current => current === category.id ? null : current);
-      setConfirmingDeleteCategoryId(current => current === category.id ? null : current);
+      setExpandedCategoryId((current) => (current === category.id ? null : current));
+      setConfirmingDeleteCategoryId((current) => (current === category.id ? null : current));
     } catch (deleteError) {
-      setErrorByCategoryId(current => ({
+      setErrorByCategoryId((current) => ({
         ...current,
-        [category.id]: deleteError instanceof Error ? deleteError.message : 'Could not delete category.',
+        [category.id]:
+          deleteError instanceof Error ? deleteError.message : 'Could not delete category.',
       }));
     } finally {
       setDeletingCategoryId(null);
@@ -233,16 +332,49 @@ export default function CategoriesPage() {
             Categories <span className="categories-page__count">{sortedCategories.length}</span>
           </h1>
           <p className="page__subtitle">
-            {selectedGroupLabel ? `${selectedGroupLabel} categories.` : 'Organize income and spending. Descriptions also guide categorization.'}
+            {selectedGroupLabel
+              ? `${selectedGroupLabel} categories.`
+              : 'Organize income and spending. Descriptions also guide categorization.'}
           </p>
         </div>
-        <button className="btn btn--primary" type="button" disabled={isCreating} onClick={() => { setErrorByCategoryId(current => ({ ...current, 0: '' })); setIsCreating(true); }}>New category</button>
+        <button
+          className="btn btn--primary"
+          type="button"
+          disabled={isCreating}
+          onClick={() => {
+            setErrorByCategoryId((current) => ({ ...current, 0: '' }));
+            setIsCreating(true);
+          }}
+        >
+          New category
+        </button>
       </header>
 
-      {isCreating && <section aria-label="New category">
-        <h2>New category</h2>
-        <CategoryDetails categories={categories} category={{ id: 0, name: '', type: selectedGroup === 'income' ? 'income' : 'expense', categoryGroup: selectedGroup || null }} isNew isSaving={savingCategoryId === 0} isDeleting={false} isConfirmingDelete={false} error={errorByCategoryId[0]} onSave={changes => saveCategory({ id: 0, name: '', type: null, categoryGroup: null }, changes)} onCancelDelete={() => setIsCreating(false)} onRequestDelete={() => {}} onConfirmDelete={() => {}} />
-      </section>}
+      {isCreating && (
+        <section aria-label="New category">
+          <h2>New category</h2>
+          <CategoryDetails
+            categories={categories}
+            category={{
+              id: 0,
+              name: '',
+              type: selectedGroup === 'income' ? 'income' : 'expense',
+              categoryGroup: selectedGroup || null,
+            }}
+            isNew
+            isSaving={savingCategoryId === 0}
+            isDeleting={false}
+            isConfirmingDelete={false}
+            error={errorByCategoryId[0]}
+            onSave={(changes) =>
+              saveCategory({ id: 0, name: '', type: null, categoryGroup: null }, changes)
+            }
+            onCancelDelete={() => setIsCreating(false)}
+            onRequestDelete={() => {}}
+            onConfirmDelete={() => {}}
+          />
+        </section>
+      )}
 
       <div className="categories-table-wrap">
         {isLoading ? (
@@ -279,7 +411,13 @@ export default function CategoriesPage() {
                       onClick={() => setExpandedCategoryId(isExpanded ? null : category.id)}
                     >
                       <td>
-                        <div className="category-row__name" style={{ paddingLeft: (categoryPath(category, categories).length - 1) * 18 }} title={categoryPathLabel(category, categories)}>
+                        <div
+                          className="category-row__name"
+                          style={{
+                            paddingLeft: (categoryPath(category, categories).length - 1) * 18,
+                          }}
+                          title={categoryPathLabel(category, categories)}
+                        >
                           <span
                             className="category-swatch"
                             style={{ backgroundColor: category.color || 'var(--text-muted)' }}
@@ -288,8 +426,14 @@ export default function CategoriesPage() {
                           <span>{category.name}</span>
                         </div>
                       </td>
-                      <td><span className="category-chip">{labelFor(category.type)}</span></td>
-                      <td><span className="category-chip">{labelFor(category.categoryGroup, CATEGORY_GROUP_LABELS)}</span></td>
+                      <td>
+                        <span className="category-chip">{labelFor(category.type)}</span>
+                      </td>
+                      <td>
+                        <span className="category-chip">
+                          {labelFor(category.categoryGroup, CATEGORY_GROUP_LABELS)}
+                        </span>
+                      </td>
                       <td className="category-row__description">
                         {category.description || 'No description'}
                       </td>
@@ -297,7 +441,9 @@ export default function CategoriesPage() {
                         <button
                           className="icon-btn category-expand-btn"
                           type="button"
-                          aria-label={isExpanded ? 'Close category details' : 'Open category details'}
+                          aria-label={
+                            isExpanded ? 'Close category details' : 'Open category details'
+                          }
                           aria-expanded={isExpanded}
                           onClick={(event) => {
                             event.stopPropagation();

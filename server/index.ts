@@ -11,7 +11,8 @@ import index from '../index.html';
 type RouteParams = Record<string, string>;
 type AppRequest = Request & { params: RouteParams };
 type RouteHandler = (request: AppRequest) => Response | Promise<Response>;
-type RouteValue = Response | typeof index | RouteHandler | Record<string, RouteHandler | Response | typeof index>;
+type RouteValue =
+  Response | typeof index | RouteHandler | Record<string, RouteHandler | Response | typeof index>;
 type RouteMap = Record<string, RouteValue>;
 
 fs.mkdirSync(path.resolve(import.meta.dir, '..', 'data'), { recursive: true });
@@ -19,7 +20,9 @@ fs.mkdirSync(path.resolve(import.meta.dir, '..', 'data'), { recursive: true });
 loadLocalEnv();
 initDatabase();
 seedDatabase();
-void (await import('./app/parserRefresh')).refreshChangedParsers().finally(startAutomaticCategorizationWorker);
+void (await import('./app/parserRefresh'))
+  .refreshChangedParsers()
+  .finally(startAutomaticCategorizationWorker);
 
 const defaultPort = Number(process.env.PORT || 4177);
 
@@ -28,11 +31,12 @@ function shouldOpenBrowser(args = process.argv.slice(2)) {
 }
 
 function openBrowser(url: string) {
-  const command = process.platform === 'darwin'
-    ? ['open', url]
-    : process.platform === 'win32'
-      ? ['cmd', '/c', 'start', '', url]
-      : ['xdg-open', url];
+  const command =
+    process.platform === 'darwin'
+      ? ['open', url]
+      : process.platform === 'win32'
+        ? ['cmd', '/c', 'start', '', url]
+        : ['xdg-open', url];
 
   Bun.spawn(command, {
     stdout: 'ignore',
@@ -65,16 +69,13 @@ function wrapRouteValue(value: RouteValue): RouteValue {
   if (!entries.some(([key]) => HTTP_METHODS.has(key))) return value;
 
   return Object.fromEntries(
-    entries.map(([key, handler]) => [
-      key,
-      typeof handler === 'function' ? safe(handler) : handler,
-    ])
+    entries.map(([key, handler]) => [key, typeof handler === 'function' ? safe(handler) : handler]),
   );
 }
 
 function wrapRoutes(routeMap: RouteMap) {
   return Object.fromEntries(
-    Object.entries(routeMap).map(([route, value]) => [route, wrapRouteValue(value)])
+    Object.entries(routeMap).map(([route, value]) => [route, wrapRouteValue(value)]),
   );
 }
 
@@ -86,18 +87,20 @@ export const routes = wrapRoutes({
   },
 
   '/api/trpc/*': {
-    GET: (request) => fetchRequestHandler({
-      endpoint: '/api/trpc',
-      req: request,
-      router: appRouter,
-      createContext: () => ({}),
-    }),
-    POST: (request) => fetchRequestHandler({
-      endpoint: '/api/trpc',
-      req: request,
-      router: appRouter,
-      createContext: () => ({}),
-    }),
+    GET: (request) =>
+      fetchRequestHandler({
+        endpoint: '/api/trpc',
+        req: request,
+        router: appRouter,
+        createContext: () => ({}),
+      }),
+    POST: (request) =>
+      fetchRequestHandler({
+        endpoint: '/api/trpc',
+        req: request,
+        router: appRouter,
+        createContext: () => ({}),
+      }),
   },
 
   '/api/*': () => json({ error: 'Not found' }, 404),

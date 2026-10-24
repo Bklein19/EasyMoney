@@ -1,4 +1,18 @@
-import { chmod, cp, mkdir, mkdtemp, open, readFile, readdir, readlink, rename, rm, stat, utimes, writeFile } from 'node:fs/promises';
+import {
+  chmod,
+  cp,
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  readdir,
+  readlink,
+  rename,
+  rm,
+  stat,
+  utimes,
+  writeFile,
+} from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join, posix, resolve, win32 } from 'node:path';
 
@@ -66,7 +80,9 @@ type RunOptions = {
   completionDurationMs?: number;
 };
 
-export type InstitutionBrowserProgramResult<T extends Record<string, unknown> = Record<string, never>> =
+export type InstitutionBrowserProgramResult<
+  T extends Record<string, unknown> = Record<string, never>,
+> =
   | ({ status: 'complete' } & T)
   | { status: 'login-required'; action?: string }
   | { status: 'error'; message?: string };
@@ -79,11 +95,20 @@ export function playwrightProfilePath(
   const platform = options.platform ?? process.platform;
   const env = options.env ?? process.env;
   const pathApi = platform === 'win32' ? win32 : posix;
-  const root = platform === 'darwin'
-    ? pathApi.join(home, 'Library', 'Application Support', 'EasyMoney', 'playwright-profiles')
-    : platform === 'win32'
-      ? pathApi.join(env.LOCALAPPDATA ?? pathApi.join(home, 'AppData', 'Local'), 'EasyMoney', 'playwright-profiles')
-      : pathApi.join(env.XDG_STATE_HOME ?? pathApi.join(home, '.local', 'state'), 'easymoney', 'playwright-profiles');
+  const root =
+    platform === 'darwin'
+      ? pathApi.join(home, 'Library', 'Application Support', 'EasyMoney', 'playwright-profiles')
+      : platform === 'win32'
+        ? pathApi.join(
+            env.LOCALAPPDATA ?? pathApi.join(home, 'AppData', 'Local'),
+            'EasyMoney',
+            'playwright-profiles',
+          )
+        : pathApi.join(
+            env.XDG_STATE_HOME ?? pathApi.join(home, '.local', 'state'),
+            'easymoney',
+            'playwright-profiles',
+          );
   return pathApi.join(root, name);
 }
 
@@ -118,14 +143,19 @@ export async function withTransientBrowserProfile<T>(
         'lockfile',
       ]);
       const source = resolve(options.seedProfilePath);
-      if (source === profilePath) throw new Error('Transient browser profile seed must be a separate directory');
+      if (source === profilePath)
+        throw new Error('Transient browser profile seed must be a separate directory');
       const entries = await readdir(source, { withFileTypes: true });
-      await Promise.all(entries
-        .filter(entry => !excluded.has(entry.name))
-        .map(entry => cp(join(source, entry.name), join(profilePath, entry.name), {
-          recursive: entry.isDirectory(),
-          force: true,
-        })));
+      await Promise.all(
+        entries
+          .filter((entry) => !excluded.has(entry.name))
+          .map((entry) =>
+            cp(join(source, entry.name), join(profilePath, entry.name), {
+              recursive: entry.isDirectory(),
+              force: true,
+            }),
+          ),
+      );
     }
     return await operation(profilePath);
   } finally {
@@ -164,7 +194,9 @@ function fileSystemErrorCode(error: unknown): string | null {
 
 async function interactiveBrowserLeaseMatches(lockPath: string, token: string): Promise<boolean> {
   try {
-    const owner = JSON.parse(await readFile(join(lockPath, 'owner.json'), 'utf8')) as Partial<InteractiveBrowserLeaseOwner>;
+    const owner = JSON.parse(
+      await readFile(join(lockPath, 'owner.json'), 'utf8'),
+    ) as Partial<InteractiveBrowserLeaseOwner>;
     return owner.token === token;
   } catch {
     return false;
@@ -178,10 +210,13 @@ async function interactiveBrowserLeaseOwner(
     const owner = JSON.parse(
       await readFile(join(lockPath, 'owner.json'), 'utf8'),
     ) as Partial<InteractiveBrowserLeaseOwner>;
-    if (typeof owner.token !== 'string' ||
-        !Number.isInteger(owner.pid) || owner.pid! <= 0 ||
-        typeof owner.sessionName !== 'string' ||
-        typeof owner.startedAt !== 'string') {
+    if (
+      typeof owner.token !== 'string' ||
+      !Number.isInteger(owner.pid) ||
+      owner.pid! <= 0 ||
+      typeof owner.sessionName !== 'string' ||
+      typeof owner.startedAt !== 'string'
+    ) {
       return null;
     }
     return owner as InteractiveBrowserLeaseOwner;
@@ -245,24 +280,29 @@ export async function withInteractiveBrowserLease<T>(
       if (fileSystemErrorCode(error) !== 'EEXIST') throw error;
       const lockStat = await stat(lockPath).catch(() => null);
       if (!lockStat) continue;
-      if (await interactiveBrowserLeaseCanBeReclaimed(
-        lockPath,
-        lockStat.mtimeMs,
-        staleAfterMs,
-        processIsAlive,
-      )) {
+      if (
+        await interactiveBrowserLeaseCanBeReclaimed(
+          lockPath,
+          lockStat.mtimeMs,
+          staleAfterMs,
+          processIsAlive,
+        )
+      ) {
         const cleanupLockPath = `${lockPath}.cleanup`;
         let ownsCleanupLock = false;
         try {
           await mkdir(cleanupLockPath);
           ownsCleanupLock = true;
           const currentLockStat = await stat(lockPath).catch(() => null);
-          if (currentLockStat && await interactiveBrowserLeaseCanBeReclaimed(
-            lockPath,
-            currentLockStat.mtimeMs,
-            staleAfterMs,
-            processIsAlive,
-          )) {
+          if (
+            currentLockStat &&
+            (await interactiveBrowserLeaseCanBeReclaimed(
+              lockPath,
+              currentLockStat.mtimeMs,
+              staleAfterMs,
+              processIsAlive,
+            ))
+          ) {
             await rm(lockPath, { recursive: true, force: true });
           }
         } catch (cleanupError) {
@@ -283,11 +323,16 @@ export async function withInteractiveBrowserLease<T>(
     }
   }
 
-  const heartbeat = setInterval(() => {
-    void interactiveBrowserLeaseMatches(lockPath, token).then(matches => {
-      if (matches) return utimes(lockPath, new Date(), new Date());
-    }).catch(() => {});
-  }, Math.max(1_000, Math.floor(staleAfterMs / 3)));
+  const heartbeat = setInterval(
+    () => {
+      void interactiveBrowserLeaseMatches(lockPath, token)
+        .then((matches) => {
+          if (matches) return utimes(lockPath, new Date(), new Date());
+        })
+        .catch(() => {});
+    },
+    Math.max(1_000, Math.floor(staleAfterMs / 3)),
+  );
 
   try {
     return await operation();
@@ -300,18 +345,22 @@ export async function withInteractiveBrowserLease<T>(
 }
 
 async function directoryExists(path: string): Promise<boolean> {
-  return stat(path).then(info => info.isDirectory()).catch(() => false);
+  return stat(path)
+    .then((info) => info.isDirectory())
+    .catch(() => false);
 }
 
 async function fileExists(path: string): Promise<boolean> {
-  return stat(path).then(info => info.isFile()).catch(() => false);
+  return stat(path)
+    .then((info) => info.isFile())
+    .catch(() => false);
 }
 
 export async function playwrightProfileState(
   name: string,
   profilePath = playwrightProfilePath(name),
 ): Promise<PlaywrightProfileState> {
-  return await directoryExists(profilePath) ? 'existing' : 'missing';
+  return (await directoryExists(profilePath)) ? 'existing' : 'missing';
 }
 
 export async function playwrightHasSavedAuthentication(
@@ -342,13 +391,8 @@ export function institutionBrowserIgnoredDefaultArguments(
   ignoredDefaultArguments?: boolean | readonly string[],
 ): boolean | string[] {
   if (ignoredDefaultArguments === true) return true;
-  const ignoredArguments = Array.isArray(ignoredDefaultArguments)
-    ? ignoredDefaultArguments
-    : [];
-  return [...new Set([
-    ...ignoredArguments,
-    playwrightEnableAutomationLaunchArgument,
-  ])];
+  const ignoredArguments = Array.isArray(ignoredDefaultArguments) ? ignoredDefaultArguments : [];
+  return [...new Set([...ignoredArguments, playwrightEnableAutomationLaunchArgument])];
 }
 
 export function institutionBrowserLaunchArguments(
@@ -382,10 +426,7 @@ export function institutionBrowserLaunchArguments(
     }
   }
 
-  return [
-    `--disable-blink-features=${[...blinkFeatures].join(',')}`,
-    ...launchArguments,
-  ];
+  return [`--disable-blink-features=${[...blinkFeatures].join(',')}`, ...launchArguments];
 }
 
 export function normalizeHeadlessUserAgent(userAgent: string): string {
@@ -410,14 +451,17 @@ export async function deriveNormalChromeUserAgent(
   let browserClose: Promise<unknown> | undefined;
   let deadlineExpired = false;
   let timeout: ReturnType<typeof setTimeout> | undefined;
-  const launch = options.launch ?? (() => chromium.launch({
-    channel: 'chrome',
-    headless: true,
-    chromiumSandbox: true,
-    timeout: timeoutMs,
-    ignoreDefaultArgs: institutionBrowserIgnoredDefaultArguments(),
-    args: institutionBrowserLaunchArguments(),
-  }));
+  const launch =
+    options.launch ??
+    (() =>
+      chromium.launch({
+        channel: 'chrome',
+        headless: true,
+        chromiumSandbox: true,
+        timeout: timeoutMs,
+        ignoreDefaultArgs: institutionBrowserIgnoredDefaultArguments(),
+        args: institutionBrowserLaunchArguments(),
+      }));
   const closeBrowser = () => {
     if (!browser) return Promise.resolve();
     browserClose ??= browser.close().catch(() => {});
@@ -432,7 +476,10 @@ export async function deriveNormalChromeUserAgent(
       if (deadlineExpired) throw timeoutError();
       const userAgent = await page.evaluate(() => navigator.userAgent);
       const normalizedUserAgent = normalizeHeadlessUserAgent(userAgent);
-      if (/\bHeadlessChrome\//.test(normalizedUserAgent) || !/\bChrome\/\d/.test(normalizedUserAgent)) {
+      if (
+        /\bHeadlessChrome\//.test(normalizedUserAgent) ||
+        !/\bChrome\/\d/.test(normalizedUserAgent)
+      ) {
         throw new Error('Installed Chrome did not expose a recognizable user agent');
       }
       return normalizedUserAgent;
@@ -517,12 +564,15 @@ export async function institutionStartPage(
   timeoutMs = defaultBrowserLaunchTimeoutMs,
   closeTimeoutMs = restoredPageCloseTimeoutMs,
 ): Promise<Page> {
-  const existingPages = context.pages().filter(page => !page.isClosed());
+  const existingPages = context.pages().filter((page) => !page.isClosed());
   if (!forceFreshPage) {
-    return existingPages[0] ?? settleBeforeBrowserDeadline(
-      context.newPage(),
-      timeoutMs,
-      'Timed out opening an institution browser page',
+    return (
+      existingPages[0] ??
+      settleBeforeBrowserDeadline(
+        context.newPage(),
+        timeoutMs,
+        'Timed out opening an institution browser page',
+      )
     );
   }
 
@@ -533,12 +583,14 @@ export async function institutionStartPage(
   );
   try {
     await settleBeforeBrowserDeadline(
-      Promise.allSettled(existingPages.map(page => page.close())),
+      Promise.allSettled(existingPages.map((page) => page.close())),
       closeTimeoutMs,
       'Timed out closing restored institution browser pages',
     );
   } catch {
-    console.warn('Timed out closing a restored institution browser page; continuing in the fresh page.');
+    console.warn(
+      'Timed out closing a restored institution browser page; continuing in the fresh page.',
+    );
   }
   return freshPage;
 }
@@ -555,8 +607,7 @@ export function institutionBrowserLaunchStrategy(options: {
     };
   }
 
-  const initialHeadless = (options.persistAuthentication ?? true) &&
-    options.hasSavedAuthentication;
+  const initialHeadless = (options.persistAuthentication ?? true) && options.hasSavedAuthentication;
   return {
     initialHeadless,
     allowHeadedAuthenticationFallback: initialHeadless,
@@ -598,20 +649,28 @@ export async function deliverHeadedBrowserWindow(
   const screenBounds = await (async () => {
     for (let attempt = 0; ; attempt += 1) {
       try {
-        return await settleBeforeBrowserDeadline(page.evaluate(() => {
-          const screen = window.screen as Screen & { availLeft?: number; availTop?: number };
-          return {
-            left: screen.availLeft ?? 0,
-            top: screen.availTop ?? 0,
-            width: screen.availWidth,
-            height: screen.availHeight,
-          };
-        }), Math.max(1, deadline - Date.now()), 'Timed out reading authentication browser screen bounds');
+        return await settleBeforeBrowserDeadline(
+          page.evaluate(() => {
+            const screen = window.screen as Screen & { availLeft?: number; availTop?: number };
+            return {
+              left: screen.availLeft ?? 0,
+              top: screen.availTop ?? 0,
+              width: screen.availWidth,
+              height: screen.availHeight,
+            };
+          }),
+          Math.max(1, deadline - Date.now()),
+          'Timed out reading authentication browser screen bounds',
+        );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        const transientNavigation = /execution context was destroyed|cannot find context with specified id/i.test(message);
-        if (!transientNavigation || attempt >= 4 || Date.now() >= deadline || page.isClosed()) throw error;
-        await page.waitForLoadState('domcontentloaded', { timeout: Math.max(1, deadline - Date.now()) });
+        const transientNavigation =
+          /execution context was destroyed|cannot find context with specified id/i.test(message);
+        if (!transientNavigation || attempt >= 4 || Date.now() >= deadline || page.isClosed())
+          throw error;
+        await page.waitForLoadState('domcontentloaded', {
+          timeout: Math.max(1, deadline - Date.now()),
+        });
       }
     }
   })();
@@ -628,12 +687,17 @@ export async function deliverHeadedBrowserWindow(
 
   const cdp = await context.newCDPSession(page);
   try {
-    const initialWindow = await cdp.send('Browser.getWindowForTarget') as {
+    const initialWindow = (await cdp.send('Browser.getWindowForTarget')) as {
       windowId?: number;
       bounds?: BrowserWindowBounds;
     };
     const windowId = initialWindow.windowId;
-    if (typeof windowId !== 'number' || !Number.isInteger(windowId) || windowId < 1 || !initialWindow.bounds) {
+    if (
+      typeof windowId !== 'number' ||
+      !Number.isInteger(windowId) ||
+      windowId < 1 ||
+      !initialWindow.bounds
+    ) {
       throw new Error('Playwright did not expose a native authentication browser window');
     }
 
@@ -675,17 +739,20 @@ export async function deliverHeadedBrowserWindow(
       await page.bringToFront();
     }
 
-    const deliveredWindow = await cdp.send('Browser.getWindowForTarget') as {
+    const deliveredWindow = (await cdp.send('Browser.getWindowForTarget')) as {
       windowId?: number;
       bounds?: BrowserWindowBounds;
     };
     const deliveredBounds = deliveredWindow.bounds;
-    const onScreen = deliveredWindow.windowId === initialWindow.windowId &&
+    const onScreen =
+      deliveredWindow.windowId === initialWindow.windowId &&
       deliveredBounds?.windowState === 'normal' &&
       finiteNumber(deliveredBounds.left, Number.NaN) < screenBounds.left + screenBounds.width &&
       finiteNumber(deliveredBounds.top, Number.NaN) < screenBounds.top + screenBounds.height &&
-      finiteNumber(deliveredBounds.left, Number.NaN) + finiteNumber(deliveredBounds.width, 0) > screenBounds.left &&
-      finiteNumber(deliveredBounds.top, Number.NaN) + finiteNumber(deliveredBounds.height, 0) > screenBounds.top;
+      finiteNumber(deliveredBounds.left, Number.NaN) + finiteNumber(deliveredBounds.width, 0) >
+        screenBounds.left &&
+      finiteNumber(deliveredBounds.top, Number.NaN) + finiteNumber(deliveredBounds.height, 0) >
+        screenBounds.top;
     if (!onScreen) {
       throw new Error('Playwright could not place the authentication browser on a visible screen');
     }
@@ -699,7 +766,7 @@ export async function deliverHeadedBrowserWindow(
     };
     options.onDiagnostic?.(
       `Authentication browser delivered: headed=${delivery.headed} nativeWindow=${delivery.nativeWindow} ` +
-      `windowState=${delivery.windowState} onScreen=${delivery.onScreen} activation=${delivery.activation}`,
+        `windowState=${delivery.windowState} onScreen=${delivery.onScreen} activation=${delivery.activation}`,
     );
     return delivery;
   } finally {
@@ -709,7 +776,9 @@ export async function deliverHeadedBrowserWindow(
 
 function isLockedProfileError(error: unknown): boolean {
   const message = String(error instanceof Error ? error.message : error);
-  return /SingletonLock|profile.*(?:in use|locked)|user data directory.*in use|ProcessSingleton/i.test(message);
+  return /SingletonLock|profile.*(?:in use|locked)|user data directory.*in use|ProcessSingleton/i.test(
+    message,
+  );
 }
 
 export async function withPlaywrightPage<T>(
@@ -722,11 +791,14 @@ export async function withPlaywrightPage<T>(
   await mkdir(profilePath, { recursive: true });
 
   if (options.contextOptions?.headless !== true) {
-    return withInteractiveBrowserLease({
-      profilePath: interactiveLeaseProfilePath,
-      sessionName: options.name,
-      onWait: options.onInteractiveBrowserWait,
-    }, () => launchPlaywrightPage({ ...options, profilePath, authenticationProfilePath }, operation));
+    return withInteractiveBrowserLease(
+      {
+        profilePath: interactiveLeaseProfilePath,
+        sessionName: options.name,
+        onWait: options.onInteractiveBrowserWait,
+      },
+      () => launchPlaywrightPage({ ...options, profilePath, authenticationProfilePath }, operation),
+    );
   }
 
   return launchPlaywrightPage({ ...options, profilePath, authenticationProfilePath }, operation);
@@ -762,9 +834,11 @@ export async function launchPersistentContextWithDeadline(
     ]);
   } catch (error) {
     if (deadlineExpired) {
-      const closeLateContext = options.closeLateContext ?? (async context => {
-        await closeBrowserContext(context);
-      });
+      const closeLateContext =
+        options.closeLateContext ??
+        (async (context) => {
+          await closeBrowserContext(context);
+        });
       void launchPromise.then(closeLateContext).catch(() => {});
       throw timeoutError();
     }
@@ -785,24 +859,25 @@ async function launchPlaywrightPage<T>(
   const browserLaunchTimeoutMs = options.browserLaunchTimeoutMs ?? defaultBrowserLaunchTimeoutMs;
   const contextOptions = await institutionBrowserContextOptions(options.contextOptions ?? {});
 
-  const hasSavedAuthentication = persistAuthentication &&
-    await fileExists(playwrightAuthStatePath(authenticationProfilePath));
+  const hasSavedAuthentication =
+    persistAuthentication && (await fileExists(playwrightAuthStatePath(authenticationProfilePath)));
 
   let context: BrowserContext;
   try {
     context = await launchPersistentContextWithDeadline(
-      () => chromium.launchPersistentContext(profilePath, {
-        channel: 'chrome',
-        headless: contextOptions.headless ?? false,
-        acceptDownloads: true,
-        chromiumSandbox: true,
-        ...contextOptions,
-        timeout: browserLaunchTimeoutMs,
-        ignoreDefaultArgs: institutionBrowserIgnoredDefaultArguments(
-          contextOptions.ignoreDefaultArgs,
-        ),
-        args: institutionBrowserLaunchArguments(contextOptions.args, options.launchArgs),
-      }),
+      () =>
+        chromium.launchPersistentContext(profilePath, {
+          channel: 'chrome',
+          headless: contextOptions.headless ?? false,
+          acceptDownloads: true,
+          chromiumSandbox: true,
+          ...contextOptions,
+          timeout: browserLaunchTimeoutMs,
+          ignoreDefaultArgs: institutionBrowserIgnoredDefaultArguments(
+            contextOptions.ignoreDefaultArgs,
+          ),
+          args: institutionBrowserLaunchArguments(contextOptions.args, options.launchArgs),
+        }),
       {
         sessionName: options.name,
         timeoutMs: browserLaunchTimeoutMs + browserLaunchWatchdogGraceMs,
@@ -810,44 +885,48 @@ async function launchPlaywrightPage<T>(
     );
   } catch (error) {
     if (isLockedProfileError(error)) {
-      throw new Error(`The ${options.name} browser profile is already open. Close that browser window, then rerun.`);
+      throw new Error(
+        `The ${options.name} browser profile is already open. Close that browser window, then rerun.`,
+      );
     }
     throw error;
   }
 
   try {
-    return await runWhilePersistentBrowserOpen(
-      context,
-      profilePath,
-      async () => {
-        if (hasSavedAuthentication) await restoreBrowserAuthentication(context, authenticationProfilePath);
-        const page = await institutionStartPage(context, options.forceStartUrl, browserLaunchTimeoutMs);
-        if (options.beforeStartNavigation) {
-          await settleBeforeBrowserDeadline(
-            Promise.resolve(options.beforeStartNavigation(page, context)),
-            browserLaunchTimeoutMs,
-            `Timed out preparing the ${options.name} browser page`,
-          );
-        }
-        const startUrl = await restoredInstitutionStartUrl(
-          authenticationProfilePath,
-          options.startUrl,
-          hasSavedAuthentication,
-          options.forceStartUrl,
+    return await runWhilePersistentBrowserOpen(context, profilePath, async () => {
+      if (hasSavedAuthentication)
+        await restoreBrowserAuthentication(context, authenticationProfilePath);
+      const page = await institutionStartPage(
+        context,
+        options.forceStartUrl,
+        browserLaunchTimeoutMs,
+      );
+      if (options.beforeStartNavigation) {
+        await settleBeforeBrowserDeadline(
+          Promise.resolve(options.beforeStartNavigation(page, context)),
+          browserLaunchTimeoutMs,
+          `Timed out preparing the ${options.name} browser page`,
         );
-        await openInstitutionStartPage(page, startUrl, hasSavedAuthentication, options.forceStartUrl);
-        if (contextOptions.headless !== true) {
-          await deliverHeadedBrowserWindow(page, context, {
-            headless: false,
-            onDiagnostic: options.onInteractiveBrowserWait,
-          });
-        }
-        return operation(page, context);
-      },
-    );
+      }
+      const startUrl = await restoredInstitutionStartUrl(
+        authenticationProfilePath,
+        options.startUrl,
+        hasSavedAuthentication,
+        options.forceStartUrl,
+      );
+      await openInstitutionStartPage(page, startUrl, hasSavedAuthentication, options.forceStartUrl);
+      if (contextOptions.headless !== true) {
+        await deliverHeadedBrowserWindow(page, context, {
+          headless: false,
+          onDiagnostic: options.onInteractiveBrowserWait,
+        });
+      }
+      return operation(page, context);
+    });
   } finally {
     const closed = await closeBrowserContext(context);
-    if (!closed) console.warn(`Timed out closing the ${options.name} browser context after Chrome exited.`);
+    if (!closed)
+      console.warn(`Timed out closing the ${options.name} browser context after Chrome exited.`);
   }
 }
 
@@ -855,19 +934,21 @@ type SessionStorageByOrigin = Record<string, Record<string, string>>;
 
 function isStringRecord(value: unknown): value is Record<string, string> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  return Object.values(value).every(entry => typeof entry === 'string');
+  return Object.values(value).every((entry) => typeof entry === 'string');
 }
 
 function isSessionStorageByOrigin(value: unknown): value is SessionStorageByOrigin {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  return Object.entries(value).every(([origin, entries]) =>
-    /^https?:\/\//.test(origin) && isStringRecord(entries)
+  return Object.entries(value).every(
+    ([origin, entries]) => /^https?:\/\//.test(origin) && isStringRecord(entries),
   );
 }
 
 async function savedSessionStorage(profilePath: string): Promise<SessionStorageByOrigin> {
   try {
-    const value = JSON.parse(await readFile(playwrightSessionStoragePath(profilePath), 'utf8')) as unknown;
+    const value = JSON.parse(
+      await readFile(playwrightSessionStoragePath(profilePath), 'utf8'),
+    ) as unknown;
     return isSessionStorageByOrigin(value) ? value : {};
   } catch {
     return {};
@@ -882,13 +963,24 @@ export async function savedAuthenticationResumeUrl(
     const value = JSON.parse(
       await readFile(playwrightAuthenticationResumeUrlPath(profilePath), 'utf8'),
     ) as unknown;
-    if (!value || typeof value !== 'object' ||
-        !('version' in value) || value.version !== 1 ||
-        !('url' in value) || typeof value.url !== 'string') return null;
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      !('version' in value) ||
+      value.version !== 1 ||
+      !('url' in value) ||
+      typeof value.url !== 'string'
+    )
+      return null;
     const start = new URL(startUrl);
     const resume = new URL(value.url);
-    if (!['http:', 'https:'].includes(start.protocol) || resume.origin !== start.origin ||
-        resume.username || resume.password) return null;
+    if (
+      !['http:', 'https:'].includes(start.protocol) ||
+      resume.origin !== start.origin ||
+      resume.username ||
+      resume.password
+    )
+      return null;
     resume.search = '';
     resume.hash = '';
     return resume.toString();
@@ -904,7 +996,7 @@ export async function restoredInstitutionStartUrl(
   forceStartUrl = false,
 ): Promise<string> {
   if (!hasSavedAuthentication || forceStartUrl) return startUrl;
-  return await savedAuthenticationResumeUrl(profilePath, startUrl) ?? startUrl;
+  return (await savedAuthenticationResumeUrl(profilePath, startUrl)) ?? startUrl;
 }
 
 export async function restoreBrowserAuthentication(
@@ -925,22 +1017,25 @@ async function captureSessionStorage(
   context: Pick<BrowserContext, 'pages'>,
 ): Promise<SessionStorageByOrigin | null> {
   const pages = context.pages();
-  const snapshots = await Promise.all(pages.map(async page => {
-    if (page.isClosed()) return null;
-    try {
-      return await page.evaluate(() => ({
-        origin: location.origin,
-        entries: Object.fromEntries(Object.entries(sessionStorage)),
-      }));
-    } catch {
-      return null;
-    }
-  }));
-  const valid = snapshots.filter((snapshot): snapshot is { origin: string; entries: Record<string, string> } =>
-    Boolean(snapshot && /^https?:\/\//.test(snapshot.origin) && isStringRecord(snapshot.entries))
+  const snapshots = await Promise.all(
+    pages.map(async (page) => {
+      if (page.isClosed()) return null;
+      try {
+        return await page.evaluate(() => ({
+          origin: location.origin,
+          entries: Object.fromEntries(Object.entries(sessionStorage)),
+        }));
+      } catch {
+        return null;
+      }
+    }),
+  );
+  const valid = snapshots.filter(
+    (snapshot): snapshot is { origin: string; entries: Record<string, string> } =>
+      Boolean(snapshot && /^https?:\/\//.test(snapshot.origin) && isStringRecord(snapshot.entries)),
   );
   if (valid.length === 0) return null;
-  return Object.fromEntries(valid.map(snapshot => [snapshot.origin, snapshot.entries]));
+  return Object.fromEntries(valid.map((snapshot) => [snapshot.origin, snapshot.entries]));
 }
 
 async function replacePrivateJson(path: string, value: unknown): Promise<void> {
@@ -971,13 +1066,12 @@ export async function persistBrowserAuthentication(
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
     const snapshot = await Promise.race([
-      Promise.resolve()
-        .then(async () => {
-          const authenticationState = await context.storageState({ indexedDB: true });
-          const sessionStorage = await captureSessionStorage(context);
-          return { authenticationState, sessionStorage };
-        }),
-      new Promise<null>(resolveTimeout => {
+      Promise.resolve().then(async () => {
+        const authenticationState = await context.storageState({ indexedDB: true });
+        const sessionStorage = await captureSessionStorage(context);
+        return { authenticationState, sessionStorage };
+      }),
+      new Promise<null>((resolveTimeout) => {
         timeout = setTimeout(() => resolveTimeout(null), timeoutMs);
       }),
     ]);
@@ -998,8 +1092,11 @@ export async function persistBrowserAuthentication(
       }
       if (resumeUrl) {
         const parsedResumeUrl = new URL(resumeUrl);
-        if (!['http:', 'https:'].includes(parsedResumeUrl.protocol) ||
-            parsedResumeUrl.username || parsedResumeUrl.password) {
+        if (
+          !['http:', 'https:'].includes(parsedResumeUrl.protocol) ||
+          parsedResumeUrl.username ||
+          parsedResumeUrl.password
+        ) {
           throw new Error('Authentication resume URL is invalid');
         }
         parsedResumeUrl.search = '';
@@ -1041,7 +1138,7 @@ export async function checkAuthenticationForCheckpoint(
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let resolveClosed: ((authenticated: false) => void) | undefined;
   const handleClose = () => resolveClosed?.(false);
-  const closed = new Promise<false>(resolve => {
+  const closed = new Promise<false>((resolve) => {
     resolveClosed = resolve;
     page.on('close', handleClose);
     context.on('close', handleClose);
@@ -1054,7 +1151,7 @@ export async function checkAuthenticationForCheckpoint(
         .then(Boolean)
         .catch(() => false),
       closed,
-      new Promise<false>(resolveTimeout => {
+      new Promise<false>((resolveTimeout) => {
         timeout = setTimeout(() => resolveTimeout(false), Math.max(0, timeoutMs));
       }),
     ]);
@@ -1074,7 +1171,7 @@ export async function closeBrowserContext(
   try {
     return await Promise.race([
       context.close().then(() => true),
-      new Promise<false>(resolveTimeout => {
+      new Promise<false>((resolveTimeout) => {
         timeout = setTimeout(() => resolveTimeout(false), timeoutMs);
       }),
     ]);
@@ -1092,13 +1189,10 @@ export async function runWhileBrowserOpen<T>(
   } = {},
 ): Promise<T> {
   const browser: Pick<Browser, 'isConnected' | 'once' | 'off'> | null =
-    typeof (context as Partial<BrowserContext>).browser === 'function'
-      ? context.browser()
-      : null;
+    typeof (context as Partial<BrowserContext>).browser === 'function' ? context.browser() : null;
   let rejectClosed: ((error: Error) => void) | undefined;
-  const handleClose = () => rejectClosed?.(
-    new Error('Browser closed before the institution sync completed'),
-  );
+  const handleClose = () =>
+    rejectClosed?.(new Error('Browser closed before the institution sync completed'));
   const browserClosed = new Promise<never>((_resolve, reject) => {
     rejectClosed = reject;
     context.once('close', handleClose);
@@ -1145,8 +1239,7 @@ export async function runWhileBrowserOpen<T>(
 }
 
 export type ChromeBrowserProfileOwner =
-  | { kind: 'process'; lockTarget: string; pid: number }
-  | { kind: 'windows-lock' };
+  { kind: 'process'; lockTarget: string; pid: number } | { kind: 'windows-lock' };
 
 type ChromeBrowserProfileOwnerOptions = {
   platform?: NodeJS.Platform;
@@ -1171,16 +1264,14 @@ export async function chromeBrowserProfileOwner(
   if (platform === 'win32') {
     const lockPath = join(resolve(profilePath), 'lockfile');
     const lockIsHeld = options.windowsLockIsHeld ?? windowsChromeProfileLockIsHeld;
-    return await lockIsHeld(lockPath) ? { kind: 'windows-lock' } : null;
+    return (await lockIsHeld(lockPath)) ? { kind: 'windows-lock' } : null;
   }
   try {
     const lockTarget = await readlink(join(resolve(profilePath), 'SingletonLock'));
     const pidText = /-(\d+)$/.exec(lockTarget)?.[1];
     if (!pidText) return null;
     const pid = Number(pidText);
-    return Number.isSafeInteger(pid) && pid > 0
-      ? { kind: 'process', lockTarget, pid }
-      : null;
+    return Number.isSafeInteger(pid) && pid > 0 ? { kind: 'process', lockTarget, pid } : null;
   } catch {
     return null;
   }
@@ -1217,7 +1308,8 @@ export async function runWhilePersistentBrowserOpen<T>(
   const readBrowserProfileOwner = options.readBrowserProfileOwner ?? chromeBrowserProfileOwner;
   const owner = await readBrowserProfileOwner(profilePath);
   if (!owner) throw new Error('Browser closed before the institution sync completed');
-  const browserProfileOwnerIsAlive = options.browserProfileOwnerIsAlive ?? chromeBrowserProfileOwnerIsAlive;
+  const browserProfileOwnerIsAlive =
+    options.browserProfileOwnerIsAlive ?? chromeBrowserProfileOwnerIsAlive;
   return runWhileBrowserOpen(context, operation, {
     isBrowserProcessAlive: () => browserProfileOwnerIsAlive(profilePath, owner),
     processPollIntervalMs: options.processPollIntervalMs,
@@ -1248,19 +1340,34 @@ const authenticationFieldSelector = [
 ].join(',');
 
 async function hasDefaultAuthentication(page: Page): Promise<boolean> {
-  return !/(?:login|logon|sign[-_]?in|authenticate|authorization|oauth|sso|auth\.)/i.test(page.url()) &&
-    await page.locator(authenticationFieldSelector).count() === 0;
+  return (
+    !/(?:login|logon|sign[-_]?in|authenticate|authorization|oauth|sso|auth\.)/i.test(page.url()) &&
+    (await page.locator(authenticationFieldSelector).count()) === 0
+  );
 }
 
 async function waitUntilDefaultAuthentication(page: Page, timeoutMs: number): Promise<void> {
-  await page.waitForFunction((selector: string) => {
-    const loginLikeUrl = /(?:login|logon|sign[-_]?in|authenticate|authorization|oauth|sso|auth\.)/i.test(location.href);
-    const hasVisibleAuthenticationField = Array.from(document.querySelectorAll(selector)).some(element => {
-      const style = getComputedStyle(element);
-      return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
-    });
-    return !loginLikeUrl && !hasVisibleAuthenticationField;
-  }, authenticationFieldSelector, { timeout: timeoutMs });
+  await page.waitForFunction(
+    (selector: string) => {
+      const loginLikeUrl =
+        /(?:login|logon|sign[-_]?in|authenticate|authorization|oauth|sso|auth\.)/i.test(
+          location.href,
+        );
+      const hasVisibleAuthenticationField = Array.from(document.querySelectorAll(selector)).some(
+        (element) => {
+          const style = getComputedStyle(element);
+          return (
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            element.getClientRects().length > 0
+          );
+        },
+      );
+      return !loginLikeUrl && !hasVisibleAuthenticationField;
+    },
+    authenticationFieldSelector,
+    { timeout: timeoutMs },
+  );
 }
 
 export async function waitForInteractiveAuthentication(
@@ -1275,11 +1382,8 @@ export async function waitForInteractiveAuthentication(
   const isAuthenticated = options.isAuthenticated ?? hasDefaultAuthentication;
   const waitUntilAuthenticated = options.waitUntilAuthenticated ?? waitUntilDefaultAuthentication;
 
-  const browserContext = context ?? (
-    typeof (page as Partial<Page>).context === 'function'
-      ? page.context()
-      : undefined
-  );
+  const browserContext =
+    context ?? (typeof (page as Partial<Page>).context === 'function' ? page.context() : undefined);
   if (!browserContext) {
     if (page.isClosed()) throw new Error('The browser was closed before authentication completed');
     if (await isAuthenticated(page)) return page;
@@ -1290,22 +1394,23 @@ export async function waitForInteractiveAuthentication(
     try {
       await waitUntilAuthenticated(page, timeoutMs);
     } catch (error) {
-      if (isClosedContextError(error)) throw new Error('The browser was closed before authentication completed');
-      if (error instanceof Error && error.name === 'TimeoutError') throw new Error('Authentication timed out');
+      if (isClosedContextError(error))
+        throw new Error('The browser was closed before authentication completed');
+      if (error instanceof Error && error.name === 'TimeoutError')
+        throw new Error('Authentication timed out');
       throw error;
     }
 
     if (page.isClosed()) throw new Error('The browser was closed before authentication completed');
-    if (!await isAuthenticated(page)) {
+    if (!(await isAuthenticated(page))) {
       throw new Error('Authentication state changed without completing sign-in');
     }
     return page;
   }
 
   let rejectContextClosed: ((error: Error) => void) | undefined;
-  const handleContextClose = () => rejectContextClosed?.(
-    new Error('The browser was closed before authentication completed'),
-  );
+  const handleContextClose = () =>
+    rejectContextClosed?.(new Error('The browser was closed before authentication completed'));
   const contextClosed = new Promise<never>((_resolve, reject) => {
     rejectContextClosed = reject;
     browserContext.on('close', handleContextClose);
@@ -1319,9 +1424,11 @@ export async function waitForInteractiveAuthentication(
       if (timeoutMs <= 0) throw new Error('Authentication timed out');
 
       if (!activePage) {
-        if (options.authenticationRecoveryUrl &&
-            !recoveredClosedAuthenticationPage &&
-            typeof browserContext.newPage === 'function') {
+        if (
+          options.authenticationRecoveryUrl &&
+          !recoveredClosedAuthenticationPage &&
+          typeof browserContext.newPage === 'function'
+        ) {
           recoveredClosedAuthenticationPage = true;
           options.onProgress?.('Authentication window closed. Reopening it.');
           let recoveryTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -1329,7 +1436,7 @@ export async function waitForInteractiveAuthentication(
             const recoveryPage = await Promise.race([
               Promise.resolve()
                 .then(() => browserContext.newPage())
-                .then(async nextPage => {
+                .then(async (nextPage) => {
                   await nextPage.goto(options.authenticationRecoveryUrl!, {
                     waitUntil: 'domcontentloaded',
                   });
@@ -1338,7 +1445,8 @@ export async function waitForInteractiveAuthentication(
               contextClosed,
               new Promise<never>((_resolve, reject) => {
                 recoveryTimeout = setTimeout(
-                  () => reject(new Error('Browser stopped responding while reopening authentication')),
+                  () =>
+                    reject(new Error('Browser stopped responding while reopening authentication')),
                   Math.min(5_000, Math.max(1, timeoutMs)),
                 );
               }),
@@ -1375,10 +1483,13 @@ export async function waitForInteractiveAuthentication(
         activePage = newestOpenPage(browserContext);
         continue;
       }
-      if (await Promise.race([
-        Promise.resolve().then(() => isAuthenticated(activePage!)),
-        contextClosed,
-      ])) return activePage;
+      if (
+        await Promise.race([
+          Promise.resolve().then(() => isAuthenticated(activePage!)),
+          contextClosed,
+        ])
+      )
+        return activePage;
 
       const pageAtWaitStart = activePage;
       const observer = observeAuthenticationPageChange(browserContext, pageAtWaitStart, timeoutMs);
@@ -1437,10 +1548,12 @@ export async function waitForInteractiveAuthentication(
         activePage = newestOpenPage(browserContext);
         continue;
       }
-      if (!await Promise.race([
-        Promise.resolve().then(() => isAuthenticated(pageAtWaitStart)),
-        contextClosed,
-      ])) {
+      if (
+        !(await Promise.race([
+          Promise.resolve().then(() => isAuthenticated(pageAtWaitStart)),
+          contextClosed,
+        ]))
+      ) {
         throw new Error('Authentication state changed without completing sign-in');
       }
       return pageAtWaitStart;
@@ -1458,11 +1571,8 @@ type AuthenticationWaitOutcome =
   | { type: 'page-closed' }
   | { type: 'timeout' };
 
-function newestOpenPage(
-  context: Pick<BrowserContext, 'pages'>,
-  preferred?: Page,
-): Page | null {
-  const pages = context.pages().filter(candidate => !candidate.isClosed());
+function newestOpenPage(context: Pick<BrowserContext, 'pages'>, preferred?: Page): Page | null {
+  const pages = context.pages().filter((candidate) => !candidate.isClosed());
   return pages.at(-1) ?? (preferred && !preferred.isClosed() ? preferred : null);
 }
 
@@ -1473,7 +1583,7 @@ function observeAuthenticationPageChange(
 ): { promise: Promise<AuthenticationWaitOutcome>; dispose: () => void } {
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let resolveOutcome: ((outcome: AuthenticationWaitOutcome) => void) | undefined;
-  const promise = new Promise<AuthenticationWaitOutcome>(resolve => {
+  const promise = new Promise<AuthenticationWaitOutcome>((resolve) => {
     resolveOutcome = resolve;
   });
   const finish = (outcome: AuthenticationWaitOutcome) => resolveOutcome?.(outcome);
@@ -1496,7 +1606,9 @@ function observeAuthenticationPageChange(
 }
 
 function isClosedContextError(error: unknown): boolean {
-  return /Target page, context or browser has been closed/i.test(String(error instanceof Error ? error.message : error));
+  return /Target page, context or browser has been closed/i.test(
+    String(error instanceof Error ? error.message : error),
+  );
 }
 
 export async function showSyncCompletionChapter(
@@ -1527,7 +1639,9 @@ type InstitutionBrowserProgramDependencies = {
 let developmentPageInspector: ((page: Page) => Promise<void>) | undefined;
 
 /** Installed only by the explicit connector development runner. */
-export function setDevelopmentPageInspector(inspector: ((page: Page) => Promise<void>) | undefined): void {
+export function setDevelopmentPageInspector(
+  inspector: ((page: Page) => Promise<void>) | undefined,
+): void {
   developmentPageInspector = inspector;
 }
 
@@ -1545,20 +1659,25 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
   ) => Promise<unknown>;
   let inspected = false;
   const program: typeof originalProgram = async (page, report, bindings) => {
-    if (!inspected && developmentPageInspector && await (options.isAuthenticated ?? hasDefaultAuthentication)(page)) {
+    if (
+      !inspected &&
+      developmentPageInspector &&
+      (await (options.isAuthenticated ?? hasDefaultAuthentication)(page))
+    ) {
       inspected = true;
       await developmentPageInspector(page);
     }
     return originalProgram(page, report, bindings);
   };
   const runWithPlaywrightPage = dependencyOverrides.withPlaywrightPage ?? withPlaywrightPage;
-  const runWithTransientBrowserProfile = dependencyOverrides.withTransientBrowserProfile ??
-    withTransientBrowserProfile;
+  const runWithTransientBrowserProfile =
+    dependencyOverrides.withTransientBrowserProfile ?? withTransientBrowserProfile;
   const reportProgress = options.onProgress ?? (() => {});
   const canonicalProfilePath = resolve(session.profilePath ?? playwrightProfilePath(session.name));
-  const hasSavedAuthentication = (session.persistAuthentication ?? true)
-    ? await playwrightHasSavedAuthentication(session.name, canonicalProfilePath)
-    : false;
+  const hasSavedAuthentication =
+    (session.persistAuthentication ?? true)
+      ? await playwrightHasSavedAuthentication(session.name, canonicalProfilePath)
+      : false;
   const launchStrategy = institutionBrowserLaunchStrategy({
     hasSavedAuthentication,
     persistAuthentication: session.persistAuthentication,
@@ -1569,92 +1688,105 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     allowInteractiveAuthentication: boolean,
     browserProfilePath = canonicalProfilePath,
     forceStartUrl = false,
-  ) => runWithPlaywrightPage({
-    ...session,
-    profilePath: browserProfilePath,
-    authenticationProfilePath: canonicalProfilePath,
-    interactiveLeaseProfilePath: canonicalProfilePath,
-    forceStartUrl,
-    onInteractiveBrowserWait: reportProgress,
-    contextOptions: {
-      ...session.contextOptions,
-      headless,
-    },
-  }, async (page, context) => {
-    const interactiveAuthenticationEnabled = allowInteractiveAuthentication &&
-      (options.allowInteractiveAuthentication ?? true);
-    let activePage = page;
-    let authenticationResumeUrl: string | undefined;
-    const deadline = Date.now() + (options.authenticationTimeoutMs ?? 10 * 60_000);
-    const isAuthenticated = options.isAuthenticated ?? hasDefaultAuthentication;
-    const checkpointAuthentication = async (): Promise<void> => {
-      if (!(session.persistAuthentication ?? true)) return;
-      const authenticated = await checkAuthenticationForCheckpoint(
-        activePage,
-        isAuthenticated,
-        options.authenticationCheckpointTimeoutMs,
-      );
-      if (!authenticated) return;
-      authenticationResumeUrl ??= activePage.url();
-      const persisted = await persistBrowserAuthentication(
-        context,
-        playwrightAuthStatePath(canonicalProfilePath),
-        undefined,
-        authenticationResumeUrl,
-      );
-      if (!persisted) console.warn(`Could not checkpoint authentication for ${session.name}.`);
-    };
-    await checkpointAuthentication();
-    let result = decodeInstitutionBrowserProgramResult<T>(await program(
-      activePage,
-      reportProgress,
-      options.programBindings ?? {},
-    ));
-    if (result.status === 'login-required' && interactiveAuthenticationEnabled) {
-      await showAuthenticationChapter(
-        activePage,
-        result.action ?? `Complete login and MFA for ${session.name}. EasyMoney will continue automatically.`,
-      );
-      console.log(`Authentication required in ${session.name}. Complete login and MFA in the open browser.`);
-    }
-    while (interactiveAuthenticationEnabled && result.status === 'login-required' && Date.now() < deadline) {
-      activePage = await waitForInteractiveAuthentication(activePage, deadline, {
-        ...options,
-        authenticationRecoveryUrl: options.authenticationRecoveryUrl ?? session.startUrl,
-      }, context);
-      await checkpointAuthentication();
-      reportProgress('Authentication complete. Continuing downloads.');
-      result = decodeInstitutionBrowserProgramResult<T>(await program(
-        activePage,
-        reportProgress,
-        options.programBindings ?? {},
-      ));
-    }
-    if (interactiveAuthenticationEnabled && result.status === 'login-required') {
-      throw new Error(`Authentication timed out in ${session.name}`);
-    }
-    if (result.status !== 'login-required') await checkpointAuthentication();
-    if (result.status === 'complete') await showSyncCompletionChapter(activePage, options);
-    return result;
-  });
+  ) =>
+    runWithPlaywrightPage(
+      {
+        ...session,
+        profilePath: browserProfilePath,
+        authenticationProfilePath: canonicalProfilePath,
+        interactiveLeaseProfilePath: canonicalProfilePath,
+        forceStartUrl,
+        onInteractiveBrowserWait: reportProgress,
+        contextOptions: {
+          ...session.contextOptions,
+          headless,
+        },
+      },
+      async (page, context) => {
+        const interactiveAuthenticationEnabled =
+          allowInteractiveAuthentication && (options.allowInteractiveAuthentication ?? true);
+        let activePage = page;
+        let authenticationResumeUrl: string | undefined;
+        const deadline = Date.now() + (options.authenticationTimeoutMs ?? 10 * 60_000);
+        const isAuthenticated = options.isAuthenticated ?? hasDefaultAuthentication;
+        const checkpointAuthentication = async (): Promise<void> => {
+          if (!(session.persistAuthentication ?? true)) return;
+          const authenticated = await checkAuthenticationForCheckpoint(
+            activePage,
+            isAuthenticated,
+            options.authenticationCheckpointTimeoutMs,
+          );
+          if (!authenticated) return;
+          authenticationResumeUrl ??= activePage.url();
+          const persisted = await persistBrowserAuthentication(
+            context,
+            playwrightAuthStatePath(canonicalProfilePath),
+            undefined,
+            authenticationResumeUrl,
+          );
+          if (!persisted) console.warn(`Could not checkpoint authentication for ${session.name}.`);
+        };
+        await checkpointAuthentication();
+        let result = decodeInstitutionBrowserProgramResult<T>(
+          await program(activePage, reportProgress, options.programBindings ?? {}),
+        );
+        if (result.status === 'login-required' && interactiveAuthenticationEnabled) {
+          await showAuthenticationChapter(
+            activePage,
+            result.action ??
+              `Complete login and MFA for ${session.name}. EasyMoney will continue automatically.`,
+          );
+          console.log(
+            `Authentication required in ${session.name}. Complete login and MFA in the open browser.`,
+          );
+        }
+        while (
+          interactiveAuthenticationEnabled &&
+          result.status === 'login-required' &&
+          Date.now() < deadline
+        ) {
+          activePage = await waitForInteractiveAuthentication(
+            activePage,
+            deadline,
+            {
+              ...options,
+              authenticationRecoveryUrl: options.authenticationRecoveryUrl ?? session.startUrl,
+            },
+            context,
+          );
+          await checkpointAuthentication();
+          reportProgress('Authentication complete. Continuing downloads.');
+          result = decodeInstitutionBrowserProgramResult<T>(
+            await program(activePage, reportProgress, options.programBindings ?? {}),
+          );
+        }
+        if (interactiveAuthenticationEnabled && result.status === 'login-required') {
+          throw new Error(`Authentication timed out in ${session.name}`);
+        }
+        if (result.status !== 'login-required') await checkpointAuthentication();
+        if (result.status === 'complete') await showSyncCompletionChapter(activePage, options);
+        return result;
+      },
+    );
 
   if (session.persistAuthentication === false) {
-    return runWithTransientBrowserProfile(profilePath => runAttempt(
-      launchStrategy.initialHeadless,
-      !launchStrategy.initialHeadless,
-      profilePath,
-    ));
+    return runWithTransientBrowserProfile((profilePath) =>
+      runAttempt(launchStrategy.initialHeadless, !launchStrategy.initialHeadless, profilePath),
+    );
   }
 
   const initialResult = launchStrategy.allowHeadedAuthenticationFallback
-    ? await withInteractiveBrowserLease({
-        profilePath: canonicalProfilePath,
-        sessionName: session.name,
-        onWait: reportProgress,
-      }, () => runWithTransientBrowserProfile(
-        profilePath => runAttempt(true, false, profilePath),
-        { seedProfilePath: canonicalProfilePath },
-      ))
+    ? await withInteractiveBrowserLease(
+        {
+          profilePath: canonicalProfilePath,
+          sessionName: session.name,
+          onWait: reportProgress,
+        },
+        () =>
+          runWithTransientBrowserProfile((profilePath) => runAttempt(true, false, profilePath), {
+            seedProfilePath: canonicalProfilePath,
+          }),
+      )
     : launchStrategy.initialHeadless
       ? await runAttempt(true, false)
       : await runAttempt(false, true);
@@ -1666,6 +1798,8 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
     return initialResult;
   }
 
-  console.log(`Saved authentication for ${session.name} needs attention. Opening the browser for login or MFA.`);
+  console.log(
+    `Saved authentication for ${session.name} needs attention. Opening the browser for login or MFA.`,
+  );
   return runAttempt(false, true, canonicalProfilePath, true);
 }

@@ -21,11 +21,18 @@ describe('Sequoia Fund statement response parsing', () => {
   });
 
   test('falls back from script state to hidden input and meta state', () => {
-    const withoutScriptToken = statementFixture
-      .replace('<script>window.activeCSRFtoken = "opaque-script-token";</script>', '')
+    const withoutScriptToken = statementFixture.replace(
+      '<script>window.activeCSRFtoken = "opaque-script-token";</script>',
+      '',
+    );
     expect(parseSequoiaFundStatementHtml(withoutScriptToken).csrfToken).toBe('opaque-input-token');
-    expect(parseSequoiaFundStatementHtml(
-      withoutScriptToken.replace('<input type="hidden" name="csrf_token" value="opaque-input-token">', ''),
-    ).csrfToken).toBe('opaque-meta-token');
+    expect(
+      parseSequoiaFundStatementHtml(
+        withoutScriptToken.replace(
+          '<input type="hidden" name="csrf_token" value="opaque-input-token">',
+          '',
+        ),
+      ).csrfToken,
+    ).toBe('opaque-meta-token');
   });
 });

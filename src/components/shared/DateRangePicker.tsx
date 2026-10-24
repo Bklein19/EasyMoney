@@ -8,7 +8,13 @@ interface DateRangePickerProps {
   className?: string;
 }
 
-const DateRangePicker = ({ startDate, endDate, onStartDateChange, onEndDateChange, className = '' }: DateRangePickerProps) => {
+const DateRangePicker = ({
+  startDate,
+  endDate,
+  onStartDateChange,
+  onEndDateChange,
+  className = '',
+}: DateRangePickerProps) => {
   return (
     <div className={`date-range-picker flex items-center gap-2 ${className}`}>
       <div className="relative flex items-center">

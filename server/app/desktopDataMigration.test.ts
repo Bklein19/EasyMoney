@@ -38,23 +38,43 @@ function createDefaultOnlyDatabase(databasePath: string, legacySeed = false) {
   database.prepare('INSERT INTO schemaMigrations (id, name) VALUES (?, ?)').run(1, 'seed');
 
   const categoryIds = new Map<string, number>();
-  const defaults = legacySeed ? DEFAULT_CATEGORIES.filter(category => !category.parentName) : DEFAULT_CATEGORIES;
+  const defaults = legacySeed
+    ? DEFAULT_CATEGORIES.filter((category) => !category.parentName)
+    : DEFAULT_CATEGORIES;
   for (const category of defaults) {
-    const result = database.prepare(`
+    const result = database
+      .prepare(
+        `
       INSERT INTO categories (name, parentId, type, categoryGroup, description, color, icon)
       VALUES (?, NULL, ?, ?, ?, ?, ?)
-    `).run(category.name, category.type, category.categoryGroup, legacySeed ? null : category.description ?? null, category.color, category.icon);
+    `,
+      )
+      .run(
+        category.name,
+        category.type,
+        category.categoryGroup,
+        legacySeed ? null : (category.description ?? null),
+        category.color,
+        category.icon,
+      );
     categoryIds.set(category.name, Number(result.lastInsertRowid));
   }
   for (const category of defaults) {
-    if (category.parentName) database.prepare('UPDATE categories SET parentId = ? WHERE name = ?').run(categoryIds.get(category.parentName)!, category.name);
+    if (category.parentName)
+      database
+        .prepare('UPDATE categories SET parentId = ? WHERE name = ?')
+        .run(categoryIds.get(category.parentName)!, category.name);
   }
 
   for (const [pattern, categoryName, priority] of DEFAULT_RULES) {
-    database.prepare(`
+    database
+      .prepare(
+        `
       INSERT INTO categorizationRules (categoryId, pattern, matchType, priority)
       VALUES (?, ?, 'contains', ?)
-    `).run(categoryIds.get(categoryName)!, pattern, priority);
+    `,
+      )
+      .run(categoryIds.get(categoryName)!, pattern, priority);
   }
   database.close();
 }
@@ -80,10 +100,17 @@ describe('desktop data migration', () => {
       const databasePath = path.join(destination, 'easymoney.sqlite');
       createDefaultOnlyDatabase(databasePath, legacySeed);
       const db = new Database(databasePath);
-      db.exec('UPDATE categories SET id = id + 1000; UPDATE categories SET parentId = parentId + 1000 WHERE parentId IS NOT NULL; UPDATE categorizationRules SET categoryId = categoryId + 1000;');
+      db.exec(
+        'UPDATE categories SET id = id + 1000; UPDATE categories SET parentId = parentId + 1000 WHERE parentId IS NOT NULL; UPDATE categorizationRules SET categoryId = categoryId + 1000;',
+      );
       db.close();
-      expect(migrateLegacyData({ homeDirectory, databasePath, environmentPath: path.join(destination, '.env.local') }))
-        .toMatchObject({ recoveredEmptyDatabase: true, migratedDatabaseFrom: legacyDatabasePath });
+      expect(
+        migrateLegacyData({
+          homeDirectory,
+          databasePath,
+          environmentPath: path.join(destination, '.env.local'),
+        }),
+      ).toMatchObject({ recoveredEmptyDatabase: true, migratedDatabaseFrom: legacyDatabasePath });
     }
   });
 
@@ -100,7 +127,10 @@ describe('desktop data migration', () => {
     source.exec('CREATE TABLE example (value TEXT NOT NULL)');
     source.prepare('INSERT INTO example (value) VALUES (?)').run('preserved');
     source.close();
-    fs.writeFileSync(path.join(legacyRoot, '.env.local'), 'OPENAI_CATEGORIZATION_MODEL="test-model"\n');
+    fs.writeFileSync(
+      path.join(legacyRoot, '.env.local'),
+      'OPENAI_CATEGORIZATION_MODEL="test-model"\n',
+    );
 
     const databasePath = path.join(destination, 'easymoney.sqlite');
     const environmentPath = path.join(destination, '.env.local');
@@ -157,7 +187,7 @@ describe('desktop data migration', () => {
     untouched.close();
     expect(fs.statSync(`${databasePath}-wal`).size).toBe(0);
     expect(fs.statSync(`${databasePath}-shm`).size).toBe(32_768);
-    expect(fs.readdirSync(destination).some(name => name.endsWith('.tmp'))).toBeFalse();
+    expect(fs.readdirSync(destination).some((name) => name.endsWith('.tmp'))).toBeFalse();
 
     fs.rmSync(legacyDatabasePath);
     const reused = migrateLegacyData({
@@ -207,9 +237,13 @@ describe('desktop data migration', () => {
     const databasePath = path.join(destination, 'easymoney.sqlite');
     createDefaultOnlyDatabase(databasePath);
     const destinationDatabase = new Database(databasePath);
-    destinationDatabase.prepare(`
+    destinationDatabase
+      .prepare(
+        `
       UPDATE categories SET color = '#000000' WHERE name = 'Groceries'
-    `).run();
+    `,
+      )
+      .run();
     destinationDatabase.close();
 
     const result = migrateLegacyData({
@@ -219,9 +253,15 @@ describe('desktop data migration', () => {
     });
 
     const preserved = new Database(databasePath, { readonly: true });
-    expect(preserved.prepare(`
+    expect(
+      preserved
+        .prepare(
+          `
       SELECT color FROM categories WHERE name = 'Groceries'
-    `).get()).toEqual({ color: '#000000' });
+    `,
+        )
+        .get(),
+    ).toEqual({ color: '#000000' });
     preserved.close();
     expect(result).toEqual({
       databasePath,
@@ -265,10 +305,14 @@ describe('desktop data migration', () => {
     const databasePath = path.join(destination, 'easymoney.sqlite');
     createDefaultOnlyDatabase(databasePath);
     const destinationDatabase = new Database(databasePath);
-    destinationDatabase.prepare(`
+    destinationDatabase
+      .prepare(
+        `
       INSERT INTO categorizationRules (categoryId, pattern, matchType, priority)
       VALUES (999999, 'custom-orphan', 'contains', 1)
-    `).run();
+    `,
+      )
+      .run();
     destinationDatabase.close();
 
     const result = migrateLegacyData({
@@ -278,9 +322,15 @@ describe('desktop data migration', () => {
     });
 
     const preserved = new Database(databasePath, { readonly: true });
-    expect(preserved.prepare(`
+    expect(
+      preserved
+        .prepare(
+          `
       SELECT COUNT(*) AS count FROM categorizationRules WHERE pattern = 'custom-orphan'
-    `).get()).toEqual({ count: 1 });
+    `,
+        )
+        .get(),
+    ).toEqual({ count: 1 });
     preserved.close();
     expect(result).toEqual({
       databasePath,
@@ -328,9 +378,15 @@ describe('desktop data migration', () => {
       expect(liveDatabase.prepare('SELECT COUNT(*) AS count FROM accounts').get()).toEqual({
         count: 0,
       });
-      expect(liveDatabase.prepare(`
+      expect(
+        liveDatabase
+          .prepare(
+            `
         SELECT color FROM categories WHERE name = 'Groceries'
-      `).get()).toEqual({ color: '#22c55e' });
+      `,
+          )
+          .get(),
+      ).toEqual({ color: '#22c55e' });
       expect(fs.statSync(`${databasePath}-wal`).size).toBeGreaterThan(0);
       const recovered = new Database(result.databasePath, { readonly: true });
       expect(recovered.prepare('SELECT name FROM accounts').get()).toEqual({
@@ -354,9 +410,9 @@ describe('desktop data migration', () => {
     let failureInjected = false;
     const linkSpy = spyOn(fs, 'linkSync').mockImplementation((source, target) => {
       if (
-        !failureInjected
-        && String(source).endsWith('.snapshot.tmp')
-        && String(target).endsWith('easymoney.legacy-recovered.sqlite')
+        !failureInjected &&
+        String(source).endsWith('.snapshot.tmp') &&
+        String(target).endsWith('easymoney.legacy-recovered.sqlite')
       ) {
         failureInjected = true;
         throw Object.assign(new Error('injected publish failure'), { code: 'EIO' });
@@ -365,11 +421,13 @@ describe('desktop data migration', () => {
     });
 
     try {
-      expect(() => migrateLegacyData({
+      expect(() =>
+        migrateLegacyData({
           homeDirectory,
           databasePath,
           environmentPath: path.join(destination, '.env.local'),
-        })).toThrow('injected publish failure');
+        }),
+      ).toThrow('injected publish failure');
     } finally {
       linkSpy.mockRestore();
     }
@@ -382,22 +440,30 @@ describe('desktop data migration', () => {
     });
     restored.close();
     expect(fs.existsSync(path.join(destination, 'easymoney.legacy-recovered.sqlite'))).toBeFalse();
-    expect(fs.readdirSync(destination).some(name => name.endsWith('.tmp'))).toBeFalse();
+    expect(fs.readdirSync(destination).some((name) => name.endsWith('.tmp'))).toBeFalse();
   });
 
   test('rejects every unmarked recovery-path collision without selecting or overwriting it', () => {
     const collisions: Array<[string, (databasePath: string) => void]> = [
-      ['zero-byte', databasePath => fs.writeFileSync(databasePath, '')],
-      ['empty-valid', databasePath => {
-        const database = new Database(databasePath, { create: true });
-        database.exec('VACUUM');
-        database.close();
-      }],
-      ['unrelated', databasePath => {
-        const database = new Database(databasePath, { create: true });
-        database.exec('CREATE TABLE unrelated (value TEXT); INSERT INTO unrelated VALUES (\'keep\');');
-        database.close();
-      }],
+      ['zero-byte', (databasePath) => fs.writeFileSync(databasePath, '')],
+      [
+        'empty-valid',
+        (databasePath) => {
+          const database = new Database(databasePath, { create: true });
+          database.exec('VACUUM');
+          database.close();
+        },
+      ],
+      [
+        'unrelated',
+        (databasePath) => {
+          const database = new Database(databasePath, { create: true });
+          database.exec(
+            "CREATE TABLE unrelated (value TEXT); INSERT INTO unrelated VALUES ('keep');",
+          );
+          database.close();
+        },
+      ],
     ];
 
     for (const [name, createCollision] of collisions) {
@@ -411,11 +477,13 @@ describe('desktop data migration', () => {
       createCollision(recoveryPath);
       const originalCollision = fs.readFileSync(recoveryPath);
 
-      expect(() => migrateLegacyData({
-        homeDirectory,
-        databasePath,
-        environmentPath: path.join(destination, '.env.local'),
-      })).toThrow('unrecognized recovery database');
+      expect(() =>
+        migrateLegacyData({
+          homeDirectory,
+          databasePath,
+          environmentPath: path.join(destination, '.env.local'),
+        }),
+      ).toThrow('unrecognized recovery database');
       expect(fs.readFileSync(recoveryPath)).toEqual(originalCollision);
       const primary = new Database(databasePath, { readonly: true });
       expect(primary.prepare('SELECT COUNT(*) AS count FROM accounts').get()).toEqual({ count: 0 });
@@ -442,11 +510,13 @@ describe('desktop data migration', () => {
     changedPrimary.prepare('INSERT INTO accounts (name) VALUES (?)').run('changed-primary');
     changedPrimary.close();
 
-    expect(() => migrateLegacyData({
-      homeDirectory,
-      databasePath,
-      environmentPath: path.join(destination, '.env.local'),
-    })).toThrow('refusing to choose between them');
+    expect(() =>
+      migrateLegacyData({
+        homeDirectory,
+        databasePath,
+        environmentPath: path.join(destination, '.env.local'),
+      }),
+    ).toThrow('refusing to choose between them');
     const canonicalRecovery = new Database(recovered.databasePath, { readonly: true });
     expect(canonicalRecovery.prepare('SELECT name FROM accounts').get()).toEqual({
       name: 'legacy-account',

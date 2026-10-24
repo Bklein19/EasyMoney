@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   Area,
   CartesianGrid,
@@ -11,10 +11,10 @@ import {
   Tooltip,
   XAxis,
   YAxis,
-} from "recharts";
-import { Info } from "lucide-react";
-import "./ReportPages.css";
-import { trpc } from "../../api/trpc";
+} from 'recharts';
+import { Info } from 'lucide-react';
+import './ReportPages.css';
+import { trpc } from '../../api/trpc';
 
 interface AccountSummary {
   id: number;
@@ -72,26 +72,34 @@ const TRIAL_COUNT = 500;
 const END_AGE = 95;
 
 const fmtUsd = (v: number) =>
-  v.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  v.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 
 const fmtPct = (v: number) =>
-  v.toLocaleString("en-US", { style: "percent", minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  v.toLocaleString('en-US', {
+    style: 'percent',
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  });
 
 const fmtUsdAxis = (v: number) =>
   Math.abs(v) >= 999_500_000
-    ? `$${(v / 1_000_000_000).toFixed(Math.abs(v) >= 10_000_000_000 ? 0 : 1).replace(/\.0$/, "")}B`
+    ? `$${(v / 1_000_000_000).toFixed(Math.abs(v) >= 10_000_000_000 ? 0 : 1).replace(/\.0$/, '')}B`
     : Math.abs(v) >= 999_500
-      ? `$${(v / 1_000_000).toFixed(Math.abs(v) >= 10_000_000 ? 0 : 1).replace(/\.0$/, "")}M`
+      ? `$${(v / 1_000_000).toFixed(Math.abs(v) >= 10_000_000 ? 0 : 1).replace(/\.0$/, '')}M`
       : Math.abs(v) >= 1000
         ? `$${(v / 1000).toFixed(0)}k`
         : `$${v.toFixed(0)}`;
 
 const chartTheme = {
-  axis: "var(--chart-axis)",
-  grid: "var(--chart-grid)",
-  zero: "var(--chart-zero)",
-  tooltipContent: { background: "var(--tooltip-bg)", border: "1px solid var(--tooltip-border)", borderRadius: 8 },
-  tooltipLabel: { color: "var(--text-muted)" },
+  axis: 'var(--chart-axis)',
+  grid: 'var(--chart-grid)',
+  zero: 'var(--chart-zero)',
+  tooltipContent: {
+    background: 'var(--tooltip-bg)',
+    border: '1px solid var(--tooltip-border)',
+    borderRadius: 8,
+  },
+  tooltipLabel: { color: 'var(--text-muted)' },
 };
 
 const xorshift32 = (seed: number) => {
@@ -100,7 +108,7 @@ const xorshift32 = (seed: number) => {
     state ^= state << 13;
     state ^= state >>> 17;
     state ^= state << 5;
-    return ((state >>> 0) / 4294967296);
+    return (state >>> 0) / 4294967296;
   };
 };
 
@@ -121,9 +129,10 @@ const percentile = (values: number[], p: number) => {
   return (sorted[lower] ?? 0) * (1 - weight) + (sorted[upper] ?? 0) * weight;
 };
 
-const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const clampNumber = (value: number, min: number, max: number) =>
+  Math.min(max, Math.max(min, value));
 const parseInput = (value: string, fallback: number) => {
-  if (value.trim() === "") return fallback;
+  if (value.trim() === '') return fallback;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 };
@@ -261,22 +270,21 @@ function runProjection({
   };
 }
 
-
 export function RetirementPage({ selectedIds: selectedIdsProp }: { selectedIds?: Set<number> }) {
   const netWorthQuery = useQuery(trpc.reports.netWorth.queryOptions());
   const savingsRateQuery = useQuery(trpc.reports.savingsRate.queryOptions());
   const netWorthReport = (netWorthQuery.data || null) as NetWorthReport | null;
   const savingsReport = (savingsRateQuery.data || null) as SavingsRateReport | null;
-  const [currentAge, setCurrentAge] = useState("35");
-  const [retirementAge, setRetirementAge] = useState("65");
-  const [expectedReturnPct, setExpectedReturnPct] = useState("6");
-  const [volatilityPct, setVolatilityPct] = useState("12");
-  const [inflationPct, setInflationPct] = useState("2.5");
-  const [contributionIncreasePct, setContributionIncreasePct] = useState("2");
-  const [annualContribution, setAnnualContribution] = useState("18000");
-  const [annualSpend, setAnnualSpend] = useState("90000");
-  const [socialSecurityAge, setSocialSecurityAge] = useState("67");
-  const [annualSocialSecurity, setAnnualSocialSecurity] = useState("0");
+  const [currentAge, setCurrentAge] = useState('35');
+  const [retirementAge, setRetirementAge] = useState('65');
+  const [expectedReturnPct, setExpectedReturnPct] = useState('6');
+  const [volatilityPct, setVolatilityPct] = useState('12');
+  const [inflationPct, setInflationPct] = useState('2.5');
+  const [contributionIncreasePct, setContributionIncreasePct] = useState('2');
+  const [annualContribution, setAnnualContribution] = useState('18000');
+  const [annualSpend, setAnnualSpend] = useState('90000');
+  const [socialSecurityAge, setSocialSecurityAge] = useState('67');
+  const [annualSocialSecurity, setAnnualSocialSecurity] = useState('0');
   const [zoomRange, setZoomRange] = useState<{ left: number; right: number } | null>(null);
   const [dragStartAge, setDragStartAge] = useState<number | null>(null);
   const [dragEndAge, setDragEndAge] = useState<number | null>(null);
@@ -287,24 +295,39 @@ export function RetirementPage({ selectedIds: selectedIdsProp }: { selectedIds?:
     [netWorthReport],
   );
   const selectedIds = selectedIdsProp && selectedIdsProp.size > 0 ? selectedIdsProp : allAccountIds;
-  const currentBalance = useMemo(() => inferCurrentBalance(netWorthReport, selectedIds), [netWorthReport, selectedIds]);
+  const currentBalance = useMemo(
+    () => inferCurrentBalance(netWorthReport, selectedIds),
+    [netWorthReport, selectedIds],
+  );
   const inferredContribution = useMemo(
     () => inferAnnualContribution(netWorthReport, selectedIds),
     [netWorthReport, selectedIds],
   );
-  const inferredIncome = useMemo(() => inferAnnualIncome(savingsReport, selectedIds), [savingsReport, selectedIds]);
-  const inferredSocialSecurity = useMemo(() => estimateSocialSecurity(inferredIncome), [inferredIncome]);
+  const inferredIncome = useMemo(
+    () => inferAnnualIncome(savingsReport, selectedIds),
+    [savingsReport, selectedIds],
+  );
+  const inferredSocialSecurity = useMemo(
+    () => estimateSocialSecurity(inferredIncome),
+    [inferredIncome],
+  );
 
   useEffect(() => {
     if (seededInputs.current || !netWorthReport || !savingsReport) return;
-    if (inferredContribution > 0) setAnnualContribution(String(Math.round(inferredContribution / 100) * 100));
-    if (inferredIncome > 0) setAnnualSpend(String(Math.round(Math.max(40000, inferredIncome * 0.75) / 1000) * 1000));
+    if (inferredContribution > 0)
+      setAnnualContribution(String(Math.round(inferredContribution / 100) * 100));
+    if (inferredIncome > 0)
+      setAnnualSpend(String(Math.round(Math.max(40000, inferredIncome * 0.75) / 1000) * 1000));
     if (inferredSocialSecurity > 0) setAnnualSocialSecurity(String(inferredSocialSecurity));
     seededInputs.current = true;
   }, [inferredContribution, inferredIncome, inferredSocialSecurity, netWorthReport, savingsReport]);
 
   const sanitizedCurrentAge = clampNumber(Math.round(parseInput(currentAge, 35)), 18, 94);
-  const sanitizedRetirementAge = clampNumber(Math.round(parseInput(retirementAge, 65)), sanitizedCurrentAge + 1, END_AGE);
+  const sanitizedRetirementAge = clampNumber(
+    Math.round(parseInput(retirementAge, 65)),
+    sanitizedCurrentAge + 1,
+    END_AGE,
+  );
   const annualContributionValue = Math.max(0, parseInput(annualContribution, 0));
   const annualSpendValue = Math.max(0, parseInput(annualSpend, 0));
   const annualSocialSecurityValue = Math.max(0, parseInput(annualSocialSecurity, 0));
@@ -312,7 +335,11 @@ export function RetirementPage({ selectedIds: selectedIdsProp }: { selectedIds?:
   const volatilityPctValue = Math.max(0, parseInput(volatilityPct, 0));
   const inflationPctValue = Math.max(0, parseInput(inflationPct, 0));
   const contributionIncreasePctValue = Math.max(0, parseInput(contributionIncreasePct, 0));
-  const socialSecurityAgeValue = clampNumber(Math.round(parseInput(socialSecurityAge, 67)), sanitizedCurrentAge, END_AGE);
+  const socialSecurityAgeValue = clampNumber(
+    Math.round(parseInput(socialSecurityAge, 67)),
+    sanitizedCurrentAge,
+    END_AGE,
+  );
 
   const projection = useMemo(
     () =>
@@ -344,17 +371,23 @@ export function RetirementPage({ selectedIds: selectedIdsProp }: { selectedIds?:
     ],
   );
 
-  const retirementPoint = projection.points.find((point) => point.age === sanitizedRetirementAge) ?? projection.points.at(-1);
+  const retirementPoint =
+    projection.points.find((point) => point.age === sanitizedRetirementAge) ??
+    projection.points.at(-1);
   const finalPoint = projection.points.at(-1);
   const displayedPoints = useMemo(
     () =>
       zoomRange
-        ? projection.points.filter((point) => point.age >= zoomRange.left && point.age <= zoomRange.right)
+        ? projection.points.filter(
+            (point) => point.age >= zoomRange.left && point.age <= zoomRange.right,
+          )
         : projection.points,
     [projection.points, zoomRange],
   );
-  const dragLeft = dragStartAge !== null && dragEndAge !== null ? Math.min(dragStartAge, dragEndAge) : null;
-  const dragRight = dragStartAge !== null && dragEndAge !== null ? Math.max(dragStartAge, dragEndAge) : null;
+  const dragLeft =
+    dragStartAge !== null && dragEndAge !== null ? Math.min(dragStartAge, dragEndAge) : null;
+  const dragRight =
+    dragStartAge !== null && dragEndAge !== null ? Math.max(dragStartAge, dragEndAge) : null;
 
   const beginChartDrag = (activeLabel: unknown) => {
     const age = Number(activeLabel);
@@ -382,15 +415,27 @@ export function RetirementPage({ selectedIds: selectedIdsProp }: { selectedIds?:
   };
 
   const reportError = netWorthQuery.error || savingsRateQuery.error;
-  if (reportError) return <div className="page page-retirement"><div className="meta import-error">{String(reportError)}</div></div>;
-  if (!netWorthReport) return <div className="page page-retirement"><div className="empty-state">Loading...</div></div>;
+  if (reportError)
+    return (
+      <div className="page page-retirement">
+        <div className="meta import-error">{String(reportError)}</div>
+      </div>
+    );
+  if (!netWorthReport)
+    return (
+      <div className="page page-retirement">
+        <div className="empty-state">Loading...</div>
+      </div>
+    );
 
   return (
     <div className="page page-retirement">
       <div className="page__header report-page__header">
         <div>
           <h1 className="page__title">Retirement</h1>
-          <p className="page__subtitle">Monte Carlo style portfolio projection using selected report accounts.</p>
+          <p className="page__subtitle">
+            Monte Carlo style portfolio projection using selected report accounts.
+          </p>
         </div>
       </div>
 
@@ -422,55 +467,141 @@ export function RetirementPage({ selectedIds: selectedIdsProp }: { selectedIds?:
           <div className="retirement-panel__header">
             <div className="return-subsection-title">Assumptions</div>
             <div className="retirement-info">
-              <button type="button" className="retirement-info__button" aria-label="Assumption notes">
+              <button
+                type="button"
+                className="retirement-info__button"
+                aria-label="Assumption notes"
+              >
                 <Info size={16} />
               </button>
               <div className="retirement-info__bubble" role="tooltip">
-                <p>Annual contribution starts from positive contribution cash flows in the last 12 imported months for the selected accounts. Projection contributions stop at retirement age.</p>
-                <p>Volatility is annual return standard deviation. With a 6% expected return and 12% volatility, most simulated years land roughly between -6% and 18%, with wider tails.</p>
+                <p>
+                  Annual contribution starts from positive contribution cash flows in the last 12
+                  imported months for the selected accounts. Projection contributions stop at
+                  retirement age.
+                </p>
+                <p>
+                  Volatility is annual return standard deviation. With a 6% expected return and 12%
+                  volatility, most simulated years land roughly between -6% and 18%, with wider
+                  tails.
+                </p>
               </div>
             </div>
           </div>
           <div className="retirement-form-grid">
             <label className="form-group">
               <span className="form-label">Current age</span>
-              <input className="input" type="number" min={18} max={94} value={currentAge} onChange={(event) => setCurrentAge(event.target.value)} />
+              <input
+                className="input"
+                type="number"
+                min={18}
+                max={94}
+                value={currentAge}
+                onChange={(event) => setCurrentAge(event.target.value)}
+              />
             </label>
             <label className="form-group">
               <span className="form-label">Retirement age</span>
-              <input className="input" type="number" min={sanitizedCurrentAge + 1} max={END_AGE} value={retirementAge} onChange={(event) => setRetirementAge(event.target.value)} />
+              <input
+                className="input"
+                type="number"
+                min={sanitizedCurrentAge + 1}
+                max={END_AGE}
+                value={retirementAge}
+                onChange={(event) => setRetirementAge(event.target.value)}
+              />
             </label>
             <label className="form-group">
               <span className="form-label">Annual contribution</span>
-              <input className="input" type="number" min={0} step={1000} value={annualContribution} onChange={(event) => setAnnualContribution(event.target.value)} />
+              <input
+                className="input"
+                type="number"
+                min={0}
+                step={1000}
+                value={annualContribution}
+                onChange={(event) => setAnnualContribution(event.target.value)}
+              />
             </label>
             <label className="form-group">
               <span className="form-label">Retirement spending</span>
-              <input className="input" type="number" min={0} step={1000} value={annualSpend} onChange={(event) => setAnnualSpend(event.target.value)} />
+              <input
+                className="input"
+                type="number"
+                min={0}
+                step={1000}
+                value={annualSpend}
+                onChange={(event) => setAnnualSpend(event.target.value)}
+              />
             </label>
             <label className="form-group">
               <span className="form-label">Expected return %</span>
-              <input className="input" type="number" min={-10} max={20} step={0.1} value={expectedReturnPct} onChange={(event) => setExpectedReturnPct(event.target.value)} />
+              <input
+                className="input"
+                type="number"
+                min={-10}
+                max={20}
+                step={0.1}
+                value={expectedReturnPct}
+                onChange={(event) => setExpectedReturnPct(event.target.value)}
+              />
             </label>
             <label className="form-group">
               <span className="form-label">Volatility %</span>
-              <input className="input" type="number" min={0} max={40} step={0.1} value={volatilityPct} onChange={(event) => setVolatilityPct(event.target.value)} />
+              <input
+                className="input"
+                type="number"
+                min={0}
+                max={40}
+                step={0.1}
+                value={volatilityPct}
+                onChange={(event) => setVolatilityPct(event.target.value)}
+              />
             </label>
             <label className="form-group">
               <span className="form-label">Inflation %</span>
-              <input className="input" type="number" min={0} max={12} step={0.1} value={inflationPct} onChange={(event) => setInflationPct(event.target.value)} />
+              <input
+                className="input"
+                type="number"
+                min={0}
+                max={12}
+                step={0.1}
+                value={inflationPct}
+                onChange={(event) => setInflationPct(event.target.value)}
+              />
             </label>
             <label className="form-group">
               <span className="form-label">Contribution raise %</span>
-              <input className="input" type="number" min={0} max={20} step={0.1} value={contributionIncreasePct} onChange={(event) => setContributionIncreasePct(event.target.value)} />
+              <input
+                className="input"
+                type="number"
+                min={0}
+                max={20}
+                step={0.1}
+                value={contributionIncreasePct}
+                onChange={(event) => setContributionIncreasePct(event.target.value)}
+              />
             </label>
             <label className="form-group">
               <span className="form-label">Social Security age</span>
-              <input className="input" type="number" min={sanitizedCurrentAge} max={END_AGE} value={socialSecurityAge} onChange={(event) => setSocialSecurityAge(event.target.value)} />
+              <input
+                className="input"
+                type="number"
+                min={sanitizedCurrentAge}
+                max={END_AGE}
+                value={socialSecurityAge}
+                onChange={(event) => setSocialSecurityAge(event.target.value)}
+              />
             </label>
             <label className="form-group">
               <span className="form-label">Annual Social Security</span>
-              <input className="input" type="number" min={0} step={1000} value={annualSocialSecurity} onChange={(event) => setAnnualSocialSecurity(event.target.value)} />
+              <input
+                className="input"
+                type="number"
+                min={0}
+                step={1000}
+                value={annualSocialSecurity}
+                onChange={(event) => setAnnualSocialSecurity(event.target.value)}
+              />
             </label>
           </div>
           <div className="retirement-inference">
@@ -489,17 +620,24 @@ export function RetirementPage({ selectedIds: selectedIdsProp }: { selectedIds?:
           </div>
         </section>
 
-        <section className="chart-container retirement-chart" aria-label="Retirement projection chart">
+        <section
+          className="chart-container retirement-chart"
+          aria-label="Retirement projection chart"
+        >
           <div className="chart-section-header">
             <div>
               <div className="chart-title">Portfolio range</div>
               <div className="chart-subtitle">
                 {TRIAL_COUNT} deterministic trials, shown as 5th, 50th, and 95th percentiles
-                {zoomRange ? `, ages ${zoomRange.left}-${zoomRange.right}` : ""}
+                {zoomRange ? `, ages ${zoomRange.left}-${zoomRange.right}` : ''}
               </div>
             </div>
             {zoomRange && (
-              <button type="button" className="btn btn--secondary btn--sm" onClick={() => setZoomRange(null)}>
+              <button
+                type="button"
+                className="btn btn--secondary btn--sm"
+                onClick={() => setZoomRange(null)}
+              >
                 Reset zoom
               </button>
             )}
@@ -514,7 +652,13 @@ export function RetirementPage({ selectedIds: selectedIdsProp }: { selectedIds?:
               onMouseLeave={finishChartDrag}
             >
               <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
-              <XAxis dataKey="age" type="number" domain={["dataMin", "dataMax"]} stroke={chartTheme.axis} tick={{ fontSize: 11 }} />
+              <XAxis
+                dataKey="age"
+                type="number"
+                domain={['dataMin', 'dataMax']}
+                stroke={chartTheme.axis}
+                tick={{ fontSize: 11 }}
+              />
               <YAxis stroke={chartTheme.axis} tick={{ fontSize: 11 }} tickFormatter={fmtUsdAxis} />
               <Tooltip
                 formatter={(value) => fmtUsd(Number(value))}
@@ -522,12 +666,44 @@ export function RetirementPage({ selectedIds: selectedIdsProp }: { selectedIds?:
                 contentStyle={chartTheme.tooltipContent}
                 labelStyle={chartTheme.tooltipLabel}
               />
-              <ReferenceLine x={sanitizedRetirementAge} stroke={chartTheme.zero} label={{ value: "Retire", fill: "var(--text-muted)", fontSize: 11 }} />
-              <Area type="monotone" dataKey="p95" name="95th percentile" stroke="var(--series-retirement-high)" fill="var(--series-retirement-band)" fillOpacity={0.16} dot={false} />
-              <Line type="monotone" dataKey="p50" name="Median" stroke="var(--series-retirement-median)" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="p5" name="5th percentile" stroke="var(--series-retirement-low)" strokeWidth={2} dot={false} />
+              <ReferenceLine
+                x={sanitizedRetirementAge}
+                stroke={chartTheme.zero}
+                label={{ value: 'Retire', fill: 'var(--text-muted)', fontSize: 11 }}
+              />
+              <Area
+                type="monotone"
+                dataKey="p95"
+                name="95th percentile"
+                stroke="var(--series-retirement-high)"
+                fill="var(--series-retirement-band)"
+                fillOpacity={0.16}
+                dot={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="p50"
+                name="Median"
+                stroke="var(--series-retirement-median)"
+                strokeWidth={2}
+                dot={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="p5"
+                name="5th percentile"
+                stroke="var(--series-retirement-low)"
+                strokeWidth={2}
+                dot={false}
+              />
               {dragLeft !== null && dragRight !== null && dragLeft !== dragRight && (
-                <ReferenceArea x1={dragLeft} x2={dragRight} strokeOpacity={0.3} fill="var(--series-retirement-band)" fillOpacity={0.12} />
+                <ReferenceArea
+                  x1={dragLeft}
+                  x2={dragRight}
+                  strokeOpacity={0.3}
+                  fill="var(--series-retirement-band)"
+                  fillOpacity={0.12}
+                />
               )}
             </ComposedChart>
           </ResponsiveContainer>
@@ -539,9 +715,15 @@ export function RetirementPage({ selectedIds: selectedIdsProp }: { selectedIds?:
           <thead>
             <tr>
               <th rowSpan={2}>Age</th>
-              <th className="num" rowSpan={2}>Contributions</th>
-              <th className="num" rowSpan={2}>Median gains</th>
-              <th className="num retirement-table__group" colSpan={3}>Projected net worth</th>
+              <th className="num" rowSpan={2}>
+                Contributions
+              </th>
+              <th className="num" rowSpan={2}>
+                Median gains
+              </th>
+              <th className="num retirement-table__group" colSpan={3}>
+                Projected net worth
+              </th>
             </tr>
             <tr>
               <th className="num">5th percentile</th>
@@ -551,7 +733,13 @@ export function RetirementPage({ selectedIds: selectedIdsProp }: { selectedIds?:
           </thead>
           <tbody>
             {projection.points
-              .filter((point) => point.age === sanitizedCurrentAge || point.age === sanitizedRetirementAge || point.age % 5 === 0 || point.age === END_AGE)
+              .filter(
+                (point) =>
+                  point.age === sanitizedCurrentAge ||
+                  point.age === sanitizedRetirementAge ||
+                  point.age % 5 === 0 ||
+                  point.age === END_AGE,
+              )
               .map((point) => (
                 <tr key={point.age}>
                   <td>

@@ -11,21 +11,29 @@ interface IncomeStreamsProps {
   onSelectStream?: (stream: StackedMerchantGroup) => void;
 }
 
-function containsRelatedTarget(currentTarget: EventTarget & Element, relatedTarget: EventTarget | null) {
+function containsRelatedTarget(
+  currentTarget: EventTarget & Element,
+  relatedTarget: EventTarget | null,
+) {
   return relatedTarget instanceof Node && currentTarget.contains(relatedTarget);
 }
 
 export default function IncomeStreams({ rows = [], onSelectStream }: IncomeStreamsProps) {
-  const { stackMap, labelMap, stackGroup, undoStack, renameStack } = usePersistentStackMap('vaultview:incomeStacks');
+  const { stackMap, labelMap, stackGroup, undoStack, renameStack } =
+    usePersistentStackMap('vaultview:incomeStacks');
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [dropTargetKey, setDropTargetKey] = useState<string | null>(null);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const data = useMemo(() => {
-    const streams = applyManualStacks(rows.map(row => ({
-      ...row,
-      aliases: row.aliases ?? [row.name],
-    })), stackMap, labelMap)
+    const streams = applyManualStacks(
+      rows.map((row) => ({
+        ...row,
+        aliases: row.aliases ?? [row.name],
+      })),
+      stackMap,
+      labelMap,
+    )
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 10);
 
@@ -41,7 +49,8 @@ export default function IncomeStreams({ rows = [], onSelectStream }: IncomeStrea
     );
   }
 
-  const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
+  const formatCurrency = (val: number) =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
   const isDragging = Boolean(draggingKey);
 
   const beginRename = (event: MouseEvent, stream: StackedMerchantGroup) => {
@@ -65,14 +74,20 @@ export default function IncomeStreams({ rows = [], onSelectStream }: IncomeStrea
   };
 
   return (
-    <div className={`merchant-list merchant-list--stackable merchant-list--income ${isDragging ? 'merchant-list--dragging' : ''}`}>
+    <div
+      className={`merchant-list merchant-list--stackable merchant-list--income ${isDragging ? 'merchant-list--dragging' : ''}`}
+    >
       <div className="merchant-list__hint">
         <span>Drag one income stream onto another to combine matching labels.</span>
         <Tooltip
           text="Combines are saved on this device and stay grouped when you return. Use Undo on a combined stream to separate it again."
           position="left"
         >
-          <span className="merchant-list__help" aria-label="Income stream stacking help" tabIndex={0}>
+          <span
+            className="merchant-list__help"
+            aria-label="Income stream stacking help"
+            tabIndex={0}
+          >
             <HelpCircle size={15} />
           </span>
         </Tooltip>
@@ -81,7 +96,8 @@ export default function IncomeStreams({ rows = [], onSelectStream }: IncomeStrea
         const topAmount = data.streams[0].amount;
         const relativePercentage = (stream.amount / topAmount) * 100;
         const isSource = draggingKey === stream.normalized;
-        const isDropTarget = dropTargetKey === stream.normalized && draggingKey !== stream.normalized;
+        const isDropTarget =
+          dropTargetKey === stream.normalized && draggingKey !== stream.normalized;
 
         return (
           <div
@@ -93,8 +109,10 @@ export default function IncomeStreams({ rows = [], onSelectStream }: IncomeStrea
               'merchant-item--income',
               stream.manuallyStackedKeys.length > 0 ? 'merchant-item--stacked' : '',
               isSource ? 'merchant-item--drag-source' : '',
-              isDropTarget ? 'merchant-item--drop-target' : ''
-            ].filter(Boolean).join(' ')}
+              isDropTarget ? 'merchant-item--drop-target' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
             title={stream.aliases.join('\n')}
             draggable={editingKey !== stream.normalized}
             onDragStart={(event) => {
@@ -160,13 +178,20 @@ export default function IncomeStreams({ rows = [], onSelectStream }: IncomeStrea
                   <button className="btn btn--ghost btn--icon" type="submit" aria-label="Save name">
                     <Check size={14} />
                   </button>
-                  <button className="btn btn--ghost btn--icon" type="button" onClick={cancelRename} aria-label="Cancel rename">
+                  <button
+                    className="btn btn--ghost btn--icon"
+                    type="button"
+                    onClick={cancelRename}
+                    aria-label="Cancel rename"
+                  >
                     <X size={14} />
                   </button>
                 </form>
               ) : (
                 <div className="merchant-item__name-row">
-                  <div className="merchant-item__name" title={stream.name}>{stream.name}</div>
+                  <div className="merchant-item__name" title={stream.name}>
+                    {stream.name}
+                  </div>
                   {stream.manuallyStackedKeys.length > 0 && (
                     <button
                       className="merchant-item__icon-action"

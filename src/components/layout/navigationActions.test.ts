@@ -1,7 +1,14 @@
 import { expect, test } from 'bun:test';
 import { installNavigationActions, navigationDelta } from './navigationActions';
 
-const key = (value: string, modifiers = {}) => ({ key: value, metaKey: false, altKey: false, ctrlKey: false, shiftKey: false, ...modifiers });
+const key = (value: string, modifiers = {}) => ({
+  key: value,
+  metaKey: false,
+  altKey: false,
+  ctrlKey: false,
+  shiftKey: false,
+  ...modifiers,
+});
 
 test('browser, Command-bracket and Alt-arrow actions map to history traversal', () => {
   expect(navigationDelta(key('BrowserBack'))).toBe(-1);
@@ -18,7 +25,9 @@ test('browser, Command-bracket and Alt-arrow actions map to history traversal', 
 test('mouse back/forward traverses once, ignores normal clicks and cleans up listeners', () => {
   const target = new EventTarget();
   const moves: number[] = [];
-  const remove = installNavigationActions(target as unknown as Window, delta => moves.push(delta));
+  const remove = installNavigationActions(target as unknown as Window, (delta) =>
+    moves.push(delta),
+  );
   const click = (type: string, button: number) => {
     const event = Object.assign(new Event(type, { cancelable: true }), { button });
     target.dispatchEvent(event);

@@ -13,37 +13,47 @@ import {
 
 describe('browser-native authenticated requests', () => {
   test('builds a bounded header from HttpOnly session cookies only', () => {
-    expect(browserNativeHttpOnlyCookieHeader([
-      { name: 'analytics', value: 'large-client-cookie', httpOnly: false },
-      { name: 'session', value: 'session-token', httpOnly: true },
-      { name: 'csrf', value: 'csrf-token', httpOnly: true },
-    ])).toBe('session=session-token; csrf=csrf-token');
-    expect(() => browserNativeHttpOnlyCookieHeader([
-      { name: 'analytics', value: 'large-client-cookie', httpOnly: false },
-    ])).toThrow('session cookies are unavailable');
-    expect(() => browserNativeHttpOnlyCookieHeader([
-      { name: 'invalid cookie', value: 'value', httpOnly: true },
-    ])).toThrow('session cookie is invalid');
-    expect(() => browserNativeHttpOnlyCookieHeader([
-      { name: 'session', value: 'x'.repeat(3_501), httpOnly: true },
-    ])).toThrow('cookie header is too large');
+    expect(
+      browserNativeHttpOnlyCookieHeader([
+        { name: 'analytics', value: 'large-client-cookie', httpOnly: false },
+        { name: 'session', value: 'session-token', httpOnly: true },
+        { name: 'csrf', value: 'csrf-token', httpOnly: true },
+      ]),
+    ).toBe('session=session-token; csrf=csrf-token');
+    expect(() =>
+      browserNativeHttpOnlyCookieHeader([
+        { name: 'analytics', value: 'large-client-cookie', httpOnly: false },
+      ]),
+    ).toThrow('session cookies are unavailable');
+    expect(() =>
+      browserNativeHttpOnlyCookieHeader([
+        { name: 'invalid cookie', value: 'value', httpOnly: true },
+      ]),
+    ).toThrow('session cookie is invalid');
+    expect(() =>
+      browserNativeHttpOnlyCookieHeader([
+        { name: 'session', value: 'x'.repeat(3_501), httpOnly: true },
+      ]),
+    ).toThrow('cookie header is too large');
   });
 
   test('keeps replayable headers and leaves browser-owned headers to Chromium', () => {
-    expect(safeBrowserRequestHeaders({
-      accept: 'application/json',
-      ':authority': 'example.test',
-      ':method': 'POST',
-      ':path': '/api',
-      ':scheme': 'https',
-      cookie: 'private=value',
-      host: 'invalid.example',
-      origin: 'https://invalid.example',
-      referer: 'https://example.test/application',
-      'sec-fetch-site': 'cross-site',
-      'user-agent': 'custom-agent',
-      'x-request-proof': 'preserved',
-    })).toEqual({
+    expect(
+      safeBrowserRequestHeaders({
+        accept: 'application/json',
+        ':authority': 'example.test',
+        ':method': 'POST',
+        ':path': '/api',
+        ':scheme': 'https',
+        cookie: 'private=value',
+        host: 'invalid.example',
+        origin: 'https://invalid.example',
+        referer: 'https://example.test/application',
+        'sec-fetch-site': 'cross-site',
+        'user-agent': 'custom-agent',
+        'x-request-proof': 'preserved',
+      }),
+    ).toEqual({
       accept: 'application/json',
       referer: 'https://example.test/application',
       'x-request-proof': 'preserved',
@@ -53,22 +63,25 @@ describe('browser-native authenticated requests', () => {
   test('normalizes a relative response URL without parsing response cookies in Bun', async () => {
     const page = {
       url: () => 'https://digital.example.test/application',
-      evaluate: async () => ({
-        status: 200,
-        url: '/api/activity',
-        headers: {
-          'content-type': 'application/octet-stream',
-          'set-cookie': 'browser-owned=accepted; Path=/',
-        },
-        bodyBase64: 'AAE=',
-        redirected: false,
-      } satisfies BrowserNativeResponse),
+      evaluate: async () =>
+        ({
+          status: 200,
+          url: '/api/activity',
+          headers: {
+            'content-type': 'application/octet-stream',
+            'set-cookie': 'browser-owned=accepted; Path=/',
+          },
+          bodyBase64: 'AAE=',
+          redirected: false,
+        }) satisfies BrowserNativeResponse,
     } as unknown as Page;
 
-    await expect(runBrowserNativeRequest(page, {
-      url: 'https://digital.example.test/api/activity',
-      method: 'GET',
-    })).resolves.toEqual({
+    await expect(
+      runBrowserNativeRequest(page, {
+        url: 'https://digital.example.test/api/activity',
+        method: 'GET',
+      }),
+    ).resolves.toEqual({
       status: 200,
       url: 'https://digital.example.test/api/activity',
       headers: {
@@ -90,20 +103,28 @@ describe('browser-native authenticated requests', () => {
       },
     } as unknown as Page;
 
-    await expect(runBrowserNativeRequest(page, {
-      url: 'https://outside.example.test/api',
-      method: 'GET',
-    })).rejects.toThrow('must match the open application origin');
+    await expect(
+      runBrowserNativeRequest(page, {
+        url: 'https://outside.example.test/api',
+        method: 'GET',
+      }),
+    ).rejects.toThrow('must match the open application origin');
     expect(evaluated).toBe(false);
 
-    await expect(runBrowserNativeRequest(page, {
-      url: 'https://outside.example.test/api',
-      method: 'GET',
-    }, {
-      applicationOrigin: 'https://accounts.example.test',
-      destinationOrigin: 'https://outside.example.test',
-      institutionHostname: 'accounts.example.test',
-    })).rejects.toThrow('does not approve this institution request');
+    await expect(
+      runBrowserNativeRequest(
+        page,
+        {
+          url: 'https://outside.example.test/api',
+          method: 'GET',
+        },
+        {
+          applicationOrigin: 'https://accounts.example.test',
+          destinationOrigin: 'https://outside.example.test',
+          institutionHostname: 'accounts.example.test',
+        },
+      ),
+    ).rejects.toThrow('does not approve this institution request');
     expect(evaluated).toBe(false);
   });
 
@@ -125,7 +146,9 @@ describe('browser-native authenticated requests', () => {
           url: () => 'https://application.fixture.test/documents/one',
           headers: () => ({ 'Content-Type': 'application/pdf' }),
           body: async () => Buffer.from('%PDF-synthetic'),
-          dispose: async () => { disposed = true; },
+          dispose: async () => {
+            disposed = true;
+          },
         };
       },
     } as unknown as Route;
@@ -172,7 +195,9 @@ describe('browser-native authenticated requests', () => {
         url: () => 'https://outside.fixture.test/document',
         headers: () => ({}),
         body: async () => Buffer.alloc(0),
-        dispose: async () => { disposed = true; },
+        dispose: async () => {
+          disposed = true;
+        },
       }),
     } as unknown as Route;
     await expect(runBrowserNativeRouteRequest(page, crossOriginResponse)).rejects.toThrow(
@@ -220,8 +245,9 @@ describe('browser-native authenticated requests', () => {
         _callback: unknown,
         request: BrowserNativeRequest & { applicationOrigin: string; destinationOrigin: string },
       ): Promise<BrowserNativeResponse> => {
-        const marker = Object.entries(request.headers ?? {})
-          .find(([name]) => name.toLowerCase() === 'x-easymoney-browser-request')?.[1];
+        const marker = Object.entries(request.headers ?? {}).find(
+          ([name]) => name.toLowerCase() === 'x-easymoney-browser-request',
+        )?.[1];
         expect(marker).toBeString();
         pausedListener?.({
           requestId: 'background',
@@ -253,17 +279,19 @@ describe('browser-native authenticated requests', () => {
       },
     } as unknown as Page;
 
-    await expect(runBrowserNativeRequest(page, {
-      url: targetUrl,
-      method: 'GET',
-      cookiePolicy: 'http-only',
-    })).resolves.toMatchObject({ status: 200, url: targetUrl });
+    await expect(
+      runBrowserNativeRequest(page, {
+        url: targetUrl,
+        method: 'GET',
+        cookiePolicy: 'http-only',
+      }),
+    ).resolves.toMatchObject({ status: 200, url: targetUrl });
 
     expect(commands[0]).toEqual({
       method: 'Fetch.enable',
       parameters: { patterns: [{ urlPattern: '*', requestStage: 'Request' }] },
     });
-    expect(commands.filter(command => command.method === 'Fetch.continueRequest')).toEqual([
+    expect(commands.filter((command) => command.method === 'Fetch.continueRequest')).toEqual([
       { method: 'Fetch.continueRequest', parameters: { requestId: 'background' } },
       {
         method: 'Fetch.continueRequest',
@@ -286,7 +314,7 @@ describe('browser-native authenticated requests', () => {
     try {
       const context = await browser.newContext();
       const page = await context.newPage();
-      await page.route('https://**/*', async route => {
+      await page.route('https://**/*', async (route) => {
         const request = route.request();
         const url = new URL(request.url());
         const headers = await request.allHeaders();
@@ -347,20 +375,27 @@ describe('browser-native authenticated requests', () => {
             contentType: headers['content-type'] ?? null,
             fields: Object.fromEntries(new URLSearchParams(request.postData() ?? '')),
           });
-          await route.fulfill({ status: 200, contentType: 'application/json', body: '{"accepted":true}' });
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: '{"accepted":true}',
+          });
           return;
         }
         if (url.pathname === '/multipart') {
           const body = request.postData() ?? '';
-          const formValue = (name: string) => body.match(
-            new RegExp(`name="${name}"\\r\\n\\r\\n([^\\r\\n]*)`),
-          )?.[1];
+          const formValue = (name: string) =>
+            body.match(new RegExp(`name="${name}"\\r\\n\\r\\n([^\\r\\n]*)`))?.[1];
           observations.push({
             kind: 'multipart',
             contentType: headers['content-type'] ?? null,
             fields: { account: formValue('account'), format: formValue('format') },
           });
-          await route.fulfill({ status: 200, contentType: 'application/json', body: '{"accepted":true}' });
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: '{"accepted":true}',
+          });
           return;
         }
         if (url.pathname === '/redirect') {
@@ -428,19 +463,23 @@ describe('browser-native authenticated requests', () => {
         fields: { account: 'example', format: 'csv' },
       });
 
-      const crossOriginResponse = await runBrowserNativeRequest(page, {
-        url: `${crossOrigin}/cross-origin`,
-        method: 'POST',
-        headers: {
-          referer: `${origin}/`,
-          'x-request-proof': 'cross-origin-preserved',
+      const crossOriginResponse = await runBrowserNativeRequest(
+        page,
+        {
+          url: `${crossOrigin}/cross-origin`,
+          method: 'POST',
+          headers: {
+            referer: `${origin}/`,
+            'x-request-proof': 'cross-origin-preserved',
+          },
+          bodyBase64: Buffer.from(requestBytes).toString('base64'),
         },
-        bodyBase64: Buffer.from(requestBytes).toString('base64'),
-      }, {
-        applicationOrigin: origin,
-        destinationOrigin: crossOrigin,
-        institutionHostname: 'fixture.test',
-      });
+        {
+          applicationOrigin: origin,
+          destinationOrigin: crossOrigin,
+          institutionHostname: 'fixture.test',
+        },
+      );
       expect(observations[3]).toEqual({
         kind: 'cross-origin',
         cookie: null,
@@ -456,8 +495,12 @@ describe('browser-native authenticated requests', () => {
       });
       expect(redirect).toMatchObject({ status: 0, redirected: true });
       const cookies = await context.cookies([origin, crossOrigin]);
-      expect(cookies.some(cookie => cookie.name === 'rotated-session' && cookie.value === 'accepted')).toBe(true);
-      expect(cookies.some(cookie => cookie.name === 'redirect-session' && cookie.value === 'accepted')).toBe(true);
+      expect(
+        cookies.some((cookie) => cookie.name === 'rotated-session' && cookie.value === 'accepted'),
+      ).toBe(true);
+      expect(
+        cookies.some((cookie) => cookie.name === 'redirect-session' && cookie.value === 'accepted'),
+      ).toBe(true);
     } finally {
       await browser.close();
     }
@@ -520,13 +563,18 @@ describe('browser-native authenticated requests', () => {
         redirected: false,
       });
       expect(browserNativeResponseBody(response)).toEqual(Buffer.from('%PDF-1.7\n%%EOF'));
-      expect(observations).toEqual([{
-        accept: '*/*',
-        cookie: 'session=session-token',
-        marker: null,
-      }]);
-      expect((await context.cookies(origin)).map(cookie => cookie.name).sort())
-        .toEqual(['analytics', 'rotated-session', 'session']);
+      expect(observations).toEqual([
+        {
+          accept: '*/*',
+          cookie: 'session=session-token',
+          marker: null,
+        },
+      ]);
+      expect((await context.cookies(origin)).map((cookie) => cookie.name).sort()).toEqual([
+        'analytics',
+        'rotated-session',
+        'session',
+      ]);
     } finally {
       await browser.close();
       await server.stop(true);

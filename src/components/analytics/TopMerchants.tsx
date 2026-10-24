@@ -11,21 +11,30 @@ interface TopMerchantsProps {
   onSelectMerchant?: (merchant: StackedMerchantGroup) => void;
 }
 
-function containsRelatedTarget(currentTarget: EventTarget & Element, relatedTarget: EventTarget | null) {
+function containsRelatedTarget(
+  currentTarget: EventTarget & Element,
+  relatedTarget: EventTarget | null,
+) {
   return relatedTarget instanceof Node && currentTarget.contains(relatedTarget);
 }
 
 export default function TopMerchants({ rows = [], onSelectMerchant }: TopMerchantsProps) {
-  const { stackMap, labelMap, stackGroup, undoStack, renameStack } = usePersistentStackMap('vaultview:merchantStacks');
+  const { stackMap, labelMap, stackGroup, undoStack, renameStack } = usePersistentStackMap(
+    'vaultview:merchantStacks',
+  );
   const [draggingKey, setDraggingKey] = useState<string | null>(null);
   const [dropTargetKey, setDropTargetKey] = useState<string | null>(null);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
   const data = useMemo(() => {
-    const sorted = applyManualStacks(rows.map(row => ({
-      ...row,
-      aliases: row.aliases ?? [row.name],
-    })), stackMap, labelMap)
+    const sorted = applyManualStacks(
+      rows.map((row) => ({
+        ...row,
+        aliases: row.aliases ?? [row.name],
+      })),
+      stackMap,
+      labelMap,
+    )
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 10);
 
@@ -41,7 +50,8 @@ export default function TopMerchants({ rows = [], onSelectMerchant }: TopMerchan
     );
   }
 
-  const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
+  const formatCurrency = (val: number) =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
   const isDragging = Boolean(draggingKey);
 
   const beginRename = (event: MouseEvent, merchant: StackedMerchantGroup) => {
@@ -65,7 +75,9 @@ export default function TopMerchants({ rows = [], onSelectMerchant }: TopMerchan
   };
 
   return (
-    <div className={`merchant-list merchant-list--stackable merchant-list--expense ${isDragging ? 'merchant-list--dragging' : ''}`}>
+    <div
+      className={`merchant-list merchant-list--stackable merchant-list--expense ${isDragging ? 'merchant-list--dragging' : ''}`}
+    >
       <div className="merchant-list__hint">
         <span>Drag one merchant onto another to combine matching labels.</span>
         <Tooltip
@@ -82,7 +94,8 @@ export default function TopMerchants({ rows = [], onSelectMerchant }: TopMerchan
         const topAmount = data.merchants[0].amount;
         const relativePercentage = (merchant.amount / topAmount) * 100;
         const isSource = draggingKey === merchant.normalized;
-        const isDropTarget = dropTargetKey === merchant.normalized && draggingKey !== merchant.normalized;
+        const isDropTarget =
+          dropTargetKey === merchant.normalized && draggingKey !== merchant.normalized;
 
         return (
           <div
@@ -94,8 +107,10 @@ export default function TopMerchants({ rows = [], onSelectMerchant }: TopMerchan
               'merchant-item--expense',
               merchant.manuallyStackedKeys.length > 0 ? 'merchant-item--stacked' : '',
               isSource ? 'merchant-item--drag-source' : '',
-              isDropTarget ? 'merchant-item--drop-target' : ''
-            ].filter(Boolean).join(' ')}
+              isDropTarget ? 'merchant-item--drop-target' : '',
+            ]
+              .filter(Boolean)
+              .join(' ')}
             title={merchant.aliases.join('\n')}
             draggable={editingKey !== merchant.normalized}
             onDragStart={(event) => {
@@ -136,10 +151,7 @@ export default function TopMerchants({ rows = [], onSelectMerchant }: TopMerchan
             <div className="merchant-item__drag-handle" aria-hidden="true">
               <GripVertical size={16} />
             </div>
-            <div 
-              className="merchant-item__bar" 
-              style={{ width: `${relativePercentage}%` }}
-            />
+            <div className="merchant-item__bar" style={{ width: `${relativePercentage}%` }} />
             <div className="merchant-item__rank">#{index + 1}</div>
             <div className="merchant-item__info">
               {editingKey === merchant.normalized ? (
@@ -161,13 +173,20 @@ export default function TopMerchants({ rows = [], onSelectMerchant }: TopMerchan
                   <button className="btn btn--ghost btn--icon" type="submit" aria-label="Save name">
                     <Check size={14} />
                   </button>
-                  <button className="btn btn--ghost btn--icon" type="button" onClick={cancelRename} aria-label="Cancel rename">
+                  <button
+                    className="btn btn--ghost btn--icon"
+                    type="button"
+                    onClick={cancelRename}
+                    aria-label="Cancel rename"
+                  >
                     <X size={14} />
                   </button>
                 </form>
               ) : (
                 <div className="merchant-item__name-row">
-                  <div className="merchant-item__name" title={merchant.name}>{merchant.name}</div>
+                  <div className="merchant-item__name" title={merchant.name}>
+                    {merchant.name}
+                  </div>
                   {merchant.manuallyStackedKeys.length > 0 && (
                     <button
                       className="merchant-item__icon-action"

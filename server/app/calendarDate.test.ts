@@ -8,7 +8,10 @@ describe('local financial calendar date', () => {
     const testDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'easymoney-calendar-date-'));
     try {
       const result = Bun.spawnSync({
-        cmd: [process.execPath, '--eval', `
+        cmd: [
+          process.execPath,
+          '--eval',
+          `
           const { localCalendarDate } = await import('./server/app/calendarDate.ts');
           const { createSyncExecutionPlan } = await import('./server/app/dataSync/executionPlan.ts');
           const { parseBankOfAmericaArgs } = await import('./server/app/dataSync/institutions/bankOfAmerica.ts');
@@ -29,7 +32,8 @@ describe('local financial calendar date', () => {
             planDate: plan.today,
             bankOfAmerica,
           }));
-        `],
+        `,
+        ],
         cwd: process.cwd(),
         env: {
           ...process.env,
@@ -58,7 +62,9 @@ describe('local financial calendar date', () => {
       expect(output.utcDate).toBe('2026-08-28');
       expect(output.localDate).toBe('2026-08-27');
       expect(output.planDate).toBe('2026-08-27');
-      expect(output.bankOfAmerica.outputDir.endsWith('/Downloads/easymoney-imports/2026-08-27')).toBe(true);
+      expect(
+        output.bankOfAmerica.outputDir.endsWith('/Downloads/easymoney-imports/2026-08-27'),
+      ).toBe(true);
       expect(output.bankOfAmerica).toMatchObject({
         through: '2026-08-27',
         checkingFrom: '2026-08-27',
@@ -69,5 +75,4 @@ describe('local financial calendar date', () => {
       fs.rmSync(testDirectory, { recursive: true, force: true });
     }
   });
-
 });

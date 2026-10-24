@@ -19,11 +19,18 @@ interface SyncAccountCoverageRow {
 }
 
 function splitValues(value: string | null, separator: string): string[] {
-  return value?.split(separator).map(item => item.trim()).filter(Boolean) ?? [];
+  return (
+    value
+      ?.split(separator)
+      .map((item) => item.trim())
+      .filter(Boolean) ?? []
+  );
 }
 
 export function loadSyncAccountCoverage(): SyncAccountCoverage[] {
-  const rows = getDb().prepare(`
+  const rows = getDb()
+    .prepare(
+      `
     WITH facts AS (
       SELECT sa.accountId, st.date, 'transaction' AS factType
       FROM sourceTransactions st
@@ -70,9 +77,13 @@ export function loadSyncAccountCoverage(): SyncAccountCoverage[] {
     WHERE COALESCE(a.status, 'active') = 'active'
     GROUP BY a.id
     ORDER BY a.id
-  `).all() as SyncAccountCoverageRow[];
+  `,
+    )
+    .all() as SyncAccountCoverageRow[];
 
-  const artifactRows = getDb().prepare(`
+  const artifactRows = getDb()
+    .prepare(
+      `
     SELECT sa.accountId, sf.fileName
     FROM sourceAccounts sa
     JOIN sourceFiles sf ON sf.id = sa.sourceFileId
@@ -80,7 +91,9 @@ export function loadSyncAccountCoverage(): SyncAccountCoverage[] {
     WHERE sa.accountId IS NOT NULL
       AND COALESCE(a.status, 'active') = 'active'
     ORDER BY sa.accountId, COALESCE(sf.committedAt, sf.createdAt) DESC, sf.id DESC
-  `).all() as Array<{ accountId: number; fileName: string }>;
+  `,
+    )
+    .all() as Array<{ accountId: number; fileName: string }>;
   const artifactFileNames = new Map<number, string[]>();
   for (const row of artifactRows) {
     const names = artifactFileNames.get(row.accountId) ?? [];
@@ -88,7 +101,7 @@ export function loadSyncAccountCoverage(): SyncAccountCoverage[] {
     artifactFileNames.set(row.accountId, names);
   }
 
-  return rows.map(row => ({
+  return rows.map((row) => ({
     ...row,
     balanceDates: splitValues(row.balanceDates, ','),
     sourceAccountNames: splitValues(row.sourceAccountNames, '|'),

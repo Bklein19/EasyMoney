@@ -5,11 +5,7 @@ import type {
   SyncConnectorRunContext,
 } from '../connector.ts';
 import { goalWindowForCoverage } from '../planning.ts';
-import {
-  runTiaaSync,
-  type TiaaDownloadedArtifact,
-  type TiaaProgressEvent,
-} from './tiaa.ts';
+import { runTiaaSync, type TiaaDownloadedArtifact, type TiaaProgressEvent } from './tiaa.ts';
 
 type TiaaSyncRunner = typeof runTiaaSync;
 
@@ -24,17 +20,17 @@ function tiaaAccounts(accounts: readonly SyncAccountCoverage[]): SyncAccountCove
 export function routeTiaaArtifacts(
   artifacts: readonly TiaaDownloadedArtifact[],
 ): MultiAccountSyncArtifact[] {
-  return artifacts.map(artifact => {
+  return artifacts.map((artifact) => {
     if (artifact.account.remoteAccounts.length === 0) {
       throw new Error('A TIAA artifact exposes no parser-backed account claims');
     }
-    const claimKeys = artifact.account.remoteAccounts.map(account => account.claimKey.trim());
-    if (claimKeys.some(value => !value) || new Set(claimKeys).size !== claimKeys.length) {
+    const claimKeys = artifact.account.remoteAccounts.map((account) => account.claimKey.trim());
+    if (claimKeys.some((value) => !value) || new Set(claimKeys).size !== claimKeys.length) {
       throw new Error('A TIAA artifact exposes ambiguous parser-backed account claims');
     }
     return {
       fileName: artifact.fileName,
-      accountRoutes: claimKeys.map(remoteAccountId => ({
+      accountRoutes: claimKeys.map((remoteAccountId) => ({
         remoteAccountId,
       })),
     };
@@ -42,16 +38,23 @@ export function routeTiaaArtifacts(
 }
 
 function combinedTiaaWindow(context: SyncConnectorRunContext, accounts: SyncAccountCoverage[]) {
-  const windows = accounts.flatMap(account => [
+  const windows = accounts.flatMap((account) => [
     goalWindowForCoverage(context.goal, account, context.today),
-    goalWindowForCoverage(context.goal, {
-      latestFactDate: account.latestBalanceDate,
-      earliestFactDate: account.earliestBalanceDate,
-    }, context.today),
+    goalWindowForCoverage(
+      context.goal,
+      {
+        latestFactDate: account.latestBalanceDate,
+        earliestFactDate: account.earliestBalanceDate,
+      },
+      context.today,
+    ),
   ]);
   return {
-    from: windows.map(window => window.startDate).sort()[0]!,
-    through: windows.map(window => window.endDate).sort().at(-1)!,
+    from: windows.map((window) => window.startDate).sort()[0]!,
+    through: windows
+      .map((window) => window.endDate)
+      .sort()
+      .at(-1)!,
   };
 }
 
@@ -98,12 +101,15 @@ export function createTiaaConnector(runSync: TiaaSyncRunner = runTiaaSync) {
         },
       });
 
-      const result = await runSync({
-        outputDir: context.outputDir,
-        from,
-        through,
-        session: 'tiaa-catchup',
-      }, event => reportTiaaProgress(context, event));
+      const result = await runSync(
+        {
+          outputDir: context.outputDir,
+          from,
+          through,
+          session: 'tiaa-catchup',
+        },
+        (event) => reportTiaaProgress(context, event),
+      );
       const routed = routeTiaaArtifacts(result.artifacts);
 
       for (const artifact of result.artifacts) {

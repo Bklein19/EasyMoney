@@ -11,9 +11,7 @@ const Tooltip = ({ text, children, position = 'top' }: TooltipProps) => {
   return (
     <div className="tooltip-wrapper">
       {children}
-      <div className={`tooltip-text tooltip-text--${position}`}>
-        {text}
-      </div>
+      <div className={`tooltip-text tooltip-text--${position}`}>{text}</div>
     </div>
   );
 };

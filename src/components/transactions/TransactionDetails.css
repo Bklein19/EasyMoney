@@ -1,19 +1,108 @@
-.transaction-detail__hero { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; }
-.transaction-detail__hero h3 { margin: 0; overflow-wrap: anywhere; }
-.transaction-detail__hero > strong { white-space: nowrap; font-size: 1.5rem; font-variant-numeric: tabular-nums; }
-.transaction-detail > p, .transaction-detail__hint, .category-review-impact { color: var(--text-secondary); font-size: .85rem; }
-.transaction-detail__category { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-block: 12px; }
-.transaction-detail > section { border-top: 1px solid var(--glass-border); margin-top: 20px; padding-top: 12px; }
-.transaction-detail__count { color: var(--text-secondary); font-weight: normal; font-size: .85rem; }
-.transaction-detail__evidence { margin-top: 20px; border-top: 1px solid var(--glass-border); padding-top: 16px; font-size: .85rem; overflow-wrap: anywhere; }
-.transaction-detail__evidence summary { cursor: pointer; }
-.transaction-detail__evidence section { border-top: 1px solid var(--glass-border); padding-block: 8px; }
-.category-review-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.category-review-feedback { font-size: .85rem; display: flex; align-items: center; gap: 8px; }
-.related-transactions { padding: 0; list-style: none; margin-block: 12px; }
-.related-transactions li { display: flex; gap: 12px; align-items: center; padding-block: 10px; border-top: 1px solid var(--glass-border); }
-.related-transactions li > span { white-space: nowrap; font-variant-numeric: tabular-nums; }
-.related-transactions__name { display: grid; flex: 1; gap: 4px; text-align: left; min-width: 0; background: none; border: none; padding: 0; color: inherit; cursor: pointer; }
-.related-transactions__name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.related-transactions__name span { font-size: .8rem; color: var(--text-secondary); }
-@media (max-width: 550px) { .transaction-detail__hero { flex-direction: column; gap: 8px; } }
+.transaction-detail__hero {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+}
+.transaction-detail__hero h3 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.transaction-detail__hero > strong {
+  white-space: nowrap;
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+}
+.transaction-detail > p,
+.transaction-detail__hint,
+.category-review-impact {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+.transaction-detail__category {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-block: 12px;
+}
+.transaction-detail > section {
+  border-top: 1px solid var(--glass-border);
+  margin-top: 20px;
+  padding-top: 12px;
+}
+.transaction-detail__count {
+  color: var(--text-secondary);
+  font-weight: normal;
+  font-size: 0.85rem;
+}
+.transaction-detail__evidence {
+  margin-top: 20px;
+  border-top: 1px solid var(--glass-border);
+  padding-top: 16px;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.transaction-detail__evidence summary {
+  cursor: pointer;
+}
+.transaction-detail__evidence section {
+  border-top: 1px solid var(--glass-border);
+  padding-block: 8px;
+}
+.category-review-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.category-review-feedback {
+  font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.related-transactions {
+  padding: 0;
+  list-style: none;
+  margin-block: 12px;
+}
+.related-transactions li {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding-block: 10px;
+  border-top: 1px solid var(--glass-border);
+}
+.related-transactions li > span {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.related-transactions__name {
+  display: grid;
+  flex: 1;
+  gap: 4px;
+  text-align: left;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+}
+.related-transactions__name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.related-transactions__name span {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+@media (max-width: 550px) {
+  .transaction-detail__hero {
+    flex-direction: column;
+    gap: 8px;
+  }
+}

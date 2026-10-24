@@ -5,28 +5,66 @@ import { overlapOccurrenceKey } from './reviewedOverlap';
 
 type Db = ReturnType<typeof getDb>;
 export interface ConflictMember {
-  sourceFileId: number; fileName: string; accountId: number; accountName: string;
-  date: string; amountCents: number; description: string;
+  sourceFileId: number;
+  fileName: string;
+  accountId: number;
+  accountName: string;
+  date: string;
+  amountCents: number;
+  description: string;
   occurrenceKey?: string;
 }
 export interface RefreshConflict {
-  kind: 'transaction' | 'balance'; key: string; members: ConflictMember[];
+  kind: 'transaction' | 'balance';
+  key: string;
+  members: ConflictMember[];
 }
 export interface RefreshDiagnostics {
-  inputRevision: string; generatedAt: string;
+  inputRevision: string;
+  generatedAt: string;
   conflicts: Array<RefreshConflict & { origin: 'existing' | 'new' }>;
   resolved: RefreshConflict[];
   preview?: {
-    candidateFiles: number; transactionCountBefore: number; transactionCountAfter: number;
-    added: Array<{ ledgerTransactionId: string; accountId: number; date: string; amount: number; description: string }>;
-    removed: Array<{ ledgerTransactionId: string; accountId: number; date: string; amount: number; description: string }>;
-    updated: Array<{ ledgerTransactionId: string; before: { date: string; description: string }; after: { date: string; description: string } }>;
+    candidateFiles: number;
+    transactionCountBefore: number;
+    transactionCountAfter: number;
+    added: Array<{
+      ledgerTransactionId: string;
+      accountId: number;
+      date: string;
+      amount: number;
+      description: string;
+    }>;
+    removed: Array<{
+      ledgerTransactionId: string;
+      accountId: number;
+      date: string;
+      amount: number;
+      description: string;
+    }>;
+    updated: Array<{
+      ledgerTransactionId: string;
+      before: { date: string; description: string };
+      after: { date: string; description: string };
+    }>;
     annotations: AnnotationDisposition[];
     annotationCounts: Record<AnnotationDisposition['disposition'], number>;
-    mappings: Array<{ sourceFileId: number; sourceAccountKey: string; accountId: number; evidence: string }>;
+    mappings: Array<{
+      sourceFileId: number;
+      sourceAccountKey: string;
+      accountId: number;
+      evidence: string;
+    }>;
     balancesBefore: Record<string, unknown>[];
     balancesAfter: RebuiltLedger['balanceSnapshots'];
-    balanceChanges: Array<{ accountId: number; month: string; beforeCents: number | null; afterCents: number | null; beforeDate: string | null; afterDate: string | null }>;
+    balanceChanges: Array<{
+      accountId: number;
+      month: string;
+      beforeCents: number | null;
+      afterCents: number | null;
+      beforeDate: string | null;
+      afterDate: string | null;
+    }>;
   };
 }
 
@@ -37,16 +75,27 @@ export function captureRefreshConflicts(db: Db, ledger: RebuiltLedger): RefreshC
   const add = (kind: RefreshConflict['kind'], ids: number[]) => {
     const table = kind === 'transaction' ? 'sourceTransactions' : 'sourceBalances';
     const amount = kind === 'transaction' ? 'amountCents' : 'balanceCents';
-    const members = ids.map(id => db.prepare(`SELECT f.sourceFileId, sf.fileName, sa.accountId,
+    const members = ids.map(
+      (id) =>
+        db
+          .prepare(
+            `SELECT f.sourceFileId, sf.fileName, sa.accountId,
       a.name AS accountName, f.date, f.${amount} AS amountCents,
       ${kind === 'transaction' ? 'f.description' : "''"} AS description
       FROM ${table} f JOIN sourceFiles sf ON sf.id=f.sourceFileId
       JOIN sourceAccounts sa ON sa.id=f.sourceAccountId JOIN accounts a ON a.id=sa.accountId
-      WHERE f.id=?`).get(id) as ConflictMember);
-    if(kind==='transaction') for(const [index,id] of ids.entries()) members[index]!.occurrenceKey=overlapOccurrenceKey(db,id);
+      WHERE f.id=?`,
+          )
+          .get(id) as ConflictMember,
+    );
+    if (kind === 'transaction')
+      for (const [index, id] of ids.entries())
+        members[index]!.occurrenceKey = overlapOccurrenceKey(db, id);
     // Preserve occurrence multiplicity, but ignore regenerated IDs and prose.
-    const key = JSON.stringify([kind, members.map(m =>
-      [m.sourceFileId, m.accountId, m.date.slice(0,10), m.amountCents]).sort()]);
+    const key = JSON.stringify([
+      kind,
+      members.map((m) => [m.sourceFileId, m.accountId, m.date.slice(0, 10), m.amountCents]).sort(),
+    ]);
     conflicts.push({ kind, key, members });
   };
   // Ambiguity records are directed edges. Report connected groups once, rather
@@ -54,7 +103,10 @@ export function captureRefreshConflicts(db: Db, ledger: RebuiltLedger): RefreshC
   const graph = new Map<number, Set<number>>();
   for (const ambiguity of ledger.ambiguities ?? []) {
     for (const other of ambiguity.candidateSourceTransactionIds) {
-      for (const [a, b] of [[ambiguity.sourceTransactionId, other], [other, ambiguity.sourceTransactionId]] as const) {
+      for (const [a, b] of [
+        [ambiguity.sourceTransactionId, other],
+        [other, ambiguity.sourceTransactionId],
+      ] as const) {
         if (!graph.has(a)) graph.set(a, new Set());
         graph.get(a)!.add(b);
       }
@@ -63,11 +115,13 @@ export function captureRefreshConflicts(db: Db, ledger: RebuiltLedger): RefreshC
   const seen = new Set<number>();
   for (const id of graph.keys()) {
     if (seen.has(id)) continue;
-    const group: number[] = [], pending = [id];
+    const group: number[] = [],
+      pending = [id];
     while (pending.length) {
       const next = pending.pop()!;
       if (seen.has(next)) continue;
-      seen.add(next); group.push(next);
+      seen.add(next);
+      group.push(next);
       pending.push(...graph.get(next)!);
     }
     add('transaction', group);
@@ -76,16 +130,22 @@ export function captureRefreshConflicts(db: Db, ledger: RebuiltLedger): RefreshC
   return conflicts;
 }
 
-export function compareRefreshConflicts(before: RefreshConflict[], after: RefreshConflict[], inputRevision: string): RefreshDiagnostics {
-  const oldKeys = new Set(before.map(c => c.key)), newKeys = new Set(after.map(c => c.key));
+export function compareRefreshConflicts(
+  before: RefreshConflict[],
+  after: RefreshConflict[],
+  inputRevision: string,
+): RefreshDiagnostics {
+  const oldKeys = new Set(before.map((c) => c.key)),
+    newKeys = new Set(after.map((c) => c.key));
   return {
-    inputRevision, generatedAt: new Date().toISOString(),
-    conflicts: after.map(c => ({ ...c, origin: oldKeys.has(c.key) ? 'existing' : 'new' })),
-    resolved: before.filter(c => !newKeys.has(c.key)),
+    inputRevision,
+    generatedAt: new Date().toISOString(),
+    conflicts: after.map((c) => ({ ...c, origin: oldKeys.has(c.key) ? 'existing' : 'new' })),
+    resolved: before.filter((c) => !newKeys.has(c.key)),
   };
 }
 
 export function readRefreshDiagnostics(db: Db): RefreshDiagnostics | null {
   const row = db.prepare('SELECT payloadJson FROM parserRefreshDiagnostics WHERE id=1').get();
-  return row ? JSON.parse(row.payloadJson) as RefreshDiagnostics : null;
+  return row ? (JSON.parse(row.payloadJson) as RefreshDiagnostics) : null;
 }

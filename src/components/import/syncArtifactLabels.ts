@@ -11,13 +11,33 @@ const SOURCE_TYPE_LABELS: Record<string, string> = {
 };
 
 const MONTH_LABELS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
 ] as const;
 
 const SHORT_MONTH_LABELS = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
 ] as const;
 
 interface CalendarDate {
@@ -43,7 +63,8 @@ function calendarDate(value: string | null | undefined): CalendarDate | null {
     verified.getUTCFullYear() !== date.year ||
     verified.getUTCMonth() + 1 !== date.month ||
     verified.getUTCDate() !== date.day
-  ) return null;
+  )
+    return null;
   return date;
 }
 
@@ -73,7 +94,8 @@ function datePeriod(artifact: ArtifactLabelMetadata): string | null {
     first.year === last.year &&
     firstQuarter === lastQuarter &&
     serialDay(last) - serialDay(first) > 45
-  ) return `Q${lastQuarter} ${last.year}`;
+  )
+    return `Q${lastQuarter} ${last.year}`;
 
   if (first.year === last.year) {
     return `${SHORT_MONTH_LABELS[first.month - 1]}–${SHORT_MONTH_LABELS[last.month - 1]} ${last.year}`;
@@ -90,13 +112,17 @@ export function syncArtifactSourceLabel(sourceType: string | null | undefined) {
 export function syncArtifactTitle(artifact: ArtifactLabelMetadata) {
   const sourceLabel = syncArtifactSourceLabel(artifact.sourceType);
   const period = datePeriod(artifact);
-  const kindLabel = artifact.sourceType === 'activity-export' ? 'activity' : sourceLabel.toLowerCase();
+  const kindLabel =
+    artifact.sourceType === 'activity-export' ? 'activity' : sourceLabel.toLowerCase();
   if (period) return `${period} ${kindLabel}`;
   return cleanLabel(artifact.parserLabel) || sourceLabel;
 }
 
 export function syncArtifactSubtitle(artifact: ArtifactLabelMetadata) {
   const title = syncArtifactTitle(artifact).toLowerCase();
-  return [cleanLabel(artifact.parserLabel), cleanLabel(artifact.institution)]
-    .find(label => label && !title.includes(label.toLowerCase())) || null;
+  return (
+    [cleanLabel(artifact.parserLabel), cleanLabel(artifact.institution)].find(
+      (label) => label && !title.includes(label.toLowerCase()),
+    ) || null
+  );
 }

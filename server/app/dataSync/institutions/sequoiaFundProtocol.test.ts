@@ -24,10 +24,30 @@ function portfolioAccount(overrides: Record<string, unknown> = {}) {
 describe('Sequoia Fund portfolio protocol', () => {
   test('parses the one login-level group and preserves opaque values', () => {
     const parsed = parseSequoiaFundPortfolio({
-      portfolioGroupList: [{
-        groupKey: '  opaque group key  ',
-        registration: ['Fixture registration', 'Secondary line'],
-        accountList: [portfolioAccount({
+      portfolioGroupList: [
+        {
+          groupKey: '  opaque group key  ',
+          registration: ['Fixture registration', 'Secondary line'],
+          accountList: [
+            portfolioAccount({
+              fundAccountNumber: '00001234',
+              fundAcctNumbMasked: 'XX 1234',
+              fundSecIssueId: ' security/id ',
+              fund: {
+                fundIdNumStripLeadingZeros: '0007',
+                fundName: ' Fixture Fund ',
+              },
+            }),
+          ],
+        },
+      ],
+    });
+
+    expect(parsed).toEqual({
+      groupKey: '  opaque group key  ',
+      registration: ['Fixture registration', 'Secondary line'],
+      accountList: [
+        {
           fundAccountNumber: '00001234',
           fundAcctNumbMasked: 'XX 1234',
           fundSecIssueId: ' security/id ',
@@ -35,55 +55,45 @@ describe('Sequoia Fund portfolio protocol', () => {
             fundIdNumStripLeadingZeros: '0007',
             fundName: ' Fixture Fund ',
           },
-        })],
-      }],
-    });
-
-    expect(parsed).toEqual({
-      groupKey: '  opaque group key  ',
-      registration: ['Fixture registration', 'Secondary line'],
-      accountList: [{
-        fundAccountNumber: '00001234',
-        fundAcctNumbMasked: 'XX 1234',
-        fundSecIssueId: ' security/id ',
-        fund: {
-          fundIdNumStripLeadingZeros: '0007',
-          fundName: ' Fixture Fund ',
         },
-      }],
+      ],
     });
   });
 
   test('handles record-shaped group and account collections and finite numeric identifiers', () => {
-    expect(parseSequoiaFundPortfolio({
-      portfolioGroupList: {
-        primary: {
-          groupKey: 17,
-          accountList: {
-            first: portfolioAccount({
-              fundAccountNumber: 101,
-              fundAcctNumbMasked: 202,
-              fundSecIssueId: 303,
-              fund: {
-                fundIdNumStripLeadingZeros: 404,
-                fundName: 'Fixture Fund',
-              },
-            }),
+    expect(
+      parseSequoiaFundPortfolio({
+        portfolioGroupList: {
+          primary: {
+            groupKey: 17,
+            accountList: {
+              first: portfolioAccount({
+                fundAccountNumber: 101,
+                fundAcctNumbMasked: 202,
+                fundSecIssueId: 303,
+                fund: {
+                  fundIdNumStripLeadingZeros: 404,
+                  fundName: 'Fixture Fund',
+                },
+              }),
+            },
           },
         },
-      },
-    })).toEqual({
+      }),
+    ).toEqual({
       groupKey: '17',
       registration: [],
-      accountList: [{
-        fundAccountNumber: '101',
-        fundAcctNumbMasked: '202',
-        fundSecIssueId: '303',
-        fund: {
-          fundIdNumStripLeadingZeros: '404',
-          fundName: 'Fixture Fund',
+      accountList: [
+        {
+          fundAccountNumber: '101',
+          fundAcctNumbMasked: '202',
+          fundSecIssueId: '303',
+          fund: {
+            fundIdNumStripLeadingZeros: '404',
+            fundName: 'Fixture Fund',
+          },
         },
-      }],
+      ],
     });
   });
 
@@ -91,28 +101,40 @@ describe('Sequoia Fund portfolio protocol', () => {
     expect(() => parseSequoiaFundPortfolio({ portfolioGroupList: [] })).toThrow(
       'exactly one portfolio group',
     );
-    expect(() => parseSequoiaFundPortfolio({
-      portfolioGroupList: [{ groupKey: 'group-a', accountList: [] }],
-    })).toThrow('has no accounts');
-    expect(() => parseSequoiaFundPortfolio({
-      portfolioGroupList: [
-        { groupKey: 'group-a', accountList: [portfolioAccount()] },
-        { groupKey: 'group-b', accountList: [portfolioAccount()] },
-      ],
-    })).toThrow('exactly one portfolio group');
-    expect(() => parseSequoiaFundPortfolio({
-      portfolioGroupList: [{
-        groupKey: 'group-a',
-        registration: ['valid', 2],
-        accountList: [portfolioAccount()],
-      }],
-    })).toThrow('registration is invalid');
-    expect(() => parseSequoiaFundPortfolio({
-      portfolioGroupList: [{
-        groupKey: 'group-a',
-        accountList: [portfolioAccount({ fundSecIssueId: Number.POSITIVE_INFINITY })],
-      }],
-    })).toThrow('security identifier is invalid');
+    expect(() =>
+      parseSequoiaFundPortfolio({
+        portfolioGroupList: [{ groupKey: 'group-a', accountList: [] }],
+      }),
+    ).toThrow('has no accounts');
+    expect(() =>
+      parseSequoiaFundPortfolio({
+        portfolioGroupList: [
+          { groupKey: 'group-a', accountList: [portfolioAccount()] },
+          { groupKey: 'group-b', accountList: [portfolioAccount()] },
+        ],
+      }),
+    ).toThrow('exactly one portfolio group');
+    expect(() =>
+      parseSequoiaFundPortfolio({
+        portfolioGroupList: [
+          {
+            groupKey: 'group-a',
+            registration: ['valid', 2],
+            accountList: [portfolioAccount()],
+          },
+        ],
+      }),
+    ).toThrow('registration is invalid');
+    expect(() =>
+      parseSequoiaFundPortfolio({
+        portfolioGroupList: [
+          {
+            groupKey: 'group-a',
+            accountList: [portfolioAccount({ fundSecIssueId: Number.POSITIVE_INFINITY })],
+          },
+        ],
+      }),
+    ).toThrow('security identifier is invalid');
   });
 });
 
@@ -185,11 +207,13 @@ describe('Sequoia Fund activity protocol', () => {
       'opaque-group',
       sequoiaFundActivityWindow('2025-01-01', '2026-08-28'),
     );
-    expect(sequoiaFundActivityExportFields(history, {
-      csrf_token: 'opaque-csrf',
-      requestCode: 'wrong',
-      customFormField_transType: 'wrong',
-    })).toEqual({
+    expect(
+      sequoiaFundActivityExportFields(history, {
+        csrf_token: 'opaque-csrf',
+        requestCode: 'wrong',
+        customFormField_transType: 'wrong',
+      }),
+    ).toEqual({
       csrf_token: 'opaque-csrf',
       acctNumber: '',
       customFormField_MaxReturnCount: '',
@@ -220,9 +244,11 @@ describe('Sequoia Fund activity protocol', () => {
   });
 
   test('validates history response shape and returns only the record count', () => {
-    expect(parseSequoiaFundHistoryResponse({
-      data: { portHistList: [{ opaque: 'not returned' }, { opaque: 'also not returned' }] },
-    })).toBe(2);
+    expect(
+      parseSequoiaFundHistoryResponse({
+        data: { portHistList: [{ opaque: 'not returned' }, { opaque: 'also not returned' }] },
+      }),
+    ).toBe(2);
     expect(parseSequoiaFundHistoryResponse({ data: { portHistList: [] } })).toBe(0);
     expect(() => parseSequoiaFundHistoryResponse({ data: { portHistList: {} } })).toThrow(
       'records are invalid',

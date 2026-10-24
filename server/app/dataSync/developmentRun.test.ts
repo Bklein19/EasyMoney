@@ -23,7 +23,7 @@ test('connector development runs isolate artifacts while reusing stable auth', a
 
     expect(first.outputDir).not.toBe(second.outputDir);
     expect(first.profilePath).toBe(second.profilePath);
-    expect(await stat(first.outputDir).then(value => value.isDirectory())).toBe(true);
+    expect(await stat(first.outputDir).then((value) => value.isDirectory())).toBe(true);
     expect(first.outputDir.startsWith(root)).toBe(true);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -31,8 +31,10 @@ test('connector development runs isolate artifacts while reusing stable auth', a
 });
 
 test('connector development runs reject path-shaped identifiers', async () => {
-  await expect(createConnectorDevelopmentRun({
-    institutionId: '../bank',
-    profileName: 'bank-catchup',
-  })).rejects.toThrow('Institution id must be a kebab-case identifier');
+  await expect(
+    createConnectorDevelopmentRun({
+      institutionId: '../bank',
+      profileName: 'bank-catchup',
+    }),
+  ).rejects.toThrow('Institution id must be a kebab-case identifier');
 });

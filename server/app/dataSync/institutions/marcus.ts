@@ -199,7 +199,10 @@ function normalizedText(value: string): string {
 
 function accountKindFromText(value: string): MarcusAccountKind | null {
   const savings = /\b(?:online\s+)?savings(?:\s+account)?\b/i.test(value);
-  const deposit = /\b(?:certificate\s+of\s+deposit|deposit\s+account|(?:no[- ]penalty|high[- ]yield)\s+cd|cd)\b/i.test(value);
+  const deposit =
+    /\b(?:certificate\s+of\s+deposit|deposit\s+account|(?:no[- ]penalty|high[- ]yield)\s+cd|cd)\b/i.test(
+      value,
+    );
   if (savings === deposit) return null;
   return savings ? 'savings' : 'deposit';
 }
@@ -299,7 +302,7 @@ export function marcusDocumentRequest(href: string): MarcusApiRequest {
 
 function objectValue(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? (value as Record<string, unknown>)
     : null;
 }
 
@@ -309,7 +312,9 @@ function stringValue(value: unknown): string | null {
 
 function apiPayloadRoots(payload: unknown): Record<string, unknown>[] {
   const values = Array.isArray(payload) ? payload : [payload];
-  return values.map(objectValue).filter((value): value is Record<string, unknown> => value !== null);
+  return values
+    .map(objectValue)
+    .filter((value): value is Record<string, unknown> => value !== null);
 }
 
 function apiAccounts(payload: unknown): unknown[] | null {
@@ -340,7 +345,10 @@ function apiAccountIdentity(record: Record<string, unknown>): MarcusAccountIdent
     record.type,
     record.productName,
     record.accountType,
-  ].map(stringValue).filter((value): value is string => value !== null).join(' ');
+  ]
+    .map(stringValue)
+    .filter((value): value is string => value !== null)
+    .join(' ');
   const kind = accountKindFromText(identityText);
   if (!kind) return null;
   return {
@@ -491,7 +499,8 @@ export function buildMarcusRemoteCatalog(
     const statementDate = marcusStatementDateFromText(candidate.documentText);
     if (!statementDate) throw new Error('Marcus statement date is unavailable');
     const downloadDate = candidate.downloadDate ?? statementDate;
-    if (!DATE_PATTERN.test(downloadDate)) throw new Error('Marcus statement download date is unavailable');
+    if (!DATE_PATTERN.test(downloadDate))
+      throw new Error('Marcus statement download date is unavailable');
     const request = marcusDocumentRequest(candidate.href);
     const logicalKey = `${identity.sourceAccountKey}:${statementDate}:statement-pdf`;
     const existing = documents.get(logicalKey);
@@ -517,23 +526,30 @@ export function buildMarcusRemoteCatalog(
       (availableByAccount.get(document.account.sourceAccountKey) ?? 0) + 1,
     );
   }
-  const remoteAccounts = [...accounts.values()].map(({ identity }) => ({
-    ...identity,
-    supportedArtifactTypes: identity.kind === 'savings' ? ['statement-pdf' as const] : [],
-    availableArtifactCount: availableByAccount.get(identity.sourceAccountKey) ?? 0,
-  })).sort((left, right) => left.sourceAccountKey.localeCompare(right.sourceAccountKey));
+  const remoteAccounts = [...accounts.values()]
+    .map(({ identity }) => ({
+      ...identity,
+      supportedArtifactTypes: identity.kind === 'savings' ? ['statement-pdf' as const] : [],
+      availableArtifactCount: availableByAccount.get(identity.sourceAccountKey) ?? 0,
+    }))
+    .sort((left, right) => left.sourceAccountKey.localeCompare(right.sourceAccountKey));
 
   return {
     accounts: remoteAccounts,
-    documents: [...documents.values()].sort((left, right) =>
-      left.statementDate.localeCompare(right.statementDate) ||
-      left.account.sourceAccountKey.localeCompare(right.account.sourceAccountKey)),
+    documents: [...documents.values()].sort(
+      (left, right) =>
+        left.statementDate.localeCompare(right.statementDate) ||
+        left.account.sourceAccountKey.localeCompare(right.account.sourceAccountKey),
+    ),
     unsupportedArtifactCount,
   };
 }
 
 export function isMarcusAuthenticatedPath(pathname: string): boolean {
-  return !LOGIN_PATH_PATTERN.test(pathname) && /^\/us\/en\/(?:accounts|documents|dashboard)(?:\/|$)/i.test(pathname);
+  return (
+    !LOGIN_PATH_PATTERN.test(pathname) &&
+    /^\/us\/en\/(?:accounts|documents|dashboard)(?:\/|$)/i.test(pathname)
+  );
 }
 
 export async function isMarcusAuthenticatedPage(page: Page): Promise<boolean> {
@@ -544,23 +560,35 @@ export async function isMarcusAuthenticatedPage(page: Page): Promise<boolean> {
     return false;
   }
   if (url.origin !== MARCUS_ORIGIN || !isMarcusAuthenticatedPath(url.pathname)) return false;
-  return await page.locator(AUTHENTICATION_FIELD_SELECTOR).count() === 0;
+  return (await page.locator(AUTHENTICATION_FIELD_SELECTOR).count()) === 0;
 }
 
 export async function waitUntilMarcusAuthenticated(page: Page, timeoutMs: number): Promise<void> {
-  await page.waitForFunction((loginPathSource: string) => {
-    const visible = (element: Element) => {
-      const style = getComputedStyle(element);
-      return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
-    };
-    const hasAuthenticationFields = Array.from(document.querySelectorAll(
-      'input[type="password"], input[autocomplete="username"], input[autocomplete="current-password"]',
-    )).some(visible);
-    return location.origin === 'https://www.marcus.com' &&
-      !new RegExp(loginPathSource, 'i').test(location.pathname) &&
-      /^\/us\/en\/(?:accounts|documents|dashboard)(?:\/|$)/i.test(location.pathname) &&
-      !hasAuthenticationFields;
-  }, LOGIN_PATH_PATTERN.source, { timeout: timeoutMs });
+  await page.waitForFunction(
+    (loginPathSource: string) => {
+      const visible = (element: Element) => {
+        const style = getComputedStyle(element);
+        return (
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          element.getClientRects().length > 0
+        );
+      };
+      const hasAuthenticationFields = Array.from(
+        document.querySelectorAll(
+          'input[type="password"], input[autocomplete="username"], input[autocomplete="current-password"]',
+        ),
+      ).some(visible);
+      return (
+        location.origin === 'https://www.marcus.com' &&
+        !new RegExp(loginPathSource, 'i').test(location.pathname) &&
+        /^\/us\/en\/(?:accounts|documents|dashboard)(?:\/|$)/i.test(location.pathname) &&
+        !hasAuthenticationFields
+      );
+    },
+    LOGIN_PATH_PATTERN.source,
+    { timeout: timeoutMs },
+  );
 }
 
 async function openMarcusAuthenticatedRoute(
@@ -582,10 +610,9 @@ function missingMarcusCatalogRequestError(
   accounts: Response | undefined,
   documents: Response | undefined,
 ): Error {
-  const missing = [
-    ...(!accounts ? ['account'] : []),
-    ...(!documents ? ['document'] : []),
-  ].join(' and ');
+  const missing = [...(!accounts ? ['account'] : []), ...(!documents ? ['document'] : [])].join(
+    ' and ',
+  );
   return new Error(`Marcus ${missing} metadata API request did not load`);
 }
 
@@ -604,9 +631,7 @@ function hasMarcusCatalogPayloadShape(
   payload: unknown,
   operation: MarcusApiCatalogOperation,
 ): boolean {
-  return operation === 'accounts'
-    ? apiAccounts(payload) !== null
-    : apiDocuments(payload) !== null;
+  return operation === 'accounts' ? apiAccounts(payload) !== null : apiDocuments(payload) !== null;
 }
 
 function getMarcusCatalogRequestCapture(page: Page): MarcusCatalogRequestCapture {
@@ -615,7 +640,9 @@ function getMarcusCatalogRequestCapture(page: Page): MarcusCatalogRequestCapture
   if (existing) return existing;
 
   let resolveCaptured: (() => void) | undefined;
-  const captured = new Promise<void>(resolve => { resolveCaptured = resolve; });
+  const captured = new Promise<void>((resolve) => {
+    resolveCaptured = resolve;
+  });
   let capture: MarcusCatalogRequestCapture;
   const onResponse = (response: Response) => {
     const request = response.request();
@@ -675,7 +702,7 @@ async function settleMarcusCatalogBootstrap(
 ): Promise<void> {
   if (capture.accounts && capture.documents) return;
   let resolveAuthenticationRedirect: (() => void) | undefined;
-  const authenticationRedirect = new Promise<void>(resolve => {
+  const authenticationRedirect = new Promise<void>((resolve) => {
     resolveAuthenticationRedirect = resolve;
   });
   const authenticationWasLost = (url: string) => {
@@ -691,7 +718,8 @@ async function settleMarcusCatalogBootstrap(
       resolveAuthenticationRedirect?.();
     }
   };
-  const canObserveNavigation = typeof page.on === 'function' &&
+  const canObserveNavigation =
+    typeof page.on === 'function' &&
     typeof page.off === 'function' &&
     typeof page.mainFrame === 'function';
   if (canObserveNavigation) {
@@ -730,9 +758,8 @@ export function isMarcusApiCatalogRequest(
   ) {
     return false;
   }
-  const marker = operation === 'accounts'
-    ? MARCUS_ACCOUNTS_REQUEST_MARKER
-    : MARCUS_DOCUMENTS_REQUEST_MARKER;
+  const marker =
+    operation === 'accounts' ? MARCUS_ACCOUNTS_REQUEST_MARKER : MARCUS_DOCUMENTS_REQUEST_MARKER;
   return request.postData()?.includes(marker) ?? false;
 }
 
@@ -763,18 +790,18 @@ async function waitForMarcusCatalogResponses(
 ): Promise<{ accounts: Response; documents: Response } | null> {
   const capture = getMarcusCatalogRequestCapture(page);
   try {
-    if (!await isMarcusAuthenticatedPage(page)) return null;
+    if (!(await isMarcusAuthenticatedPage(page))) return null;
     await settleMarcusCatalogBootstrap(page, capture);
-    if (!await isMarcusAuthenticatedPage(page)) return null;
+    if (!(await isMarcusAuthenticatedPage(page))) return null;
     if (!capture.accounts) {
-      if (!await openMarcusAuthenticatedRoute(page, ACCOUNTS_URL, 'accounts')) return null;
+      if (!(await openMarcusAuthenticatedRoute(page, ACCOUNTS_URL, 'accounts'))) return null;
       await settleMarcusCatalogBootstrap(page, capture);
-      if (!await isMarcusAuthenticatedPage(page)) return null;
+      if (!(await isMarcusAuthenticatedPage(page))) return null;
     }
     if (!capture.documents) {
-      if (!await openMarcusAuthenticatedRoute(page, DOCUMENTS_URL, 'documents')) return null;
+      if (!(await openMarcusAuthenticatedRoute(page, DOCUMENTS_URL, 'documents'))) return null;
       await settleMarcusCatalogBootstrap(page, capture);
-      if (!await isMarcusAuthenticatedPage(page)) return null;
+      if (!(await isMarcusAuthenticatedPage(page))) return null;
     }
     if (!capture.accounts || !capture.documents) {
       let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -796,8 +823,8 @@ async function waitForMarcusCatalogResponses(
       throw missingMarcusCatalogRequestError(capture.accounts, capture.documents);
     }
     if (isMarcusDocumentsPage(page)) {
-      if (!await isMarcusAuthenticatedPage(page)) return null;
-    } else if (!await openMarcusAuthenticatedRoute(page, DOCUMENTS_URL, 'documents')) {
+      if (!(await isMarcusAuthenticatedPage(page))) return null;
+    } else if (!(await openMarcusAuthenticatedRoute(page, DOCUMENTS_URL, 'documents'))) {
       return null;
     }
     const requests = { accounts: capture.accounts, documents: capture.documents };
@@ -813,13 +840,18 @@ export async function discoverMarcusRemoteCatalog(page: Page): Promise<MarcusRem
   const responses = await waitForMarcusCatalogResponses(page);
   if (!responses) return null;
   const accountPayload = await readMarcusApiPayload(responses.accounts);
-  const documentPayload = responses.documents === responses.accounts
-    ? accountPayload
-    : await readMarcusApiPayload(responses.documents);
+  const documentPayload =
+    responses.documents === responses.accounts
+      ? accountPayload
+      : await readMarcusApiPayload(responses.documents);
   return buildMarcusRemoteCatalogFromApi(accountPayload, documentPayload);
 }
 
-function documentIsInRange(document: MarcusCatalogDocument, from: string, through: string): boolean {
+function documentIsInRange(
+  document: MarcusCatalogDocument,
+  from: string,
+  through: string,
+): boolean {
   const month = document.statementDate.slice(0, 7);
   return month >= from.slice(0, 7) && month <= through.slice(0, 7);
 }
@@ -855,16 +887,15 @@ export function planMarcusCatalog(
   through: string,
 ): MarcusCatalogPlan {
   const mappedAccounts = mapMarcusRemoteAccounts(catalog.accounts, plannedAccounts);
-  const planByIdentity = new Map(mappedAccounts.map(({ remote, planned }) => [
-    accountIdentityKey(remote),
-    planned,
-  ]));
+  const planByIdentity = new Map(
+    mappedAccounts.map(({ remote, planned }) => [accountIdentityKey(remote), planned]),
+  );
   const plannedIdentities = new Set(plannedAccounts.map(accountIdentityKey));
-  const unmappedAccountCount = catalog.accounts.filter(account =>
-    !plannedIdentities.has(accountIdentityKey(account))
+  const unmappedAccountCount = catalog.accounts.filter(
+    (account) => !plannedIdentities.has(accountIdentityKey(account)),
   ).length;
   const unavailableAccountCount = plannedAccounts.length - mappedAccounts.length;
-  const documents = catalog.documents.flatMap(document => {
+  const documents = catalog.documents.flatMap((document) => {
     const planned = planByIdentity.get(accountIdentityKey(document.account));
     return planned && documentIsInRange(document, planned.startDate, through)
       ? [{ document, planned }]
@@ -881,15 +912,15 @@ export function planMarcusCatalog(
 function safeMarcusError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   if (!message.startsWith('Marcus ')) return 'Marcus sync failed';
-  return message
-    .replace(/https?:\/\/\S+/g, '<redacted-url>')
-    .replace(/\b\d{4,}\b/g, '<digits>');
+  return message.replace(/https?:\/\/\S+/g, '<redacted-url>').replace(/\b\d{4,}\b/g, '<digits>');
 }
 
 export function validateMarcusPdfSignature(bytes: Uint8Array): void {
   if (bytes.byteLength < 32) throw new Error('Marcus statement PDF is empty or too small');
   const header = new TextDecoder('ascii').decode(bytes.slice(0, 5));
-  const trailer = new TextDecoder('ascii').decode(bytes.slice(Math.max(0, bytes.byteLength - 2_048)));
+  const trailer = new TextDecoder('ascii').decode(
+    bytes.slice(Math.max(0, bytes.byteLength - 2_048)),
+  );
   if (header !== '%PDF-' || !trailer.includes('%%EOF')) {
     throw new Error('Marcus statement PDF signature is invalid');
   }
@@ -913,9 +944,12 @@ export function marcusDocumentProxyRequest(
 
 function marcusRequestFailureCategory(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
-  if (/session cookies are unavailable/i.test(message)) return 'authenticated session cookies unavailable';
-  if (/cookie header is too large/i.test(message)) return 'authenticated session cookie header too large';
-  if (/compact cookie request was not intercepted/i.test(message)) return 'browser request interception failed';
+  if (/session cookies are unavailable/i.test(message))
+    return 'authenticated session cookies unavailable';
+  if (/cookie header is too large/i.test(message))
+    return 'authenticated session cookie header too large';
+  if (/compact cookie request was not intercepted/i.test(message))
+    return 'browser request interception failed';
   if (/origin/i.test(message)) return 'request origin rejected';
   if (/abort|timeout/i.test(message)) return 'request timed out';
   return 'unexpected browser transport failure';
@@ -944,7 +978,10 @@ export async function fetchMarcusDocumentBytes(
   if (response.status < 200 || response.status >= 300) {
     throw new Error(`Marcus statement request returned status ${response.status}`);
   }
-  const contentType = (response.headers['content-type'] ?? '').split(';', 1)[0]!.trim().toLowerCase();
+  const contentType = (response.headers['content-type'] ?? '')
+    .split(';', 1)[0]!
+    .trim()
+    .toLowerCase();
   if (!['application/pdf', 'application/octet-stream'].includes(contentType)) {
     throw new Error('Marcus statement response content type was not accepted');
   }
@@ -954,19 +991,26 @@ export async function fetchMarcusDocumentBytes(
 }
 
 function parsedAccountNames(parsed: AppImportParseResult): string[] {
-  return [...new Set([
-    ...parsed.transactions.map(transaction => transaction?.account ?? null),
-    ...parsed.balances.map(balance => balance.account ?? null),
-  ].filter((value): value is string => Boolean(value)))];
+  return [
+    ...new Set(
+      [
+        ...parsed.transactions.map((transaction) => transaction?.account ?? null),
+        ...parsed.balances.map((balance) => balance.account ?? null),
+      ].filter((value): value is string => Boolean(value)),
+    ),
+  ];
 }
 
 function marcusParserFailureCategory(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   if (/Could not find Marcus account number/i.test(message)) return 'account identity unavailable';
-  if (/Could not find Marcus statement period/i.test(message)) return 'statement period unavailable';
-  if (/Could not find Marcus account activity header/i.test(message)) return 'activity layout not recognized';
+  if (/Could not find Marcus statement period/i.test(message))
+    return 'statement period unavailable';
+  if (/Could not find Marcus account activity header/i.test(message))
+    return 'activity layout not recognized';
   if (/Could not find Marcus ending balance/i.test(message)) return 'ending balance unavailable';
-  if (/Could not parse Marcus activity row/i.test(message)) return 'activity row layout not recognized';
+  if (/Could not parse Marcus activity row/i.test(message))
+    return 'activity row layout not recognized';
   if (/Invalid Marcus statement date/i.test(message)) return 'statement date invalid';
   if (/password|encrypted|decrypt/i.test(message)) return 'PDF could not be decrypted';
   if (/pdftotext|PDF.*(?:parse|read|extract)/i.test(message)) return 'PDF text extraction failed';
@@ -1000,11 +1044,16 @@ export async function validateMarcusStatementArtifact(
         fileBytes: options.bytes,
       });
     } catch (error) {
-      throw new Error(`Marcus statement parser validation failed: ${marcusParserFailureCategory(error)}`);
+      throw new Error(
+        `Marcus statement parser validation failed: ${marcusParserFailureCategory(error)}`,
+      );
     }
 
     const accountNames = parsedAccountNames(parsed);
-    if (accountNames.length !== 1 || accountNames[0] !== options.expectedAccount.parserAccountName) {
+    if (
+      accountNames.length !== 1 ||
+      accountNames[0] !== options.expectedAccount.parserAccountName
+    ) {
       throw new Error('Marcus statement account identity does not match its remote account');
     }
     if (parsed.balances.length !== 1 || !DATE_PATTERN.test(parsed.balances[0]!.date)) {
@@ -1073,22 +1122,34 @@ async function syncAuthenticatedMarcus(
         artifactCount: plan.documents.length,
         artifactType: document.artifactType,
       };
-      const bytes = await reportSyncStep(report, {
-        step: 'download-artifact',
-        message: 'Downloading Marcus statement',
-        details,
-      }, () => fetchMarcusDocumentBytes(page, document));
-      const artifact = await reportSyncStep(report, {
-        step: 'validate-artifact',
-        message: 'Validating Marcus statement',
-        details,
-      }, () => validateMarcusStatementArtifact({
-        outputDir: config.outputDir,
-        bytes,
-        accountId: planned.accountId,
-        expectedAccount: document.account,
-        expectedStatementDate: document.statementDate,
-      }, parser));
+      const bytes = await reportSyncStep(
+        report,
+        {
+          step: 'download-artifact',
+          message: 'Downloading Marcus statement',
+          details,
+        },
+        () => fetchMarcusDocumentBytes(page, document),
+      );
+      const artifact = await reportSyncStep(
+        report,
+        {
+          step: 'validate-artifact',
+          message: 'Validating Marcus statement',
+          details,
+        },
+        () =>
+          validateMarcusStatementArtifact(
+            {
+              outputDir: config.outputDir,
+              bytes,
+              accountId: planned.accountId,
+              expectedAccount: document.account,
+              expectedStatementDate: document.statementDate,
+            },
+            parser,
+          ),
+      );
       artifacts.push(artifact);
       report({
         type: 'artifact',
@@ -1097,7 +1158,7 @@ async function syncAuthenticatedMarcus(
       });
     }
   } catch (error) {
-    await Promise.all(artifacts.map(artifact => rm(artifact.path, { force: true })));
+    await Promise.all(artifacts.map((artifact) => rm(artifact.path, { force: true })));
     throw error;
   }
 
@@ -1118,10 +1179,14 @@ export async function executeMarcusBrowser(
   parser: MarcusParserLike,
 ): Promise<InstitutionBrowserProgramResult<MarcusBrowserResult>> {
   try {
-    const catalog = await reportSyncStep(report, {
-      step: 'discover-metadata',
-      message: 'Discovering Marcus accounts and documents',
-    }, () => discoverMarcusRemoteCatalog(page));
+    const catalog = await reportSyncStep(
+      report,
+      {
+        step: 'discover-metadata',
+        message: 'Discovering Marcus accounts and documents',
+      },
+      () => discoverMarcusRemoteCatalog(page),
+    );
     if (!catalog) {
       return {
         status: 'login-required',
@@ -1156,10 +1221,14 @@ export async function runMarcusSync(
   await mkdir(outputDir, { recursive: true, mode: 0o700 });
   const session = config.session ?? MARCUS_PROFILE_NAME;
   const allowInteractiveAuthentication = config.allowInteractiveAuthentication ?? false;
-  const hasSavedAuthentication = await reportSyncStep(report, {
-    step: 'check-authentication',
-    message: 'Checking Marcus cached authentication',
-  }, () => dependencies.hasSavedAuthentication(session, config.profilePath));
+  const hasSavedAuthentication = await reportSyncStep(
+    report,
+    {
+      step: 'check-authentication',
+      message: 'Checking Marcus cached authentication',
+    },
+    () => dependencies.hasSavedAuthentication(session, config.profilePath),
+  );
 
   if (!hasSavedAuthentication && !allowInteractiveAuthentication) {
     report({
@@ -1170,41 +1239,43 @@ export async function runMarcusSync(
     return { status: 'authentication-required', reason: 'missing', accounts: [], artifacts: [] };
   }
 
-  const result = await reportSyncStep(report, {
-    step: 'browser-session',
-    message: hasSavedAuthentication
-      ? 'Opening Marcus cached session'
-      : 'Opening Marcus authentication session',
-    details: { cachedAuthentication: hasSavedAuthentication },
-  }, () => dependencies.runBrowserProgram<MarcusBrowserResult>(
+  const result = await reportSyncStep(
+    report,
     {
-      name: session,
-      startUrl: DOCUMENTS_URL,
-      beforeStartNavigation: prepareMarcusCatalogCapture,
-      ...(config.profilePath ? { profilePath: config.profilePath } : {}),
+      step: 'browser-session',
+      message: hasSavedAuthentication
+        ? 'Opening Marcus cached session'
+        : 'Opening Marcus authentication session',
+      details: { cachedAuthentication: hasSavedAuthentication },
     },
-    browserProgram(),
-    {
-      allowInteractiveAuthentication,
-      completionDescription: 'Marcus downloads are complete.',
-      authenticationRecoveryUrl: LOGIN_URL,
-      isAuthenticated: isMarcusAuthenticatedPage,
-      waitUntilAuthenticated: waitUntilMarcusAuthenticated,
-      onProgress: message => report({
-        type: 'phase',
-        message,
-        data: { step: 'browser-session-wait' },
-      }),
-      programBindings: {
-        execute: (page: Page) => executeMarcusBrowser(
-          page,
-          { ...config, outputDir },
-          report,
-          dependencies.parser,
-        ),
-      },
-    },
-  ));
+    () =>
+      dependencies.runBrowserProgram<MarcusBrowserResult>(
+        {
+          name: session,
+          startUrl: DOCUMENTS_URL,
+          beforeStartNavigation: prepareMarcusCatalogCapture,
+          ...(config.profilePath ? { profilePath: config.profilePath } : {}),
+        },
+        browserProgram(),
+        {
+          allowInteractiveAuthentication,
+          completionDescription: 'Marcus downloads are complete.',
+          authenticationRecoveryUrl: LOGIN_URL,
+          isAuthenticated: isMarcusAuthenticatedPage,
+          waitUntilAuthenticated: waitUntilMarcusAuthenticated,
+          onProgress: (message) =>
+            report({
+              type: 'phase',
+              message,
+              data: { step: 'browser-session-wait' },
+            }),
+          programBindings: {
+            execute: (page: Page) =>
+              executeMarcusBrowser(page, { ...config, outputDir }, report, dependencies.parser),
+          },
+        },
+      ),
+  );
 
   if (result.status === 'login-required') {
     report({

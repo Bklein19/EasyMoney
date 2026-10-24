@@ -52,12 +52,24 @@
   font-variant-numeric: tabular-nums;
 }
 
-.accounts-table__account { width: 38%; }
-.accounts-table__type { width: 14%; }
-.accounts-table__status { width: 12%; }
-.accounts-table__balance { width: 14%; }
-.accounts-table__updated { width: 14%; }
-.accounts-table__action { width: 8%; }
+.accounts-table__account {
+  width: 38%;
+}
+.accounts-table__type {
+  width: 14%;
+}
+.accounts-table__status {
+  width: 12%;
+}
+.accounts-table__balance {
+  width: 14%;
+}
+.accounts-table__updated {
+  width: 14%;
+}
+.accounts-table__action {
+  width: 8%;
+}
 
 .accounts-table th,
 .accounts-table td {

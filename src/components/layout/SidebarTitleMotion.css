@@ -29,7 +29,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .easymoney-macos .sidebar::after { transition: none; }
-  .easymoney-macos .sidebar-brand { transform: translate(16px, 54px); }
-  .easymoney-macos .sidebar-brand.is-docked { transform: translate(86px, 9px) scale(0.866667); }
+  .easymoney-macos .sidebar::after {
+    transition: none;
+  }
+  .easymoney-macos .sidebar-brand {
+    transform: translate(16px, 54px);
+  }
+  .easymoney-macos .sidebar-brand.is-docked {
+    transform: translate(86px, 9px) scale(0.866667);
+  }
 }

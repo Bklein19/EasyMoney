@@ -76,7 +76,10 @@ function statusFor(daysSinceLatestFact: number | null): DataFreshnessStatus {
   return 'current';
 }
 
-function freshnessStatusFor(accountStatus: string | null, daysSinceLatestFact: number | null): DataFreshnessStatus {
+function freshnessStatusFor(
+  accountStatus: string | null,
+  daysSinceLatestFact: number | null,
+): DataFreshnessStatus {
   if (accountStatus === 'closed') return 'closed';
   return statusFor(daysSinceLatestFact);
 }
@@ -102,8 +105,8 @@ function downloadWindowFor(account: DataFreshnessAccount, today: string) {
 
 function buildCatchUpPlan(accounts: DataFreshnessAccount[], today: string) {
   const items = accounts
-    .filter(account => account.needsUpdate)
-    .map(account => ({
+    .filter((account) => account.needsUpdate)
+    .map((account) => ({
       id: `account-${account.accountId}`,
       accountId: account.accountId,
       accountName: account.accountName,
@@ -116,41 +119,49 @@ function buildCatchUpPlan(accounts: DataFreshnessAccount[], today: string) {
       suggestedDownloads: account.suggestedDownloads,
       latestImport: account.latestImportFileName
         ? {
-          fileName: account.latestImportFileName,
-          parserName: account.latestParserName,
-          sourceType: account.latestSourceType,
-          importedAt: account.latestImportedAt,
-        }
+            fileName: account.latestImportFileName,
+            parserName: account.latestParserName,
+            sourceType: account.latestSourceType,
+            importedAt: account.latestImportedAt,
+          }
         : null,
     }));
 
   const groups = Array.from(
-    items.reduce((byInstitution, item) => {
-      const existing = byInstitution.get(item.institution) || {
-        institution: item.institution,
-        statuses: { due: 0, stale: 0, noData: 0 },
-        items: [],
-      };
-      existing.statuses.due += item.status === 'due' ? 1 : 0;
-      existing.statuses.stale += item.status === 'stale' ? 1 : 0;
-      existing.statuses.noData += item.status === 'no-data' ? 1 : 0;
-      existing.items.push(item);
-      byInstitution.set(item.institution, existing);
-      return byInstitution;
-    }, new Map<string, {
-      institution: string;
-      statuses: { due: number; stale: number; noData: number };
-      items: typeof items;
-    }>())
-    .values()
+    items
+      .reduce(
+        (byInstitution, item) => {
+          const existing = byInstitution.get(item.institution) || {
+            institution: item.institution,
+            statuses: { due: 0, stale: 0, noData: 0 },
+            items: [],
+          };
+          existing.statuses.due += item.status === 'due' ? 1 : 0;
+          existing.statuses.stale += item.status === 'stale' ? 1 : 0;
+          existing.statuses.noData += item.status === 'no-data' ? 1 : 0;
+          existing.items.push(item);
+          byInstitution.set(item.institution, existing);
+          return byInstitution;
+        },
+        new Map<
+          string,
+          {
+            institution: string;
+            statuses: { due: number; stale: number; noData: number };
+            items: typeof items;
+          }
+        >(),
+      )
+      .values(),
   )
-    .map(group => ({
+    .map((group) => ({
       ...group,
-      items: group.items.sort((a, b) => (
-        a.status.localeCompare(b.status)
-        || a.accountName.localeCompare(b.accountName)
-        || a.accountId - b.accountId
-      )),
+      items: group.items.sort(
+        (a, b) =>
+          a.status.localeCompare(b.status) ||
+          a.accountName.localeCompare(b.accountName) ||
+          a.accountId - b.accountId,
+      ),
     }))
     .sort((a, b) => a.institution.localeCompare(b.institution));
 
@@ -164,7 +175,9 @@ function buildCatchUpPlan(accounts: DataFreshnessAccount[], today: string) {
 
 export function getDataFreshnessReport(options: { today?: string } = {}) {
   const today = options.today || localCalendarDate();
-  const rows = getDb().prepare(`
+  const rows = getDb()
+    .prepare(
+      `
     WITH transactionFacts AS (
       SELECT
         sa.accountId,
@@ -249,17 +262,32 @@ export function getDataFreshnessReport(options: { today?: string } = {}) {
     LEFT JOIN balanceFacts bf ON bf.accountId = a.id
     WHERE COALESCE(a.status, 'active') != 'archived'
     ORDER BY COALESCE(a.institution, ''), a.name, a.id
-  `).all(today) as DataFreshnessRow[];
+  `,
+    )
+    .all(today) as DataFreshnessRow[];
 
-  const accounts = rows.map(row => {
+  const accounts = rows.map((row) => {
     const latestFactDate = maxDate(row.latestTransactionDate, row.latestBalanceDate);
     const daysSinceLatestFact = daysBetween(latestFactDate, today);
     const accountStatus = row.accountStatus || 'active';
-    const transactionStatus = freshnessStatusFor(accountStatus, daysBetween(maxDate(row.latestTransactionDate, row.activityCheckedThrough), today));
-    const balanceStatus = freshnessStatusFor(accountStatus, daysBetween(row.latestBalanceDate, today));
-    const factStatus = freshnessStatusFor(accountStatus, daysBetween(maxDate(latestFactDate, row.activityCheckedThrough), today));
-    const status = accountStatus !== 'closed' && row.freshnessPolicy === 'on-demand' && (transactionStatus !== 'current' || balanceStatus !== 'current')
-      ? 'on-demand' as const : factStatus;
+    const transactionStatus = freshnessStatusFor(
+      accountStatus,
+      daysBetween(maxDate(row.latestTransactionDate, row.activityCheckedThrough), today),
+    );
+    const balanceStatus = freshnessStatusFor(
+      accountStatus,
+      daysBetween(row.latestBalanceDate, today),
+    );
+    const factStatus = freshnessStatusFor(
+      accountStatus,
+      daysBetween(maxDate(latestFactDate, row.activityCheckedThrough), today),
+    );
+    const status =
+      accountStatus !== 'closed' &&
+      row.freshnessPolicy === 'on-demand' &&
+      (transactionStatus !== 'current' || balanceStatus !== 'current')
+        ? ('on-demand' as const)
+        : factStatus;
     return {
       accountId: row.accountId,
       accountName: row.accountName,
@@ -267,7 +295,10 @@ export function getDataFreshnessReport(options: { today?: string } = {}) {
       accountType: row.accountType,
       accountStatus,
       freshnessPolicy: row.freshnessPolicy,
-      needsUpdate: accountStatus !== 'closed' && row.freshnessPolicy !== 'on-demand' && (transactionStatus !== 'current' || balanceStatus !== 'current'),
+      needsUpdate:
+        accountStatus !== 'closed' &&
+        row.freshnessPolicy !== 'on-demand' &&
+        (transactionStatus !== 'current' || balanceStatus !== 'current'),
       activityCheckedThrough: row.activityCheckedThrough,
       latestTransactionDate: row.latestTransactionDate,
       latestBalanceDate: row.latestBalanceDate,
@@ -296,7 +327,15 @@ export function getDataFreshnessReport(options: { today?: string } = {}) {
       closedAccounts: current.closedAccounts + (account.status === 'closed' ? 1 : 0),
       onDemandAccounts: current.onDemandAccounts + (account.status === 'on-demand' ? 1 : 0),
     }),
-    { totalAccounts: 0, currentAccounts: 0, dueAccounts: 0, staleAccounts: 0, noDataAccounts: 0, closedAccounts: 0, onDemandAccounts: 0 }
+    {
+      totalAccounts: 0,
+      currentAccounts: 0,
+      dueAccounts: 0,
+      staleAccounts: 0,
+      noDataAccounts: 0,
+      closedAccounts: 0,
+      onDemandAccounts: 0,
+    },
   );
 
   return {

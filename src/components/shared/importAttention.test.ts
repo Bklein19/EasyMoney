@@ -13,12 +13,16 @@ test('quiet while loading or healthy; failed checks are not reported as healthy'
 });
 
 test('counts each open account once and excludes closed accounts', () => {
-  expect(importAttentionMessage([
-    { status: 'stale', balanceStatus: 'stale' },
-    { status: 'closed', balanceStatus: 'closed' },
-  ])).toStartWith('1 account due');
-  expect(importAttentionMessage([
-    { status: 'current', balanceStatus: 'no-data' },
-    { status: 'due', balanceStatus: 'current' },
-  ])).toStartWith('2 accounts due');
+  expect(
+    importAttentionMessage([
+      { status: 'stale', balanceStatus: 'stale' },
+      { status: 'closed', balanceStatus: 'closed' },
+    ]),
+  ).toStartWith('1 account due');
+  expect(
+    importAttentionMessage([
+      { status: 'current', balanceStatus: 'no-data' },
+      { status: 'due', balanceStatus: 'current' },
+    ]),
+  ).toStartWith('2 accounts due');
 });

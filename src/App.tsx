@@ -21,7 +21,10 @@ import BackupsPage from './components/settings/BackupsPage';
 import PalettePage from './components/settings/PalettePage';
 import AutomaticCategorizationStatus from './components/transactions/AutomaticCategorizationStatus';
 
-import { expandReportSelection, visibleReportAccounts } from './components/investments/reportAccountSelection';
+import {
+  expandReportSelection,
+  visibleReportAccounts,
+} from './components/investments/reportAccountSelection';
 
 interface ReportAccount {
   status?: string;
@@ -45,7 +48,10 @@ const getInitialSidebarCollapsed = () => {
 };
 
 function App() {
-  const maintenance = useQuery({ ...trpc.imports.parserRefreshStatus.queryOptions(), refetchInterval: 3000 });
+  const maintenance = useQuery({
+    ...trpc.imports.parserRefreshStatus.queryOptions(),
+    refetchInterval: 3000,
+  });
   const wasRefreshing = useRef(false);
   useEffect(() => {
     const running = maintenance.data?.running;
@@ -56,12 +62,20 @@ function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(getInitialSidebarCollapsed);
   const [isSidebarPeekOpen, setIsSidebarPeekOpen] = useState(false);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [selectedReportAccountIds, setSelectedReportAccountIds] = useState<Set<number> | null>(null);
+  const [selectedReportAccountIds, setSelectedReportAccountIds] = useState<Set<number> | null>(
+    null,
+  );
   // The navigation shell needs account metadata, not the entire investment report.
   const reportAccountsQuery = useQuery(trpc.accounts.list.queryOptions({ includeArchived: true }));
-  const reportAccounts: ReportAccount[] = useMemo(() => (reportAccountsQuery.data?.accounts ?? []).map(account => ({
-    ...account, institution: account.institution ?? '', account_holder: account.accountHolder,
-  })), [reportAccountsQuery.data?.accounts]);
+  const reportAccounts: ReportAccount[] = useMemo(
+    () =>
+      (reportAccountsQuery.data?.accounts ?? []).map((account) => ({
+        ...account,
+        institution: account.institution ?? '',
+        account_holder: account.accountHolder,
+      })),
+    [reportAccountsQuery.data?.accounts],
+  );
   const pickerAccounts = visibleReportAccounts(reportAccounts);
 
   const handleSidebarCollapsedChange = (nextValue: boolean) => {
@@ -94,53 +108,62 @@ function App() {
     };
   }, [isSidebarCollapsed, isSidebarPeekOpen]);
 
-
   const reportSelectedIds = useMemo(
-    () => selectedReportAccountIds ?? new Set(reportAccounts.map(account => account.id)),
-    [reportAccounts, selectedReportAccountIds]
+    () => selectedReportAccountIds ?? new Set(reportAccounts.map((account) => account.id)),
+    [reportAccounts, selectedReportAccountIds],
   );
 
   return (
     <Router>
       <SidebarContextProvider>
-      <div className={`app-shell ${isSidebarCollapsed ? 'app-shell--sidebar-collapsed' : ''} ${isSidebarPeekOpen ? 'app-shell--sidebar-peek' : ''}`}>
         <div
-          className="desktop-window-drag-strip electrobun-webkit-app-region-drag"
-          aria-hidden="true"
-        />
-        <Sidebar
-          isMobileOpen={isMobileSidebarOpen}
-          onClose={() => setIsMobileSidebarOpen(false)}
-          isCollapsed={isSidebarCollapsed}
-          isPeekOpen={isSidebarPeekOpen}
-          onCollapsedChange={handleSidebarCollapsedChange}
-          reportAccounts={pickerAccounts}
-          selectedReportAccountIds={new Set(pickerAccounts.filter(account => reportSelectedIds.has(account.id)).map(account => account.id))}
-          onReportAccountSelectionChange={ids => setSelectedReportAccountIds(expandReportSelection(reportAccounts, ids))}
-        />
-        {isSidebarCollapsed && (
+          className={`app-shell ${isSidebarCollapsed ? 'app-shell--sidebar-collapsed' : ''} ${isSidebarPeekOpen ? 'app-shell--sidebar-peek' : ''}`}
+        >
           <div
-            className="sidebar-peek-zone"
-            onPointerEnter={() => setIsSidebarPeekOpen(true)}
-            onMouseEnter={() => setIsSidebarPeekOpen(true)}
+            className="desktop-window-drag-strip electrobun-webkit-app-region-drag"
             aria-hidden="true"
           />
-        )}
-        <button
-          className="mobile-sidebar-trigger"
-          type="button"
-          aria-label="Open navigation"
-          onClick={() => setIsMobileSidebarOpen(true)}
-        >
-          <Menu size={20} />
-        </button>
-        <div className="app-content">
-          <main className="app-main">
-            <AutomaticCategorizationStatus />
-            <AppRoutes reportSelectedIds={reportSelectedIds} />
-          </main>
+          <Sidebar
+            isMobileOpen={isMobileSidebarOpen}
+            onClose={() => setIsMobileSidebarOpen(false)}
+            isCollapsed={isSidebarCollapsed}
+            isPeekOpen={isSidebarPeekOpen}
+            onCollapsedChange={handleSidebarCollapsedChange}
+            reportAccounts={pickerAccounts}
+            selectedReportAccountIds={
+              new Set(
+                pickerAccounts
+                  .filter((account) => reportSelectedIds.has(account.id))
+                  .map((account) => account.id),
+              )
+            }
+            onReportAccountSelectionChange={(ids) =>
+              setSelectedReportAccountIds(expandReportSelection(reportAccounts, ids))
+            }
+          />
+          {isSidebarCollapsed && (
+            <div
+              className="sidebar-peek-zone"
+              onPointerEnter={() => setIsSidebarPeekOpen(true)}
+              onMouseEnter={() => setIsSidebarPeekOpen(true)}
+              aria-hidden="true"
+            />
+          )}
+          <button
+            className="mobile-sidebar-trigger"
+            type="button"
+            aria-label="Open navigation"
+            onClick={() => setIsMobileSidebarOpen(true)}
+          >
+            <Menu size={20} />
+          </button>
+          <div className="app-content">
+            <main className="app-main">
+              <AutomaticCategorizationStatus />
+              <AppRoutes reportSelectedIds={reportSelectedIds} />
+            </main>
+          </div>
         </div>
-      </div>
       </SidebarContextProvider>
     </Router>
   );
@@ -148,11 +171,18 @@ function App() {
 
 function AppRoutes({ reportSelectedIds }: AppRoutesProps) {
   const navigate = useNavigate();
-  useEffect(() => installNavigationActions(window, delta => { void navigate(delta); }), [navigate]);
+  useEffect(
+    () =>
+      installNavigationActions(window, (delta) => {
+        void navigate(delta);
+      }),
+    [navigate],
+  );
   useEffect(() => {
     const editAccount = (event: Event) => {
       const id: unknown = (event as CustomEvent).detail;
-      if (typeof id === 'number' && Number.isSafeInteger(id) && id > 0) navigate(`/accounts?edit=${id}`);
+      if (typeof id === 'number' && Number.isSafeInteger(id) && id > 0)
+        navigate(`/accounts?edit=${id}`);
     };
     window.addEventListener('easymoney:edit-account', editAccount);
     return () => window.removeEventListener('easymoney:edit-account', editAccount);
@@ -165,8 +195,14 @@ function AppRoutes({ reportSelectedIds }: AppRoutesProps) {
       <Route path="/accounts" element={<AccountsPage />} />
       <Route path="/categories" element={<CategoriesPage />} />
       <Route path="/budgeting" element={<BudgetingPage />} />
-      <Route path="/net-worth" element={<NetWorthPage view="networth" selectedIds={reportSelectedIds} />} />
-      <Route path="/performance" element={<NetWorthPage view="performance" selectedIds={reportSelectedIds} />} />
+      <Route
+        path="/net-worth"
+        element={<NetWorthPage view="networth" selectedIds={reportSelectedIds} />}
+      />
+      <Route
+        path="/performance"
+        element={<NetWorthPage view="performance" selectedIds={reportSelectedIds} />}
+      />
       <Route path="/savings-rate" element={<SavingsRatePage selectedIds={reportSelectedIds} />} />
       <Route path="/retirement" element={<RetirementPage selectedIds={reportSelectedIds} />} />
       <Route path="/investments" element={<Navigate to="/net-worth" replace />} />

@@ -48,99 +48,121 @@ const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
   setDevelopmentPageInspector(undefined);
-  await Promise.all(temporaryDirectories.splice(0).map(path => rm(path, { recursive: true, force: true })));
+  await Promise.all(
+    temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
+  );
 });
 
 describe('development browser inspection', () => {
-  test.each([true, false])('inspects only authenticated pages: %s', async authenticated => {
+  test.each([true, false])('inspects only authenticated pages: %s', async (authenticated) => {
     let inspections = 0;
-    setDevelopmentPageInspector(async () => { inspections += 1; });
-    const page = { screencast: { showChapter: async () => {} } } as unknown as Page;
-    await runInstitutionBrowserProgram({
-      name: 'inspection-test', startUrl: 'https://example.test', persistAuthentication: false,
-    }, 'async () => JSON.stringify({ status: "complete" })', {
-      completionDescription: 'Done', isAuthenticated: async () => authenticated,
-    }, {
-      withPlaywrightPage: async (options, operation) => {
-        expect(options.contextOptions?.headless).toBe(false);
-        return operation(page, {} as BrowserContext);
-      },
-      withTransientBrowserProfile: async operation => operation('/private/tmp/inspection-test'),
+    setDevelopmentPageInspector(async () => {
+      inspections += 1;
     });
+    const page = { screencast: { showChapter: async () => {} } } as unknown as Page;
+    await runInstitutionBrowserProgram(
+      {
+        name: 'inspection-test',
+        startUrl: 'https://example.test',
+        persistAuthentication: false,
+      },
+      'async () => JSON.stringify({ status: "complete" })',
+      {
+        completionDescription: 'Done',
+        isAuthenticated: async () => authenticated,
+      },
+      {
+        withPlaywrightPage: async (options, operation) => {
+          expect(options.contextOptions?.headless).toBe(false);
+          return operation(page, {} as BrowserContext);
+        },
+        withTransientBrowserProfile: async (operation) => operation('/private/tmp/inspection-test'),
+      },
+    );
     expect(inspections).toBe(authenticated ? 1 : 0);
   });
 });
 
 describe('Playwright session helper', () => {
   test('uses stable platform-specific persistent profile locations', () => {
-    expect(playwrightProfilePath('tiaa-catchup', {
-      home: '/Users/example',
-      platform: 'darwin',
-      env: {},
-    })).toBe('/Users/example/Library/Application Support/EasyMoney/playwright-profiles/tiaa-catchup');
-    expect(playwrightProfilePath('tiaa-catchup', {
-      home: 'C:\\Users\\example',
-      platform: 'win32',
-      env: { LOCALAPPDATA: 'C:\\Users\\example\\AppData\\Local' },
-    })).toBe('C:\\Users\\example\\AppData\\Local\\EasyMoney\\playwright-profiles\\tiaa-catchup');
-    expect(playwrightProfilePath('tiaa-catchup', {
-      home: '/home/example',
-      platform: 'linux',
-      env: { XDG_STATE_HOME: '/state' },
-    })).toBe('/state/easymoney/playwright-profiles/tiaa-catchup');
+    expect(
+      playwrightProfilePath('tiaa-catchup', {
+        home: '/Users/example',
+        platform: 'darwin',
+        env: {},
+      }),
+    ).toBe('/Users/example/Library/Application Support/EasyMoney/playwright-profiles/tiaa-catchup');
+    expect(
+      playwrightProfilePath('tiaa-catchup', {
+        home: 'C:\\Users\\example',
+        platform: 'win32',
+        env: { LOCALAPPDATA: 'C:\\Users\\example\\AppData\\Local' },
+      }),
+    ).toBe('C:\\Users\\example\\AppData\\Local\\EasyMoney\\playwright-profiles\\tiaa-catchup');
+    expect(
+      playwrightProfilePath('tiaa-catchup', {
+        home: '/home/example',
+        platform: 'linux',
+        env: { XDG_STATE_HOME: '/state' },
+      }),
+    ).toBe('/state/easymoney/playwright-profiles/tiaa-catchup');
   });
 
   test('keeps auth state inside the private institution profile', () => {
-    expect(playwrightAuthStatePath('/profiles/tiaa-catchup'))
-      .toBe('/profiles/tiaa-catchup/.easymoney-auth-state.json');
-    expect(playwrightSessionStoragePath('/profiles/tiaa-catchup'))
-      .toBe('/profiles/tiaa-catchup/.easymoney-session-storage.json');
-    expect(playwrightAuthenticationResumeUrlPath('/profiles/tiaa-catchup'))
-      .toBe('/profiles/tiaa-catchup/.easymoney-auth-resume-url.json');
+    expect(playwrightAuthStatePath('/profiles/tiaa-catchup')).toBe(
+      '/profiles/tiaa-catchup/.easymoney-auth-state.json',
+    );
+    expect(playwrightSessionStoragePath('/profiles/tiaa-catchup')).toBe(
+      '/profiles/tiaa-catchup/.easymoney-session-storage.json',
+    );
+    expect(playwrightAuthenticationResumeUrlPath('/profiles/tiaa-catchup')).toBe(
+      '/profiles/tiaa-catchup/.easymoney-auth-resume-url.json',
+    );
   });
 
   test('restores only a query-free private same-origin URL and bypasses it after cached auth expires', async () => {
     const profilePath = await mkdtemp(join(tmpdir(), 'easymoney-playwright-resume-url-'));
     temporaryDirectories.push(profilePath);
     const resumePath = playwrightAuthenticationResumeUrlPath(profilePath);
-    await writeFile(resumePath, JSON.stringify({
-      version: 1,
-      url: 'https://accounts.example.test/summary?SAMLart=one-time-state#resume',
-    }));
+    await writeFile(
+      resumePath,
+      JSON.stringify({
+        version: 1,
+        url: 'https://accounts.example.test/summary?SAMLart=one-time-state#resume',
+      }),
+    );
 
-    expect(await savedAuthenticationResumeUrl(
-      profilePath,
-      'https://accounts.example.test/login',
-    )).toBe('https://accounts.example.test/summary');
-    expect(await savedAuthenticationResumeUrl(
-      profilePath,
-      'https://login.example.test/start',
-    )).toBeNull();
-    expect(await restoredInstitutionStartUrl(
-      profilePath,
-      'https://accounts.example.test/login',
-      true,
-    )).toBe('https://accounts.example.test/summary');
-    expect(await restoredInstitutionStartUrl(
-      profilePath,
-      'https://accounts.example.test/login',
-      false,
-    )).toBe('https://accounts.example.test/login');
-    expect(await restoredInstitutionStartUrl(
-      profilePath,
-      'https://accounts.example.test/login',
-      true,
-      true,
-    )).toBe('https://accounts.example.test/login');
+    expect(
+      await savedAuthenticationResumeUrl(profilePath, 'https://accounts.example.test/login'),
+    ).toBe('https://accounts.example.test/summary');
+    expect(
+      await savedAuthenticationResumeUrl(profilePath, 'https://login.example.test/start'),
+    ).toBeNull();
+    expect(
+      await restoredInstitutionStartUrl(profilePath, 'https://accounts.example.test/login', true),
+    ).toBe('https://accounts.example.test/summary');
+    expect(
+      await restoredInstitutionStartUrl(profilePath, 'https://accounts.example.test/login', false),
+    ).toBe('https://accounts.example.test/login');
+    expect(
+      await restoredInstitutionStartUrl(
+        profilePath,
+        'https://accounts.example.test/login',
+        true,
+        true,
+      ),
+    ).toBe('https://accounts.example.test/login');
 
-    await writeFile(resumePath, JSON.stringify({
-      version: 1,
-      url: 'https://user:secret@accounts.example.test/summary',
-    }));
-    expect(await savedAuthenticationResumeUrl(
-      profilePath,
-      'https://accounts.example.test/login',
-    )).toBeNull();
+    await writeFile(
+      resumePath,
+      JSON.stringify({
+        version: 1,
+        url: 'https://user:secret@accounts.example.test/summary',
+      }),
+    );
+    expect(
+      await savedAuthenticationResumeUrl(profilePath, 'https://accounts.example.test/login'),
+    ).toBeNull();
   });
 
   test('detects saved authentication independently from the browser profile', async () => {
@@ -166,10 +188,12 @@ describe('Playwright session helper', () => {
 
     await openInstitutionStartPage(page, 'https://example.test/start', true);
 
-    expect(navigations).toEqual([{
-      url: 'https://example.test/start',
-      options: { waitUntil: 'domcontentloaded' },
-    }]);
+    expect(navigations).toEqual([
+      {
+        url: 'https://example.test/start',
+        options: { waitUntil: 'domcontentloaded' },
+      },
+    ]);
   });
 
   test('preserves an interactive page when there is no cached authentication to restore', async () => {
@@ -225,24 +249,29 @@ describe('Playwright session helper', () => {
   });
 
   test('normalizes only the headless Chrome product token', () => {
-    expect(normalizeHeadlessUserAgent(
-      'Mozilla/5.0 AppleWebKit/537.36 HeadlessChrome/151.0.0.0 Safari/537.36',
-    )).toBe('Mozilla/5.0 AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36');
-    expect(normalizeHeadlessUserAgent(
-      'Mozilla/5.0 AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36',
-    )).toBe('Mozilla/5.0 AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36');
+    expect(
+      normalizeHeadlessUserAgent(
+        'Mozilla/5.0 AppleWebKit/537.36 HeadlessChrome/151.0.0.0 Safari/537.36',
+      ),
+    ).toBe('Mozilla/5.0 AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36');
+    expect(
+      normalizeHeadlessUserAgent('Mozilla/5.0 AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36'),
+    ).toBe('Mozilla/5.0 AppleWebKit/537.36 Chrome/151.0.0.0 Safari/537.36');
   });
 
   test('suppresses AutomationControlled for every institution browser launch', () => {
-    expect(institutionAutomationControlledLaunchArgument)
-      .toBe('--disable-blink-features=AutomationControlled');
+    expect(institutionAutomationControlledLaunchArgument).toBe(
+      '--disable-blink-features=AutomationControlled',
+    );
     expect(institutionBrowserLaunchArguments()).toEqual([
       '--disable-blink-features=AutomationControlled',
     ]);
-    expect(institutionBrowserLaunchArguments(
-      ['--window-size=1200,800', '--disable-blink-features=MediaRouter'],
-      ['--disable-blink-features', 'AutomationControlled,Translate', '--start-maximized'],
-    )).toEqual([
+    expect(
+      institutionBrowserLaunchArguments(
+        ['--window-size=1200,800', '--disable-blink-features=MediaRouter'],
+        ['--disable-blink-features', 'AutomationControlled,Translate', '--start-maximized'],
+      ),
+    ).toEqual([
       '--disable-blink-features=AutomationControlled,MediaRouter,Translate',
       '--window-size=1200,800',
       '--start-maximized',
@@ -252,13 +281,9 @@ describe('Playwright session helper', () => {
   test('ignores Playwright enable-automation defaults for every institution browser launch', () => {
     expect(playwrightEnableAutomationLaunchArgument).toBe('--enable-automation');
     expect(institutionBrowserIgnoredDefaultArguments()).toEqual(['--enable-automation']);
-    expect(institutionBrowserIgnoredDefaultArguments([
-      '--mute-audio',
-      '--enable-automation',
-    ])).toEqual([
-      '--mute-audio',
-      '--enable-automation',
-    ]);
+    expect(
+      institutionBrowserIgnoredDefaultArguments(['--mute-audio', '--enable-automation']),
+    ).toEqual(['--mute-audio', '--enable-automation']);
     expect(institutionBrowserIgnoredDefaultArguments(true)).toBe(true);
     expect(institutionBrowserIgnoredDefaultArguments(false)).toEqual(['--enable-automation']);
   });
@@ -271,11 +296,13 @@ describe('Playwright session helper', () => {
       return 'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36';
     });
 
-    expect(await Promise.all([
-      normalChromeUserAgent(),
-      normalChromeUserAgent(),
-      normalChromeUserAgent(),
-    ])).toEqual([
+    expect(
+      await Promise.all([
+        normalChromeUserAgent(),
+        normalChromeUserAgent(),
+        normalChromeUserAgent(),
+      ]),
+    ).toEqual([
       'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36',
       'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36',
       'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36',
@@ -294,10 +321,12 @@ describe('Playwright session helper', () => {
     } as unknown as Pick<Browser, 'newPage' | 'close'>;
 
     const startedAt = performance.now();
-    await expect(deriveNormalChromeUserAgent({
-      timeoutMs: 10,
-      launch: async () => browser,
-    })).rejects.toThrow('Timed out reading the installed Chrome user agent');
+    await expect(
+      deriveNormalChromeUserAgent({
+        timeoutMs: 10,
+        launch: async () => browser,
+      }),
+    ).rejects.toThrow('Timed out reading the installed Chrome user agent');
     expect(performance.now() - startedAt).toBeLessThan(250);
     expect(closeCalls).toBe(1);
   });
@@ -310,19 +339,26 @@ describe('Playwright session helper', () => {
       locale: 'en-US',
     };
 
-    expect(await institutionBrowserContextOptions(headedOptions, async () => {
-      probes += 1;
-      return 'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36';
-    })).toBe(headedOptions);
+    expect(
+      await institutionBrowserContextOptions(headedOptions, async () => {
+        probes += 1;
+        return 'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36';
+      }),
+    ).toBe(headedOptions);
     expect(probes).toBe(0);
   });
 
   test('overrides every headless context with the shared normal Chrome identity', async () => {
-    expect(await institutionBrowserContextOptions({
-      headless: true,
-      userAgent: 'Institution-specific identity',
-      locale: 'en-US',
-    }, async () => 'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36')).toEqual({
+    expect(
+      await institutionBrowserContextOptions(
+        {
+          headless: true,
+          userAgent: 'Institution-specific identity',
+          locale: 'en-US',
+        },
+        async () => 'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36',
+      ),
+    ).toEqual({
       headless: true,
       userAgent: 'Mozilla/5.0 Chrome/151.0.0.0 Safari/537.36',
       locale: 'en-US',
@@ -335,39 +371,45 @@ describe('Playwright session helper', () => {
     const server = Bun.serve({
       hostname: '127.0.0.1',
       port: 0,
-      fetch: request => Response.json({
-        userAgent: request.headers.get('user-agent'),
-      }),
+      fetch: (request) =>
+        Response.json({
+          userAgent: request.headers.get('user-agent'),
+        }),
     });
     const origin = `http://127.0.0.1:${server.port}`;
     let capturedStartNavigation = false;
 
     try {
-      await withPlaywrightPage({
-        name: 'user-agent-fixture',
-        startUrl: `${origin}/page-navigation`,
-        profilePath: join(root, 'profile'),
-        persistAuthentication: false,
-        browserLaunchTimeoutMs: 30_000,
-        contextOptions: { headless: true },
-        beforeStartNavigation: page => {
-          page.once('request', request => {
-            if (request.url() === `${origin}/page-navigation`) capturedStartNavigation = true;
-          });
+      await withPlaywrightPage(
+        {
+          name: 'user-agent-fixture',
+          startUrl: `${origin}/page-navigation`,
+          profilePath: join(root, 'profile'),
+          persistAuthentication: false,
+          browserLaunchTimeoutMs: 30_000,
+          contextOptions: { headless: true },
+          beforeStartNavigation: (page) => {
+            page.once('request', (request) => {
+              if (request.url() === `${origin}/page-navigation`) capturedStartNavigation = true;
+            });
+          },
         },
-      }, async (page, context) => {
-        const navigatorUserAgent = await page.evaluate(() => navigator.userAgent);
-        const pageRequest = JSON.parse(await page.locator('body').innerText()) as { userAgent: string };
-        const contextRequest = await context.request.fetch(`${origin}/context-request`);
-        const contextRequestBody = await contextRequest.json() as { userAgent: string };
+        async (page, context) => {
+          const navigatorUserAgent = await page.evaluate(() => navigator.userAgent);
+          const pageRequest = JSON.parse(await page.locator('body').innerText()) as {
+            userAgent: string;
+          };
+          const contextRequest = await context.request.fetch(`${origin}/context-request`);
+          const contextRequestBody = (await contextRequest.json()) as { userAgent: string };
 
-        expect(navigatorUserAgent).toContain(' Chrome/');
-        expect(navigatorUserAgent).not.toContain('HeadlessChrome/');
-        expect(await page.evaluate(() => navigator.webdriver)).toBe(false);
-        expect(pageRequest.userAgent).toBe(navigatorUserAgent);
-        expect(contextRequestBody.userAgent).toBe(navigatorUserAgent);
-        expect(capturedStartNavigation).toBe(true);
-      });
+          expect(navigatorUserAgent).toContain(' Chrome/');
+          expect(navigatorUserAgent).not.toContain('HeadlessChrome/');
+          expect(await page.evaluate(() => navigator.webdriver)).toBe(false);
+          expect(pageRequest.userAgent).toBe(navigatorUserAgent);
+          expect(contextRequestBody.userAgent).toBe(navigatorUserAgent);
+          expect(capturedStartNavigation).toBe(true);
+        },
+      );
     } finally {
       await server.stop(true);
     }
@@ -380,8 +422,9 @@ describe('Playwright session helper', () => {
     } as unknown as Pick<BrowserContext, 'newPage' | 'pages'>;
 
     const startedAt = performance.now();
-    await expect(institutionStartPage(context, false, 10))
-      .rejects.toThrow('Timed out opening an institution browser page');
+    await expect(institutionStartPage(context, false, 10)).rejects.toThrow(
+      'Timed out opening an institution browser page',
+    );
     expect(performance.now() - startedAt).toBeLessThan(250);
   });
 
@@ -396,118 +439,149 @@ describe('Playwright session helper', () => {
     });
   });
 
-  test.each([0, 2])('delivers a normal on-screen headed browser after %i context replacements', async (contextReplacements) => {
-    const events: string[] = [];
-    let bounds: {
-      left: number;
-      top: number;
-      width: number;
-      height: number;
-      windowState: 'normal' | 'minimized';
-    } = {
-      left: -2_000,
-      top: -1_500,
-      width: 1_400,
-      height: 1_000,
-      windowState: 'minimized',
-    };
-    const cdp = {
-      send: async (method: string, parameters?: {
-        bounds?: Partial<typeof bounds>;
-      }) => {
-        events.push(method);
-        if (method === 'Browser.getWindowForTarget') return { windowId: 7, bounds };
-        if (method === 'Browser.setWindowBounds' && parameters?.bounds) {
-          bounds = { ...bounds, ...parameters.bounds };
-        }
-        return {};
-      },
-      detach: async () => { events.push('detach'); },
-    };
-    let evaluations = 0;
-    const page = {
-      evaluate: async () => {
-        if (evaluations++ < contextReplacements) throw new Error('evaluate: Execution context was destroyed, most likely because of a navigation');
-        return { left: 0, top: 25, width: 1_280, height: 775 };
-      },
-      isClosed: () => false,
-      waitForLoadState: async () => {},
-      bringToFront: async () => { events.push('foreground'); },
-    } as unknown as Page;
-    const context = {
-      newCDPSession: async () => cdp,
-    } as unknown as BrowserContext;
-    const diagnostics: string[] = [];
+  test.each([0, 2])(
+    'delivers a normal on-screen headed browser after %i context replacements',
+    async (contextReplacements) => {
+      const events: string[] = [];
+      let bounds: {
+        left: number;
+        top: number;
+        width: number;
+        height: number;
+        windowState: 'normal' | 'minimized';
+      } = {
+        left: -2_000,
+        top: -1_500,
+        width: 1_400,
+        height: 1_000,
+        windowState: 'minimized',
+      };
+      const cdp = {
+        send: async (
+          method: string,
+          parameters?: {
+            bounds?: Partial<typeof bounds>;
+          },
+        ) => {
+          events.push(method);
+          if (method === 'Browser.getWindowForTarget') return { windowId: 7, bounds };
+          if (method === 'Browser.setWindowBounds' && parameters?.bounds) {
+            bounds = { ...bounds, ...parameters.bounds };
+          }
+          return {};
+        },
+        detach: async () => {
+          events.push('detach');
+        },
+      };
+      let evaluations = 0;
+      const page = {
+        evaluate: async () => {
+          if (evaluations++ < contextReplacements)
+            throw new Error(
+              'evaluate: Execution context was destroyed, most likely because of a navigation',
+            );
+          return { left: 0, top: 25, width: 1_280, height: 775 };
+        },
+        isClosed: () => false,
+        waitForLoadState: async () => {},
+        bringToFront: async () => {
+          events.push('foreground');
+        },
+      } as unknown as Page;
+      const context = {
+        newCDPSession: async () => cdp,
+      } as unknown as BrowserContext;
+      const diagnostics: string[] = [];
 
-    const delivery = await deliverHeadedBrowserWindow(page, context, {
-      headless: false,
-      platform: 'darwin',
-      activateApplication: async () => { events.push('activate'); },
-      onDiagnostic: message => diagnostics.push(message),
-    });
+      const delivery = await deliverHeadedBrowserWindow(page, context, {
+        headless: false,
+        platform: 'darwin',
+        activateApplication: async () => {
+          events.push('activate');
+        },
+        onDiagnostic: (message) => diagnostics.push(message),
+      });
 
-    expect(delivery).toEqual({
-      headed: true,
-      nativeWindow: true,
-      windowState: 'normal',
-      onScreen: true,
-      activation: 'macos-requested',
-    });
-    expect(evaluations).toBe(contextReplacements + 1);
-    expect(bounds).toEqual({
-      left: 0,
-      top: 25,
-      width: 1_280,
-      height: 775,
-      windowState: 'normal',
-    });
-    expect(events).toEqual([
-      'Browser.getWindowForTarget',
-      'Browser.setWindowBounds',
-      'Browser.setWindowBounds',
-      'foreground',
-      'activate',
-      'foreground',
-      'Browser.getWindowForTarget',
-      'detach',
-    ]);
-    expect(diagnostics).toEqual([
-      'Authentication browser delivered: headed=true nativeWindow=true windowState=normal ' +
-      'onScreen=true activation=macos-requested',
-    ]);
-  });
+      expect(delivery).toEqual({
+        headed: true,
+        nativeWindow: true,
+        windowState: 'normal',
+        onScreen: true,
+        activation: 'macos-requested',
+      });
+      expect(evaluations).toBe(contextReplacements + 1);
+      expect(bounds).toEqual({
+        left: 0,
+        top: 25,
+        width: 1_280,
+        height: 775,
+        windowState: 'normal',
+      });
+      expect(events).toEqual([
+        'Browser.getWindowForTarget',
+        'Browser.setWindowBounds',
+        'Browser.setWindowBounds',
+        'foreground',
+        'activate',
+        'foreground',
+        'Browser.getWindowForTarget',
+        'detach',
+      ]);
+      expect(diagnostics).toEqual([
+        'Authentication browser delivered: headed=true nativeWindow=true windowState=normal ' +
+          'onScreen=true activation=macos-requested',
+      ]);
+    },
+  );
 
   test.each([
     ['Execution context was destroyed', false, 5],
     ['Execution context was destroyed', true, 1],
     ['Target page, context or browser has been closed', true, 1],
     ['Unexpected evaluation failure', false, 1],
-  ] as const)('fails closed for screen-bound error %s (closed=%s)', async (message, closed, expectedAttempts) => {
-    let attempts = 0;
-    let nativeCalls = 0;
-    const page = {
-      evaluate: async () => { attempts += 1; throw new Error(message); },
-      isClosed: () => closed,
-      waitForLoadState: async () => {},
-    } as unknown as Page;
-    const context = { newCDPSession: async () => { nativeCalls += 1; } } as unknown as BrowserContext;
-    const diagnostics: string[] = [];
-    await expect(deliverHeadedBrowserWindow(page, context, {
-      headless: false,
-      onDiagnostic: message => diagnostics.push(message),
-    })).rejects.toThrow(message);
-    expect(attempts).toBe(expectedAttempts);
-    expect(nativeCalls).toBe(0);
-    expect(diagnostics).toEqual([]);
-  });
+  ] as const)(
+    'fails closed for screen-bound error %s (closed=%s)',
+    async (message, closed, expectedAttempts) => {
+      let attempts = 0;
+      let nativeCalls = 0;
+      const page = {
+        evaluate: async () => {
+          attempts += 1;
+          throw new Error(message);
+        },
+        isClosed: () => closed,
+        waitForLoadState: async () => {},
+      } as unknown as Page;
+      const context = {
+        newCDPSession: async () => {
+          nativeCalls += 1;
+        },
+      } as unknown as BrowserContext;
+      const diagnostics: string[] = [];
+      await expect(
+        deliverHeadedBrowserWindow(page, context, {
+          headless: false,
+          onDiagnostic: (message) => diagnostics.push(message),
+        }),
+      ).rejects.toThrow(message);
+      expect(attempts).toBe(expectedAttempts);
+      expect(nativeCalls).toBe(0);
+      expect(diagnostics).toEqual([]);
+    },
+  );
 
   test('rejects headed-window delivery from a headless browser', async () => {
     const page = {} as Page;
     const context = {} as Pick<BrowserContext, 'newCDPSession'>;
 
-    await expect(deliverHeadedBrowserWindow(page, context, {
-      headless: true,
-    })).rejects.toThrow('Cannot deliver an interactive authentication window from a headless browser');
+    await expect(
+      deliverHeadedBrowserWindow(page, context, {
+        headless: true,
+      }),
+    ).rejects.toThrow(
+      'Cannot deliver an interactive authentication window from a headless browser',
+    );
   });
 
   test('uses a fresh transient profile for the cached-auth probe and the canonical profile for fallback', async () => {
@@ -516,7 +590,10 @@ describe('Playwright session helper', () => {
     const canonicalProfilePath = join(root, 'profiles', 'tiaa-catchup');
     const transientRoot = join(root, 'transient');
     await mkdir(canonicalProfilePath, { recursive: true });
-    await writeFile(playwrightAuthStatePath(canonicalProfilePath), JSON.stringify({ cookies: [], origins: [] }));
+    await writeFile(
+      playwrightAuthStatePath(canonicalProfilePath),
+      JSON.stringify({ cookies: [], origins: [] }),
+    );
 
     const attempts: Array<{
       headless: boolean;
@@ -547,13 +624,19 @@ describe('Playwright session helper', () => {
       Object.assign(context, { pages: () => [page] });
       return operation(page, context as unknown as BrowserContext);
     };
-    const fakeWithTransientBrowserProfile: typeof withTransientBrowserProfile = async (operation, options = {}) =>
-      withTransientBrowserProfile(async profilePath => {
-        transientProfilePath = profilePath;
-        transientProfileMode = (await stat(profilePath)).mode & 0o777;
-        transientSeedProfilePath = options.seedProfilePath ?? '';
-        return operation(profilePath);
-      }, { ...options, temporaryRoot: transientRoot });
+    const fakeWithTransientBrowserProfile: typeof withTransientBrowserProfile = async (
+      operation,
+      options = {},
+    ) =>
+      withTransientBrowserProfile(
+        async (profilePath) => {
+          transientProfilePath = profilePath;
+          transientProfileMode = (await stat(profilePath)).mode & 0o777;
+          transientSeedProfilePath = options.seedProfilePath ?? '';
+          return operation(profilePath);
+        },
+        { ...options, temporaryRoot: transientRoot },
+      );
 
     const result = await runInstitutionBrowserProgram(
       {
@@ -592,7 +675,12 @@ describe('Playwright session helper', () => {
         forceStartUrl: true,
       },
     ]);
-    expect(await stat(transientProfilePath).then(() => true, () => false)).toBe(false);
+    expect(
+      await stat(transientProfilePath).then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(false);
   });
 
   test('seeds a private transient profile with browser-owned state and excludes live locks', async () => {
@@ -617,31 +705,49 @@ describe('Playwright session helper', () => {
     }
 
     let transientProfilePath = '';
-    const copiedState = await withTransientBrowserProfile(async profilePath => {
-      transientProfilePath = profilePath;
-      expect((await stat(profilePath)).mode & 0o777).toBe(0o700);
-      for (const lockName of [
-        '.interactive-browser.lock',
-        'DevToolsActivePort',
-        'SingletonCookie',
-        'SingletonLock',
-        'SingletonSocket',
-        'lockfile',
-      ]) {
-        expect(await stat(join(profilePath, lockName)).then(() => true, () => false)).toBe(false);
-      }
-      return readFile(join(profilePath, 'Default', 'Session Storage', 'browser-owned-state'), 'utf8');
-    }, {
-      temporaryRoot: transientRoot,
-      seedProfilePath: canonicalProfilePath,
-    });
+    const copiedState = await withTransientBrowserProfile(
+      async (profilePath) => {
+        transientProfilePath = profilePath;
+        expect((await stat(profilePath)).mode & 0o777).toBe(0o700);
+        for (const lockName of [
+          '.interactive-browser.lock',
+          'DevToolsActivePort',
+          'SingletonCookie',
+          'SingletonLock',
+          'SingletonSocket',
+          'lockfile',
+        ]) {
+          expect(
+            await stat(join(profilePath, lockName)).then(
+              () => true,
+              () => false,
+            ),
+          ).toBe(false);
+        }
+        return readFile(
+          join(profilePath, 'Default', 'Session Storage', 'browser-owned-state'),
+          'utf8',
+        );
+      },
+      {
+        temporaryRoot: transientRoot,
+        seedProfilePath: canonicalProfilePath,
+      },
+    );
 
     expect(copiedState).toBe('private-test-state');
-    expect(await stat(transientProfilePath).then(() => true, () => false)).toBe(false);
-    expect(await readFile(
-      join(canonicalProfilePath, 'Default', 'Session Storage', 'browser-owned-state'),
-      'utf8',
-    )).toBe('private-test-state');
+    expect(
+      await stat(transientProfilePath).then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(false);
+    expect(
+      await readFile(
+        join(canonicalProfilePath, 'Default', 'Session Storage', 'browser-owned-state'),
+        'utf8',
+      ),
+    ).toBe('private-test-state');
   });
 
   test('continues in the authenticated headed attempt and saves a future headless probe', async () => {
@@ -650,10 +756,13 @@ describe('Playwright session helper', () => {
     const canonicalProfilePath = join(root, 'profiles', 'fidelity-catchup');
     const transientRoot = join(root, 'transient');
     await mkdir(canonicalProfilePath, { recursive: true });
-    await writeFile(playwrightAuthStatePath(canonicalProfilePath), JSON.stringify({
-      cookies: [{ name: 'stale-session', value: 'old', domain: '.example.test', path: '/' }],
-      origins: [],
-    }));
+    await writeFile(
+      playwrightAuthStatePath(canonicalProfilePath),
+      JSON.stringify({
+        cookies: [{ name: 'stale-session', value: 'old', domain: '.example.test', path: '/' }],
+        origins: [],
+      }),
+    );
 
     const attempts: Array<{
       headless: boolean;
@@ -668,11 +777,11 @@ describe('Playwright session helper', () => {
       const headless = sessionOptions.contextOptions?.headless ?? false;
       attemptNumber += 1;
       const authenticationProfilePath = sessionOptions.authenticationProfilePath ?? '';
-      const savedState = JSON.parse(await readFile(
-        playwrightAuthStatePath(authenticationProfilePath),
-        'utf8',
-      )) as { cookies?: Array<{ name?: string }> };
-      const restoredFreshAuthentication = savedState.cookies?.some(cookie => cookie.name === 'fresh-session') ?? false;
+      const savedState = JSON.parse(
+        await readFile(playwrightAuthStatePath(authenticationProfilePath), 'utf8'),
+      ) as { cookies?: Array<{ name?: string }> };
+      const restoredFreshAuthentication =
+        savedState.cookies?.some((cookie) => cookie.name === 'fresh-session') ?? false;
       attempts.push({
         headless,
         profilePath: sessionOptions.profilePath ?? '',
@@ -708,46 +817,48 @@ describe('Playwright session helper', () => {
       });
       return operation(page, context as unknown as BrowserContext);
     };
-    const fakeWithTransientBrowserProfile: typeof withTransientBrowserProfile = async operation =>
+    const fakeWithTransientBrowserProfile: typeof withTransientBrowserProfile = async (operation) =>
       withTransientBrowserProfile(operation, { temporaryRoot: transientRoot });
 
-    const run = () => runInstitutionBrowserProgram(
-      {
-        name: 'fidelity-catchup',
-        startUrl: 'https://digital.fidelity.com/ftgw/digital/portfolio/activity',
-        profilePath: canonicalProfilePath,
-      },
-      `async (page, _reportProgress, bindings) => {
+    const run = () =>
+      runInstitutionBrowserProgram(
+        {
+          name: 'fidelity-catchup',
+          startUrl: 'https://digital.fidelity.com/ftgw/digital/portfolio/activity',
+          profilePath: canonicalProfilePath,
+        },
+        `async (page, _reportProgress, bindings) => {
         bindings.programCalls[page.attemptNumber - 1] += 1;
         return JSON.stringify({ status: page.authenticated ? 'complete' : 'login-required' });
       }`,
-      {
-        completionDescription: 'Downloads complete.',
-        programBindings: { programCalls },
-        isAuthenticated: async page => Boolean((page as unknown as { authenticated: boolean }).authenticated),
-        waitUntilAuthenticated: async page => {
-          (page as unknown as { authenticated: boolean }).authenticated = true;
+        {
+          completionDescription: 'Downloads complete.',
+          programBindings: { programCalls },
+          isAuthenticated: async (page) =>
+            Boolean((page as unknown as { authenticated: boolean }).authenticated),
+          waitUntilAuthenticated: async (page) => {
+            (page as unknown as { authenticated: boolean }).authenticated = true;
+          },
         },
-      },
-      {
-        withPlaywrightPage: fakeWithPlaywrightPage,
-        withTransientBrowserProfile: fakeWithTransientBrowserProfile,
-      },
-    );
+        {
+          withPlaywrightPage: fakeWithPlaywrightPage,
+          withTransientBrowserProfile: fakeWithTransientBrowserProfile,
+        },
+      );
 
     const firstResult = await run();
 
     expect(firstResult.status).toBe('complete');
     expect(attempts).toHaveLength(2);
-    expect(attempts.map(attempt => attempt.headless)).toEqual([true, false]);
-    expect(attempts.map(attempt => attempt.authenticationProfilePath)).toEqual([
+    expect(attempts.map((attempt) => attempt.headless)).toEqual([true, false]);
+    expect(attempts.map((attempt) => attempt.authenticationProfilePath)).toEqual([
       canonicalProfilePath,
       canonicalProfilePath,
     ]);
     expect(attempts[0]?.profilePath).not.toBe(canonicalProfilePath);
     expect(attempts[1]?.profilePath).toBe(canonicalProfilePath);
-    expect(attempts.map(attempt => attempt.forceStartUrl)).toEqual([false, true]);
-    expect(attempts.map(attempt => attempt.restoredFreshAuthentication)).toEqual([false, false]);
+    expect(attempts.map((attempt) => attempt.forceStartUrl)).toEqual([false, true]);
+    expect(attempts.map((attempt) => attempt.restoredFreshAuthentication)).toEqual([false, false]);
     expect(programCalls).toEqual([1, 2]);
 
     const secondResult = await run();
@@ -771,14 +882,19 @@ describe('Playwright session helper', () => {
     const canonicalProfilePath = join(root, 'profiles', 'wells-fargo-catchup');
     await mkdir(canonicalProfilePath, { recursive: true });
 
-    const fakeWithPlaywrightPage: typeof withPlaywrightPage = async (_sessionOptions, operation) => {
+    const fakeWithPlaywrightPage: typeof withPlaywrightPage = async (
+      _sessionOptions,
+      operation,
+    ) => {
       const context = new EventEmitter();
       const page = Object.assign(new EventEmitter(), {
         authenticated: true,
         currentUrl: 'https://accounts.example.test/account-summary?opaque=landing#resume',
         isClosed: () => false,
         context: () => context,
-        url() { return this.currentUrl; },
+        url() {
+          return this.currentUrl;
+        },
         evaluate: async () => ({ origin: 'https://accounts.example.test', entries: {} }),
         screencast: { showChapter: async () => {} },
       }) as unknown as Page;
@@ -802,19 +918,22 @@ describe('Playwright session helper', () => {
       }`,
       {
         completionDescription: 'Downloads complete.',
-        isAuthenticated: async page => Boolean((page as unknown as { authenticated: boolean }).authenticated),
+        isAuthenticated: async (page) =>
+          Boolean((page as unknown as { authenticated: boolean }).authenticated),
       },
       {
         withPlaywrightPage: fakeWithPlaywrightPage,
-        withTransientBrowserProfile: async operation => operation(join(root, 'unexpected-transient')),
+        withTransientBrowserProfile: async (operation) =>
+          operation(join(root, 'unexpected-transient')),
       },
     );
 
     expect(result.status).toBe('complete');
-    expect(JSON.parse(await readFile(
-      playwrightAuthenticationResumeUrlPath(canonicalProfilePath),
-      'utf8',
-    ))).toEqual({
+    expect(
+      JSON.parse(
+        await readFile(playwrightAuthenticationResumeUrlPath(canonicalProfilePath), 'utf8'),
+      ),
+    ).toEqual({
       version: 1,
       url: 'https://accounts.example.test/account-summary',
     });
@@ -862,14 +981,15 @@ describe('Playwright session helper', () => {
       {
         completionDescription: 'Downloads complete.',
         programBindings: { programCalls },
-        isAuthenticated: async page => Boolean((page as unknown as { authenticated: boolean }).authenticated),
-        waitUntilAuthenticated: async page => {
+        isAuthenticated: async (page) =>
+          Boolean((page as unknown as { authenticated: boolean }).authenticated),
+        waitUntilAuthenticated: async (page) => {
           (page as unknown as { authenticated: boolean }).authenticated = true;
         },
       },
       {
         withPlaywrightPage: fakeWithPlaywrightPage,
-        withTransientBrowserProfile: async operation => {
+        withTransientBrowserProfile: async (operation) => {
           transientAttempts += 1;
           return operation(join(root, 'unexpected-transient'));
         },
@@ -896,7 +1016,9 @@ describe('Playwright session helper', () => {
       const page = Object.assign(new EventEmitter(), {
         context: () => context,
         isClosed: () => false,
-        bringToFront: async () => { authenticationChapters += 1; },
+        bringToFront: async () => {
+          authenticationChapters += 1;
+        },
         waitForTimeout: async () => {},
         screencast: { showChapter: async () => {}, hideOverlays: async () => {} },
       }) as unknown as Page;
@@ -919,11 +1041,14 @@ describe('Playwright session helper', () => {
         allowInteractiveAuthentication: false,
         completionDescription: 'Downloads complete.',
         programBindings: { programCalls },
-        waitUntilAuthenticated: async () => { authenticationWaits += 1; },
+        waitUntilAuthenticated: async () => {
+          authenticationWaits += 1;
+        },
       },
       {
         withPlaywrightPage: fakeWithPlaywrightPage,
-        withTransientBrowserProfile: async operation => operation(join(root, 'unexpected-transient')),
+        withTransientBrowserProfile: async (operation) =>
+          operation(join(root, 'unexpected-transient')),
       },
     );
 
@@ -941,7 +1066,10 @@ describe('Playwright session helper', () => {
 
     const programCalls = { value: 0 };
     let transientAttempts = 0;
-    const fakeWithPlaywrightPage: typeof withPlaywrightPage = async (_sessionOptions, operation) => {
+    const fakeWithPlaywrightPage: typeof withPlaywrightPage = async (
+      _sessionOptions,
+      operation,
+    ) => {
       const context = new EventEmitter();
       const page = Object.assign(new EventEmitter(), {
         authenticated: false,
@@ -962,33 +1090,36 @@ describe('Playwright session helper', () => {
       return operation(page, context as unknown as BrowserContext);
     };
 
-    await expect(runInstitutionBrowserProgram(
-      {
-        name: 'failed-checkpoint',
-        startUrl: 'https://example.test/account',
-        profilePath: canonicalProfilePath,
-      },
-      `async (page, _reportProgress, bindings) => {
+    await expect(
+      runInstitutionBrowserProgram(
+        {
+          name: 'failed-checkpoint',
+          startUrl: 'https://example.test/account',
+          profilePath: canonicalProfilePath,
+        },
+        `async (page, _reportProgress, bindings) => {
         bindings.programCalls.value += 1;
         if (page.authenticated) throw new Error('connector failed');
         return JSON.stringify({ status: 'login-required' });
       }`,
-      {
-        completionDescription: 'Downloads complete.',
-        programBindings: { programCalls },
-        isAuthenticated: async page => Boolean((page as unknown as { authenticated: boolean }).authenticated),
-        waitUntilAuthenticated: async page => {
-          (page as unknown as { authenticated: boolean }).authenticated = true;
+        {
+          completionDescription: 'Downloads complete.',
+          programBindings: { programCalls },
+          isAuthenticated: async (page) =>
+            Boolean((page as unknown as { authenticated: boolean }).authenticated),
+          waitUntilAuthenticated: async (page) => {
+            (page as unknown as { authenticated: boolean }).authenticated = true;
+          },
         },
-      },
-      {
-        withPlaywrightPage: fakeWithPlaywrightPage,
-        withTransientBrowserProfile: async operation => {
-          transientAttempts += 1;
-          return operation(join(root, 'unexpected-transient'));
+        {
+          withPlaywrightPage: fakeWithPlaywrightPage,
+          withTransientBrowserProfile: async (operation) => {
+            transientAttempts += 1;
+            return operation(join(root, 'unexpected-transient'));
+          },
         },
-      },
-    )).rejects.toThrow('connector failed');
+      ),
+    ).rejects.toThrow('connector failed');
     expect(programCalls.value).toBe(2);
     expect(transientAttempts).toBe(0);
   });
@@ -1000,9 +1131,12 @@ describe('Playwright session helper', () => {
     const transientRoot = join(root, 'transient');
     await mkdir(canonicalProfilePath, { recursive: true });
     await writeFile(playwrightAuthStatePath(canonicalProfilePath), JSON.stringify({ old: true }));
-    await writeFile(playwrightSessionStoragePath(canonicalProfilePath), JSON.stringify({
-      'https://stale.example.test': { stale: 'state' },
-    }));
+    await writeFile(
+      playwrightSessionStoragePath(canonicalProfilePath),
+      JSON.stringify({
+        'https://stale.example.test': { stale: 'state' },
+      }),
+    );
 
     const authenticationState = { cookies: [{ name: 'session', value: 'fresh' }], origins: [] };
     let transientProfilePath = '';
@@ -1027,15 +1161,22 @@ describe('Playwright session helper', () => {
         },
       });
       const result = await operation(page, context as unknown as BrowserContext);
-      transientAuthStateWasWritten = await stat(playwrightAuthStatePath(sessionOptions.profilePath ?? ''))
-        .then(() => true, () => false);
+      transientAuthStateWasWritten = await stat(
+        playwrightAuthStatePath(sessionOptions.profilePath ?? ''),
+      ).then(
+        () => true,
+        () => false,
+      );
       return result;
     };
-    const fakeWithTransientBrowserProfile: typeof withTransientBrowserProfile = async operation =>
-      withTransientBrowserProfile(profilePath => {
-        transientProfilePath = profilePath;
-        return operation(profilePath);
-      }, { temporaryRoot: transientRoot });
+    const fakeWithTransientBrowserProfile: typeof withTransientBrowserProfile = async (operation) =>
+      withTransientBrowserProfile(
+        (profilePath) => {
+          transientProfilePath = profilePath;
+          return operation(profilePath);
+        },
+        { temporaryRoot: transientRoot },
+      );
 
     const result = await runInstitutionBrowserProgram(
       {
@@ -1056,19 +1197,28 @@ describe('Playwright session helper', () => {
 
     expect(result.status).toBe('complete');
     expect(transientAuthStateWasWritten).toBe(false);
-    expect(JSON.parse(await readFile(playwrightAuthStatePath(canonicalProfilePath), 'utf8')))
-      .toEqual(authenticationState);
-    expect(JSON.parse(await readFile(playwrightSessionStoragePath(canonicalProfilePath), 'utf8'))).toEqual({
+    expect(
+      JSON.parse(await readFile(playwrightAuthStatePath(canonicalProfilePath), 'utf8')),
+    ).toEqual(authenticationState);
+    expect(
+      JSON.parse(await readFile(playwrightSessionStoragePath(canonicalProfilePath), 'utf8')),
+    ).toEqual({
       'https://accounts.example.test': { authenticatedFlow: 'fresh-resume-token' },
     });
-    expect(JSON.parse(await readFile(
-      playwrightAuthenticationResumeUrlPath(canonicalProfilePath),
-      'utf8',
-    ))).toEqual({
+    expect(
+      JSON.parse(
+        await readFile(playwrightAuthenticationResumeUrlPath(canonicalProfilePath), 'utf8'),
+      ),
+    ).toEqual({
       version: 1,
       url: 'https://example.test/account',
     });
-    expect(await stat(transientProfilePath).then(() => true, () => false)).toBe(false);
+    expect(
+      await stat(transientProfilePath).then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(false);
   });
 
   test('uses a transient headed profile and canonical lease identity when authentication caching is disabled', async () => {
@@ -1116,11 +1266,14 @@ describe('Playwright session helper', () => {
       });
       return operation(page, context as unknown as BrowserContext);
     };
-    const fakeWithTransientBrowserProfile: typeof withTransientBrowserProfile = async operation =>
-      withTransientBrowserProfile(profilePath => {
-        transientProfilePath = profilePath;
-        return operation(profilePath);
-      }, { temporaryRoot: transientRoot });
+    const fakeWithTransientBrowserProfile: typeof withTransientBrowserProfile = async (operation) =>
+      withTransientBrowserProfile(
+        (profilePath) => {
+          transientProfilePath = profilePath;
+          return operation(profilePath);
+        },
+        { temporaryRoot: transientRoot },
+      );
 
     const result = await runInstitutionBrowserProgram(
       {
@@ -1142,17 +1295,28 @@ describe('Playwright session helper', () => {
 
     expect(result.status).toBe('complete');
     expect(transientProfilePath).not.toBe(canonicalProfilePath);
-    expect(attempts).toEqual([{
-      headless: false,
-      profilePath: transientProfilePath,
-      authenticationProfilePath: canonicalProfilePath,
-      interactiveLeaseProfilePath: canonicalProfilePath,
-      forceStartUrl: false,
-    }]);
+    expect(attempts).toEqual([
+      {
+        headless: false,
+        profilePath: transientProfilePath,
+        authenticationProfilePath: canonicalProfilePath,
+        interactiveLeaseProfilePath: canonicalProfilePath,
+        forceStartUrl: false,
+      },
+    ]);
     expect(storageStateCalls).toBe(0);
-    expect(await readFile(playwrightAuthStatePath(canonicalProfilePath), 'utf8')).toBe(savedAuthentication);
-    expect(await readFile(playwrightSessionStoragePath(canonicalProfilePath), 'utf8')).toBe(savedSessionStorage);
-    expect(await stat(transientProfilePath).then(() => true, () => false)).toBe(false);
+    expect(await readFile(playwrightAuthStatePath(canonicalProfilePath), 'utf8')).toBe(
+      savedAuthentication,
+    );
+    expect(await readFile(playwrightSessionStoragePath(canonicalProfilePath), 'utf8')).toBe(
+      savedSessionStorage,
+    );
+    expect(
+      await stat(transientProfilePath).then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(false);
   });
 
   test('allows interactive sign-in browsers for different profiles to run concurrently', async () => {
@@ -1162,25 +1326,31 @@ describe('Playwright session helper', () => {
     const releaseFirst = Promise.withResolvers<void>();
     let secondEntered = false;
 
-    const first = withInteractiveBrowserLease({
-      profilePath: join(root, 'fidelity-catchup'),
-      sessionName: 'fidelity-catchup',
-      pollIntervalMs: 5,
-    }, async () => {
-      firstEntered.resolve();
-      await releaseFirst.promise;
-      return 'fidelity';
-    });
+    const first = withInteractiveBrowserLease(
+      {
+        profilePath: join(root, 'fidelity-catchup'),
+        sessionName: 'fidelity-catchup',
+        pollIntervalMs: 5,
+      },
+      async () => {
+        firstEntered.resolve();
+        await releaseFirst.promise;
+        return 'fidelity';
+      },
+    );
     await firstEntered.promise;
 
-    const second = withInteractiveBrowserLease({
-      profilePath: join(root, 'wells-fargo-catchup'),
-      sessionName: 'wells-fargo-catchup',
-      pollIntervalMs: 5,
-    }, async () => {
-      secondEntered = true;
-      return 'wells-fargo';
-    });
+    const second = withInteractiveBrowserLease(
+      {
+        profilePath: join(root, 'wells-fargo-catchup'),
+        sessionName: 'wells-fargo-catchup',
+        pollIntervalMs: 5,
+      },
+      async () => {
+        secondEntered = true;
+        return 'wells-fargo';
+      },
+    );
 
     expect(await second).toBe('wells-fargo');
     expect(secondEntered).toBe(true);
@@ -1198,26 +1368,32 @@ describe('Playwright session helper', () => {
     const secondWaiting = Promise.withResolvers<void>();
     let secondEntered = false;
 
-    const first = withInteractiveBrowserLease({
-      profilePath,
-      sessionName: 'fidelity-catchup',
-      pollIntervalMs: 5,
-    }, async () => {
-      firstEntered.resolve();
-      await releaseFirst.promise;
-      return 'first';
-    });
+    const first = withInteractiveBrowserLease(
+      {
+        profilePath,
+        sessionName: 'fidelity-catchup',
+        pollIntervalMs: 5,
+      },
+      async () => {
+        firstEntered.resolve();
+        await releaseFirst.promise;
+        return 'first';
+      },
+    );
     await firstEntered.promise;
 
-    const second = withInteractiveBrowserLease({
-      profilePath,
-      sessionName: 'fidelity-catchup',
-      pollIntervalMs: 5,
-      onWait: () => secondWaiting.resolve(),
-    }, async () => {
-      secondEntered = true;
-      return 'second';
-    });
+    const second = withInteractiveBrowserLease(
+      {
+        profilePath,
+        sessionName: 'fidelity-catchup',
+        pollIntervalMs: 5,
+        onWait: () => secondWaiting.resolve(),
+      },
+      async () => {
+        secondEntered = true;
+        return 'second';
+      },
+    );
     await secondWaiting.promise;
     expect(secondEntered).toBe(false);
 
@@ -1233,23 +1409,29 @@ describe('Playwright session helper', () => {
     const profilePath = join(root, 'vanguard-catchup');
     const lockPath = join(profilePath, '.interactive-browser.lock');
     await mkdir(lockPath, { recursive: true });
-    await writeFile(join(lockPath, 'owner.json'), JSON.stringify({
-      token: 'dead-worker',
-      pid: 12345,
-      sessionName: 'vanguard-catchup',
-      startedAt: new Date().toISOString(),
-    }));
+    await writeFile(
+      join(lockPath, 'owner.json'),
+      JSON.stringify({
+        token: 'dead-worker',
+        pid: 12345,
+        sessionName: 'vanguard-catchup',
+        startedAt: new Date().toISOString(),
+      }),
+    );
 
     let entered = false;
-    const result = await withInteractiveBrowserLease({
-      profilePath,
-      sessionName: 'vanguard-catchup',
-      staleAfterMs: 60_000,
-      processIsAlive: () => false,
-    }, async () => {
-      entered = true;
-      return 'recovered';
-    });
+    const result = await withInteractiveBrowserLease(
+      {
+        profilePath,
+        sessionName: 'vanguard-catchup',
+        staleAfterMs: 60_000,
+        processIsAlive: () => false,
+      },
+      async () => {
+        entered = true;
+        return 'recovered';
+      },
+    );
 
     expect(result).toBe('recovered');
     expect(entered).toBe(true);
@@ -1261,44 +1443,58 @@ describe('Playwright session helper', () => {
     const profilePath = join(root, 'vanguard-catchup');
     const lockPath = join(profilePath, '.interactive-browser.lock');
     await mkdir(lockPath, { recursive: true });
-    await writeFile(join(lockPath, 'owner.json'), JSON.stringify({
-      token: 'live-worker',
-      pid: 12345,
-      sessionName: 'vanguard-catchup',
-      startedAt: new Date(Date.now() - 60_000).toISOString(),
-    }));
+    await writeFile(
+      join(lockPath, 'owner.json'),
+      JSON.stringify({
+        token: 'live-worker',
+        pid: 12345,
+        sessionName: 'vanguard-catchup',
+        startedAt: new Date(Date.now() - 60_000).toISOString(),
+      }),
+    );
     const old = new Date(Date.now() - 60_000);
     await utimes(lockPath, old, old);
 
-    await expect(withInteractiveBrowserLease({
-      profilePath,
-      sessionName: 'vanguard-catchup',
-      timeoutMs: 20,
-      staleAfterMs: 1,
-      pollIntervalMs: 5,
-      processIsAlive: () => true,
-    }, async () => 'overlapped')).rejects.toThrow('Timed out waiting');
+    await expect(
+      withInteractiveBrowserLease(
+        {
+          profilePath,
+          sessionName: 'vanguard-catchup',
+          timeoutMs: 20,
+          staleAfterMs: 1,
+          pollIntervalMs: 5,
+          processIsAlive: () => true,
+        },
+        async () => 'overlapped',
+      ),
+    ).rejects.toThrow('Timed out waiting');
   });
 
   test('honors explicit browser visibility choices', () => {
-    expect(institutionBrowserLaunchStrategy({
-      hasSavedAuthentication: true,
-      requestedHeadless: false,
-    })).toEqual({
+    expect(
+      institutionBrowserLaunchStrategy({
+        hasSavedAuthentication: true,
+        requestedHeadless: false,
+      }),
+    ).toEqual({
       initialHeadless: false,
       allowHeadedAuthenticationFallback: false,
     });
-    expect(institutionBrowserLaunchStrategy({
-      hasSavedAuthentication: false,
-      requestedHeadless: true,
-    })).toEqual({
+    expect(
+      institutionBrowserLaunchStrategy({
+        hasSavedAuthentication: false,
+        requestedHeadless: true,
+      }),
+    ).toEqual({
       initialHeadless: true,
       allowHeadedAuthenticationFallback: false,
     });
-    expect(institutionBrowserLaunchStrategy({
-      hasSavedAuthentication: true,
-      persistAuthentication: false,
-    })).toEqual({
+    expect(
+      institutionBrowserLaunchStrategy({
+        hasSavedAuthentication: true,
+        persistAuthentication: false,
+      }),
+    ).toEqual({
       initialHeadless: false,
       allowHeadedAuthenticationFallback: false,
     });
@@ -1310,13 +1506,20 @@ describe('Playwright session helper', () => {
     const page = {
       isClosed: () => false,
       url: () => url,
-      locator: () => ({ count: async () => url.includes('/login') ? 1 : 0 }),
+      locator: () => ({ count: async () => (url.includes('/login') ? 1 : 0) }),
       waitForFunction: async () => authenticationChanged.promise,
     } as unknown as Page;
 
     const waiting = waitForInteractiveAuthentication(page, Date.now() + 5_000);
     let completed = false;
-    void waiting.then(() => { completed = true; }, () => { completed = true; });
+    void waiting.then(
+      () => {
+        completed = true;
+      },
+      () => {
+        completed = true;
+      },
+    );
     await Promise.resolve();
     expect(completed).toBe(false);
     url = 'https://my.tiaa.org/private/participant/home';
@@ -1336,16 +1539,20 @@ describe('Playwright session helper', () => {
       locator: () => ({ count: async () => 0 }),
     } as unknown as Page;
 
-    const waiting = waitForInteractiveAuthentication(
-      page,
-      Date.now() + 5_000,
-      {
-        isAuthenticated: async currentPage => (await currentPage.title()).includes('Accounts Overview'),
-        waitUntilAuthenticated: async () => authenticationChanged.promise,
+    const waiting = waitForInteractiveAuthentication(page, Date.now() + 5_000, {
+      isAuthenticated: async (currentPage) =>
+        (await currentPage.title()).includes('Accounts Overview'),
+      waitUntilAuthenticated: async () => authenticationChanged.promise,
+    });
+    let completed = false;
+    void waiting.then(
+      () => {
+        completed = true;
+      },
+      () => {
+        completed = true;
       },
     );
-    let completed = false;
-    void waiting.then(() => { completed = true; }, () => { completed = true; });
     await Promise.resolve();
     expect(completed).toBe(false);
     title = 'Bank of America | Online Banking | Accounts Overview';
@@ -1380,7 +1587,7 @@ describe('Playwright session helper', () => {
       originalPage,
       Date.now() + 5_000,
       {
-        isAuthenticated: async currentPage => currentPage === replacementPage,
+        isAuthenticated: async (currentPage) => currentPage === replacementPage,
         waitUntilAuthenticated: async () => new Promise<void>(() => {}),
       },
       context as never,
@@ -1457,7 +1664,7 @@ describe('Playwright session helper', () => {
       Date.now() + 5_000,
       {
         authenticationRecoveryUrl: 'https://login.example.test/login',
-        isAuthenticated: async currentPage => currentPage.url().endsWith('/accounts'),
+        isAuthenticated: async (currentPage) => currentPage.url().endsWith('/accounts'),
         waitUntilAuthenticated: async () => new Promise<void>(() => {}),
       },
       context as never,
@@ -1503,16 +1710,24 @@ describe('Playwright session helper', () => {
     pages = [];
     pageEvents.emit('close');
 
-    await expect(waiting).rejects.toThrow('Browser stopped responding while reopening authentication');
+    await expect(waiting).rejects.toThrow(
+      'Browser stopped responding while reopening authentication',
+    );
     expect(performance.now() - startedAt).toBeLessThan(250);
   });
 
   test('decodes the typed institution browser status contract', () => {
-    expect(decodeInstitutionBrowserProgramResult(JSON.stringify({
-      status: 'complete',
-      saved: ['activity.csv'],
-    }))).toEqual({ status: 'complete', saved: ['activity.csv'] });
-    expect(() => decodeInstitutionBrowserProgramResult('{"status":"unknown"}')).toThrow('unknown status');
+    expect(
+      decodeInstitutionBrowserProgramResult(
+        JSON.stringify({
+          status: 'complete',
+          saved: ['activity.csv'],
+        }),
+      ),
+    ).toEqual({ status: 'complete', saved: ['activity.csv'] });
+    expect(() => decodeInstitutionBrowserProgramResult('{"status":"unknown"}')).toThrow(
+      'unknown status',
+    );
   });
 
   test('shows the shared two-second completion chapter', async () => {
@@ -1525,10 +1740,12 @@ describe('Playwright session helper', () => {
 
     await showSyncCompletionChapter(page, { completionDescription: 'Downloads are complete.' });
 
-    expect(chapters).toEqual([{
-      title: 'Done',
-      options: { description: 'Downloads are complete.', duration: 2_000 },
-    }]);
+    expect(chapters).toEqual([
+      {
+        title: 'Done',
+        options: { description: 'Downloads are complete.', duration: 2_000 },
+      },
+    ]);
   });
 
   test('clears the shared authentication chapter before credential entry', async () => {
@@ -1571,10 +1788,12 @@ describe('Playwright session helper', () => {
     } as unknown as BrowserContext;
 
     const startedAt = performance.now();
-    await expect(launchPersistentContextWithDeadline(
-      () => launch.promise,
-      { sessionName: 'tiaa-catchup', timeoutMs: 10 },
-    )).rejects.toThrow('Timed out opening the tiaa-catchup browser');
+    await expect(
+      launchPersistentContextWithDeadline(() => launch.promise, {
+        sessionName: 'tiaa-catchup',
+        timeoutMs: 10,
+      }),
+    ).rejects.toThrow('Timed out opening the tiaa-catchup browser');
     expect(performance.now() - startedAt).toBeLessThan(250);
 
     launch.resolve(lateContext);
@@ -1648,58 +1867,85 @@ describe('Playwright session helper', () => {
         expect(options).toEqual({ indexedDB: true });
         return authenticationState;
       },
-      pages: () => [{
-        isClosed: () => false,
-        evaluate: async () => ({
-          origin: 'https://accounts.example.test',
-          entries: { authenticatedFlow: 'resume-token' },
-        }),
-      }],
+      pages: () => [
+        {
+          isClosed: () => false,
+          evaluate: async () => ({
+            origin: 'https://accounts.example.test',
+            entries: { authenticatedFlow: 'resume-token' },
+          }),
+        },
+      ],
     };
 
-    expect(await persistBrowserAuthentication(
-      context as never,
-      authStatePath,
-      5_000,
-      'https://accounts.example.test/summary?opaque=state#resume',
-    )).toBe(true);
+    expect(
+      await persistBrowserAuthentication(
+        context as never,
+        authStatePath,
+        5_000,
+        'https://accounts.example.test/summary?opaque=state#resume',
+      ),
+    ).toBe(true);
     expect(JSON.parse(await readFile(authStatePath, 'utf8'))).toEqual(authenticationState);
     expect(JSON.parse(await readFile(playwrightSessionStoragePath(profilePath), 'utf8'))).toEqual({
       'https://accounts.example.test': { authenticatedFlow: 'resume-token' },
     });
-    expect(JSON.parse(await readFile(playwrightAuthenticationResumeUrlPath(profilePath), 'utf8'))).toEqual({
+    expect(
+      JSON.parse(await readFile(playwrightAuthenticationResumeUrlPath(profilePath), 'utf8')),
+    ).toEqual({
       version: 1,
       url: 'https://accounts.example.test/summary',
     });
   });
 
   test('removes stale saved session storage when the browser has none', async () => {
-    const profilePath = await mkdtemp(join(tmpdir(), 'easymoney-playwright-stale-session-storage-'));
+    const profilePath = await mkdtemp(
+      join(tmpdir(), 'easymoney-playwright-stale-session-storage-'),
+    );
     temporaryDirectories.push(profilePath);
     const authStatePath = playwrightAuthStatePath(profilePath);
     const sessionStoragePath = playwrightSessionStoragePath(profilePath);
     const resumeUrlPath = playwrightAuthenticationResumeUrlPath(profilePath);
-    await writeFile(sessionStoragePath, JSON.stringify({
-      'https://stale.example.test': { stale: 'value' },
-    }));
-    await writeFile(resumeUrlPath, JSON.stringify({
-      version: 1,
-      url: 'https://stale.example.test/account',
-    }));
+    await writeFile(
+      sessionStoragePath,
+      JSON.stringify({
+        'https://stale.example.test': { stale: 'value' },
+      }),
+    );
+    await writeFile(
+      resumeUrlPath,
+      JSON.stringify({
+        version: 1,
+        url: 'https://stale.example.test/account',
+      }),
+    );
     const context = {
       storageState: async () => ({ cookies: [], origins: [] }),
       pages: () => [],
     };
 
     expect(await persistBrowserAuthentication(context as never, authStatePath)).toBe(true);
-    expect(await stat(sessionStoragePath).then(() => true, () => false)).toBe(false);
-    expect(await stat(resumeUrlPath).then(() => true, () => false)).toBe(false);
+    expect(
+      await stat(sessionStoragePath).then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(false);
+    expect(
+      await stat(resumeUrlPath).then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(false);
   });
 
   test('restores session storage before reopening the institution page', async () => {
     const profilePath = await mkdtemp(join(tmpdir(), 'easymoney-playwright-session-restore-'));
     temporaryDirectories.push(profilePath);
-    await writeFile(playwrightAuthStatePath(profilePath), JSON.stringify({ cookies: [], origins: [] }));
+    await writeFile(
+      playwrightAuthStatePath(profilePath),
+      JSON.stringify({ cookies: [], origins: [] }),
+    );
     const saved = {
       'https://accounts.example.test': { authenticatedFlow: 'resume-token' },
     };
@@ -1734,10 +1980,7 @@ describe('Playwright session helper', () => {
       },
     };
 
-    const running = runWhileBrowserOpen(
-      context as never,
-      () => new Promise<never>(() => {}),
-    );
+    const running = runWhileBrowserOpen(context as never, () => new Promise<never>(() => {}));
     closeListener?.();
 
     await expect(running).rejects.toThrow('Browser closed before the institution sync completed');
@@ -1751,10 +1994,7 @@ describe('Playwright session helper', () => {
     const context = Object.assign(new EventEmitter(), {
       browser: () => browser,
     });
-    const running = runWhileBrowserOpen(
-      context as never,
-      () => new Promise<never>(() => {}),
-    );
+    const running = runWhileBrowserOpen(context as never, () => new Promise<never>(() => {}));
     await Promise.resolve();
     browser.emit('disconnected');
 
@@ -1778,13 +2018,15 @@ describe('Playwright session helper', () => {
 
   test('recognizes the locked Chrome profile marker used on Windows', async () => {
     let inspectedPath = '';
-    expect(await chromeBrowserProfileOwner('C:\\profiles\\fidelity-catchup', {
-      platform: 'win32',
-      windowsLockIsHeld: lockPath => {
-        inspectedPath = lockPath;
-        return true;
-      },
-    })).toEqual({ kind: 'windows-lock' });
+    expect(
+      await chromeBrowserProfileOwner('C:\\profiles\\fidelity-catchup', {
+        platform: 'win32',
+        windowsLockIsHeld: (lockPath) => {
+          inspectedPath = lockPath;
+          return true;
+        },
+      }),
+    ).toEqual({ kind: 'windows-lock' });
     expect(inspectedPath.endsWith('lockfile')).toBe(true);
   });
 
@@ -1798,18 +2040,14 @@ describe('Playwright session helper', () => {
     let alive = true;
     const firstProcessCheck = Promise.withResolvers<void>();
     let processChecks = 0;
-    const running = runWhileBrowserOpen(
-      context as never,
-      () => new Promise<never>(() => {}),
-      {
-        isBrowserProcessAlive: () => {
-          processChecks += 1;
-          firstProcessCheck.resolve();
-          return alive;
-        },
-        processPollIntervalMs: 1,
+    const running = runWhileBrowserOpen(context as never, () => new Promise<never>(() => {}), {
+      isBrowserProcessAlive: () => {
+        processChecks += 1;
+        firstProcessCheck.resolve();
+        return alive;
       },
-    );
+      processPollIntervalMs: 1,
+    });
     await firstProcessCheck.promise;
     alive = false;
 

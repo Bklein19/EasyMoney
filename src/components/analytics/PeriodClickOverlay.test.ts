@@ -10,9 +10,7 @@ test('creates contiguous click bands around line-chart period centers', () => {
 });
 
 test('uses the full plot for a single period', () => {
-  expect(getPeriodClickBands([200], 80, 240)).toEqual([
-    { start: 80, width: 240 },
-  ]);
+  expect(getPeriodClickBands([200], 80, 240)).toEqual([{ start: 80, width: 240 }]);
 });
 
 test('transient zero-width and nonfinite plot measurements have no click targets', () => {
@@ -25,9 +23,24 @@ test('transient zero-width and nonfinite plot measurements have no click targets
 
 test('builds an inclusive period range in either drag direction', () => {
   const periods = [
-    { timeKey: '2026-01', displayLabel: 'Jan 2026', startDate: '2026-01-01', endDate: '2026-01-31' },
-    { timeKey: '2026-02', displayLabel: 'Feb 2026', startDate: '2026-02-01', endDate: '2026-02-28' },
-    { timeKey: '2026-03', displayLabel: 'Mar 2026', startDate: '2026-03-01', endDate: '2026-03-31' },
+    {
+      timeKey: '2026-01',
+      displayLabel: 'Jan 2026',
+      startDate: '2026-01-01',
+      endDate: '2026-01-31',
+    },
+    {
+      timeKey: '2026-02',
+      displayLabel: 'Feb 2026',
+      startDate: '2026-02-01',
+      endDate: '2026-02-28',
+    },
+    {
+      timeKey: '2026-03',
+      displayLabel: 'Mar 2026',
+      startDate: '2026-03-01',
+      endDate: '2026-03-31',
+    },
   ];
 
   expect(getAnalyticsPeriodRange(periods, 2, 0)).toMatchObject({

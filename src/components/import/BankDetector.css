@@ -32,8 +32,12 @@
   flex-shrink: 0;
 }
 
-.success-icon { color: var(--color-success); }
-.warning-icon { color: var(--color-warning); }
+.success-icon {
+  color: var(--color-success);
+}
+.warning-icon {
+  color: var(--color-warning);
+}
 
 .bank-detector .content h4 {
   margin: 0 0 0.25rem 0;
@@ -48,6 +52,12 @@
 }
 
 @keyframes slideDown {
-  from { opacity: 0; transform: translateY(-10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }

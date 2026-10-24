@@ -26,7 +26,9 @@ interface Evidence {
 }
 
 function eligibleRows() {
-  return getDb().prepare(`SELECT t.ledgerTransactionId, ta.categoryId, ta.updatedAt AS annotationUpdatedAt,
+  return getDb()
+    .prepare(
+      `SELECT t.ledgerTransactionId, ta.categoryId, ta.updatedAt AS annotationUpdatedAt,
       ta.notes, t.accountId, t.date, t.amountCents,
       t.description, t.merchant, t.originalDescription, t.originalCategory,
       t.transactionKind, t.sourceRole, a.type AS accountType, a.institution AS accountInstitution
@@ -36,7 +38,9 @@ function eligibleRows() {
     WHERE (ta.categoryId IS NULL OR lower(c.name) = 'uncategorized')
       AND COALESCE(ta.categoryOrigin, '') != 'manual'
       AND COALESCE(a.status, 'active') != 'archived'
-    ORDER BY t.ledgerTransactionId`).all() as Array<Evidence & { ledgerTransactionId: string }>;
+    ORDER BY t.ledgerTransactionId`,
+    )
+    .all() as Array<Evidence & { ledgerTransactionId: string }>;
 }
 
 function evidenceJson(row: Evidence & { ledgerTransactionId: string }) {
@@ -69,13 +73,19 @@ export function queueUncategorizedTransactions() {
 }
 
 export function automaticCategorizationStatus() {
-  const counts = getDb().prepare(`SELECT status, COUNT(*) AS count FROM automaticCategorizationTasks GROUP BY status`)
+  const counts = getDb()
+    .prepare(`SELECT status, COUNT(*) AS count FROM automaticCategorizationTasks GROUP BY status`)
     .all() as Array<{ status: string; count: number }>;
-  const count = (status: string) => counts.find(row => row.status === status)?.count ?? 0;
-  const latest = getDb().prepare(`SELECT MAX(updatedAt) AS revision FROM automaticCategorizationTasks`).get() as { revision: string | null };
+  const count = (status: string) => counts.find((row) => row.status === status)?.count ?? 0;
+  const latest = getDb()
+    .prepare(`SELECT MAX(updatedAt) AS revision FROM automaticCategorizationTasks`)
+    .get() as { revision: string | null };
   return {
-    pending: count('queued') + count('running'), applied: count('applied'),
-    needsReview: count('review'), failed: count('failed'), skipped: count('skipped'),
+    pending: count('queued') + count('running'),
+    applied: count('applied'),
+    needsReview: count('review'),
+    failed: count('failed'),
+    skipped: count('skipped'),
     configured: Boolean(process.env.OPENAI_API_KEY?.trim()),
     // Counts make same-millisecond changes observable too.
     revision: JSON.stringify([latest.revision, counts]),
@@ -84,8 +94,12 @@ export function automaticCategorizationStatus() {
 
 /** Retry only failed jobs; never rerun an applied/undone or deliberately skipped guess. */
 export function retryAutomaticCategorization() {
-  getDb().prepare(`UPDATE automaticCategorizationTasks SET status = 'queued', reason = NULL,
-    updatedAt = ? WHERE status = 'failed'`).run(new Date().toISOString());
+  getDb()
+    .prepare(
+      `UPDATE automaticCategorizationTasks SET status = 'queued', reason = NULL,
+    updatedAt = ? WHERE status = 'failed'`,
+    )
+    .run(new Date().toISOString());
   schedule();
   return automaticCategorizationStatus();
 }
@@ -93,66 +107,132 @@ export function retryAutomaticCategorization() {
 type Preview = typeof previewAiCategorization;
 
 /** Public for deterministic tests; production always uses the shared AI workflow. */
-export async function processAutomaticCategorizationBatch(preview: Preview = previewAiCategorization) {
+export async function processAutomaticCategorizationBatch(
+  preview: Preview = previewAiCategorization,
+) {
   const db = getDb();
-  const tasks = db.prepare(`SELECT ledgerTransactionId, evidenceJson FROM automaticCategorizationTasks
-    WHERE status = 'queued' ORDER BY createdAt, ledgerTransactionId LIMIT 128`).all() as
-    Array<{ ledgerTransactionId: string; evidenceJson: string }>;
+  const tasks = db
+    .prepare(
+      `SELECT ledgerTransactionId, evidenceJson FROM automaticCategorizationTasks
+    WHERE status = 'queued' ORDER BY createdAt, ledgerTransactionId LIMIT 128`,
+    )
+    .all() as Array<{ ledgerTransactionId: string; evidenceJson: string }>;
   if (!tasks.length) return false;
-  const update = db.prepare(`UPDATE automaticCategorizationTasks SET status = ?, reason = ?, categoryId = ?,
+  const update =
+    db.prepare(`UPDATE automaticCategorizationTasks SET status = ?, reason = ?, categoryId = ?,
     undoOperationId = ?, updatedAt = ? WHERE ledgerTransactionId = ?`);
-  const mark = (id: string, status: string, reason: string | null, categoryId: number | null = null, undoId: number | null = null) =>
-    update.run(status, reason, categoryId, undoId, new Date().toISOString(), id);
-  const current = new Map(eligibleRows().map(row => [row.ledgerTransactionId, evidenceJson(row)]));
-  const eligible = tasks.filter(task => {
+  const mark = (
+    id: string,
+    status: string,
+    reason: string | null,
+    categoryId: number | null = null,
+    undoId: number | null = null,
+  ) => update.run(status, reason, categoryId, undoId, new Date().toISOString(), id);
+  const current = new Map(
+    eligibleRows().map((row) => [row.ledgerTransactionId, evidenceJson(row)]),
+  );
+  const eligible = tasks.filter((task) => {
     if (current.get(task.ledgerTransactionId) === task.evidenceJson) return true;
-    mark(task.ledgerTransactionId, 'skipped', 'Transaction was edited, removed, or archived before categorization.');
+    mark(
+      task.ledgerTransactionId,
+      'skipped',
+      'Transaction was edited, removed, or archived before categorization.',
+    );
     return false;
   });
   if (!eligible.length) return true;
   for (const task of eligible) mark(task.ledgerTransactionId, 'running', null);
   const taxonomy = categoryContext();
   try {
-    const result = await preview({ transactionIds: eligible.map(task => task.ledgerTransactionId), limit: 500 });
+    const result = await preview({
+      transactionIds: eligible.map((task) => task.ledgerTransactionId),
+      limit: 500,
+    });
     db.transaction(() => {
-      const latest = new Map(eligibleRows().map(row => [row.ledgerTransactionId, evidenceJson(row)]));
+      const latest = new Map(
+        eligibleRows().map((row) => [row.ledgerTransactionId, evidenceJson(row)]),
+      );
       const unchangedTaxonomy = taxonomy === categoryContext();
       const changes: Parameters<typeof applyReviewedCategoryChanges>[0]['changes'] = [];
       for (const task of eligible) {
         const id = task.ledgerTransactionId;
         if (latest.get(id) !== task.evidenceJson) {
-          mark(id, 'skipped', 'Your edit or a ledger change took priority over the automatic guess.');
+          mark(
+            id,
+            'skipped',
+            'Your edit or a ledger change took priority over the automatic guess.',
+          );
           continue;
         }
         if (!unchangedTaxonomy) {
-          mark(id, 'failed', 'Categories changed during categorization. Retry with the current categories.');
+          mark(
+            id,
+            'failed',
+            'Categories changed during categorization. Retry with the current categories.',
+          );
           continue;
         }
-        const guesses = result.suggestions.filter(suggestion => suggestion.transactionIds.includes(id));
-        const question = result.questions.find(question => question.transactionIds.includes(id));
+        const guesses = result.suggestions.filter((suggestion) =>
+          suggestion.transactionIds.includes(id),
+        );
+        const question = result.questions.find((question) => question.transactionIds.includes(id));
         const evidence = JSON.parse(task.evidenceJson) as Evidence;
-        const destination = guesses.length === 1 ? db.prepare('SELECT type, name FROM categories WHERE id=?').get(guesses[0]!.categoryId) as {type:string;name:string} | null : null;
+        const destination =
+          guesses.length === 1
+            ? (db
+                .prepare('SELECT type, name FROM categories WHERE id=?')
+                .get(guesses[0]!.categoryId) as { type: string; name: string } | null)
+            : null;
         const concern = destination ? financialCategoryConcern(evidence, destination) : null;
-        if (concern) { mark(id, 'review', concern); continue; }
+        if (concern) {
+          mark(id, 'review', concern);
+          continue;
+        }
         if (!question && guesses.length === 1 && guesses[0]!.confidence === 'high') {
-          changes.push({ transactionId: id, categoryId: guesses[0]!.categoryId,
-            expected: evidence });
+          changes.push({
+            transactionId: id,
+            categoryId: guesses[0]!.categoryId,
+            expected: evidence,
+          });
         } else {
-          mark(id, !result.configured && !question ? 'failed' : 'review', question?.reason ??
-            (!result.configured ? 'AI is not configured. Historical matching found no category.' : 'No unambiguous category was returned.'));
+          mark(
+            id,
+            !result.configured && !question ? 'failed' : 'review',
+            question?.reason ??
+              (!result.configured
+                ? 'AI is not configured. Historical matching found no category.'
+                : 'No unambiguous category was returned.'),
+          );
         }
       }
       // Category-only annotation changes, stable identities, notes untouched, one Undo per batch.
-      const applied = applyReviewedCategoryChanges({ label: 'Automatic categorization', categoryOrigin: 'automatic', changes });
+      const applied = applyReviewedCategoryChanges({
+        label: 'Automatic categorization',
+        categoryOrigin: 'automatic',
+        changes,
+      });
       for (const change of changes) {
-        const suggestion = result.suggestions.find(suggestion => suggestion.transactionIds.includes(change.transactionId))!;
-        mark(change.transactionId, 'applied', suggestion.reason, change.categoryId, applied.undoOperation?.id ?? null);
+        const suggestion = result.suggestions.find((suggestion) =>
+          suggestion.transactionIds.includes(change.transactionId),
+        )!;
+        mark(
+          change.transactionId,
+          'applied',
+          suggestion.reason,
+          change.categoryId,
+          applied.undoOperation?.id ?? null,
+        );
       }
     })();
   } catch {
     // Never expose provider responses/prompts or turn a categorization failure into an import failure.
     db.transaction(() => {
-      for (const task of eligible) mark(task.ledgerTransactionId, 'failed', 'Automatic categorization failed. Your import is safe; retry categorization.');
+      for (const task of eligible)
+        mark(
+          task.ledgerTransactionId,
+          'failed',
+          'Automatic categorization failed. Your import is safe; retry categorization.',
+        );
     })();
   }
   return true;
@@ -167,12 +247,14 @@ function schedule() {
       try {
         while (await processAutomaticCategorizationBatch()) {
           // History-only batches also yield to navigation and other app requests.
-          await new Promise(resolve => setTimeout(resolve, 0));
+          await new Promise((resolve) => setTimeout(resolve, 0));
         }
       } finally {
         running = false;
       }
-    })().catch(() => { /* persisted tasks resume after restart */ });
+    })().catch(() => {
+      /* persisted tasks resume after restart */
+    });
   }, 0);
 }
 
@@ -189,5 +271,7 @@ export function startAutomaticCategorizationWorker() {
 }
 
 export function resumeInterruptedCategorization() {
-  getDb().prepare(`UPDATE automaticCategorizationTasks SET status = 'queued' WHERE status = 'running'`).run();
+  getDb()
+    .prepare(`UPDATE automaticCategorizationTasks SET status = 'queued' WHERE status = 'running'`)
+    .run();
 }

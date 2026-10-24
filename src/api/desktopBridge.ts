@@ -2,7 +2,8 @@ import { Electroview } from 'electrobun/view';
 import type { EasyMoneyDesktopRpc } from '../../desktop/rpc';
 
 function createDesktopBridge() {
-  if (typeof window === 'undefined' || typeof window.__electrobunWebviewId !== 'number') return null;
+  if (typeof window === 'undefined' || typeof window.__electrobunWebviewId !== 'number')
+    return null;
   const rpc = Electroview.defineRPC<EasyMoneyDesktopRpc>({
     maxRequestTime: Infinity,
     handlers: {

@@ -1,7 +1,15 @@
 import { useEffect, type RefObject } from 'react';
 
-interface Point { x: number; y: number }
-interface Rect { left: number; right: number; top: number; bottom: number }
+interface Point {
+  x: number;
+  y: number;
+}
+interface Rect {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
 
 // Safe triangle from the departure point to the submenu's near edge.
 export function insideMenuCorridor(point: Point, origin: Point, panel: Rect): boolean {
@@ -26,26 +34,38 @@ export function useMenuAim(ref: RefObject<HTMLDetailsElement | null>, customizin
     let hoverOnly = false;
     let departure: Point | null = null;
     let previous: Point | null = null;
-    const clear = () => { clearTimeout(timer); timer = undefined; pendingDelay = 0; };
+    const clear = () => {
+      clearTimeout(timer);
+      timer = undefined;
+      pendingDelay = 0;
+    };
     const position = () => {
       const rect = summary.getBoundingClientRect();
       const width = panel.offsetWidth;
-      const left = rect.right + width + 4 <= window.innerWidth ? rect.right + 4 : Math.max(8, rect.left - width - 4);
+      const left =
+        rect.right + width + 4 <= window.innerWidth
+          ? rect.right + 4
+          : Math.max(8, rect.left - width - 4);
       panel.style.left = `${left}px`;
       panel.style.top = `${Math.max(8, Math.min(rect.top, window.innerHeight - panel.offsetHeight - 8))}px`;
     };
     const schedule = (delay: number) => {
       clear();
       pendingDelay = delay;
-      timer = setTimeout(() => { if (hoverOnly && !customizing) details.open = false; }, delay);
+      timer = setTimeout(() => {
+        if (hoverOnly && !customizing) details.open = false;
+      }, delay);
     };
     const open = () => {
       if (details.open) return;
-      hoverOnly = true; details.open = true; position();
+      hoverOnly = true;
+      details.open = true;
+      position();
     };
     const enter = (event: PointerEvent) => {
       if (event.pointerType !== 'mouse') return;
-      clear(); departure = null;
+      clear();
+      departure = null;
       void open();
     };
     const leave = (event: PointerEvent) => {
@@ -58,22 +78,45 @@ export function useMenuAim(ref: RefObject<HTMLDetailsElement | null>, customizin
       if (!details.open || !hoverOnly || customizing || !departure) return;
       const point = { x: event.clientX, y: event.clientY };
       const rect = panel.getBoundingClientRect();
-      if (panel.contains(event.target as Node) || summary.contains(event.target as Node)) { clear(); departure = null; return; }
+      if (panel.contains(event.target as Node) || summary.contains(event.target as Node)) {
+        clear();
+        departure = null;
+        return;
+      }
       const edge = departure.x < rect.left ? rect.left : rect.right;
       const movingToward = !previous || Math.abs(edge - point.x) <= Math.abs(edge - previous.x);
       if (movingToward && insideMenuCorridor(point, departure, rect)) schedule(450);
       else if (pendingDelay !== 120) schedule(120);
       previous = point;
     };
-    const panelEnter = () => { clear(); departure = null; };
+    const panelEnter = () => {
+      clear();
+      departure = null;
+    };
     const click = (event: MouseEvent) => {
-      if (!details.open) { event.preventDefault(); open(); hoverOnly = false; return; }
+      if (!details.open) {
+        event.preventDefault();
+        open();
+        hoverOnly = false;
+        return;
+      }
       // A click on a hover-open trigger pins it instead of immediately closing it.
       if (hoverOnly && details.open) event.preventDefault();
-      hoverOnly = false; clear();
+      hoverOnly = false;
+      clear();
     };
-    const toggle = () => { if (details.open) position(); else { clear(); hoverOnly = false; departure = null; } };
-    const focus = () => { hoverOnly = false; clear(); };
+    const toggle = () => {
+      if (details.open) position();
+      else {
+        clear();
+        hoverOnly = false;
+        departure = null;
+      }
+    };
+    const focus = () => {
+      hoverOnly = false;
+      clear();
+    };
     summary.addEventListener('pointerenter', enter);
     summary.addEventListener('pointerleave', leave);
     summary.addEventListener('click', click);

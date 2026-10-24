@@ -6,7 +6,8 @@ export type SequoiaFundFileAccountIdentity =
   | { kind: 'legacy'; value: null };
 
 const storedHashPrefix = /^[0-9a-f]{64}-/i;
-const accountIdentityPattern = /(?:^|-)account-(last4)-(\d{4})(?:-|\.)|(?:^|-)account-(key)-([a-f0-9]{12})(?:-|\.)/i;
+const accountIdentityPattern =
+  /(?:^|-)account-(last4)-(\d{4})(?:-|\.)|(?:^|-)account-(key)-([a-f0-9]{12})(?:-|\.)/i;
 
 export function sequoiaFundOriginalFileName(fileName: string): string {
   return basename(fileName).replace(storedHashPrefix, '');
@@ -27,13 +28,17 @@ export function sequoiaFundSourceAccountName(fileName: string): string {
 }
 
 export function isSequoiaFundActivityFileName(fileName: string): boolean {
-  return /^sequoia-fund-account-(?:last4-\d{4}|key-[a-f0-9]{12})(?:-scope-key-[a-f0-9]{12})?-activity-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv$/i
-    .test(sequoiaFundOriginalFileName(fileName));
+  return /^sequoia-fund-account-(?:last4-\d{4}|key-[a-f0-9]{12})(?:-scope-key-[a-f0-9]{12})?-activity-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv$/i.test(
+    sequoiaFundOriginalFileName(fileName),
+  );
 }
 
 export function isSequoiaFundStatementFileName(fileName: string): boolean {
   const original = sequoiaFundOriginalFileName(fileName);
-  return /^sequoia-fund-\d{4}-\d{2}-\d{2}\.pdf$/i.test(original) ||
-    /^sequoia-fund-account-(?:last4-\d{4}|key-[a-f0-9]{12})-\d{4}-\d{2}-\d{2}-statement-[a-f0-9]{10}\.pdf$/i
-      .test(original);
+  return (
+    /^sequoia-fund-\d{4}-\d{2}-\d{2}\.pdf$/i.test(original) ||
+    /^sequoia-fund-account-(?:last4-\d{4}|key-[a-f0-9]{12})-\d{4}-\d{2}-\d{2}-statement-[a-f0-9]{10}\.pdf$/i.test(
+      original,
+    )
+  );
 }

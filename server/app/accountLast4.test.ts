@@ -28,12 +28,16 @@ test('account last four extraction only accepts explicit labels and structured r
 });
 
 test('source account last four rejects conflicting name and remote identity evidence', () => {
-  expect(sourceAccountLast4({
-    sourceAccountName: 'Savings ending in 0123',
-    sourceAccountKey: 'provider:savings:0123',
-  })).toBe('0123');
-  expect(sourceAccountLast4({
-    sourceAccountName: 'Savings ending in 0123',
-    sourceAccountKey: 'provider:savings:4567',
-  })).toBeNull();
+  expect(
+    sourceAccountLast4({
+      sourceAccountName: 'Savings ending in 0123',
+      sourceAccountKey: 'provider:savings:0123',
+    }),
+  ).toBe('0123');
+  expect(
+    sourceAccountLast4({
+      sourceAccountName: 'Savings ending in 0123',
+      sourceAccountKey: 'provider:savings:4567',
+    }),
+  ).toBeNull();
 });

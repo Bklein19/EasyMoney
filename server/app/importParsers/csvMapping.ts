@@ -61,25 +61,29 @@ const COMMON_DATE_FORMATS = [
 ];
 
 function normalizeHeader(value = '') {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }
 
 function findHeader(headers: string[], hints: string[]) {
-  const normalizedHeaders = headers.map(header => ({
+  const normalizedHeaders = headers.map((header) => ({
     original: header,
     normalized: normalizeHeader(header),
   }));
 
   for (const hint of hints) {
     const normalizedHint = normalizeHeader(hint);
-    const exact = normalizedHeaders.find(header => header.normalized === normalizedHint);
+    const exact = normalizedHeaders.find((header) => header.normalized === normalizedHint);
     if (exact) return exact.original;
   }
 
   for (const hint of hints) {
     const normalizedHint = normalizeHeader(hint);
-    const partial = normalizedHeaders.find(header =>
-      header.normalized.includes(normalizedHint) || normalizedHint.includes(header.normalized)
+    const partial = normalizedHeaders.find(
+      (header) =>
+        header.normalized.includes(normalizedHint) || normalizedHint.includes(header.normalized),
     );
     if (partial) return partial.original;
   }
@@ -89,11 +93,13 @@ function findHeader(headers: string[], hints: string[]) {
 
 function resolveHeader(headers: string[], configuredHeader?: string | null) {
   if (!configuredHeader) return configuredHeader || '';
-  const exact = headers.find(header => header === configuredHeader);
+  const exact = headers.find((header) => header === configuredHeader);
   if (exact) return exact;
 
   const normalizedConfigured = normalizeHeader(configuredHeader);
-  return headers.find(header => normalizeHeader(header) === normalizedConfigured) || configuredHeader;
+  return (
+    headers.find((header) => normalizeHeader(header) === normalizedConfigured) || configuredHeader
+  );
 }
 
 export function inferMappingFromHeaders(headers: string[] = []) {
@@ -137,7 +143,10 @@ export function buildCustomProfile(mapping: CsvMapping): ImportProfile {
   };
 }
 
-export function mappingFromProfile(profile: ImportProfile | null | undefined, headers: string[] = []) {
+export function mappingFromProfile(
+  profile: ImportProfile | null | undefined,
+  headers: string[] = [],
+) {
   const inferred = inferMappingFromHeaders(headers);
   if (!profile) {
     return {
@@ -155,14 +164,19 @@ export function mappingFromProfile(profile: ImportProfile | null | undefined, he
     categoryColumn: profile.categoryColumn || inferred.categoryColumn || '',
     splitAmount: amountConfig.type === 'split',
     amountColumn: amountConfig.column || inferred.amountColumn || '',
-    debitColumn: amountConfig.chargeColumn || amountConfig.debitColumn || inferred.debitColumn || '',
-    creditColumn: amountConfig.paymentColumn || amountConfig.creditColumn || inferred.creditColumn || '',
+    debitColumn:
+      amountConfig.chargeColumn || amountConfig.debitColumn || inferred.debitColumn || '',
+    creditColumn:
+      amountConfig.paymentColumn || amountConfig.creditColumn || inferred.creditColumn || '',
     negativeIsDebit: amountConfig.negativeIsDebit !== false,
     positiveIsCharge: amountConfig.positiveIsCharge !== false,
   };
 }
 
-export function enhanceProfileWithHeaders(profile: ImportProfile, headers: string[] = []): ImportProfile {
+export function enhanceProfileWithHeaders(
+  profile: ImportProfile,
+  headers: string[] = [],
+): ImportProfile {
   const amountConfig = profile.amountConfig || {};
   const resolvedAmountConfig = { ...amountConfig };
 
@@ -174,7 +188,7 @@ export function enhanceProfileWithHeaders(profile: ImportProfile, headers: strin
 
   return {
     ...profile,
-    dateColumns: profile.dateColumns?.map(column => resolveHeader(headers, column)) || [],
+    dateColumns: profile.dateColumns?.map((column) => resolveHeader(headers, column)) || [],
     descriptionColumn: resolveHeader(headers, profile.descriptionColumn),
     merchantColumn: resolveHeader(headers, profile.merchantColumn),
     categoryColumn: resolveHeader(headers, profile.categoryColumn),
@@ -208,9 +222,13 @@ export function parseAmount(value: unknown) {
   return Number.isNaN(num) ? null : num;
 }
 
-export function normalizeMappedCsvTransaction(row: Record<string, string>, profile: ImportProfile): NormalizedCsvTransaction | null {
+export function normalizeMappedCsvTransaction(
+  row: Record<string, string>,
+  profile: ImportProfile,
+): NormalizedCsvTransaction | null {
   const resolvedProfile = profile;
-  const dateStr = row[resolvedProfile.dateColumns?.[0] || ''] || row[resolvedProfile.dateColumns?.[1] || ''];
+  const dateStr =
+    row[resolvedProfile.dateColumns?.[0] || ''] || row[resolvedProfile.dateColumns?.[1] || ''];
   const date = parseDate(dateStr, resolvedProfile.dateFormats || COMMON_DATE_FORMATS);
   if (!date) return null;
 
@@ -233,8 +251,10 @@ export function normalizeMappedCsvTransaction(row: Record<string, string>, profi
     }
   } else if (amountConfig.type === 'split') {
     if (resolvedProfile.statementType === 'credit_card') {
-      const charges = parseAmount(row[amountConfig.chargeColumn || amountConfig.debitColumn || '']) || 0;
-      const payments = parseAmount(row[amountConfig.paymentColumn || amountConfig.creditColumn || '']) || 0;
+      const charges =
+        parseAmount(row[amountConfig.chargeColumn || amountConfig.debitColumn || '']) || 0;
+      const payments =
+        parseAmount(row[amountConfig.paymentColumn || amountConfig.creditColumn || '']) || 0;
       amount = payments - charges;
     } else {
       const debit = parseAmount(row[amountConfig.debitColumn || '']) || 0;
@@ -257,7 +277,8 @@ export function normalizeMappedCsvTransaction(row: Record<string, string>, profi
     amount: Math.round(amount * 100) / 100,
     originalCategory,
     type: amount >= 0 ? 'credit' : 'debit',
-    transactionKind: resolvedProfile.statementType === 'credit_card' && amount > 0 ? 'card_payment' : null,
+    transactionKind:
+      resolvedProfile.statementType === 'credit_card' && amount > 0 ? 'card_payment' : null,
     status: 'cleared',
     notes: '',
   };

@@ -8,21 +8,26 @@ const dataSyncDirectory = resolve(import.meta.dir);
 const repositoryRoot = resolve(dataSyncDirectory, '../../..');
 
 function sharedDataSyncFiles(): string[] {
-  return [...new Bun.Glob('**/*.ts').scanSync({
-    cwd: dataSyncDirectory,
-    absolute: true,
-  })].filter(file =>
-    !file.replaceAll('\\', '/').includes('/institutions/') &&
-    !file.endsWith('.test.ts') &&
-    !file.replaceAll('\\', '/').endsWith('/registry.ts')
+  return [
+    ...new Bun.Glob('**/*.ts').scanSync({
+      cwd: dataSyncDirectory,
+      absolute: true,
+    }),
+  ].filter(
+    (file) =>
+      !file.replaceAll('\\', '/').includes('/institutions/') &&
+      !file.endsWith('.test.ts') &&
+      !file.replaceAll('\\', '/').endsWith('/registry.ts'),
   );
 }
 
 function institutionProductionFiles(): string[] {
-  return [...new Bun.Glob('institutions/**/*.ts').scanSync({
-    cwd: dataSyncDirectory,
-    absolute: true,
-  })].filter(file => !file.endsWith('.test.ts'));
+  return [
+    ...new Bun.Glob('institutions/**/*.ts').scanSync({
+      cwd: dataSyncDirectory,
+      absolute: true,
+    }),
+  ].filter((file) => !file.endsWith('.test.ts'));
 }
 
 function displayPath(file: string): string {
@@ -32,9 +37,9 @@ function displayPath(file: string): string {
 function relativeTypeScriptImports(file: string): string[] {
   const source = readFileSync(file, 'utf8');
   return [...source.matchAll(/(?:from\s+|import\s*\()\s*['"](\.[^'"]+)['"]/g)]
-    .map(match => resolve(dirname(file), match[1]!))
-    .map(candidate => existsSync(candidate) ? candidate : `${candidate}.ts`)
-    .filter(candidate => existsSync(candidate));
+    .map((match) => resolve(dirname(file), match[1]!))
+    .map((candidate) => (existsSync(candidate) ? candidate : `${candidate}.ts`))
+    .filter((candidate) => existsSync(candidate));
 }
 
 function dependencyClosure(entrypoint: string): string[] {
@@ -51,11 +56,10 @@ function dependencyClosure(entrypoint: string): string[] {
 
 describe('data sync architecture', () => {
   test('keeps automation-signal suppression in the shared browser launcher', () => {
-    const violations = institutionProductionFiles()
-      .filter(file => {
-        const source = readFileSync(file, 'utf8');
-        return source.includes('AutomationControlled') || source.includes('--enable-automation');
-      });
+    const violations = institutionProductionFiles().filter((file) => {
+      const source = readFileSync(file, 'utf8');
+      return source.includes('AutomationControlled') || source.includes('--enable-automation');
+    });
 
     expect(violations.map(displayPath)).toEqual([]);
   });
@@ -69,9 +73,11 @@ describe('data sync architecture', () => {
       /\bAPIResponse\b/,
       /\bfetch\s*\(/,
     ];
-    const violations = institutionProductionFiles().flatMap(file => {
+    const violations = institutionProductionFiles().flatMap((file) => {
       const source = readFileSync(file, 'utf8');
-      const matches = forbidden.filter(pattern => pattern.test(source)).map(pattern => pattern.source);
+      const matches = forbidden
+        .filter((pattern) => pattern.test(source))
+        .map((pattern) => pattern.source);
       return matches.length === 0 ? [] : [{ file: displayPath(file), matches }];
     });
 
@@ -79,8 +85,8 @@ describe('data sync architecture', () => {
   });
 
   test('keeps concrete connector imports inside the registry composition root', () => {
-    const violations = sharedDataSyncFiles().filter(file =>
-      /(?:from|import\()\s*['"][^'"]*\/institutions\//.test(readFileSync(file, 'utf8'))
+    const violations = sharedDataSyncFiles().filter((file) =>
+      /(?:from|import\()\s*['"][^'"]*\/institutions\//.test(readFileSync(file, 'utf8')),
     );
 
     expect(violations.map(displayPath)).toEqual([]);
@@ -93,10 +99,10 @@ describe('data sync architecture', () => {
       resolve(repositoryRoot, 'server/app/dataFreshness.ts'),
       resolve(repositoryRoot, 'scripts/sync.ts'),
     ];
-    const terms = syncConnectors.flatMap(connector => [connector.id, connector.label]);
-    const violations = files.flatMap(file => {
+    const terms = syncConnectors.flatMap((connector) => [connector.id, connector.label]);
+    const violations = files.flatMap((file) => {
       const source = readFileSync(file, 'utf8').toLowerCase();
-      const matches = terms.filter(term => source.includes(term.toLowerCase()));
+      const matches = terms.filter((term) => source.includes(term.toLowerCase()));
       return matches.length === 0 ? [] : [{ file: displayPath(file), matches }];
     });
 

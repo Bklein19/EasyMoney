@@ -49,11 +49,21 @@
   font-size: var(--text-sm);
 }
 
-.categories-table__category { width: 26%; }
-.categories-table__type { width: 12%; }
-.categories-table__group { width: 18%; }
-.categories-table__description { width: 36%; }
-.categories-table__action { width: 8%; }
+.categories-table__category {
+  width: 26%;
+}
+.categories-table__type {
+  width: 12%;
+}
+.categories-table__group {
+  width: 18%;
+}
+.categories-table__description {
+  width: 36%;
+}
+.categories-table__action {
+  width: 8%;
+}
 
 .categories-table th,
 .categories-table td {

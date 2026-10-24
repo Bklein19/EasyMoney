@@ -22,17 +22,22 @@ export function matchesFidelityAccount(account: SyncAccountCoverage): boolean {
 export function routeFidelityArtifacts(
   artifacts: readonly FidelityDownloadedArtifact[],
 ): MultiAccountSyncArtifact[] {
-  return artifacts.map(artifact => {
+  return artifacts.map((artifact) => {
     if (artifact.sourceAccounts.length === 0) {
       throw new Error('A Fidelity artifact exposes no parser-backed account claims');
     }
-    const remoteAccountIds = artifact.sourceAccounts.map(account => account.remoteAccountId.trim());
-    if (remoteAccountIds.some(value => !value) || new Set(remoteAccountIds).size !== remoteAccountIds.length) {
+    const remoteAccountIds = artifact.sourceAccounts.map((account) =>
+      account.remoteAccountId.trim(),
+    );
+    if (
+      remoteAccountIds.some((value) => !value) ||
+      new Set(remoteAccountIds).size !== remoteAccountIds.length
+    ) {
       throw new Error('A Fidelity artifact exposes ambiguous parser-backed account claims');
     }
     return {
       fileName: artifact.fileName,
-      accountRoutes: remoteAccountIds.map(remoteAccountId => ({ remoteAccountId })),
+      accountRoutes: remoteAccountIds.map((remoteAccountId) => ({ remoteAccountId })),
     };
   });
 }
@@ -42,17 +47,24 @@ function fidelityAccounts(context: SyncConnectorContext): SyncAccountCoverage[] 
 }
 
 function targetLabel(accounts: SyncAccountCoverage[]): string {
-  const holders = [...new Set(accounts
-    .map(account => account.accountHolder?.trim())
-    .filter((holder): holder is string => Boolean(holder)))];
+  const holders = [
+    ...new Set(
+      accounts
+        .map((account) => account.accountHolder?.trim())
+        .filter((holder): holder is string => Boolean(holder)),
+    ),
+  ];
   return holders.length === 1 ? `Fidelity (${holders[0]})` : 'Fidelity';
 }
 
 function reportProgress(context: SyncConnectorRunContext, event: FidelityProgressEvent): void {
   context.report({
-    type: event.status === 'failed'
-      ? 'warning'
-      : event.phase === 'authentication' && event.status === 'started' ? 'action' : 'phase',
+    type:
+      event.status === 'failed'
+        ? 'warning'
+        : event.phase === 'authentication' && event.status === 'started'
+          ? 'action'
+          : 'phase',
     message: event.message,
     data: {
       phase: event.phase,
@@ -84,16 +96,26 @@ export function createFidelityConnector(
 
       // Activity exports do not refresh statement balances. Catch up from the
       // older source so recent transactions cannot hide months of missing statements.
-      const windows = accounts.map(account => goalWindowForCoverage(context.goal, {
-        ...account,
-        latestFactDate: context.goal.kind === 'current'
-          ? account.latestFactDate && account.latestBalanceDate
-            ? [account.latestFactDate, account.latestBalanceDate].sort()[0]!
-            : null
-          : account.latestFactDate,
-      }, context.today));
-      const from = windows.map(window => window.startDate).sort()[0]!;
-      const through = windows.map(window => window.endDate).sort().at(-1)!;
+      const windows = accounts.map((account) =>
+        goalWindowForCoverage(
+          context.goal,
+          {
+            ...account,
+            latestFactDate:
+              context.goal.kind === 'current'
+                ? account.latestFactDate && account.latestBalanceDate
+                  ? [account.latestFactDate, account.latestBalanceDate].sort()[0]!
+                  : null
+                : account.latestFactDate,
+          },
+          context.today,
+        ),
+      );
+      const from = windows.map((window) => window.startDate).sort()[0]!;
+      const through = windows
+        .map((window) => window.endDate)
+        .sort()
+        .at(-1)!;
       context.report({
         type: 'phase',
         message: 'Opening Fidelity',
@@ -102,7 +124,7 @@ export function createFidelityConnector(
 
       const result = await runSync(
         { outputDir: context.outputDir, from, through, session: 'fidelity-catchup' },
-        event => reportProgress(context, event),
+        (event) => reportProgress(context, event),
       );
       if (result.status === 'authentication-required') {
         throw new Error('Fidelity authentication is required');
@@ -115,10 +137,13 @@ export function createFidelityConnector(
       }
       for (const artifact of result.artifacts) {
         context.report({
-          type: 'artifact', message: 'Fidelity downloaded artifact passed parser validation',
+          type: 'artifact',
+          message: 'Fidelity downloaded artifact passed parser validation',
           data: {
-            artifactKind: artifact.artifactType, parserValidated: true,
-            transactionCount: artifact.transactionCount, balanceCount: artifact.balanceCount,
+            artifactKind: artifact.artifactType,
+            parserValidated: true,
+            transactionCount: artifact.transactionCount,
+            balanceCount: artifact.balanceCount,
           },
         });
       }

@@ -1,12 +1,12 @@
-import { basename } from "node:path";
-import type { ParseResult, ParserMeta } from "./types.ts";
-import { cents, pdfToText } from "./_helpers";
+import { basename } from 'node:path';
+import type { ParseResult, ParserMeta } from './types.ts';
+import { cents, pdfToText } from './_helpers';
 import { checkInvestmentRollForward } from '../printedStatementChecks';
 
 export const meta: ParserMeta = {
-  id: "merrill-cma-statement-pdf",
-  institution: "Merrill",
-  kind: "statement",
+  id: 'merrill-cma-statement-pdf',
+  institution: 'Merrill',
+  kind: 'statement',
   priority: 50,
   matches: ({ filename, sample }) =>
     /^merrill-statement-\d{4}-STMT_\d{8}_XXXXX\d+_CMAEdge\.pdf$/i.test(filename) ||
@@ -15,23 +15,23 @@ export const meta: ParserMeta = {
 
 function statementDate(filePath: string): string {
   const m = basename(filePath).match(/STMT_(\d{2})(\d{2})(\d{4})_/);
-  if (!m) throw new Error("Could not find statement date in Merrill filename");
+  if (!m) throw new Error('Could not find statement date in Merrill filename');
   return `${m[3]}-${m[1]}-${m[2]}`;
 }
 
 function parseBalance(value: string): number {
-  return value.trim() === "-" ? 0 : cents(value);
+  return value.trim() === '-' ? 0 : cents(value);
 }
 
 export function parseMerrillCmaStatementText(text: string, date: string): ParseResult {
   const accountMatch = text.match(/Account Number:\s*(\d{2}W-\d{5})/);
-  if (!accountMatch) throw new Error("Could not find Merrill account number");
+  if (!accountMatch) throw new Error('Could not find Merrill account number');
   const account = `CMA-Edge - ${accountMatch[1]}`;
 
   const balanceMatch =
     text.match(/Closing Value \(\d{2}\/\d{2}\)\s+(\$?[\d,]+\.\d{2}|-)/) ||
     text.match(/Net Portfolio Value:\s+(\$?[\d,]+\.\d{2}|-)/);
-  if (!balanceMatch) throw new Error("Could not find Merrill closing value");
+  if (!balanceMatch) throw new Error('Could not find Merrill closing value');
 
   return {
     // Period totals describe the statement, not individually dated ledger events.
@@ -40,9 +40,15 @@ export function parseMerrillCmaStatementText(text: string, date: string): ParseR
       {
         date,
         account,
-        institution: "Merrill",
+        institution: 'Merrill',
         balance_cents: parseBalance(balanceMatch[1]!),
-        raw: { statementValidation: checkInvestmentRollForward('merrill', text, parseBalance(balanceMatch[1]!)) },
+        raw: {
+          statementValidation: checkInvestmentRollForward(
+            'merrill',
+            text,
+            parseBalance(balanceMatch[1]!),
+          ),
+        },
       },
     ],
     covered_from: date,

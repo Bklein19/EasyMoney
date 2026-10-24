@@ -8,7 +8,13 @@ export interface StatementCashFlow {
 export function readStatementCashFlow(raw: Record<string, unknown>): StatementCashFlow | null {
   if (!raw.statementCashFlow) return null;
   const flow = raw.statementCashFlow as StatementCashFlow;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(flow.from) || !/^\d{4}-\d{2}-\d{2}$/.test(flow.to) || flow.from > flow.to || !Number.isSafeInteger(flow.netContributionsCents)) throw new Error('Invalid statement cash-flow evidence');
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(flow.from) ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(flow.to) ||
+    flow.from > flow.to ||
+    !Number.isSafeInteger(flow.netContributionsCents)
+  )
+    throw new Error('Invalid statement cash-flow evidence');
   return flow;
 }
 export function selectStatementCashFlows(input: StatementCashFlow[]): StatementCashFlow[] {
@@ -16,22 +22,32 @@ export function selectStatementCashFlows(input: StatementCashFlow[]): StatementC
   for (const flow of input) {
     const key = `${flow.from}/${flow.to}`;
     const prior = unique.get(key);
-    if (prior && prior.netContributionsCents !== flow.netContributionsCents) throw new Error('Statements disagree on contribution totals');
+    if (prior && prior.netContributionsCents !== flow.netContributionsCents)
+      throw new Error('Statements disagree on contribution totals');
     unique.set(key, flow);
   }
-  const sorted = [...unique.values()].sort((a,b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
+  const sorted = [...unique.values()].sort(
+    (a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to),
+  );
   const result: StatementCashFlow[] = [];
   for (const flow of sorted) {
-    if (result.some(prior => prior.to >= flow.from)) throw new Error('Overlapping statement contribution periods need review');
+    if (result.some((prior) => prior.to >= flow.from))
+      throw new Error('Overlapping statement contribution periods need review');
     result.push(flow);
   }
   return result;
 }
 
-export function getStatementCashFlows(db: ReturnType<typeof getDb>): Map<number, StatementCashFlow[]> {
-  const rows = db.prepare(`SELECT sa.accountId, sb.rawJson FROM sourceBalances sb
+export function getStatementCashFlows(
+  db: ReturnType<typeof getDb>,
+): Map<number, StatementCashFlow[]> {
+  const rows = db
+    .prepare(
+      `SELECT sa.accountId, sb.rawJson FROM sourceBalances sb
     JOIN sourceAccounts sa ON sa.id=sb.sourceAccountId JOIN sourceFiles sf ON sf.id=sb.sourceFileId
-    WHERE sf.status='committed' AND sa.accountId IS NOT NULL`).all() as {accountId:number;rawJson:string|null}[];
+    WHERE sf.status='committed' AND sa.accountId IS NOT NULL`,
+    )
+    .all() as { accountId: number; rawJson: string | null }[];
   const grouped = new Map<number, StatementCashFlow[]>();
   for (const row of rows) {
     const flow = readStatementCashFlow(JSON.parse(row.rawJson || '{}'));

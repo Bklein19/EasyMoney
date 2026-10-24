@@ -21,9 +21,6 @@ export function robinhoodBankingCrossSourceIdentity(description: string): string
 
 export function robinhoodCreditCrossSourceIdentity(description: string): string {
   const normalized = normalizedWords(description);
-  const withoutTrailingContact = normalized.replace(
-    /\s+\d[\d ]{5,}(?: [a-z]{2}| credit)$/,
-    '',
-  );
+  const withoutTrailingContact = normalized.replace(/\s+\d[\d ]{5,}(?: [a-z]{2}| credit)$/, '');
   return `robinhood-credit:${withoutTrailingContact.replace(/\s+/g, '')}`;
 }

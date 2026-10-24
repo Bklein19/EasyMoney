@@ -34,7 +34,10 @@ export function matchesMarcusAccount(account: SyncAccountCoverage): boolean {
 export function inferMarcusAccountKind(account: SyncAccountCoverage): MarcusAccountKind | null {
   const text = identityTexts(account).join(' ');
   const savings = /\b(?:online\s+)?savings(?:\s+account)?\b/i.test(text);
-  const deposit = /\b(?:certificate\s+of\s+deposit|deposit\s+account|(?:no[- ]penalty|high[- ]yield)\s+cd|cd)\b/i.test(text);
+  const deposit =
+    /\b(?:certificate\s+of\s+deposit|deposit\s+account|(?:no[- ]penalty|high[- ]yield)\s+cd|cd)\b/i.test(
+      text,
+    );
   if (savings === deposit) return null;
   return savings ? 'savings' : 'deposit';
 }
@@ -69,7 +72,8 @@ export function planMarcusAccounts(
     if (!kind || !last4) {
       report({
         type: 'warning',
-        message: 'Skipped one Marcus account because its type or routing identity is missing or ambiguous',
+        message:
+          'Skipped one Marcus account because its type or routing identity is missing or ambiguous',
         data: { accountId: account.id, reason: 'missing-identity' },
       });
       continue;
@@ -104,9 +108,9 @@ export function routeMarcusArtifacts(
   artifacts: readonly Pick<MarcusDownloadedArtifact, 'fileName' | 'accountId'>[],
   plans: readonly MarcusSyncAccount[],
 ): RoutedSyncArtifact[] {
-  const plannedAccountIds = new Set(plans.map(plan => plan.accountId));
+  const plannedAccountIds = new Set(plans.map((plan) => plan.accountId));
   const fileNames = new Set<string>();
-  return artifacts.map(artifact => {
+  return artifacts.map((artifact) => {
     if (!plannedAccountIds.has(artifact.accountId)) {
       throw new Error('Marcus returned an artifact for an unplanned local account');
     }
@@ -139,13 +143,16 @@ export function createMarcusConnector(
         message: 'Opening Marcus',
         data: { goal: context.goal.kind, plannedAccountCount: plans.length },
       });
-      const result = await syncRunner({
-        outputDir: context.outputDir,
-        through: context.today,
-        accounts: plans,
-        session: MARCUS_PROFILE_NAME,
-        allowInteractiveAuthentication: true,
-      }, context.report);
+      const result = await syncRunner(
+        {
+          outputDir: context.outputDir,
+          through: context.today,
+          accounts: plans,
+          session: MARCUS_PROFILE_NAME,
+          allowInteractiveAuthentication: true,
+        },
+        context.report,
+      );
       if (result.status === 'authentication-required') {
         throw new Error('Marcus authentication is required');
       }

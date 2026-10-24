@@ -1,9 +1,29 @@
 import { useMemo, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { addMonths, differenceInCalendarDays, endOfDay, endOfMonth, endOfYear, format, parseISO, startOfMonth, startOfYear } from 'date-fns';
+import {
+  addMonths,
+  differenceInCalendarDays,
+  endOfDay,
+  endOfMonth,
+  endOfYear,
+  format,
+  parseISO,
+  startOfMonth,
+  startOfYear,
+} from 'date-fns';
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
-import { ArrowDown, ArrowUp, Calendar, CheckCircle2, CircleAlert, PiggyBank, RotateCcw, Target, Wand2 } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  Calendar,
+  CheckCircle2,
+  CircleAlert,
+  PiggyBank,
+  RotateCcw,
+  Target,
+  Wand2,
+} from 'lucide-react';
 import { useBudgets } from '../../hooks/useBudgets';
 import { useLoadBudgetPlans, useSaveBudgetPlans } from '../../hooks/useBudgetPlans';
 import { budgetAmounts, budgetPercentages } from '../../../server/app/budgetAllocation';
@@ -17,11 +37,11 @@ import './BudgetingPage.css';
 const PERIOD_MODES = {
   MONTH: 'month',
   YEAR: 'year',
-  CUSTOM: 'custom'
+  CUSTOM: 'custom',
 } as const;
 const AVERAGE_DAYS_PER_MONTH = 365.2425 / 12;
 
-type PeriodMode = typeof PERIOD_MODES[keyof typeof PERIOD_MODES];
+type PeriodMode = (typeof PERIOD_MODES)[keyof typeof PERIOD_MODES];
 type CategoryId = string | number;
 
 interface DreamBudget {
@@ -96,7 +116,8 @@ interface BudgetTooltipProps {
 const toMonthKey = (date: Date) => format(date, 'yyyy-MM');
 const toDateInput = (date: Date) => format(date, 'yyyy-MM-dd');
 const clampPercent = (value: number) => Math.max(0, Number.isFinite(value) ? value : 0);
-const formatPercentValue = (value: number) => `${value.toFixed(value >= 10 || value === 0 ? 0 : 1)}%`;
+const formatPercentValue = (value: number) =>
+  `${value.toFixed(value >= 10 || value === 0 ? 0 : 1)}%`;
 
 function BudgetTooltip({ active, payload }: BudgetTooltipProps) {
   if (!active || !payload?.length) return null;
@@ -106,7 +127,9 @@ function BudgetTooltip({ active, payload }: BudgetTooltipProps) {
     <div className="custom-tooltip">
       <div className="custom-tooltip__item">
         <span className="custom-tooltip__dot" style={{ background: item.payload.color }} />
-        <span>{item.name}: {formatCurrency(item.value)}</span>
+        <span>
+          {item.name}: {formatCurrency(item.value)}
+        </span>
       </div>
     </div>
   );
@@ -114,12 +137,24 @@ function BudgetTooltip({ active, payload }: BudgetTooltipProps) {
 
 export default function BudgetingPage() {
   const { data, error } = useLoadBudgetPlans();
-  if (error) return <p role="alert">Unable to load budget plans: {error} <button onClick={() => window.location.reload()}>Retry</button></p>;
+  if (error)
+    return (
+      <p role="alert">
+        Unable to load budget plans: {error}{' '}
+        <button onClick={() => window.location.reload()}>Retry</button>
+      </p>
+    );
   if (!data) return <p role="status">Loading budget plans…</p>;
   return <BudgetingEditor initialPlans={data.plans} revision={data.revision} />;
 }
 
-function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans; revision: number }) {
+function BudgetingEditor({
+  initialPlans,
+  revision,
+}: {
+  initialPlans: BudgetPlans;
+  revision: number;
+}) {
   const today = new Date();
   const [periodMode, setPeriodMode] = useState<PeriodMode>(PERIOD_MODES.MONTH);
   const [month, setMonth] = useState(() => toMonthKey(new Date()));
@@ -127,14 +162,25 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
   const [customStartDate, setCustomStartDate] = useState(() => toDateInput(startOfMonth(today)));
   const [customEndDate, setCustomEndDate] = useState(() => toDateInput(endOfMonth(today)));
   const [globalBudgetByPeriod, setGlobalBudgetByPeriod] = useState<Record<string, string>>(() => {
-    return Object.fromEntries(Object.entries(initialPlans.globalBudgets).map(([key, value]) => [key, String(value)]));
+    return Object.fromEntries(
+      Object.entries(initialPlans.globalBudgets).map(([key, value]) => [key, String(value)]),
+    );
   });
   const [dreamBudget, setDreamBudget] = useState(initialPlans.dreamBudget);
   const [savedBudgets, setSavedBudgets] = useState(initialPlans.savedBudgets);
-  const planSave = useSaveBudgetPlans({
-    globalBudgets: Object.fromEntries(Object.entries(globalBudgetByPeriod).map(([key, value]) => [key, Math.max(0, Number(value) || 0)])),
-    dreamBudget, savedBudgets,
-  }, revision);
+  const planSave = useSaveBudgetPlans(
+    {
+      globalBudgets: Object.fromEntries(
+        Object.entries(globalBudgetByPeriod).map(([key, value]) => [
+          key,
+          Math.max(0, Number(value) || 0),
+        ]),
+      ),
+      dreamBudget,
+      savedBudgets,
+    },
+    revision,
+  );
   const [selectedSavedBudgetId, setSelectedSavedBudgetId] = useState('');
   const [isDesigningBudget, setIsDesigningBudget] = useState(false);
   const [isSavingPeriodBudget, setIsSavingPeriodBudget] = useState(false);
@@ -157,7 +203,7 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
         label: year,
         scale: 12,
         startDate: startOfYear(yearDate).toISOString(),
-        endDate: endOfYear(yearDate).toISOString()
+        endDate: endOfYear(yearDate).toISOString(),
       };
     }
 
@@ -170,7 +216,7 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
         label: `${format(start, 'MMM d, yyyy')} - ${format(parseISO(customEndDate), 'MMM d, yyyy')}`,
         scale: dayCount / AVERAGE_DAYS_PER_MONTH,
         startDate: start.toISOString(),
-        endDate: end.toISOString()
+        endDate: end.toISOString(),
       };
     }
 
@@ -180,7 +226,7 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
       label: format(monthDate, 'MMMM yyyy'),
       scale: 1,
       startDate: startOfMonth(monthDate).toISOString(),
-      endDate: endOfMonth(monthDate).toISOString()
+      endDate: endOfMonth(monthDate).toISOString(),
     };
   }, [customEndDate, customStartDate, month, periodMode, year]);
 
@@ -190,63 +236,70 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
   const { expenseCategories } = useCategories();
   const { setBudget } = useBudgets(isMonthlyPeriod ? month : undefined);
   const manualGlobalBudget = Number(globalBudgetInput);
-  const explicitGlobalBudget = Number.isFinite(manualGlobalBudget) && manualGlobalBudget > 0
-    ? manualGlobalBudget
-    : dreamBudget.globalBudget > 0
-      ? dreamBudget.globalBudget * period.scale
-      : null;
-  const hasDreamTargets = Object.values(dreamBudget.categoryPercents).some(value => Number(value) > 0);
-  const budgetReportQuery = useQuery(trpc.budgets.report.queryOptions({
-    startDate: period.startDate,
-    endDate: period.endDate,
-    month: isMonthlyPeriod ? month : null,
-    globalBudget: explicitGlobalBudget,
-    categoryPercents: hasDreamTargets ? dreamBudget.categoryPercents : null,
-  }));
+  const explicitGlobalBudget =
+    Number.isFinite(manualGlobalBudget) && manualGlobalBudget > 0
+      ? manualGlobalBudget
+      : dreamBudget.globalBudget > 0
+        ? dreamBudget.globalBudget * period.scale
+        : null;
+  const hasDreamTargets = Object.values(dreamBudget.categoryPercents).some(
+    (value) => Number(value) > 0,
+  );
+  const budgetReportQuery = useQuery(
+    trpc.budgets.report.queryOptions({
+      startDate: period.startDate,
+      endDate: period.endDate,
+      month: isMonthlyPeriod ? month : null,
+      globalBudget: explicitGlobalBudget,
+      categoryPercents: hasDreamTargets ? dreamBudget.categoryPercents : null,
+    }),
+  );
   const budgetReport = budgetReportQuery.data as BudgetReport | undefined;
   const cashFlow = budgetReport?.cashFlow ?? { income: 0, expenses: 0, byCategory: {} };
   const autoGlobalBudget = cashFlow.income > 0 ? cashFlow.income : cashFlow.expenses;
   const globalBudget = budgetReport?.globalBudget ?? 0;
   const rows = budgetReport?.rows ?? [];
   const targetTotalPercent = budgetReport?.summary?.targetTotalPercent ?? 0;
-  const overRows = rows.filter(row => row.status === 'over');
-  const unplannedRows = rows.filter(row => row.status === 'unplanned');
+  const overRows = rows.filter((row) => row.status === 'over');
+  const unplannedRows = rows.filter((row) => row.status === 'unplanned');
   const actualSpendPercent = budgetReport?.summary?.actualSpendPercent ?? 0;
   const budgetRemaining = budgetReport?.summary?.budgetRemaining ?? 0;
   const unspentIncome = budgetReport?.summary?.unspentIncome ?? 0;
   const overspentAmount = budgetReport?.summary?.overspentAmount ?? 0;
   const spendingAllocationData = rows
-    .filter(row => row.actual > 0)
-    .map(row => ({
+    .filter((row) => row.actual > 0)
+    .map((row) => ({
       name: row.category.name,
       value: row.actual,
-      color: row.category.color || 'var(--cat-uncategorized)'
+      color: row.category.color || 'var(--cat-uncategorized)',
     }));
   const allocationData = [
     ...spendingAllocationData,
-    ...(unspentIncome > 0 ? [{ name: 'Unspent', value: unspentIncome, color: 'var(--data-income)' }] : [])
+    ...(unspentIncome > 0
+      ? [{ name: 'Unspent', value: unspentIncome, color: 'var(--data-income)' }]
+      : []),
   ];
   const allocationTotal = allocationData.reduce((sum, item) => sum + item.value, 0);
-  const incomeCoveragePercent = cashFlow.expenses > 0
-    ? Math.min(100, (cashFlow.income / cashFlow.expenses) * 100)
-    : 0;
-  const overspentPercent = cashFlow.expenses > 0
-    ? Math.min(100, (overspentAmount / cashFlow.expenses) * 100)
-    : 0;
-  const dreamTargetTotalPercent = Object.values(dreamBudget.categoryPercents)
-    .reduce((sum, value) => sum + (Number(value) || 0), 0);
+  const incomeCoveragePercent =
+    cashFlow.expenses > 0 ? Math.min(100, (cashFlow.income / cashFlow.expenses) * 100) : 0;
+  const overspentPercent =
+    cashFlow.expenses > 0 ? Math.min(100, (overspentAmount / cashFlow.expenses) * 100) : 0;
+  const dreamTargetTotalPercent = Object.values(dreamBudget.categoryPercents).reduce(
+    (sum, value) => sum + (Number(value) || 0),
+    0,
+  );
 
   const handleGlobalBudgetChange = (event: ChangeEvent<HTMLInputElement>) => {
     const nextValue = event.target.value;
-    setGlobalBudgetByPeriod(previous => ({ ...previous, [period.key]: nextValue }));
+    setGlobalBudgetByPeriod((previous) => ({ ...previous, [period.key]: nextValue }));
   };
 
   const hydratePeriodBudget = (periodKey: string) => {
-    setGlobalBudgetByPeriod(previous => (
+    setGlobalBudgetByPeriod((previous) =>
       Object.prototype.hasOwnProperty.call(previous, periodKey)
         ? previous
-        : { ...previous, [periodKey]: '' }
-    ));
+        : { ...previous, [periodKey]: '' },
+    );
   };
 
   const handleTargetPercentChange = async (categoryId: CategoryId, value: string) => {
@@ -254,7 +307,7 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
     const nextPercent = clampPercent(Number(value));
     setSavingCategoryId(categoryId);
     try {
-      await setBudget(categoryId, Math.round(((nextPercent / 100) * globalBudget) * 100) / 100);
+      await setBudget(categoryId, Math.round((nextPercent / 100) * globalBudget * 100) / 100);
     } finally {
       setSavingCategoryId(null);
     }
@@ -273,18 +326,19 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
   };
 
   const resetGlobalBudget = () => {
-    setGlobalBudgetByPeriod(previous => ({ ...previous, [period.key]: '' }));
+    setGlobalBudgetByPeriod((previous) => ({ ...previous, [period.key]: '' }));
   };
 
   const persistDreamBudget = (nextDreamBudget: DreamBudget): DreamBudget => {
     const categoryPercents = Object.fromEntries(
       Object.entries(nextDreamBudget.categoryPercents || {})
         .map(([categoryId, value]): [string, number] => [categoryId, clampPercent(Number(value))])
-        .filter(([, value]) => value > 0)
+        .filter(([, value]) => value > 0),
     );
     const cleaned: DreamBudget = {
-      globalBudget: Number(nextDreamBudget.globalBudget) > 0 ? Number(nextDreamBudget.globalBudget) : 0,
-      categoryPercents
+      globalBudget:
+        Number(nextDreamBudget.globalBudget) > 0 ? Number(nextDreamBudget.globalBudget) : 0,
+      categoryPercents,
     };
     setDreamBudget(cleaned);
     setDraftTemplate(cleaned);
@@ -296,11 +350,11 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
   };
 
   const applySavedBudget = (budgetId = selectedSavedBudgetId) => {
-    const budget = savedBudgets.find(item => item.id === budgetId);
+    const budget = savedBudgets.find((item) => item.id === budgetId);
     if (!budget) return;
     const applied = persistDreamBudget({
       globalBudget: budget.globalBudget,
-      categoryPercents: budget.categoryPercents
+      categoryPercents: budget.categoryPercents,
     });
     setSelectedSavedBudgetId(budget.id);
     setDraftBudgetName(budget.name);
@@ -308,19 +362,21 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
   };
 
   const buildDreamFromDisplayedPeriod = (): DreamBudget => {
-    const denominator = cashFlow.income > 0 ? Math.max(cashFlow.income, cashFlow.expenses) : cashFlow.expenses;
+    const denominator =
+      cashFlow.income > 0 ? Math.max(cashFlow.income, cashFlow.expenses) : cashFlow.expenses;
     const monthlyDenominator = period.scale > 0 ? denominator / period.scale : denominator;
     const nextCategoryPercents: Record<string, number> = {};
     if (denominator > 0) {
-      rows.forEach(row => {
+      rows.forEach((row) => {
         if (row.category.id === 'uncategorized' || row.actual <= 0) return;
-        nextCategoryPercents[String(row.category.id)] = Math.round(((row.actual / denominator) * 100) * 10) / 10;
+        nextCategoryPercents[String(row.category.id)] =
+          Math.round((row.actual / denominator) * 100 * 10) / 10;
       });
     }
 
     return {
       globalBudget: monthlyDenominator,
-      categoryPercents: nextCategoryPercents
+      categoryPercents: nextCategoryPercents,
     };
   };
 
@@ -336,16 +392,16 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
 
   const upsertSavedBudget = (name: string, nextBudget: DreamBudget) => {
     const applied = persistDreamBudget(nextBudget);
-    const existing = savedBudgets.find(item => item.name.toLowerCase() === name.toLowerCase());
+    const existing = savedBudgets.find((item) => item.name.toLowerCase() === name.toLowerCase());
     const savedBudget = {
       id: existing?.id || crypto.randomUUID(),
       name,
       globalBudget: applied.globalBudget,
       categoryPercents: applied.categoryPercents,
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
     };
     const nextSavedBudgets = existing
-      ? savedBudgets.map(item => item.id === existing.id ? savedBudget : item)
+      ? savedBudgets.map((item) => (item.id === existing.id ? savedBudget : item))
       : [...savedBudgets, savedBudget];
     persistSavedBudgets(nextSavedBudgets);
     setSelectedSavedBudgetId(savedBudget.id);
@@ -366,37 +422,45 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
 
   const openDesignBudget = () => {
     setDraftTemplate(dreamBudget);
-    const selectedBudget = savedBudgets.find(item => item.id === selectedSavedBudgetId);
+    const selectedBudget = savedBudgets.find((item) => item.id === selectedSavedBudgetId);
     setDraftBudgetName(selectedBudget?.name || 'Budget Template');
     setIsDesigningBudget(true);
   };
 
   const updateDraftCategoryPercent = (categoryId: CategoryId, value: string) => {
     const nextValue = clampPercent(Number(value));
-    setDraftAmounts(previous => ({ ...previous, [String(categoryId)]: Math.round(draftDreamBudget.globalBudget * nextValue) / 100 }));
-    setDraftDreamBudget(previous => ({
+    setDraftAmounts((previous) => ({
+      ...previous,
+      [String(categoryId)]: Math.round(draftDreamBudget.globalBudget * nextValue) / 100,
+    }));
+    setDraftDreamBudget((previous) => ({
       ...previous,
       categoryPercents: {
         ...previous.categoryPercents,
-        [String(categoryId)]: nextValue
-      }
+        [String(categoryId)]: nextValue,
+      },
     }));
   };
 
   const saveDraftDreamBudget = () => {
     if (draftDreamBudget.globalBudget <= 0) return;
-    const applied = persistDreamBudget({ ...draftDreamBudget, categoryPercents: budgetPercentages(draftAmounts, draftDreamBudget.globalBudget) });
+    const applied = persistDreamBudget({
+      ...draftDreamBudget,
+      categoryPercents: budgetPercentages(draftAmounts, draftDreamBudget.globalBudget),
+    });
     const name = draftBudgetName.trim() || 'Budget Template';
-    const existing = savedBudgets.find(item => item.id === selectedSavedBudgetId || item.name.toLowerCase() === name.toLowerCase());
+    const existing = savedBudgets.find(
+      (item) => item.id === selectedSavedBudgetId || item.name.toLowerCase() === name.toLowerCase(),
+    );
     const savedBudget = {
       id: existing?.id || crypto.randomUUID(),
       name,
       globalBudget: applied.globalBudget,
       categoryPercents: applied.categoryPercents,
-      updatedAt: new Date().toISOString()
+      updatedAt: new Date().toISOString(),
     };
     const nextSavedBudgets = existing
-      ? savedBudgets.map(item => item.id === existing.id ? savedBudget : item)
+      ? savedBudgets.map((item) => (item.id === existing.id ? savedBudget : item))
       : [...savedBudgets, savedBudget];
     persistSavedBudgets(nextSavedBudgets);
     setSelectedSavedBudgetId(savedBudget.id);
@@ -406,382 +470,507 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
   return (
     <>
       <div className="page budgeting-page stagger-in">
-      {planSave.error ? <p role="alert">Budget changes have not been saved. {planSave.error} <button onClick={planSave.retry}>Retry save</button> Copy your changes before reloading.</p>
-        : <p role="status">{planSave.pending ? 'Saving budget plans…' : 'Budget plans saved on this computer.'}</p>}
-      <div className="page__header budgeting-page__header">
-        <div>
-          <h1 className="page__title">Budgeting</h1>
-          <p className="page__subtitle">Save monthly budget templates and compare them across any period.</p>
-        </div>
-
-        <div className="budgeting-period-controls">
-          <button className="btn btn--secondary" type="button" onClick={openDesignBudget}>
-            <Wand2 size={16} />
-            Design Budget
-          </button>
-          {savedBudgets.length > 0 && (
-            <div className="budgeting-saved-budget">
-              <select
-                className="input input--sm"
-                value={selectedSavedBudgetId}
-                onChange={(event) => setSelectedSavedBudgetId(event.target.value)}
-                aria-label="Saved budgets"
-              >
-                <option value="">Saved budgets</option>
-                {savedBudgets.map(budget => (
-                  <option key={budget.id} value={budget.id}>{budget.name}</option>
-                ))}
-              </select>
-              <button
-                className="btn btn--secondary btn--sm"
-                type="button"
-                disabled={!selectedSavedBudgetId}
-                onClick={() => applySavedBudget()}
-              >
-                Apply
-              </button>
-            </div>
-          )}
-          <div className="budgeting-period-tabs" aria-label="Budget period">
-            {Object.values(PERIOD_MODES).map(mode => (
-              <button
-                key={mode}
-                className={periodMode === mode ? 'active' : ''}
-                type="button"
-                onClick={() => {
-                  setPeriodMode(mode);
-                  const nextKey = mode === PERIOD_MODES.YEAR
-                    ? `year:${year}`
-                    : mode === PERIOD_MODES.CUSTOM
-                      ? `custom:${customStartDate}:${customEndDate}`
-                      : `month:${month}`;
-                  hydratePeriodBudget(nextKey);
-                }}
-              >
-                {mode}
-              </button>
-            ))}
+        {planSave.error ? (
+          <p role="alert">
+            Budget changes have not been saved. {planSave.error}{' '}
+            <button onClick={planSave.retry}>Retry save</button> Copy your changes before reloading.
+          </p>
+        ) : (
+          <p role="status">
+            {planSave.pending ? 'Saving budget plans…' : 'Budget plans saved on this computer.'}
+          </p>
+        )}
+        <div className="page__header budgeting-page__header">
+          <div>
+            <h1 className="page__title">Budgeting</h1>
+            <p className="page__subtitle">
+              Save monthly budget templates and compare them across any period.
+            </p>
           </div>
 
-          {periodMode === PERIOD_MODES.MONTH && (
-            <div className="budgeting-controls">
-              <button className="btn btn--ghost btn--icon" type="button" onClick={() => shiftMonth(-1)} aria-label="Previous month">
-                <ArrowDown size={16} />
-              </button>
-              <label className="budgeting-month">
-                <Calendar size={15} />
-                <input
+          <div className="budgeting-period-controls">
+            <button className="btn btn--secondary" type="button" onClick={openDesignBudget}>
+              <Wand2 size={16} />
+              Design Budget
+            </button>
+            {savedBudgets.length > 0 && (
+              <div className="budgeting-saved-budget">
+                <select
                   className="input input--sm"
-                  type="month"
-                  value={month}
-                  onChange={(event) => {
-                    setMonth(event.target.value);
-                    hydratePeriodBudget(`month:${event.target.value}`);
+                  value={selectedSavedBudgetId}
+                  onChange={(event) => setSelectedSavedBudgetId(event.target.value)}
+                  aria-label="Saved budgets"
+                >
+                  <option value="">Saved budgets</option>
+                  {savedBudgets.map((budget) => (
+                    <option key={budget.id} value={budget.id}>
+                      {budget.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="btn btn--secondary btn--sm"
+                  type="button"
+                  disabled={!selectedSavedBudgetId}
+                  onClick={() => applySavedBudget()}
+                >
+                  Apply
+                </button>
+              </div>
+            )}
+            <div className="budgeting-period-tabs" aria-label="Budget period">
+              {Object.values(PERIOD_MODES).map((mode) => (
+                <button
+                  key={mode}
+                  className={periodMode === mode ? 'active' : ''}
+                  type="button"
+                  onClick={() => {
+                    setPeriodMode(mode);
+                    const nextKey =
+                      mode === PERIOD_MODES.YEAR
+                        ? `year:${year}`
+                        : mode === PERIOD_MODES.CUSTOM
+                          ? `custom:${customStartDate}:${customEndDate}`
+                          : `month:${month}`;
+                    hydratePeriodBudget(nextKey);
                   }}
-                />
-              </label>
-              <button className="btn btn--ghost btn--icon" type="button" onClick={() => shiftMonth(1)} aria-label="Next month">
-                <ArrowUp size={16} />
-              </button>
+                >
+                  {mode}
+                </button>
+              ))}
             </div>
-          )}
 
-          {periodMode === PERIOD_MODES.YEAR && (
-            <div className="budgeting-controls">
-              <button className="btn btn--ghost btn--icon" type="button" onClick={() => shiftYear(-1)} aria-label="Previous year">
-                <ArrowDown size={16} />
-              </button>
-              <label className="budgeting-month">
-                <Calendar size={15} />
-                <input
-                  className="input input--sm"
-                  type="number"
-                  min="2000"
-                  max="2100"
-                  value={year}
-                  onChange={(event) => {
-                    setYear(event.target.value);
-                    hydratePeriodBudget(`year:${event.target.value}`);
-                  }}
-                />
-              </label>
-              <button className="btn btn--ghost btn--icon" type="button" onClick={() => shiftYear(1)} aria-label="Next year">
-                <ArrowUp size={16} />
-              </button>
-            </div>
-          )}
+            {periodMode === PERIOD_MODES.MONTH && (
+              <div className="budgeting-controls">
+                <button
+                  className="btn btn--ghost btn--icon"
+                  type="button"
+                  onClick={() => shiftMonth(-1)}
+                  aria-label="Previous month"
+                >
+                  <ArrowDown size={16} />
+                </button>
+                <label className="budgeting-month">
+                  <Calendar size={15} />
+                  <input
+                    className="input input--sm"
+                    type="month"
+                    value={month}
+                    onChange={(event) => {
+                      setMonth(event.target.value);
+                      hydratePeriodBudget(`month:${event.target.value}`);
+                    }}
+                  />
+                </label>
+                <button
+                  className="btn btn--ghost btn--icon"
+                  type="button"
+                  onClick={() => shiftMonth(1)}
+                  aria-label="Next month"
+                >
+                  <ArrowUp size={16} />
+                </button>
+              </div>
+            )}
 
-          {periodMode === PERIOD_MODES.CUSTOM && (
-            <div className="budgeting-custom-range">
-              <label>
-                <Calendar size={15} />
+            {periodMode === PERIOD_MODES.YEAR && (
+              <div className="budgeting-controls">
+                <button
+                  className="btn btn--ghost btn--icon"
+                  type="button"
+                  onClick={() => shiftYear(-1)}
+                  aria-label="Previous year"
+                >
+                  <ArrowDown size={16} />
+                </button>
+                <label className="budgeting-month">
+                  <Calendar size={15} />
+                  <input
+                    className="input input--sm"
+                    type="number"
+                    min="2000"
+                    max="2100"
+                    value={year}
+                    onChange={(event) => {
+                      setYear(event.target.value);
+                      hydratePeriodBudget(`year:${event.target.value}`);
+                    }}
+                  />
+                </label>
+                <button
+                  className="btn btn--ghost btn--icon"
+                  type="button"
+                  onClick={() => shiftYear(1)}
+                  aria-label="Next year"
+                >
+                  <ArrowUp size={16} />
+                </button>
+              </div>
+            )}
+
+            {periodMode === PERIOD_MODES.CUSTOM && (
+              <div className="budgeting-custom-range">
+                <label>
+                  <Calendar size={15} />
+                  <input
+                    className="input input--sm"
+                    type="date"
+                    value={customStartDate}
+                    onChange={(event) => {
+                      setCustomStartDate(event.target.value);
+                      hydratePeriodBudget(`custom:${event.target.value}:${customEndDate}`);
+                    }}
+                  />
+                </label>
+                <span>to</span>
                 <input
                   className="input input--sm"
                   type="date"
-                  value={customStartDate}
+                  value={customEndDate}
                   onChange={(event) => {
-                    setCustomStartDate(event.target.value);
-                    hydratePeriodBudget(`custom:${event.target.value}:${customEndDate}`);
+                    setCustomEndDate(event.target.value);
+                    hydratePeriodBudget(`custom:${customStartDate}:${event.target.value}`);
                   }}
                 />
-              </label>
-              <span>to</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="budgeting-summary grid-4">
+          <div className="glass-card kpi-card">
+            <div className="kpi-card__label">Period Budget</div>
+            <div className="budgeting-baseline">
+              <span>$</span>
               <input
-                className="input input--sm"
-                type="date"
-                value={customEndDate}
-                onChange={(event) => {
-                  setCustomEndDate(event.target.value);
-                  hydratePeriodBudget(`custom:${customStartDate}:${event.target.value}`);
-                }}
+                className="input"
+                type="number"
+                min="0"
+                step="50"
+                value={globalBudgetInput}
+                onChange={handleGlobalBudgetChange}
+                placeholder={autoGlobalBudget ? String(Math.round(autoGlobalBudget)) : '0'}
+                aria-label="Budget for selected period"
               />
+              <button
+                className="btn btn--ghost btn--icon btn--sm"
+                type="button"
+                onClick={resetGlobalBudget}
+                aria-label="Use automatic budget"
+              >
+                <RotateCcw size={14} />
+              </button>
             </div>
-          )}
-        </div>
-      </div>
-
-      <div className="budgeting-summary grid-4">
-        <div className="glass-card kpi-card">
-          <div className="kpi-card__label">Period Budget</div>
-          <div className="budgeting-baseline">
-            <span>$</span>
-            <input
-              className="input"
-              type="number"
-              min="0"
-              step="50"
-              value={globalBudgetInput}
-              onChange={handleGlobalBudgetChange}
-              placeholder={autoGlobalBudget ? String(Math.round(autoGlobalBudget)) : '0'}
-              aria-label="Budget for selected period"
-            />
-            <button className="btn btn--ghost btn--icon btn--sm" type="button" onClick={resetGlobalBudget} aria-label="Use automatic budget">
-              <RotateCcw size={14} />
-            </button>
-          </div>
-          <div className="kpi-card__detail">{dreamBudget.globalBudget > 0 && !globalBudgetInput ? `Saved budget - ${period.label}` : period.label}</div>
-        </div>
-        <div className="glass-card kpi-card">
-          <div className="kpi-card__label">Actual Spending</div>
-          <div className="kpi-card__value">{formatCurrency(cashFlow.expenses)}</div>
-          <div className="kpi-card__detail">{formatPercentValue(actualSpendPercent)} of period budget</div>
-        </div>
-        <div className="glass-card kpi-card">
-          <div className="kpi-card__label">Remaining</div>
-          <div className={`kpi-card__value ${budgetRemaining >= 0 ? 'amount--positive' : 'amount--negative'}`}>
-            {formatCurrency(budgetRemaining, true)}
-          </div>
-          <div className="kpi-card__detail">{budgetRemaining >= 0 ? 'under budget' : 'over budget'}</div>
-        </div>
-        <div className="glass-card kpi-card">
-          <div className="kpi-card__label">Income</div>
-          <div className="kpi-card__value amount--positive">{formatCurrency(cashFlow.income)}</div>
-          <div className="kpi-card__detail">
-            {cashFlow.income > cashFlow.expenses
-              ? `${formatCurrency(unspentIncome)} unspent`
-              : overspentAmount > 0
-                ? `${formatCurrency(overspentAmount)} beyond income`
-                : 'matches spending'}
-          </div>
-        </div>
-      </div>
-
-      <div className="budgeting-grid">
-        <section className="glass-card budgeting-allocation-panel">
-          <div className="budgeting-section-heading">
-            <div>
-              <h2>Income Allocation</h2>
-              <p>How this period's inflow was spent, with unspent income shown when available.</p>
+            <div className="kpi-card__detail">
+              {dreamBudget.globalBudget > 0 && !globalBudgetInput
+                ? `Saved budget - ${period.label}`
+                : period.label}
             </div>
-            <button className="btn btn--secondary btn--sm" type="button" onClick={openSavePeriodBudget}>
-              <Wand2 size={14} />
-              Save Budget from This Period
-            </button>
           </div>
+          <div className="glass-card kpi-card">
+            <div className="kpi-card__label">Actual Spending</div>
+            <div className="kpi-card__value">{formatCurrency(cashFlow.expenses)}</div>
+            <div className="kpi-card__detail">
+              {formatPercentValue(actualSpendPercent)} of period budget
+            </div>
+          </div>
+          <div className="glass-card kpi-card">
+            <div className="kpi-card__label">Remaining</div>
+            <div
+              className={`kpi-card__value ${budgetRemaining >= 0 ? 'amount--positive' : 'amount--negative'}`}
+            >
+              {formatCurrency(budgetRemaining, true)}
+            </div>
+            <div className="kpi-card__detail">
+              {budgetRemaining >= 0 ? 'under budget' : 'over budget'}
+            </div>
+          </div>
+          <div className="glass-card kpi-card">
+            <div className="kpi-card__label">Income</div>
+            <div className="kpi-card__value amount--positive">
+              {formatCurrency(cashFlow.income)}
+            </div>
+            <div className="kpi-card__detail">
+              {cashFlow.income > cashFlow.expenses
+                ? `${formatCurrency(unspentIncome)} unspent`
+                : overspentAmount > 0
+                  ? `${formatCurrency(overspentAmount)} beyond income`
+                  : 'matches spending'}
+            </div>
+          </div>
+        </div>
 
-          <div className="budgeting-allocation">
-            <div className="budgeting-chart">
-              {allocationData.length > 0 ? (
-                <>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={allocationData}
-                        dataKey="value"
-                        nameKey="name"
-                        innerRadius="62%"
-                        outerRadius="86%"
-                        paddingAngle={2}
-                      >
-                        {allocationData.map(item => (
-                          <Cell key={item.name} fill={item.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip content={<BudgetTooltip />} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div className="budgeting-chart__center">
-                    <span>{cashFlow.income > 0 ? 'Income' : 'Spent'}</span>
-                    <strong>{formatCurrency(cashFlow.income > 0 ? Math.max(cashFlow.income, cashFlow.expenses) : cashFlow.expenses)}</strong>
+        <div className="budgeting-grid">
+          <section className="glass-card budgeting-allocation-panel">
+            <div className="budgeting-section-heading">
+              <div>
+                <h2>Income Allocation</h2>
+                <p>How this period's inflow was spent, with unspent income shown when available.</p>
+              </div>
+              <button
+                className="btn btn--secondary btn--sm"
+                type="button"
+                onClick={openSavePeriodBudget}
+              >
+                <Wand2 size={14} />
+                Save Budget from This Period
+              </button>
+            </div>
+
+            <div className="budgeting-allocation">
+              <div className="budgeting-chart">
+                {allocationData.length > 0 ? (
+                  <>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={allocationData}
+                          dataKey="value"
+                          nameKey="name"
+                          innerRadius="62%"
+                          outerRadius="86%"
+                          paddingAngle={2}
+                        >
+                          {allocationData.map((item) => (
+                            <Cell key={item.name} fill={item.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip content={<BudgetTooltip />} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="budgeting-chart__center">
+                      <span>{cashFlow.income > 0 ? 'Income' : 'Spent'}</span>
+                      <strong>
+                        {formatCurrency(
+                          cashFlow.income > 0
+                            ? Math.max(cashFlow.income, cashFlow.expenses)
+                            : cashFlow.expenses,
+                        )}
+                      </strong>
+                    </div>
+                  </>
+                ) : (
+                  <div className="empty-state-simple">No spending or income for this period.</div>
+                )}
+              </div>
+
+              <div className="budgeting-legend">
+                {allocationData.map((item) => (
+                  <div key={item.name} className="budgeting-legend__row">
+                    <span className="budgeting-legend__dot" style={{ background: item.color }} />
+                    <span>{item.name}</span>
+                    <strong>
+                      {formatPercentValue(
+                        allocationTotal > 0 ? (item.value / allocationTotal) * 100 : 0,
+                      )}
+                    </strong>
                   </div>
-                </>
-              ) : (
-                <div className="empty-state-simple">No spending or income for this period.</div>
-              )}
+                ))}
+
+                {overspentAmount > 0 && (
+                  <div className="budgeting-overflow-card">
+                    <div className="budgeting-overflow-card__header">
+                      <span>Income coverage</span>
+                      <strong>{formatCurrency(overspentAmount)} over</strong>
+                    </div>
+                    <div
+                      className="budgeting-overflow-bar"
+                      aria-label="Income coverage compared to overspent amount"
+                    >
+                      <span
+                        className="budgeting-overflow-bar__income"
+                        style={{ width: `${incomeCoveragePercent}%` }}
+                      />
+                      <span
+                        className="budgeting-overflow-bar__over"
+                        style={{ width: `${overspentPercent}%` }}
+                      />
+                    </div>
+                    <div className="budgeting-overflow-card__legend">
+                      <span>
+                        Covered by income:{' '}
+                        {formatCurrency(Math.min(cashFlow.income, cashFlow.expenses))}
+                      </span>
+                      <span>Beyond income: {formatCurrency(overspentAmount)}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+
+          <section className="glass-card budgeting-allocator">
+            <div className="budgeting-section-heading">
+              <div>
+                <h2>{isMonthlyPeriod ? 'Monthly Category Targets' : 'Category Breakdown'}</h2>
+                <p>
+                  {hasDreamTargets
+                    ? 'Comparing this period against the applied saved budget.'
+                    : isMonthlyPeriod
+                      ? 'Adjust target percentages for each expense category.'
+                      : 'Category targets are editable in monthly views.'}
+                </p>
+              </div>
+              <div
+                className={`budgeting-target-total ${targetTotalPercent > 100 ? 'budgeting-target-total--over' : ''}`}
+              >
+                <Target size={16} />
+                <span>
+                  {hasDreamTargets
+                    ? `${formatPercentValue(dreamTargetTotalPercent)} saved`
+                    : isMonthlyPeriod
+                      ? `${formatPercentValue(targetTotalPercent)} assigned`
+                      : 'read-only'}
+                </span>
+              </div>
             </div>
 
-            <div className="budgeting-legend">
-              {allocationData.map(item => (
-                <div key={item.name} className="budgeting-legend__row">
-                  <span className="budgeting-legend__dot" style={{ background: item.color }} />
-                  <span>{item.name}</span>
-                  <strong>{formatPercentValue(allocationTotal > 0 ? (item.value / allocationTotal) * 100 : 0)}</strong>
-                </div>
-              ))}
-
-              {overspentAmount > 0 && (
-                <div className="budgeting-overflow-card">
-                  <div className="budgeting-overflow-card__header">
-                    <span>Income coverage</span>
-                    <strong>{formatCurrency(overspentAmount)} over</strong>
-                  </div>
-                  <div className="budgeting-overflow-bar" aria-label="Income coverage compared to overspent amount">
+            <div className="budgeting-table">
+              <div className="budgeting-table__head">
+                <span>Category</span>
+                <span>Target</span>
+                <span>Actual</span>
+                <span>Gap</span>
+                <span>Status</span>
+              </div>
+              {rows.map((row) => (
+                <div className="budgeting-row" key={row.category.id}>
+                  <div className="budgeting-category">
                     <span
-                      className="budgeting-overflow-bar__income"
-                      style={{ width: `${incomeCoveragePercent}%` }}
+                      className="budgeting-category__dot"
+                      style={{ backgroundColor: row.category.color || 'var(--cat-uncategorized)' }}
                     />
-                    <span
-                      className="budgeting-overflow-bar__over"
-                      style={{ width: `${overspentPercent}%` }}
-                    />
+                    <div>
+                      <strong>{row.category.name}</strong>
+                      <span>{formatCurrency(row.budgetAmount)} target</span>
+                    </div>
                   </div>
-                  <div className="budgeting-overflow-card__legend">
-                    <span>Covered by income: {formatCurrency(Math.min(cashFlow.income, cashFlow.expenses))}</span>
-                    <span>Beyond income: {formatCurrency(overspentAmount)}</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </section>
-
-        <section className="glass-card budgeting-allocator">
-          <div className="budgeting-section-heading">
-            <div>
-              <h2>{isMonthlyPeriod ? 'Monthly Category Targets' : 'Category Breakdown'}</h2>
-              <p>{hasDreamTargets ? 'Comparing this period against the applied saved budget.' : isMonthlyPeriod ? 'Adjust target percentages for each expense category.' : 'Category targets are editable in monthly views.'}</p>
-            </div>
-            <div className={`budgeting-target-total ${targetTotalPercent > 100 ? 'budgeting-target-total--over' : ''}`}>
-              <Target size={16} />
-              <span>{hasDreamTargets ? `${formatPercentValue(dreamTargetTotalPercent)} saved` : isMonthlyPeriod ? `${formatPercentValue(targetTotalPercent)} assigned` : 'read-only'}</span>
-            </div>
-          </div>
-
-          <div className="budgeting-table">
-            <div className="budgeting-table__head">
-              <span>Category</span>
-              <span>Target</span>
-              <span>Actual</span>
-              <span>Gap</span>
-              <span>Status</span>
-            </div>
-            {rows.map(row => (
-              <div className="budgeting-row" key={row.category.id}>
-                <div className="budgeting-category">
-                  <span className="budgeting-category__dot" style={{ backgroundColor: row.category.color || 'var(--cat-uncategorized)' }} />
-                  <div>
-                    <strong>{row.category.name}</strong>
-                    <span>{formatCurrency(row.budgetAmount)} target</span>
-                  </div>
-                </div>
-                <div className="budgeting-target-control">
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={Math.round(row.targetPercent)}
-                    disabled={hasDreamTargets || !isMonthlyPeriod || row.category.id === 'uncategorized' || globalBudget <= 0}
-                    onChange={(event) => handleTargetPercentChange(row.category.id, event.target.value)}
-                    aria-label={`${row.category.name} target percentage`}
-                  />
-                  <div className="budgeting-percent-input">
+                  <div className="budgeting-target-control">
                     <input
-                      className="input input--sm"
-                      type="number"
+                      type="range"
                       min="0"
                       max="100"
                       step="1"
                       value={Math.round(row.targetPercent)}
-                      disabled={hasDreamTargets || !isMonthlyPeriod || row.category.id === 'uncategorized' || globalBudget <= 0}
-                      onChange={(event) => handleTargetPercentChange(row.category.id, event.target.value)}
-                      aria-label={`${row.category.name} target percentage number`}
+                      disabled={
+                        hasDreamTargets ||
+                        !isMonthlyPeriod ||
+                        row.category.id === 'uncategorized' ||
+                        globalBudget <= 0
+                      }
+                      onChange={(event) =>
+                        handleTargetPercentChange(row.category.id, event.target.value)
+                      }
+                      aria-label={`${row.category.name} target percentage`}
                     />
-                    <span>%</span>
+                    <div className="budgeting-percent-input">
+                      <input
+                        className="input input--sm"
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={Math.round(row.targetPercent)}
+                        disabled={
+                          hasDreamTargets ||
+                          !isMonthlyPeriod ||
+                          row.category.id === 'uncategorized' ||
+                          globalBudget <= 0
+                        }
+                        onChange={(event) =>
+                          handleTargetPercentChange(row.category.id, event.target.value)
+                        }
+                        aria-label={`${row.category.name} target percentage number`}
+                      />
+                      <span>%</span>
+                    </div>
+                  </div>
+                  <div className="budgeting-actual">
+                    <strong>{formatCurrency(row.actual)}</strong>
+                    <span>{formatPercentValue(row.actualPercent)}</span>
+                  </div>
+                  <div
+                    className={
+                      row.variance > 0 ? 'amount amount--negative' : 'amount amount--positive'
+                    }
+                  >
+                    {row.budgetAmount > 0
+                      ? formatCurrency(Math.abs(row.variance))
+                      : formatCurrency(row.actual)}
+                  </div>
+                  <div>
+                    <span className={`budgeting-status budgeting-status--${row.status}`}>
+                      {row.status === 'aligned' ? (
+                        <CheckCircle2 size={14} />
+                      ) : (
+                        <CircleAlert size={14} />
+                      )}
+                      {savingCategoryId === row.category.id ? 'Saving' : row.status}
+                    </span>
                   </div>
                 </div>
-                <div className="budgeting-actual">
-                  <strong>{formatCurrency(row.actual)}</strong>
-                  <span>{formatPercentValue(row.actualPercent)}</span>
+              ))}
+              {rows.length === 0 && (
+                <div className="empty-state-simple">
+                  No expense categories or transactions for this month.
                 </div>
-                <div className={row.variance > 0 ? 'amount amount--negative' : 'amount amount--positive'}>
-                  {row.budgetAmount > 0 ? formatCurrency(Math.abs(row.variance)) : formatCurrency(row.actual)}
-                </div>
-                <div>
-                  <span className={`budgeting-status budgeting-status--${row.status}`}>
-                    {row.status === 'aligned' ? <CheckCircle2 size={14} /> : <CircleAlert size={14} />}
-                    {savingCategoryId === row.category.id ? 'Saving' : row.status}
-                  </span>
-                </div>
+              )}
+            </div>
+          </section>
+
+          <aside className="budgeting-insights">
+            <section className="glass-card budgeting-card">
+              <div className="budgeting-card__icon budgeting-card__icon--green">
+                <PiggyBank size={18} />
               </div>
-            ))}
-            {rows.length === 0 && (
-              <div className="empty-state-simple">No expense categories or transactions for this month.</div>
-            )}
-          </div>
-        </section>
+              <h2>Alignment</h2>
+              <p>
+                You have {formatCurrency(Math.max(0, budgetRemaining))} left against the current
+                period budget.
+              </p>
+              <div className="budgeting-meter">
+                <span style={{ width: `${Math.min(100, actualSpendPercent)}%` }} />
+              </div>
+            </section>
 
-        <aside className="budgeting-insights">
-          <section className="glass-card budgeting-card">
-            <div className="budgeting-card__icon budgeting-card__icon--green">
-              <PiggyBank size={18} />
-            </div>
-            <h2>Alignment</h2>
-            <p>
-              You have {formatCurrency(Math.max(0, budgetRemaining))} left against the current period budget.
-            </p>
-            <div className="budgeting-meter">
-              <span style={{ width: `${Math.min(100, actualSpendPercent)}%` }} />
-            </div>
-          </section>
+            <section className="glass-card budgeting-card">
+              <h2>Over Target</h2>
+              <div className="budgeting-insight-list">
+                {overRows.slice(0, 5).map((row) => (
+                  <div className="budgeting-insight-row" key={row.category.id}>
+                    <span>{row.category.name}</span>
+                    <strong>
+                      {formatPercentValue(
+                        row.budgetAmount > 0
+                          ? (row.variance / row.budgetAmount) * 100
+                          : row.actualPercent,
+                      )}{' '}
+                      over
+                    </strong>
+                  </div>
+                ))}
+                {overRows.length === 0 && (
+                  <p className="budgeting-muted">No categories are over their target.</p>
+                )}
+              </div>
+            </section>
 
-          <section className="glass-card budgeting-card">
-            <h2>Over Target</h2>
-            <div className="budgeting-insight-list">
-              {overRows.slice(0, 5).map(row => (
-                <div className="budgeting-insight-row" key={row.category.id}>
-                  <span>{row.category.name}</span>
-                  <strong>{formatPercentValue(row.budgetAmount > 0 ? (row.variance / row.budgetAmount) * 100 : row.actualPercent)} over</strong>
-                </div>
-              ))}
-              {overRows.length === 0 && <p className="budgeting-muted">No categories are over their target.</p>}
-            </div>
-          </section>
-
-          <section className="glass-card budgeting-card">
-            <h2>Unplanned Spend</h2>
-            <div className="budgeting-insight-list">
-              {unplannedRows.slice(0, 5).map(row => (
-                <div className="budgeting-insight-row" key={row.category.id}>
-                  <span>{row.category.name}</span>
-                  <strong>{formatCurrency(row.actual)}</strong>
-                </div>
-              ))}
-              {unplannedRows.length === 0 && <p className="budgeting-muted">Every spending category has a target.</p>}
-            </div>
-          </section>
-        </aside>
-      </div>
+            <section className="glass-card budgeting-card">
+              <h2>Unplanned Spend</h2>
+              <div className="budgeting-insight-list">
+                {unplannedRows.slice(0, 5).map((row) => (
+                  <div className="budgeting-insight-row" key={row.category.id}>
+                    <span>{row.category.name}</span>
+                    <strong>{formatCurrency(row.actual)}</strong>
+                  </div>
+                ))}
+                {unplannedRows.length === 0 && (
+                  <p className="budgeting-muted">Every spending category has a target.</p>
+                )}
+              </div>
+            </section>
+          </aside>
+        </div>
       </div>
 
       <Modal
@@ -789,20 +978,33 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
         onClose={() => setIsDesigningBudget(false)}
         title="Design Budget"
         maxWidth="780px"
-        footer={(
+        footer={
           <>
-            <button className="btn btn--ghost" type="button" onClick={() => setIsDesigningBudget(false)}>
+            <button
+              className="btn btn--ghost"
+              type="button"
+              onClick={() => setIsDesigningBudget(false)}
+            >
               Cancel
             </button>
-            <button className="btn btn--secondary" type="button" onClick={() => setDraftTemplate(buildDreamFromDisplayedPeriod())}>
+            <button
+              className="btn btn--secondary"
+              type="button"
+              onClick={() => setDraftTemplate(buildDreamFromDisplayedPeriod())}
+            >
               <Wand2 size={15} />
               Use This Period
             </button>
-            <button className="btn btn--primary" type="button" onClick={saveDraftDreamBudget} disabled={draftDreamBudget.globalBudget <= 0}>
+            <button
+              className="btn btn--primary"
+              type="button"
+              onClick={saveDraftDreamBudget}
+              disabled={draftDreamBudget.globalBudget <= 0}
+            >
               Save and Apply Budget
             </button>
           </>
-        )}
+        }
       >
         <div className="budgeting-design-modal">
           <div className="budgeting-design-summary">
@@ -823,33 +1025,50 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
                 min="0"
                 step="0.01"
                 value={draftDreamBudget.globalBudget || ''}
-                onChange={(event) => setDraftDreamBudget(previous => ({
-                  ...previous,
-                  globalBudget: Math.max(0, Number(event.target.value) || 0),
-                  categoryPercents: budgetPercentages(draftAmounts, Math.max(0, Number(event.target.value) || 0))
-                }))}
+                onChange={(event) =>
+                  setDraftDreamBudget((previous) => ({
+                    ...previous,
+                    globalBudget: Math.max(0, Number(event.target.value) || 0),
+                    categoryPercents: budgetPercentages(
+                      draftAmounts,
+                      Math.max(0, Number(event.target.value) || 0),
+                    ),
+                  }))
+                }
                 placeholder={autoGlobalBudget ? String(Math.round(autoGlobalBudget)) : '0'}
               />
             </label>
             <div className="budgeting-design-total">
               <span>Planned monthly costs</span>
               <strong>{formatCurrency(draftTotal)}</strong>
-              <strong>{formatPercentValue(Object.values(draftDreamBudget.categoryPercents).reduce((sum, value) => sum + (Number(value) || 0), 0))}</strong>
+              <strong>
+                {formatPercentValue(
+                  Object.values(draftDreamBudget.categoryPercents).reduce(
+                    (sum, value) => sum + (Number(value) || 0),
+                    0,
+                  ),
+                )}
+              </strong>
             </div>
           </div>
 
-          <p className="budgeting-muted" role="status">{draftDreamBudget.globalBudget <= 0
-            ? 'Enter a monthly budget amount to calculate percentages and save. You can enter costs first.'
-            : draftTotal > draftDreamBudget.globalBudget
-              ? `Planned costs exceed your monthly budget by ${formatCurrency(draftTotal - draftDreamBudget.globalBudget)}.`
-              : `${formatCurrency(draftDreamBudget.globalBudget - draftTotal)} left to allocate.`}</p>
+          <p className="budgeting-muted" role="status">
+            {draftDreamBudget.globalBudget <= 0
+              ? 'Enter a monthly budget amount to calculate percentages and save. You can enter costs first.'
+              : draftTotal > draftDreamBudget.globalBudget
+                ? `Planned costs exceed your monthly budget by ${formatCurrency(draftTotal - draftDreamBudget.globalBudget)}.`
+                : `${formatCurrency(draftDreamBudget.globalBudget - draftTotal)} left to allocate.`}
+          </p>
           <div className="budgeting-design-list">
-            {expenseCategories.map(category => {
+            {expenseCategories.map((category) => {
               const value = Number(draftDreamBudget.categoryPercents[String(category.id)]) || 0;
               return (
                 <div className="budgeting-design-row" key={category.id}>
                   <div className="budgeting-category">
-                    <span className="budgeting-category__dot" style={{ backgroundColor: category.color || 'var(--cat-uncategorized)' }} />
+                    <span
+                      className="budgeting-category__dot"
+                      style={{ backgroundColor: category.color || 'var(--cat-uncategorized)' }}
+                    />
                     <div>
                       <strong>{category.name}</strong>
                       <span>{formatCurrency(draftAmounts[String(category.id)] || 0)} target</span>
@@ -857,15 +1076,26 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
                   </div>
                   <label className="budgeting-dollar-input">
                     <span>$</span>
-                    <input className="input input--sm" type="number" min="0" step="0.01"
+                    <input
+                      className="input input--sm"
+                      type="number"
+                      min="0"
+                      step="0.01"
                       value={draftAmounts[String(category.id)] || ''}
                       placeholder="0.00"
                       aria-label={`${category.name} monthly cost in dollars`}
-                      onChange={event => {
-                        const amounts = { ...draftAmounts, [String(category.id)]: Math.max(0, Number(event.target.value) || 0) };
+                      onChange={(event) => {
+                        const amounts = {
+                          ...draftAmounts,
+                          [String(category.id)]: Math.max(0, Number(event.target.value) || 0),
+                        };
                         setDraftAmounts(amounts);
-                        setDraftDreamBudget(previous => ({ ...previous, categoryPercents: budgetPercentages(amounts, previous.globalBudget) }));
-                      }} />
+                        setDraftDreamBudget((previous) => ({
+                          ...previous,
+                          categoryPercents: budgetPercentages(amounts, previous.globalBudget),
+                        }));
+                      }}
+                    />
                   </label>
                   <div className="budgeting-percent-input">
                     <input
@@ -874,7 +1104,9 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
                       min="0"
                       step="0.01"
                       value={Number(value.toFixed(2))}
-                      onChange={(event) => updateDraftCategoryPercent(category.id, event.target.value)}
+                      onChange={(event) =>
+                        updateDraftCategoryPercent(category.id, event.target.value)
+                      }
                       disabled={draftDreamBudget.globalBudget <= 0}
                       aria-label={`${category.name} budget percentage number`}
                     />
@@ -892,20 +1124,29 @@ function BudgetingEditor({ initialPlans, revision }: { initialPlans: BudgetPlans
         onClose={() => setIsSavingPeriodBudget(false)}
         title="Save Budget from This Period"
         maxWidth="520px"
-        footer={(
+        footer={
           <>
-            <button className="btn btn--ghost" type="button" onClick={() => setIsSavingPeriodBudget(false)}>
+            <button
+              className="btn btn--ghost"
+              type="button"
+              onClick={() => setIsSavingPeriodBudget(false)}
+            >
               Cancel
             </button>
-            <button className="btn btn--primary" type="button" onClick={saveBudgetFromDisplayedPeriod}>
+            <button
+              className="btn btn--primary"
+              type="button"
+              onClick={saveBudgetFromDisplayedPeriod}
+            >
               Save and Apply Budget
             </button>
           </>
-        )}
+        }
       >
         <div className="budgeting-save-period-modal">
           <p className="budgeting-muted">
-            This will save the current period's allocation as a monthly budget template and apply it immediately.
+            This will save the current period's allocation as a monthly budget template and apply it
+            immediately.
           </p>
           <label className="form-group">
             <span className="form-label">Budget name</span>

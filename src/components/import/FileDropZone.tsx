@@ -9,29 +9,38 @@ interface FileDropZoneProps {
   isParsing?: boolean;
 }
 
-export default function FileDropZone({ onFileSelected, onFilesSelected, isParsing }: FileDropZoneProps) {
+export default function FileDropZone({
+  onFileSelected,
+  onFilesSelected,
+  isParsing,
+}: FileDropZoneProps) {
   const [isDragging, setIsDragging] = useState(false);
   const isSupportedFile = (file: File) => /\.(csv|txt|pdf|html?)$/i.test(file.name);
 
-  const submitFiles = useCallback((files: File[]) => {
-    const supportedFiles = Array.from(files).filter(isSupportedFile);
-    if (supportedFiles.length === 0) {
-      alert('Please upload CSV, PDF, or HTML import files.');
-      return;
-    }
-    if (supportedFiles.length !== files.length) {
-      alert(`Skipped ${files.length - supportedFiles.length} unsupported file${files.length - supportedFiles.length === 1 ? '' : 's'}.`);
-    }
-    if (supportedFiles.length === 1 && onFileSelected) {
-      onFileSelected(supportedFiles[0]);
-      return;
-    }
-    if (onFilesSelected) {
-      onFilesSelected(supportedFiles);
-      return;
-    }
-    onFileSelected?.(supportedFiles[0]);
-  }, [onFileSelected, onFilesSelected]);
+  const submitFiles = useCallback(
+    (files: File[]) => {
+      const supportedFiles = Array.from(files).filter(isSupportedFile);
+      if (supportedFiles.length === 0) {
+        alert('Please upload CSV, PDF, or HTML import files.');
+        return;
+      }
+      if (supportedFiles.length !== files.length) {
+        alert(
+          `Skipped ${files.length - supportedFiles.length} unsupported file${files.length - supportedFiles.length === 1 ? '' : 's'}.`,
+        );
+      }
+      if (supportedFiles.length === 1 && onFileSelected) {
+        onFileSelected(supportedFiles[0]);
+        return;
+      }
+      if (onFilesSelected) {
+        onFilesSelected(supportedFiles);
+        return;
+      }
+      onFileSelected?.(supportedFiles[0]);
+    },
+    [onFileSelected, onFilesSelected],
+  );
 
   const handleDrag = useCallback((e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -52,16 +61,19 @@ export default function FileDropZone({ onFileSelected, onFilesSelected, isParsin
     setIsDragging(false);
   }, []);
 
-  const handleDrop = useCallback((e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragging(false);
+  const handleDrop = useCallback(
+    (e: DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsDragging(false);
 
-    const files = e.dataTransfer.files ? Array.from(e.dataTransfer.files) : [];
-    if (files.length > 0) {
-      submitFiles(files);
-    }
-  }, [submitFiles]);
+      const files = e.dataTransfer.files ? Array.from(e.dataTransfer.files) : [];
+      if (files.length > 0) {
+        submitFiles(files);
+      }
+    },
+    [submitFiles],
+  );
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {

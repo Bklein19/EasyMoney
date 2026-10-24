@@ -403,7 +403,9 @@
   color: inherit;
   text-align: left;
   cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
+  transition:
+    background var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .category-bar-button:hover,
@@ -458,7 +460,12 @@
   cursor: pointer;
   opacity: 0;
   transform: translateX(-4px);
-  transition: opacity var(--transition-fast), transform var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast);
+  transition:
+    opacity var(--transition-fast),
+    transform var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast),
+    background var(--transition-fast);
 }
 
 .category-bar-row:hover .category-bar-exclude,
@@ -591,11 +598,11 @@
   background: var(--bg-hover);
 }
 
-.merchant-item[draggable="true"] {
+.merchant-item[draggable='true'] {
   cursor: grab;
 }
 
-.merchant-item[draggable="true"]:active {
+.merchant-item[draggable='true']:active {
   cursor: grabbing;
 }
 

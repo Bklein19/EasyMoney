@@ -1,9 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import type {
-  SyncAccountCoverage,
-  SyncConnectorRunContext,
-} from '../connector.ts';
+import type { SyncAccountCoverage, SyncConnectorRunContext } from '../connector.ts';
 import type { SyncEvent } from '../protocol.ts';
 import type {
   SequoiaFundArtifactKind,
@@ -19,10 +16,7 @@ import {
   sequoiaFundConnector,
 } from './sequoiaFundConnector.ts';
 
-function account(
-  id: number,
-  overrides: Partial<SyncAccountCoverage> = {},
-): SyncAccountCoverage {
+function account(id: number, overrides: Partial<SyncAccountCoverage> = {}): SyncAccountCoverage {
   return {
     id,
     name: `Sequoia account ${id}`,
@@ -60,9 +54,7 @@ function artifact(
     fileName,
     path: `/tmp/${fileName}`,
     kind,
-    parserId: kind === 'activity'
-      ? 'sequoia-fund-activity-csv'
-      : 'sequoia-fund-statement-pdf',
+    parserId: kind === 'activity' ? 'sequoia-fund-activity-csv' : 'sequoia-fund-statement-pdf',
     accountToken,
     accountName: accountNameForToken(accountToken),
     status: 'downloaded',
@@ -80,8 +72,8 @@ function result(
   return {
     artifacts,
     accountCount: 1,
-    activityCount: artifacts.filter(item => item.kind === 'activity').length,
-    statementCount: artifacts.filter(item => item.kind === 'statement').length,
+    activityCount: artifacts.filter((item) => item.kind === 'activity').length,
+    statementCount: artifacts.filter((item) => item.kind === 'statement').length,
     ...overrides,
   };
 }
@@ -109,13 +101,18 @@ describe('Sequoia Fund connector targeting', () => {
       account(3, { institution: 'Different Institution' }),
     ];
 
-    expect(accounts.map(item => sequoiaFundConnector.matchesAccount(item))).toEqual([true, true, false]);
+    expect(accounts.map((item) => sequoiaFundConnector.matchesAccount(item))).toEqual([
+      true,
+      true,
+      false,
+    ]);
     expect(sequoiaFundConnector.listTargets({ today: '2026-08-24', accounts })).toEqual([
       { connectionId: 'account-1', label: 'Sequoia Fund (Example Owner)' },
       { connectionId: 'account-2', label: 'Sequoia Fund (Second fund)' },
     ]);
-    expect(sequoiaFundConnector.listTargets({ today: '2026-08-24', accounts: [accounts[2]!] }))
-      .toEqual([]);
+    expect(
+      sequoiaFundConnector.listTargets({ today: '2026-08-24', accounts: [accounts[2]!] }),
+    ).toEqual([]);
   });
 
   test('selects an exact local connection and permits only a single-account fallback', () => {
@@ -148,25 +145,24 @@ describe('Sequoia Fund connector execution', () => {
   test('selects the requested local account and routes every scoped artifact back to it', async () => {
     const calls: SequoiaFundSyncConfig[] = [];
     const events: Array<Omit<SyncEvent, 'runId' | 'timestamp'>> = [];
-    const connector = createSequoiaFundConnector(async (
-      config: SequoiaFundSyncConfig,
-      progress: SequoiaFundProgressReporter = () => {},
-    ) => {
-      calls.push(config);
-      progress({
-        phase: 'authentication',
-        state: 'waiting',
-        timestamp: '2026-08-24T00:00:00.000Z',
-        message: 'Waiting for authentication',
-        elapsedMs: 125,
-        data: { attempt: 1 },
-      });
-      return result([
-        artifact('last4-2222', 'first-scope.csv'),
-        artifact('last4-2222', 'second-scope.csv'),
-        artifact('last4-2222', 'statement.pdf', { kind: 'statement' }),
-      ]);
-    });
+    const connector = createSequoiaFundConnector(
+      async (config: SequoiaFundSyncConfig, progress: SequoiaFundProgressReporter = () => {}) => {
+        calls.push(config);
+        progress({
+          phase: 'authentication',
+          state: 'waiting',
+          timestamp: '2026-08-24T00:00:00.000Z',
+          message: 'Waiting for authentication',
+          elapsedMs: 125,
+          data: { attempt: 1 },
+        });
+        return result([
+          artifact('last4-2222', 'first-scope.csv'),
+          artifact('last4-2222', 'second-scope.csv'),
+          artifact('last4-2222', 'statement.pdf', { kind: 'statement' }),
+        ]);
+      },
+    );
     const accounts = [
       account(1, {
         name: 'First fund',
@@ -180,22 +176,22 @@ describe('Sequoia Fund connector execution', () => {
       }),
     ];
 
-    await expect(connector.run(runContext(
-      accounts,
-      event => events.push(event),
-      'account-2',
-    ))).resolves.toEqual([
+    await expect(
+      connector.run(runContext(accounts, (event) => events.push(event), 'account-2')),
+    ).resolves.toEqual([
       { fileName: 'first-scope.csv', routing: 'source' },
       { fileName: 'second-scope.csv', routing: 'source' },
       { fileName: 'statement.pdf', routing: 'source' },
     ]);
-    expect(calls).toEqual([{
-      outputDir: '/tmp/sequoia-connector-test',
-      from: '2026-06-24',
-      through: '2026-08-24',
-      accountToken: 'last4-2222',
-      session: 'sequoia-fund-account-2-catchup',
-    }]);
+    expect(calls).toEqual([
+      {
+        outputDir: '/tmp/sequoia-connector-test',
+        from: '2026-06-24',
+        through: '2026-08-24',
+        accountToken: 'last4-2222',
+        session: 'sequoia-fund-account-2-catchup',
+      },
+    ]);
     expect(events).toContainEqual({
       type: 'phase',
       message: 'Opening Sequoia Fund',
@@ -224,7 +220,7 @@ describe('Sequoia Fund connector execution', () => {
 
   test('runs the unambiguous fallback with the selected account canonical hash', async () => {
     const calls: SequoiaFundSyncConfig[] = [];
-    const connector = createSequoiaFundConnector(async config => {
+    const connector = createSequoiaFundConnector(async (config) => {
       calls.push(config);
       return result([artifact('key-90a2dadb275a', 'activity.csv')]);
     });
@@ -251,45 +247,47 @@ describe('Sequoia Fund connector execution', () => {
     await expect(connector.run(runContext([account(10)], undefined, 'account-20'))).rejects.toThrow(
       'Sequoia Fund connection is unavailable',
     );
-    await expect(connector.run(runContext([
-      account(10, { institution: 'Different Institution' }),
-    ]))).rejects.toThrow('Select exactly one Sequoia Fund account connection');
+    await expect(
+      connector.run(runContext([account(10, { institution: 'Different Institution' })])),
+    ).rejects.toThrow('Select exactly one Sequoia Fund account connection');
     expect(invocationCount).toBe(0);
   });
 
   test('rejects artifacts with a different canonical token or account name', async () => {
-    const wrongToken = createSequoiaFundConnector(async () => result([
-      artifact('last4-2222', 'activity.csv'),
-    ]));
-    await expect(wrongToken.run(runContext([account(10, { last4: '1111' })])))
-      .rejects.toThrow('Sequoia Fund returned an artifact for a different canonical account');
+    const wrongToken = createSequoiaFundConnector(async () =>
+      result([artifact('last4-2222', 'activity.csv')]),
+    );
+    await expect(wrongToken.run(runContext([account(10, { last4: '1111' })]))).rejects.toThrow(
+      'Sequoia Fund returned an artifact for a different canonical account',
+    );
 
-    const wrongName = createSequoiaFundConnector(async () => result([
-      artifact('last4-1111', 'activity.csv', { accountName: 'Wrong name' }),
-    ]));
-    await expect(wrongName.run(runContext([account(10, { last4: '1111' })])))
-      .rejects.toThrow('Sequoia Fund returned an artifact for a different canonical account');
+    const wrongName = createSequoiaFundConnector(async () =>
+      result([artifact('last4-1111', 'activity.csv', { accountName: 'Wrong name' })]),
+    );
+    await expect(wrongName.run(runContext([account(10, { last4: '1111' })]))).rejects.toThrow(
+      'Sequoia Fund returned an artifact for a different canonical account',
+    );
   });
 
   test('rejects duplicate filenames even when every artifact has the canonical identity', async () => {
-    const connector = createSequoiaFundConnector(async () => result([
-      artifact('last4-1111', 'duplicate.csv'),
-      artifact('last4-1111', 'duplicate.csv'),
-    ]));
+    const connector = createSequoiaFundConnector(async () =>
+      result([artifact('last4-1111', 'duplicate.csv'), artifact('last4-1111', 'duplicate.csv')]),
+    );
 
-    await expect(connector.run(runContext([account(10, { last4: '1111' })])))
-      .rejects.toThrow('Sequoia Fund returned a duplicate artifact filename');
+    await expect(connector.run(runContext([account(10, { last4: '1111' })]))).rejects.toThrow(
+      'Sequoia Fund returned a duplicate artifact filename',
+    );
   });
 
   test('rejects a low-level result that does not represent one canonical account', async () => {
     for (const invalidAccountCount of [0, 2]) {
-      const connector = createSequoiaFundConnector(async () => result(
-        [artifact('last4-1111', 'activity.csv')],
-        { accountCount: invalidAccountCount },
-      ));
+      const connector = createSequoiaFundConnector(async () =>
+        result([artifact('last4-1111', 'activity.csv')], { accountCount: invalidAccountCount }),
+      );
 
-      await expect(connector.run(runContext([account(10, { last4: '1111' })])))
-        .rejects.toThrow('Sequoia Fund returned an invalid account count');
+      await expect(connector.run(runContext([account(10, { last4: '1111' })]))).rejects.toThrow(
+        'Sequoia Fund returned an invalid account count',
+      );
     }
   });
 });

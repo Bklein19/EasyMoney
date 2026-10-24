@@ -11,5 +11,7 @@ export function calendarDate(value: string | undefined, allowShortYear = false):
   if (year < 1000 || year > 9999) return null;
   const result = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
   const date = new Date(`${result}T00:00:00Z`);
-  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === result ? result : null;
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === result
+    ? result
+    : null;
 }

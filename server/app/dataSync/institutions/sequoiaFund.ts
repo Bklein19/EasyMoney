@@ -6,9 +6,7 @@ import type { Page } from 'playwright';
 
 import { parseCsvRows } from '../../importParsers/csvRows.ts';
 import { sequoiaFundActivityParser } from '../../importParsers/sequoiaFundActivity.ts';
-import {
-  sequoiaFundSourceAccountName,
-} from '../../importParsers/sequoiaFundIdentity.ts';
+import { sequoiaFundSourceAccountName } from '../../importParsers/sequoiaFundIdentity.ts';
 import { sequoiaFundStatementParser } from '../../importParsers/sequoiaFundStatement.ts';
 import {
   assertAuthenticatedHttpResponse,
@@ -112,14 +110,7 @@ export type SequoiaFundActivityForm = {
 };
 
 export type SequoiaFundArtifactByteClass =
-  | 'empty'
-  | 'pdf'
-  | 'html'
-  | 'json'
-  | 'csv'
-  | 'tabular-text'
-  | 'utf16-or-binary'
-  | 'text';
+  'empty' | 'pdf' | 'html' | 'json' | 'csv' | 'tabular-text' | 'utf16-or-binary' | 'text';
 
 export type SequoiaFundApiRequest = {
   url: string;
@@ -158,8 +149,8 @@ export function safeSequoiaFundErrorMessage(
 ): string {
   let message = String(error instanceof Error ? error.message : error);
   const values = [...new Set(sensitiveValues)]
-    .map(value => value.trim())
-    .filter(value => value.length >= 4)
+    .map((value) => value.trim())
+    .filter((value) => value.length >= 4)
     .sort((left, right) => right.length - left.length);
   for (const value of values) message = message.split(value).join('<redacted-selection>');
   return message
@@ -169,8 +160,10 @@ export function safeSequoiaFundErrorMessage(
 }
 
 function isSequoiaFundOrigin(url: URL): boolean {
-  return url.protocol === 'https:' &&
-    (url.hostname === sequoiaFundHost || url.hostname.endsWith(`.${sequoiaFundHost}`));
+  return (
+    url.protocol === 'https:' &&
+    (url.hostname === sequoiaFundHost || url.hostname.endsWith(`.${sequoiaFundHost}`))
+  );
 }
 
 function validatedSequoiaFundUrl(value: string, base?: string): URL {
@@ -248,7 +241,8 @@ function stringsFromAccountFields(value: Record<string, unknown>): string[] {
 }
 
 export function parseSequoiaFundStatementList(value: unknown): SequoiaFundStatementList {
-  if (!value || typeof value !== 'object') throw new Error('Sequoia Fund statement list was not an object');
+  if (!value || typeof value !== 'object')
+    throw new Error('Sequoia Fund statement list was not an object');
   const root = value as { success?: unknown; data?: unknown };
   if (root.success === false || !root.data || typeof root.data !== 'object') {
     throw new Error('Sequoia Fund statement list reported failure');
@@ -350,7 +344,10 @@ export function classifySequoiaFundArtifactBytes(bytes: Uint8Array): SequoiaFund
   const sample = Buffer.from(bytes).subarray(0, Math.min(bytes.length, 4096));
   if (sample.subarray(0, 5).toString('ascii') === '%PDF-') return 'pdf';
   if (sample.includes(0)) return 'utf16-or-binary';
-  const text = sample.toString('utf8').replace(/^\uFEFF/, '').trimStart();
+  const text = sample
+    .toString('utf8')
+    .replace(/^\uFEFF/, '')
+    .trimStart();
   const lower = text.toLowerCase();
   if (/^(?:<!doctype\s+html|<html\b|<head\b|<body\b|<\?xml\b)/.test(lower)) return 'html';
   if (/^[{[]/.test(text)) return 'json';
@@ -360,22 +357,33 @@ export function classifySequoiaFundArtifactBytes(bytes: Uint8Array): SequoiaFund
 }
 
 function assertCsvResponse(response: AuthenticatedHttpResponse, body: Buffer): void {
-  if (response.status < 200 || response.status >= 300 ||
-    body.length < 32 || classifySequoiaFundArtifactBytes(body) !== 'csv' ||
-    !/(?:csv|text|excel|octet-stream)/.test(responseContentType(response))) {
+  if (
+    response.status < 200 ||
+    response.status >= 300 ||
+    body.length < 32 ||
+    classifySequoiaFundArtifactBytes(body) !== 'csv' ||
+    !/(?:csv|text|excel|octet-stream)/.test(responseContentType(response))
+  ) {
     throw new Error('Sequoia Fund activity response failed CSV validation');
   }
 }
 
 function assertPdfResponse(response: AuthenticatedHttpResponse, body: Buffer): void {
-  if (response.status < 200 || response.status >= 300 ||
-    body.length < 1_000 || body.subarray(0, 5).toString('ascii') !== '%PDF-' ||
-    !/(?:pdf|octet-stream)/.test(responseContentType(response))) {
+  if (
+    response.status < 200 ||
+    response.status >= 300 ||
+    body.length < 1_000 ||
+    body.subarray(0, 5).toString('ascii') !== '%PDF-' ||
+    !/(?:pdf|octet-stream)/.test(responseContentType(response))
+  ) {
     throw new Error('Sequoia Fund statement response failed PDF validation');
   }
 }
 
-async function executeRequest(page: Page, request: SequoiaFundApiRequest): Promise<AuthenticatedHttpResponse> {
+async function executeRequest(
+  page: Page,
+  request: SequoiaFundApiRequest,
+): Promise<AuthenticatedHttpResponse> {
   return runAuthenticatedHttpRequest(page, {
     url: request.url,
     method: request.method,
@@ -404,10 +412,12 @@ export async function validateSequoiaFundArtifact(
 ): Promise<Omit<SequoiaFundDownloadedArtifact, 'status' | 'statementDate'>> {
   const fileName = basename(path);
   const expectedExtension = kind === 'activity' ? '.csv' : '.pdf';
-  if (!fileName.endsWith(expectedExtension)) throw new Error('Sequoia Fund artifact extension is invalid');
+  if (!fileName.endsWith(expectedExtension))
+    throw new Error('Sequoia Fund artifact extension is invalid');
   const info = await stat(path);
   const minimum = kind === 'activity' ? 32 : 1_000;
-  if (!info.isFile() || info.size < minimum) throw new Error('Sequoia Fund artifact is empty or too small');
+  if (!info.isFile() || info.size < minimum)
+    throw new Error('Sequoia Fund artifact is empty or too small');
   const bytes = await readFile(path);
   if (kind === 'activity') {
     if (classifySequoiaFundArtifactBytes(bytes) !== 'csv') {
@@ -423,17 +433,22 @@ export async function validateSequoiaFundArtifact(
     throw new Error(`EasyMoney did not match the Sequoia Fund ${kind} parser`);
   }
   const parsed = await parser.parse(input);
-  const transactions = parsed.transactions.filter((transaction): transaction is NonNullable<typeof transaction> =>
-    transaction !== null);
+  const transactions = parsed.transactions.filter(
+    (transaction): transaction is NonNullable<typeof transaction> => transaction !== null,
+  );
   if (kind === 'statement' && parsed.balances.length === 0) {
     throw new Error('EasyMoney Sequoia Fund statement parser produced no balance');
   }
-  const claimedAccounts = new Set([
-    ...transactions.map(transaction => transaction.account),
-    ...parsed.balances.map(balance => balance.account),
-  ].filter((value): value is string => Boolean(value)));
-  if (claimedAccounts.size > 0 &&
-    (claimedAccounts.size !== 1 || !claimedAccounts.has(account.accountName))) {
+  const claimedAccounts = new Set(
+    [
+      ...transactions.map((transaction) => transaction.account),
+      ...parsed.balances.map((balance) => balance.account),
+    ].filter((value): value is string => Boolean(value)),
+  );
+  if (
+    claimedAccounts.size > 0 &&
+    (claimedAccounts.size !== 1 || !claimedAccounts.has(account.accountName))
+  ) {
     throw new Error('EasyMoney Sequoia Fund parser produced an ambiguous account identity');
   }
   return {
@@ -468,7 +483,9 @@ function createProgress(onProgress: SequoiaFundProgressReporter) {
       state,
       timestamp: new Date().toISOString(),
       message,
-      ...(state === 'complete' && began !== undefined ? { elapsedMs: Math.round(now - began) } : {}),
+      ...(state === 'complete' && began !== undefined
+        ? { elapsedMs: Math.round(now - began) }
+        : {}),
       ...(data ? { data } : {}),
     });
   };
@@ -483,8 +500,10 @@ type SequoiaFundActivityExportState = {
 function isSequoiaFundLoginResponseUrl(url: URL): boolean {
   if (!isSequoiaFundOrigin(url)) return true;
   const path = url.pathname.toLowerCase();
-  return path === `${sequoiaFundClientPath}/index`.toLowerCase() ||
-    /\/(?:login|authenticate|authentication|challenge|mfa)(?:\/|$)/.test(path);
+  return (
+    path === `${sequoiaFundClientPath}/index`.toLowerCase() ||
+    /\/(?:login|authenticate|authentication|challenge|mfa)(?:\/|$)/.test(path)
+  );
 }
 
 function acceptedHttpBody(
@@ -494,26 +513,21 @@ function acceptedHttpBody(
 ): Buffer {
   return assertAuthenticatedHttpResponse(response, {
     isLoginUrl: isSequoiaFundLoginResponseUrl,
-    status: status => status >= 200 && status < 300,
+    status: (status) => status >= 200 && status < 300,
     contentTypes,
     body: { minimumBytes },
   });
 }
 
-function acceptedResponseBody(
-  response: AuthenticatedHttpResponse,
-  minimumBytes = 1,
-): Buffer {
+function acceptedResponseBody(response: AuthenticatedHttpResponse, minimumBytes = 1): Buffer {
   return assertAuthenticatedHttpResponse(response, {
     isLoginUrl: isSequoiaFundLoginResponseUrl,
-    status: status => status >= 200 && status < 300,
+    status: (status) => status >= 200 && status < 300,
     body: { minimumBytes },
   });
 }
 
-export function parseSequoiaFundHistoryHttpResponse(
-  response: AuthenticatedHttpResponse,
-): number {
+export function parseSequoiaFundHistoryHttpResponse(response: AuthenticatedHttpResponse): number {
   const body = acceptedResponseBody(response);
   if (classifySequoiaFundArtifactBytes(body) !== 'json') {
     throw new Error('Sequoia Fund history response was not valid JSON');
@@ -594,10 +608,12 @@ async function fetchStatementList(
 ): Promise<SequoiaFundStatementList> {
   const request = sequoiaFundStatementListRequest(access);
   const response = await executeRequest(page, request);
-  const responseBody = acceptedHttpBody(
-    response,
-    ['application/json', 'text/json', 'text/plain', 'text/html'],
-  );
+  const responseBody = acceptedHttpBody(response, [
+    'application/json',
+    'text/json',
+    'text/plain',
+    'text/html',
+  ]);
   let body: unknown;
   try {
     body = JSON.parse(responseBody.toString('utf8')) as unknown;
@@ -630,7 +646,7 @@ async function existingArtifact(
   account: SequoiaFundCanonicalAccount,
 ): Promise<SequoiaFundDownloadedArtifact | null> {
   try {
-    return { ...await validateSequoiaFundArtifact(path, kind, account), status: 'existing' };
+    return { ...(await validateSequoiaFundArtifact(path, kind, account)), status: 'existing' };
   } catch {
     return null;
   }
@@ -650,7 +666,13 @@ async function downloadActivityArtifact(options: {
   const existing = await existingArtifact(path, 'activity', options.account);
   if (existing) return existing;
 
-  options.progress(options.key, 'activity-download', 'start', 'Downloading Sequoia Fund activity', options.data);
+  options.progress(
+    options.key,
+    'activity-download',
+    'start',
+    'Downloading Sequoia Fund activity',
+    options.data,
+  );
   try {
     const response = await executeRequest(
       options.page,
@@ -659,16 +681,28 @@ async function downloadActivityArtifact(options: {
     const bytes = response.body;
     assertCsvResponse(response, bytes);
     await writeFile(path, bytes);
-    options.progress(options.key, 'activity-download', 'complete', 'Downloaded Sequoia Fund activity', {
-      ...options.data,
-      byteClass: classifySequoiaFundArtifactBytes(bytes),
-      responseStatus: response.status,
-      responseContentType: responseContentType(response).split(';')[0]?.trim() || 'unknown',
-      responseBytes: bytes.length,
-    });
+    options.progress(
+      options.key,
+      'activity-download',
+      'complete',
+      'Downloaded Sequoia Fund activity',
+      {
+        ...options.data,
+        byteClass: classifySequoiaFundArtifactBytes(bytes),
+        responseStatus: response.status,
+        responseContentType: responseContentType(response).split(';')[0]?.trim() || 'unknown',
+        responseBytes: bytes.length,
+      },
+    );
 
     const validationKey = `${options.key}:validation`;
-    options.progress(validationKey, 'validation', 'start', 'Validating Sequoia Fund activity', options.data);
+    options.progress(
+      validationKey,
+      'validation',
+      'start',
+      'Validating Sequoia Fund activity',
+      options.data,
+    );
     const validated = await validateSequoiaFundArtifact(path, 'activity', options.account);
     options.progress(validationKey, 'validation', 'complete', 'Validated Sequoia Fund activity', {
       ...options.data,
@@ -697,25 +731,53 @@ async function downloadArtifact(options: {
 }): Promise<SequoiaFundDownloadedArtifact> {
   const path = resolve(options.outputDir, options.fileName);
   const existing = await existingArtifact(path, options.kind, options.account);
-  if (existing) return { ...existing, ...(options.statementDate ? { statementDate: options.statementDate } : {}) };
+  if (existing)
+    return {
+      ...existing,
+      ...(options.statementDate ? { statementDate: options.statementDate } : {}),
+    };
 
-  options.progress(options.key, options.phase, 'start', `Downloading Sequoia Fund ${options.kind}`, options.data);
+  options.progress(
+    options.key,
+    options.phase,
+    'start',
+    `Downloading Sequoia Fund ${options.kind}`,
+    options.data,
+  );
   const response = await executeRequest(options.page, options.request);
   const body = response.body;
   if (options.kind === 'activity') assertCsvResponse(response, body);
   else assertPdfResponse(response, body);
   await writeFile(path, body);
-  options.progress(options.key, options.phase, 'complete', `Downloaded Sequoia Fund ${options.kind}`, options.data);
+  options.progress(
+    options.key,
+    options.phase,
+    'complete',
+    `Downloaded Sequoia Fund ${options.kind}`,
+    options.data,
+  );
 
   const validationKey = `${options.key}:validation`;
-  options.progress(validationKey, 'validation', 'start', `Validating Sequoia Fund ${options.kind}`, options.data);
+  options.progress(
+    validationKey,
+    'validation',
+    'start',
+    `Validating Sequoia Fund ${options.kind}`,
+    options.data,
+  );
   try {
     const validated = await validateSequoiaFundArtifact(path, options.kind, options.account);
-    options.progress(validationKey, 'validation', 'complete', `Validated Sequoia Fund ${options.kind}`, {
-      ...options.data,
-      transactionCount: validated.transactionCount,
-      balanceCount: validated.balanceCount,
-    });
+    options.progress(
+      validationKey,
+      'validation',
+      'complete',
+      `Validated Sequoia Fund ${options.kind}`,
+      {
+        ...options.data,
+        transactionCount: validated.transactionCount,
+        balanceCount: validated.balanceCount,
+      },
+    );
     return {
       ...validated,
       status: 'downloaded',
@@ -770,16 +832,18 @@ async function syncAuthenticatedWithSensitiveValues(
     sensitiveValues,
   );
   const activityFileName = `sequoia-fund-account-${account.accountToken}-activity-${config.from}-to-${config.through}.csv`;
-  artifacts.push(await downloadActivityArtifact({
-    page,
-    outputDir: config.outputDir,
-    fileName: activityFileName,
-    account,
-    state: activityState,
-    progress,
-    key: 'activity:0',
-    data: { transactionCount: activityState.transactionCount },
-  }));
+  artifacts.push(
+    await downloadActivityArtifact({
+      page,
+      outputDir: config.outputDir,
+      fileName: activityFileName,
+      account,
+      state: activityState,
+      progress,
+      key: 'activity:0',
+      data: { transactionCount: activityState.transactionCount },
+    }),
+  );
 
   const statementAccess = await discoverStatementAccess(page, historyReferer);
   const statementList = await fetchStatementList(page, statementAccess);
@@ -798,19 +862,21 @@ async function syncAuthenticatedWithSensitiveValues(
 
   for (let index = 0; index < statementJobs.length; index += 1) {
     const job = statementJobs[index]!;
-    artifacts.push(await downloadArtifact({
-      page,
-      outputDir: config.outputDir,
-      fileName: job.fileName,
-      kind: 'statement',
-      account: job.account,
-      request: job.request,
-      progress,
-      key: `statement:${index}`,
-      phase: 'statement-download',
-      data: { artifactIndex: index + 1, artifactCount: statementJobs.length },
-      statementDate: job.document.statementDate,
-    }));
+    artifacts.push(
+      await downloadArtifact({
+        page,
+        outputDir: config.outputDir,
+        fileName: job.fileName,
+        kind: 'statement',
+        account: job.account,
+        request: job.request,
+        progress,
+        key: `statement:${index}`,
+        phase: 'statement-download',
+        data: { artifactIndex: index + 1, artifactCount: statementJobs.length },
+        statementDate: job.document.statementDate,
+      }),
+    );
   }
 
   return {
@@ -837,7 +903,10 @@ export async function isSequoiaFundAuthenticatedPage(page: Page): Promise<boolea
   }
 }
 
-export async function waitUntilSequoiaFundAuthenticated(page: Page, timeoutMs: number): Promise<void> {
+export async function waitUntilSequoiaFundAuthenticated(
+  page: Page,
+  timeoutMs: number,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (await isSequoiaFundAuthenticatedPage(page)) return;
@@ -891,29 +960,51 @@ export async function runSequoiaFundSync(
       completionDescription: 'Sequoia Fund downloads are complete.',
       isAuthenticated: isSequoiaFundAuthenticatedPage,
       waitUntilAuthenticated: waitUntilSequoiaFundAuthenticated,
-      onProgress: message => {
-        if (/^Authentication browser delivered: headed=(?:true|false) nativeWindow=(?:true|false) windowState=(?:normal|minimized|maximized|fullscreen) onScreen=(?:true|false) activation=(?:macos-requested|not-required)$/.test(message)) {
+      onProgress: (message) => {
+        if (
+          /^Authentication browser delivered: headed=(?:true|false) nativeWindow=(?:true|false) windowState=(?:normal|minimized|maximized|fullscreen) onScreen=(?:true|false) activation=(?:macos-requested|not-required)$/.test(
+            message,
+          )
+        ) {
           progress(authenticationKey, 'authentication', 'waiting', message);
         }
-        if (/waiting|authentication required|needs attention/i.test(message) && !authenticationWaiting) {
+        if (
+          /waiting|authentication required|needs attention/i.test(message) &&
+          !authenticationWaiting
+        ) {
           authenticationWaiting = true;
-          progress(authenticationKey, 'authentication', 'waiting', 'Waiting for Sequoia Fund authentication');
+          progress(
+            authenticationKey,
+            'authentication',
+            'waiting',
+            'Waiting for Sequoia Fund authentication',
+          );
         }
       },
       programBindings: {
         authenticationRequired: () => {
           if (authenticationWaiting) return;
           authenticationWaiting = true;
-          progress(authenticationKey, 'authentication', 'waiting', 'Waiting for Sequoia Fund authentication');
+          progress(
+            authenticationKey,
+            'authentication',
+            'waiting',
+            'Waiting for Sequoia Fund authentication',
+          );
         },
         isAuthenticated: isSequoiaFundAuthenticatedPage,
         safeErrorMessage: safeSequoiaFundErrorMessage,
-        syncAuthenticated: (page: Page) => syncAuthenticated(page, {
-          outputDir,
-          from: config.from,
-          through: config.through,
-          accountToken: config.accountToken,
-        }, progress),
+        syncAuthenticated: (page: Page) =>
+          syncAuthenticated(
+            page,
+            {
+              outputDir,
+              from: config.from,
+              through: config.through,
+              accountToken: config.accountToken,
+            },
+            progress,
+          ),
       },
     },
   );

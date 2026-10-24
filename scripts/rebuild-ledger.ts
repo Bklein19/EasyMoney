@@ -7,8 +7,10 @@ const ledger = buildLedgerFromSourceFacts(db);
 const result = materializeLedger(db, ledger);
 const durationMs = Date.now() - startedAt;
 
-console.log([
-  `Rebuilt ledger read model in ${durationMs}ms.`,
-  `Transactions: ${result.transactionCount}`,
-  `Balance snapshots: ${result.balanceSnapshotCount}`,
-].join('\n'));
+console.log(
+  [
+    `Rebuilt ledger read model in ${durationMs}ms.`,
+    `Transactions: ${result.transactionCount}`,
+    `Balance snapshots: ${result.balanceSnapshotCount}`,
+  ].join('\n'),
+);

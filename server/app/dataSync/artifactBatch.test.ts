@@ -18,8 +18,10 @@ describe('sync artifact batch', () => {
 
     const result = await importSyncArtifactBatch(
       [job('one.csv', 3), job('two.pdf', 4)],
-      event => events.push(event),
-      () => { rebuilds += 1; },
+      (event) => events.push(event),
+      () => {
+        rebuilds += 1;
+      },
     );
 
     expect(result).toEqual({
@@ -29,7 +31,7 @@ describe('sync artifact batch', () => {
       skippedArtifacts: 0,
     });
     expect(rebuilds).toBe(1);
-    expect(events.map(event => event.message)).toEqual([
+    expect(events.map((event) => event.message)).toEqual([
       'Importing one.csv',
       'Imported one.csv',
       'Importing two.pdf',
@@ -53,8 +55,10 @@ describe('sync artifact batch', () => {
 
     const result = await importSyncArtifactBatch(
       [duplicate],
-      event => events.push(event),
-      () => { rebuilds += 1; },
+      (event) => events.push(event),
+      () => {
+        rebuilds += 1;
+      },
     );
 
     expect(result.skippedArtifacts).toBe(1);
@@ -68,12 +72,21 @@ describe('sync artifact batch', () => {
       job('committed.csv', 3),
       {
         ...job('broken.pdf', 0),
-        import: async () => { throw new Error('parser failed'); },
+        import: async () => {
+          throw new Error('parser failed');
+        },
       },
     ];
 
-    await expect(importSyncArtifactBatch(jobs, () => {}, () => { rebuilds += 1; }))
-      .rejects.toThrow('parser failed');
+    await expect(
+      importSyncArtifactBatch(
+        jobs,
+        () => {},
+        () => {
+          rebuilds += 1;
+        },
+      ),
+    ).rejects.toThrow('parser failed');
     expect(rebuilds).toBe(1);
   });
 });

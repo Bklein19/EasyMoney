@@ -1,24 +1,38 @@
-import type { ParseResult, ParserMeta } from "./types.ts";
-import { cents, makeTx } from "./_helpers";
-import { getDocumentProxy, extractText } from "unpdf";
+import type { ParseResult, ParserMeta } from './types.ts';
+import { cents, makeTx } from './_helpers';
+import { getDocumentProxy, extractText } from 'unpdf';
 import { validateRecognizedRows } from '../statementValidation';
 
 export const meta: ParserMeta = {
-  id: "robinhood-statement-pdf",
-  institution: "Robinhood",
-  kind: "statement",
+  id: 'robinhood-statement-pdf',
+  institution: 'Robinhood',
+  kind: 'statement',
   priority: 50,
   matches: ({ filename, sample }) =>
     /^robinhood-\d+-\d{4}-\d{2}-\d{2}-statement\.pdf$/i.test(filename) ||
-    /\b(Individual Investing Account Statement|Consolidated IRA Statement)-?\.pdf$/i.test(filename) ||
+    /\b(Individual Investing Account Statement|Consolidated IRA Statement)-?\.pdf$/i.test(
+      filename,
+    ) ||
     (/\.pdf$/i.test(filename) &&
       /Robinhood/i.test(sample) &&
       /Account Summary/i.test(sample) &&
       /(Portfolio Value|Net Account Balance|Account #:)/i.test(sample)),
 };
 
-const ACTIVITY_ACTIONS = new Set(["ACATI", "ACH", "BTO", "DRFRO", "INT", "MTCH", "STC", "STO", "XENT_CC", "Buy", "Sell"]);
-const DEBIT_ACTIONS = new Set(["BTO", "Buy"]);
+const ACTIVITY_ACTIONS = new Set([
+  'ACATI',
+  'ACH',
+  'BTO',
+  'DRFRO',
+  'INT',
+  'MTCH',
+  'STC',
+  'STO',
+  'XENT_CC',
+  'Buy',
+  'Sell',
+]);
+const DEBIT_ACTIONS = new Set(['BTO', 'Buy']);
 const SKIP_LINES = [
   /^Page of\d+ \d+$/,
   /^Account Activity$/,
@@ -33,9 +47,9 @@ const SKIP_LINES = [
 ];
 
 function mmddyyyyToIso(value: string) {
-  const [month, day, year] = value.split("/").map(Number);
+  const [month, day, year] = value.split('/').map(Number);
   if (!month || !day || !year) throw new Error(`Invalid Robinhood statement date: ${value}`);
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
 
 function dateToIso(value: string) {
@@ -44,7 +58,7 @@ function dateToIso(value: string) {
 }
 
 function normalizeWhitespace(value: string) {
-  return value.replace(/\s+/g, " ").trim();
+  return value.replace(/\s+/g, ' ').trim();
 }
 
 interface RobinhoodAccountContext {
@@ -52,22 +66,23 @@ interface RobinhoodAccountContext {
   account_holder: string | null;
 }
 
-function accountFromLine(line: string, nextLine = ""): RobinhoodAccountContext | null {
+function accountFromLine(line: string, nextLine = ''): RobinhoodAccountContext | null {
   const account = line.match(/^([A-Za-z][A-Za-z ]*?)\s+Account #:\s*(\d+)/i);
   if (!account) return null;
   const label = normalizeWhitespace(account[1]!);
   const explicitAccountType = /^(traditional ira|roth ira)$/i.test(nextLine)
     ? normalizeWhitespace(nextLine)
-    : "";
+    : '';
   const normalizedLabel = (explicitAccountType || label).toLowerCase();
-  const accountTypeLabel = normalizedLabel.includes("traditional ira")
-    ? "Traditional IRA"
-    : normalizedLabel.includes("roth ira")
-      ? "Roth IRA"
-      : normalizedLabel.includes("ira")
+  const accountTypeLabel = normalizedLabel.includes('traditional ira')
+    ? 'Traditional IRA'
+    : normalizedLabel.includes('roth ira')
+      ? 'Roth IRA'
+      : normalizedLabel.includes('ira')
         ? label
-        : "Individual";
-  const account_holder = accountTypeLabel === "Individual" && !/^individual$/i.test(label) ? label : null;
+        : 'Individual';
+  const account_holder =
+    accountTypeLabel === 'Individual' && !/^individual$/i.test(label) ? label : null;
   return {
     account: `Robinhood ${accountTypeLabel} - ${account[2]!.slice(-4)}`,
     account_holder,
@@ -77,16 +92,18 @@ function accountFromLine(line: string, nextLine = ""): RobinhoodAccountContext |
 function firstAccountContext(text: string) {
   const lines = text.split(/\r?\n/).map(normalizeWhitespace);
   for (let index = 0; index < lines.length; index += 1) {
-    const account = accountFromLine(lines[index]!, lines[index + 1] || "");
+    const account = accountFromLine(lines[index]!, lines[index + 1] || '');
     if (account) return account;
   }
 
-  throw new Error("Could not find Robinhood account number");
+  throw new Error('Could not find Robinhood account number');
 }
 
 function statementPeriod(text: string) {
-  const period = text.match(/(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2})\s+to\s+(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2})/);
-  if (!period) throw new Error("Could not find Robinhood statement period");
+  const period = text.match(
+    /(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2})\s+to\s+(\d{1,2}\/\d{1,2}\/\d{4}|\d{4}-\d{2}-\d{2})/,
+  );
+  if (!period) throw new Error('Could not find Robinhood statement period');
   return {
     covered_from: dateToIso(period[1]!),
     covered_to: dateToIso(period[2]!),
@@ -95,7 +112,7 @@ function statementPeriod(text: string) {
 
 function closingPortfolioValue(text: string) {
   const summary = text.match(/Portfolio Value\s+\$[\d,]+\.\d{2}\s+(\$[\d,]+\.\d{2})/);
-  if (!summary) throw new Error("Could not find Robinhood closing portfolio value");
+  if (!summary) throw new Error('Could not find Robinhood closing portfolio value');
   return cents(summary[1]!);
 }
 
@@ -115,7 +132,7 @@ function splitDescriptionAndSymbol(left: string, pendingDescription: string | nu
   }
 
   const parts = normalized.split(/\s+/);
-  const last = parts.at(-1) || "";
+  const last = parts.at(-1) || '';
   if (/^[A-Z][A-Z0-9._-]{0,7}$/.test(last) && parts.length === 1) {
     return {
       description: pendingDescription || normalized,
@@ -125,7 +142,7 @@ function splitDescriptionAndSymbol(left: string, pendingDescription: string | nu
 
   if (/^[A-Z][A-Z0-9._-]{0,7}$/.test(last) && parts.length > 1) {
     return {
-      description: parts.slice(0, -1).join(" "),
+      description: parts.slice(0, -1).join(' '),
       symbol: last,
     };
   }
@@ -137,34 +154,39 @@ function splitDescriptionAndSymbol(left: string, pendingDescription: string | nu
 }
 
 function parseActivityLine(line: string, pendingDescription: string | null) {
-  const match = line.match(/^(?<left>.+?)\s+(?<accountType>Cash|CASH|Margin|MARGIN|Sweep|SWEEP)\s+(?<action>[A-Z_]+|Buy|Sell)\s+(?<date>\d{1,2}\/\d{1,2}\/\d{4})(?<rest>.*)$/);
+  const match = line.match(
+    /^(?<left>.+?)\s+(?<accountType>Cash|CASH|Margin|MARGIN|Sweep|SWEEP)\s+(?<action>[A-Z_]+|Buy|Sell)\s+(?<date>\d{1,2}\/\d{1,2}\/\d{4})(?<rest>.*)$/,
+  );
   if (!match?.groups) return null;
 
   const action = match.groups.action;
   if (!ACTIVITY_ACTIONS.has(action)) return null;
 
-  const moneyMatches = [...match.groups.rest.matchAll(/\$[\d,]+\.\d{2}/g)].map(item => item[0]);
+  const moneyMatches = [...match.groups.rest.matchAll(/\$[\d,]+\.\d{2}/g)].map((item) => item[0]);
   if (!moneyMatches.length) return null;
 
   const amount = cents(moneyMatches.at(-1)!);
   const signedAmount = DEBIT_ACTIONS.has(action) ? -Math.abs(amount) : Math.abs(amount);
   const { description, symbol } = splitDescriptionAndSymbol(match.groups.left, pendingDescription);
   const price = moneyMatches.length > 1 ? moneyMatches.at(-2) || null : null;
-  const quantity = match.groups.rest
-    .replace(/\$[\d,]+\.\d{2,5}/g, "")
-    .trim()
-    .split(/\s+/)
-    .find(token => /^-?\d+(?:\.\d+)?$/.test(token)) || null;
+  const quantity =
+    match.groups.rest
+      .replace(/\$[\d,]+\.\d{2,5}/g, '')
+      .trim()
+      .split(/\s+/)
+      .find((token) => /^-?\d+(?:\.\d+)?$/.test(token)) || null;
 
   return {
     date: mmddyyyyToIso(match.groups.date),
     amount_cents: signedAmount,
     description: `${action} ${description}`,
     raw: {
-      source: "robinhood-statement",
+      source: 'robinhood-statement',
       action,
       symbol,
-      accountType: normalizeWhitespace(match.groups.accountType).toLowerCase().replace(/^\w/, value => value.toUpperCase()),
+      accountType: normalizeWhitespace(match.groups.accountType)
+        .toLowerCase()
+        .replace(/^\w/, (value) => value.toUpperCase()),
       quantity,
       price,
     },
@@ -174,8 +196,11 @@ function parseActivityLine(line: string, pendingDescription: string | null) {
 export function parseRobinhoodStatementText(text: string): ParseResult {
   const fallbackAccount = firstAccountContext(text);
   const { covered_from, covered_to } = statementPeriod(text);
-  const transactions: ParseResult["transactions"] = [];
-  const balancesByAccount = new Map<string, { balance_cents: number; account_holder: string | null }>();
+  const transactions: ParseResult['transactions'] = [];
+  const balancesByAccount = new Map<
+    string,
+    { balance_cents: number; account_holder: string | null }
+  >();
   let currentAccount = fallbackAccount;
   let pendingDescription: string | null = null;
   const lines = text.split(/\r?\n/).map(normalizeWhitespace);
@@ -184,7 +209,7 @@ export function parseRobinhoodStatementText(text: string): ParseResult {
     const line = lines[index]!;
     if (!line) continue;
 
-    const account = accountFromLine(line, lines[index + 1] || "");
+    const account = accountFromLine(line, lines[index + 1] || '');
     if (account) {
       currentAccount = account;
       pendingDescription = null;
@@ -201,49 +226,72 @@ export function parseRobinhoodStatementText(text: string): ParseResult {
       continue;
     }
 
-    if (SKIP_LINES.some(pattern => pattern.test(line))) continue;
+    if (SKIP_LINES.some((pattern) => pattern.test(line))) continue;
 
     const activity = parseActivityLine(line, pendingDescription);
     if (activity) {
-      transactions.push(makeTx({
-        ...activity,
-        account: currentAccount.account,
-        institution: "Robinhood",
-        ...(currentAccount.account_holder ? { account_holder: currentAccount.account_holder } : {}),
-      }));
+      transactions.push(
+        makeTx({
+          ...activity,
+          account: currentAccount.account,
+          institution: 'Robinhood',
+          ...(currentAccount.account_holder
+            ? { account_holder: currentAccount.account_holder }
+            : {}),
+        }),
+      );
       pendingDescription = null;
       continue;
     }
 
-    if (!line.includes("$") && !/\b(Account Summary|Portfolio Allocation|Income and Expense Summary|Important Information)\b/.test(line)) {
+    if (
+      !line.includes('$') &&
+      !/\b(Account Summary|Portfolio Allocation|Income and Expense Summary|Important Information)\b/.test(
+        line,
+      )
+    ) {
       pendingDescription = line;
     }
   }
 
-  const candidate = new RegExp('\\b(?:Cash|Margin|Sweep)\\s+(?:' + [...ACTIVITY_ACTIONS].join('|') + ')\\s+\\d{1,2}/\\d{1,2}/\\d{4}\\b', 'i');
+  const candidate = new RegExp(
+    '\\b(?:Cash|Margin|Sweep)\\s+(?:' +
+      [...ACTIVITY_ACTIONS].join('|') +
+      ')\\s+\\d{1,2}/\\d{1,2}/\\d{4}\\b',
+    'i',
+  );
   // Share-only ACAT rows carry no cash amount and are intentionally not cash
   // transactions. Do not infer a market value from their share quantity.
-  const recognized = lines.filter(line => candidate.test(line) && !(/\bACATI\b/.test(line) && !/\$[\d,]+\.\d{2}/.test(line)));
-  const validation = { ...validateRecognizedRows(recognized.length, transactions.length), scope: 'document' };
+  const recognized = lines.filter(
+    (line) => candidate.test(line) && !(/\bACATI\b/.test(line) && !/\$[\d,]+\.\d{2}/.test(line)),
+  );
+  const validation = {
+    ...validateRecognizedRows(recognized.length, transactions.length),
+    scope: 'document',
+  };
   return {
     transactions,
     balances: balancesByAccount.size
       ? [...balancesByAccount.entries()].map(([account, balance]) => ({
           date: covered_to,
           account,
-          institution: "Robinhood",
+          institution: 'Robinhood',
           balance_cents: balance.balance_cents,
           raw: { statementValidation: validation },
           ...(balance.account_holder ? { account_holder: balance.account_holder } : {}),
         }))
-      : [{
-          date: covered_to,
-          account: fallbackAccount.account,
-          institution: "Robinhood",
-          raw: { statementValidation: validation },
-          balance_cents: closingPortfolioValue(text),
-          ...(fallbackAccount.account_holder ? { account_holder: fallbackAccount.account_holder } : {}),
-        }],
+      : [
+          {
+            date: covered_to,
+            account: fallbackAccount.account,
+            institution: 'Robinhood',
+            raw: { statementValidation: validation },
+            balance_cents: closingPortfolioValue(text),
+            ...(fallbackAccount.account_holder
+              ? { account_holder: fallbackAccount.account_holder }
+              : {}),
+          },
+        ],
     covered_from,
     covered_to,
   };
@@ -252,5 +300,5 @@ export function parseRobinhoodStatementText(text: string): ParseResult {
 export default async function parse(filePath: string): Promise<ParseResult> {
   const pdf = await getDocumentProxy(new Uint8Array(await Bun.file(filePath).arrayBuffer()));
   const { text } = await extractText(pdf);
-  return parseRobinhoodStatementText(text.join("\n"));
+  return parseRobinhoodStatementText(text.join('\n'));
 }

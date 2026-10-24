@@ -1,21 +1,24 @@
-import { basename } from "node:path";
-import type { ParseResult, ParserMeta } from "./types.ts";
-import { cents, makeTx } from "./_helpers";
+import { basename } from 'node:path';
+import type { ParseResult, ParserMeta } from './types.ts';
+import { cents, makeTx } from './_helpers';
 
 export const meta: ParserMeta = {
-  id: "bofa-activity-csv",
-  institution: "Bank of America",
-  kind: "activity-export",
+  id: 'bofa-activity-csv',
+  institution: 'Bank of America',
+  kind: 'activity-export',
   priority: 100,
   matches: ({ filename, sample }) =>
-    /^bofa-(checking|savings|deposit)-\d{4}-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv$/i.test(filename) ||
-    (sample.startsWith("Description,,Summary Amt.") && /Date,Description,Amount,Running Bal\./.test(sample)),
+    /^bofa-(checking|savings|deposit)-\d{4}-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}\.csv$/i.test(
+      filename,
+    ) ||
+    (sample.startsWith('Description,,Summary Amt.') &&
+      /Date,Description,Amount,Running Bal\./.test(sample)),
 };
 
 function parseCsv(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
-  let field = "";
+  let field = '';
   let quoted = false;
 
   for (let i = 0; i < text.length; i++) {
@@ -35,15 +38,15 @@ function parseCsv(text: string): string[][] {
     }
 
     if (ch === '"') quoted = true;
-    else if (ch === ",") {
+    else if (ch === ',') {
       row.push(field);
-      field = "";
-    } else if (ch === "\n") {
+      field = '';
+    } else if (ch === '\n') {
       row.push(field);
       rows.push(row);
       row = [];
-      field = "";
-    } else if (ch !== "\r") {
+      field = '';
+    } else if (ch !== '\r') {
       field += ch;
     }
   }
@@ -53,38 +56,41 @@ function parseCsv(text: string): string[][] {
     rows.push(row);
   }
 
-  return rows.filter((r) => r.some((v) => v.trim() !== ""));
+  return rows.filter((r) => r.some((v) => v.trim() !== ''));
 }
 
 function isoDate(value: string): string {
-  const [m, d, y] = value.split("/").map(Number);
+  const [m, d, y] = value.split('/').map(Number);
   if (!m || !d || !y) throw new Error(`Invalid BofA CSV date: ${value}`);
-  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
 function accountFromFilename(filePath: string): string {
   const filename = basename(filePath);
-  const withLast4 = filename.match(/^bofa-(checking|savings|deposit)-(\d{4})-\d{4}-\d{2}-\d{2}-to-/i);
+  const withLast4 = filename.match(
+    /^bofa-(checking|savings|deposit)-(\d{4})-\d{4}-\d{2}-\d{2}-to-/i,
+  );
   if (withLast4) {
     const kind = withLast4[1]!.toLowerCase();
-    return kind === "checking"
+    return kind === 'checking'
       ? `Adv Plus Banking - ${withLast4[2]}`
-      : kind === "savings"
+      : kind === 'savings'
         ? `Advantage Savings - ${withLast4[2]}`
         : `Bank of America Deposit - ${withLast4[2]}`;
   }
-  if (/^bofa-(checking|savings|deposit)-\d{4}-\d{2}-\d{2}-to-/i.test(filename)) return "Selected account";
+  if (/^bofa-(checking|savings|deposit)-\d{4}-\d{2}-\d{2}-to-/i.test(filename))
+    return 'Selected account';
   throw new Error(`Could not infer BofA account from filename: ${filename}`);
 }
 
 export default async function parse(filePath: string): Promise<ParseResult> {
   const rows = parseCsv(await Bun.file(filePath).text());
-  const headerIndex = rows.findIndex((row) => row[0] === "Date" && row[1] === "Description");
-  if (headerIndex === -1) throw new Error("Could not find BofA CSV transaction header");
+  const headerIndex = rows.findIndex((row) => row[0] === 'Date' && row[1] === 'Description');
+  if (headerIndex === -1) throw new Error('Could not find BofA CSV transaction header');
 
   const account = accountFromFilename(filePath);
-  const transactions: ParseResult["transactions"] = [];
-  const balances: ParseResult["balances"] = [];
+  const transactions: ParseResult['transactions'] = [];
+  const balances: ParseResult['balances'] = [];
 
   for (const row of rows.slice(headerIndex + 1)) {
     const [dateRaw, descriptionRaw, amountRaw, runningBalanceRaw] = row;
@@ -99,9 +105,9 @@ export default async function parse(filePath: string): Promise<ParseResult> {
           amount_cents: cents(amountRaw),
           description,
           account,
-          institution: "Bank of America",
-          raw: { source: "bofa-csv", runningBalance: runningBalanceRaw ?? "" },
-        })
+          institution: 'Bank of America',
+          raw: { source: 'bofa-csv', runningBalance: runningBalanceRaw ?? '' },
+        }),
       );
     }
 
@@ -109,7 +115,7 @@ export default async function parse(filePath: string): Promise<ParseResult> {
       balances.push({
         date,
         account,
-        institution: "Bank of America",
+        institution: 'Bank of America',
         balance_cents: cents(runningBalanceRaw),
       });
     }

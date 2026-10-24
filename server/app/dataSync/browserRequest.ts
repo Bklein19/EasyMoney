@@ -64,22 +64,29 @@ const compactCookieRequestMarkerHeader = 'x-easymoney-browser-request';
 
 function isBrowserOwnedRequestHeader(name: string): boolean {
   const normalized = name.toLowerCase();
-  return browserOwnedRequestHeaders.has(normalized) || normalized.startsWith('sec-fetch-') || normalized.startsWith(':');
+  return (
+    browserOwnedRequestHeaders.has(normalized) ||
+    normalized.startsWith('sec-fetch-') ||
+    normalized.startsWith(':')
+  );
 }
 
 export function safeBrowserRequestHeaders(headers: Record<string, string>): Record<string, string> {
-  return Object.fromEntries(Object.entries(headers).filter(([name]) => !isBrowserOwnedRequestHeader(name)));
+  return Object.fromEntries(
+    Object.entries(headers).filter(([name]) => !isBrowserOwnedRequestHeader(name)),
+  );
 }
 
 export function browserNativeHttpOnlyCookieHeader(cookies: readonly BrowserNativeCookie[]): string {
-  const eligible = cookies.filter(cookie => cookie.httpOnly);
-  if (eligible.length === 0) throw new Error('Browser-native authenticated session cookies are unavailable');
+  const eligible = cookies.filter((cookie) => cookie.httpOnly);
+  if (eligible.length === 0)
+    throw new Error('Browser-native authenticated session cookies are unavailable');
   for (const cookie of eligible) {
     if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(cookie.name) || /[;\r\n]/.test(cookie.value)) {
       throw new Error('Browser-native authenticated session cookie is invalid');
     }
   }
-  const header = eligible.map(cookie => `${cookie.name}=${cookie.value}`).join('; ');
+  const header = eligible.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ');
   if (Buffer.byteLength(header) > 3_500) {
     throw new Error('Browser-native authenticated session cookie header is too large');
   }
@@ -106,35 +113,50 @@ function validatedRequestOrigins(
   const applicationOrigin = new URL(crossOriginPolicy.applicationOrigin);
   const destinationOrigin = new URL(crossOriginPolicy.destinationOrigin);
   const institutionHostname = crossOriginPolicy.institutionHostname.toLowerCase();
-  const isLoopbackHostname = (hostname: string) => /^(?:127\.0\.0\.1|localhost|\[::1\])$/.test(hostname) ||
-    hostname.endsWith('.localhost');
-  const isSecureOrLoopback = (url: URL) => url.protocol === 'https:' ||
-    (url.protocol === 'http:' && isLoopbackHostname(url.hostname));
-  const isInstitutionHostname = (hostname: string) => (
-    hostname === institutionHostname || hostname.endsWith(`.${institutionHostname}`)
-  );
-  if ((!institutionHostname.includes('.') && institutionHostname !== 'localhost') ||
+  const isLoopbackHostname = (hostname: string) =>
+    /^(?:127\.0\.0\.1|localhost|\[::1\])$/.test(hostname) || hostname.endsWith('.localhost');
+  const isSecureOrLoopback = (url: URL) =>
+    url.protocol === 'https:' || (url.protocol === 'http:' && isLoopbackHostname(url.hostname));
+  const isInstitutionHostname = (hostname: string) =>
+    hostname === institutionHostname || hostname.endsWith(`.${institutionHostname}`);
+  if (
+    (!institutionHostname.includes('.') && institutionHostname !== 'localhost') ||
     applicationOrigin.origin !== crossOriginPolicy.applicationOrigin ||
     destinationOrigin.origin !== crossOriginPolicy.destinationOrigin ||
-    !isSecureOrLoopback(applicationOrigin) || !isSecureOrLoopback(destinationOrigin) ||
-    current.origin !== applicationOrigin.origin || url.origin !== destinationOrigin.origin ||
-    !isInstitutionHostname(applicationOrigin.hostname) || !isInstitutionHostname(destinationOrigin.hostname)) {
+    !isSecureOrLoopback(applicationOrigin) ||
+    !isSecureOrLoopback(destinationOrigin) ||
+    current.origin !== applicationOrigin.origin ||
+    url.origin !== destinationOrigin.origin ||
+    !isInstitutionHostname(applicationOrigin.hostname) ||
+    !isInstitutionHostname(destinationOrigin.hostname)
+  ) {
     throw new Error('Browser-native cross-origin policy does not approve this institution request');
   }
-  return { applicationOrigin: applicationOrigin.origin, destinationOrigin: destinationOrigin.origin };
+  return {
+    applicationOrigin: applicationOrigin.origin,
+    destinationOrigin: destinationOrigin.origin,
+  };
 }
 
 function validateBrowserNativeRequest(request: BrowserNativeRequest): void {
   if (!request.method.trim()) throw new Error('Browser-native request requires an HTTP method');
-  const bodyVariants = [request.bodyBase64, request.form, request.multipart]
-    .filter(value => value !== undefined).length;
+  const bodyVariants = [request.bodyBase64, request.form, request.multipart].filter(
+    (value) => value !== undefined,
+  ).length;
   if (bodyVariants > 1) throw new Error('Browser-native request has multiple request bodies');
-  if (request.timeoutMs !== undefined &&
-    (!Number.isSafeInteger(request.timeoutMs) || request.timeoutMs <= 0 || request.timeoutMs > 5 * 60_000)) {
+  if (
+    request.timeoutMs !== undefined &&
+    (!Number.isSafeInteger(request.timeoutMs) ||
+      request.timeoutMs <= 0 ||
+      request.timeoutMs > 5 * 60_000)
+  ) {
     throw new Error('Browser-native request timeout is invalid');
   }
-  if (request.cookiePolicy !== undefined &&
-    request.cookiePolicy !== 'browser' && request.cookiePolicy !== 'http-only') {
+  if (
+    request.cookiePolicy !== undefined &&
+    request.cookiePolicy !== 'browser' &&
+    request.cookiePolicy !== 'http-only'
+  ) {
     throw new Error('Browser-native request cookie policy is invalid');
   }
 }
@@ -145,9 +167,7 @@ async function runWithHttpOnlyBrowserCookies<T>(
   operation: (request: BrowserNativeRequest) => Promise<T>,
 ): Promise<T> {
   const targetUrl = new URL(request.url).toString();
-  const cookieHeader = browserNativeHttpOnlyCookieHeader(
-    await page.context().cookies(targetUrl),
-  );
+  const cookieHeader = browserNativeHttpOnlyCookieHeader(await page.context().cookies(targetUrl));
   const requestMarker = crypto.randomUUID();
   const markedRequest: BrowserNativeRequest = {
     ...request,
@@ -162,9 +182,11 @@ async function runWithHttpOnlyBrowserCookies<T>(
   const cdp: CDPSession = await page.context().newCDPSession(page);
 
   const handlePausedRequest = async (event: BrowserRequestPausedEvent): Promise<void> => {
-    const marker = Object.entries(event.request.headers)
-      .find(([name]) => name.toLowerCase() === compactCookieRequestMarkerHeader)?.[1];
-    const isTarget = marker === requestMarker &&
+    const marker = Object.entries(event.request.headers).find(
+      ([name]) => name.toLowerCase() === compactCookieRequestMarkerHeader,
+    )?.[1];
+    const isTarget =
+      marker === requestMarker &&
       new URL(event.request.url).toString() === targetUrl &&
       event.request.method.toUpperCase() === request.method.trim().toUpperCase();
     try {
@@ -174,16 +196,20 @@ async function runWithHttpOnlyBrowserCookies<T>(
       }
       intercepted = true;
       const headers = Object.entries(event.request.headers)
-        .filter(([name]) => !['cookie', compactCookieRequestMarkerHeader].includes(name.toLowerCase()))
+        .filter(
+          ([name]) => !['cookie', compactCookieRequestMarkerHeader].includes(name.toLowerCase()),
+        )
         .map(([name, value]) => ({ name, value: String(value) }));
       headers.push({ name: 'cookie', value: cookieHeader });
       await cdp.send('Fetch.continueRequest', { requestId: event.requestId, headers });
     } catch (error) {
       if (isTarget) interceptionError = error;
-      await cdp.send('Fetch.failRequest', {
-        requestId: event.requestId,
-        errorReason: 'Failed',
-      }).catch(() => {});
+      await cdp
+        .send('Fetch.failRequest', {
+          requestId: event.requestId,
+          errorReason: 'Failed',
+        })
+        .catch(() => {});
     }
   };
   const onPausedRequest = (event: BrowserRequestPausedEvent) => {
@@ -224,8 +250,11 @@ async function browserNativeFetchInPage(
   request: BrowserNativePageRequest,
 ): Promise<BrowserNativeResponse> {
   const target = new URL(request.url, location.href);
-  if ((target.protocol !== 'http:' && target.protocol !== 'https:') ||
-    location.origin !== request.applicationOrigin || target.origin !== request.destinationOrigin) {
+  if (
+    (target.protocol !== 'http:' && target.protocol !== 'https:') ||
+    location.origin !== request.applicationOrigin ||
+    target.origin !== request.destinationOrigin
+  ) {
     throw new Error('Browser-native request origin changed before execution');
   }
 
@@ -237,21 +266,26 @@ async function browserNativeFetchInPage(
       requestedReferrer = value;
       continue;
     }
-    if ([
-      'accept-encoding',
-      'connection',
-      'content-length',
-      'cookie',
-      'host',
-      'keep-alive',
-      'origin',
-      'proxy-connection',
-      'te',
-      'trailer',
-      'transfer-encoding',
-      'upgrade',
-      'user-agent',
-    ].includes(name) || name.startsWith('sec-fetch-') || name.startsWith(':')) continue;
+    if (
+      [
+        'accept-encoding',
+        'connection',
+        'content-length',
+        'cookie',
+        'host',
+        'keep-alive',
+        'origin',
+        'proxy-connection',
+        'te',
+        'trailer',
+        'transfer-encoding',
+        'upgrade',
+        'user-agent',
+      ].includes(name) ||
+      name.startsWith('sec-fetch-') ||
+      name.startsWith(':')
+    )
+      continue;
     headers.set(rawName, value);
   }
 
@@ -314,13 +348,12 @@ export async function runBrowserNativeRequest(
 ): Promise<BrowserNativeResponse> {
   validateBrowserNativeRequest(request);
   const origins = validatedRequestOrigins(request, page.url(), crossOriginPolicy);
-  const performRequest = (effectiveRequest: BrowserNativeRequest) => page.evaluate(
-    browserNativeFetchInPage,
-    { ...effectiveRequest, ...origins },
-  );
-  const response = request.cookiePolicy === 'http-only'
-    ? await runWithHttpOnlyBrowserCookies(page, request, performRequest)
-    : await performRequest(request);
+  const performRequest = (effectiveRequest: BrowserNativeRequest) =>
+    page.evaluate(browserNativeFetchInPage, { ...effectiveRequest, ...origins });
+  const response =
+    request.cookiePolicy === 'http-only'
+      ? await runWithHttpOnlyBrowserCookies(page, request, performRequest)
+      : await performRequest(request);
   return {
     ...response,
     url: new URL(response.url, request.url).toString(),
@@ -351,8 +384,9 @@ export async function runBrowserNativeRouteRequest(
     return {
       status: response.status(),
       url: responseUrl,
-      headers: Object.fromEntries(Object.entries(response.headers())
-        .map(([name, value]) => [name.toLowerCase(), value])),
+      headers: Object.fromEntries(
+        Object.entries(response.headers()).map(([name, value]) => [name.toLowerCase(), value]),
+      ),
       bodyBase64: body.toString('base64'),
       redirected: responseUrl !== new URL(request.url).toString(),
     };

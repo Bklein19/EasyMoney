@@ -14,7 +14,9 @@ export function readLegacyBudgetPlans(): BudgetPlans {
   // Invalid legacy JSON is left intact, with an error shown instead of silently losing plans.
   return {
     globalBudgets,
-    dreamBudget: JSON.parse(localStorage.getItem('easymoney:dream-budget') || '{"globalBudget":0,"categoryPercents":{}}'),
+    dreamBudget: JSON.parse(
+      localStorage.getItem('easymoney:dream-budget') || '{"globalBudget":0,"categoryPercents":{}}',
+    ),
     savedBudgets: JSON.parse(localStorage.getItem('easymoney:saved-budgets') || '[]'),
   };
 }
@@ -26,10 +28,16 @@ export function useLoadBudgetPlans() {
     let active = true;
     void (async () => {
       const current = await trpcClient.budgets.plans.query();
-      const result = current.revision ? current : await trpcClient.budgets.migratePlans.mutate(readLegacyBudgetPlans());
+      const result = current.revision
+        ? current
+        : await trpcClient.budgets.migratePlans.mutate(readLegacyBudgetPlans());
       if (active) setData(result);
-    })().catch(error => { if (active) setError(String(error.message || error)); });
-    return () => { active = false; };
+    })().catch((error) => {
+      if (active) setError(String(error.message || error));
+    });
+    return () => {
+      active = false;
+    };
   }, []);
   return { data, error };
 }
@@ -50,16 +58,19 @@ export function useSaveBudgetPlans(plans: BudgetPlans, initialRevision: number) 
     // Serialize writes so rapid edits cannot arrive at the server out of order.
     queue.current = queue.current.then(async () => {
       if (failed.current) return;
-      setPending(value => value + 1);
+      setPending((value) => value + 1);
       try {
-        const result = await trpcClient.budgets.savePlans.mutate({ plans: JSON.parse(serialized), revision: revision.current });
+        const result = await trpcClient.budgets.savePlans.mutate({
+          plans: JSON.parse(serialized),
+          revision: revision.current,
+        });
         revision.current = result.revision;
         saved.current = serialized;
       } catch (error) {
         failed.current = true;
         setError(error instanceof Error ? error.message : 'Unable to save budget plans.');
       } finally {
-        setPending(value => value - 1);
+        setPending((value) => value - 1);
       }
     });
   }, [serialized, attempt]);
@@ -70,9 +81,13 @@ export function useSaveBudgetPlans(plans: BudgetPlans, initialRevision: number) 
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [serialized]);
-  return { error, pending: pending > 0 || serialized !== saved.current, retry: () => {
-    failed.current = false;
-    setError('');
-    setAttempt(value => value + 1);
-  } };
+  return {
+    error,
+    pending: pending > 0 || serialized !== saved.current,
+    retry: () => {
+      failed.current = false;
+      setError('');
+      setAttempt((value) => value + 1);
+    },
+  };
 }

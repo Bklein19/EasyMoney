@@ -2,7 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import './PalettePage.css';
 import { usePalette } from '../../styles/palette';
 
-interface Token { name: string; value: string; group: string; effect: boolean }
+interface Token {
+  name: string;
+  value: string;
+  group: string;
+  effect: boolean;
+}
 
 export function paletteGroup(name: string): string {
   if (/^--(chart-|tooltip-|series-|account-series-|data-)/.test(name)) return 'Data visualization';
@@ -27,7 +32,11 @@ function tokenNames(): string[] {
     }
   };
   for (const sheet of Array.from(document.styleSheets)) {
-    try { visit(sheet.cssRules); } catch { /* Cross-origin font stylesheets are not readable. */ }
+    try {
+      visit(sheet.cssRules);
+    } catch {
+      /* Cross-origin font stylesheets are not readable. */
+    }
   }
   return [...names].sort();
 }
@@ -44,34 +53,87 @@ export default function PalettePage() {
       const root = getComputedStyle(document.documentElement);
       const chart = probe.current ? getComputedStyle(probe.current) : root;
       setTheme(media.matches ? 'Light' : 'Dark');
-      setTokens(tokenNames().flatMap(name => {
-        const group = paletteGroup(name);
-        const value = (group === 'Data visualization' ? chart : root).getPropertyValue(name).trim();
-        const effect = name.startsWith('--shadow-');
-        return value && (effect || CSS.supports('color', value)) ? [{ name, value, group, effect }] : [];
-      }));
+      setTokens(
+        tokenNames().flatMap((name) => {
+          const group = paletteGroup(name);
+          const value = (group === 'Data visualization' ? chart : root)
+            .getPropertyValue(name)
+            .trim();
+          const effect = name.startsWith('--shadow-');
+          return value && (effect || CSS.supports('color', value))
+            ? [{ name, value, group, effect }]
+            : [];
+        }),
+      );
     };
     refresh();
     media.addEventListener('change', refresh);
     const observer = new MutationObserver(refresh);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-palette'] });
-    return () => { media.removeEventListener('change', refresh); observer.disconnect(); };
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'style', 'data-theme', 'data-palette'],
+    });
+    return () => {
+      media.removeEventListener('change', refresh);
+      observer.disconnect();
+    };
   }, []);
-  const visible = tokens.filter(token => `${token.name} ${token.value} ${token.group}`.toLowerCase().includes(search.toLowerCase()));
-  const groups = [...new Set(visible.map(token => token.group))];
-  return <div className="palette-page">
-    <header><p className="palette-eyebrow">Developer tools</p><h1>Color palette</h1>
-      <p>{palette === 'banknote' ? 'Banknote' : 'Default'} palette · {theme} system appearance · {tokens.length} color and shadow tokens</p>
-    </header>
-    <div ref={probe} className="page-networth palette-probe" aria-hidden="true" />
-    <aside className="palette-note">UI roles and data visualization have independent palettes. These are live token values; saved category colors are user data and can differ. Chart aliases share a small base palette.</aside>
-    <input className="palette-search" type="search" aria-label="Filter palette tokens" placeholder="Find a token, color, or group…" value={search} onChange={event => setSearch(event.target.value)} />
-    {!visible.length && <p>No matching tokens.</p>}
-    {groups.map(group => <section key={group} aria-label={group}><h2>{group}</h2><div className="palette-grid">
-      {visible.filter(token => token.group === group).map(token => <article className="palette-card" key={token.name}>
-        <div className="palette-swatch-base"><div className="palette-swatch" style={token.effect ? { boxShadow: `var(${token.name})`, background: 'var(--bg-elevated)' } : { background: token.value }} /></div>
-        <div className="palette-token"><code>{token.name}</code><span>{token.value}</span></div>
-      </article>)}
-    </div></section>)}
-  </div>;
+  const visible = tokens.filter((token) =>
+    `${token.name} ${token.value} ${token.group}`.toLowerCase().includes(search.toLowerCase()),
+  );
+  const groups = [...new Set(visible.map((token) => token.group))];
+  return (
+    <div className="palette-page">
+      <header>
+        <p className="palette-eyebrow">Developer tools</p>
+        <h1>Color palette</h1>
+        <p>
+          {palette === 'banknote' ? 'Banknote' : 'Default'} palette · {theme} system appearance ·{' '}
+          {tokens.length} color and shadow tokens
+        </p>
+      </header>
+      <div ref={probe} className="page-networth palette-probe" aria-hidden="true" />
+      <aside className="palette-note">
+        UI roles and data visualization have independent palettes. These are live token values;
+        saved category colors are user data and can differ. Chart aliases share a small base
+        palette.
+      </aside>
+      <input
+        className="palette-search"
+        type="search"
+        aria-label="Filter palette tokens"
+        placeholder="Find a token, color, or group…"
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+      />
+      {!visible.length && <p>No matching tokens.</p>}
+      {groups.map((group) => (
+        <section key={group} aria-label={group}>
+          <h2>{group}</h2>
+          <div className="palette-grid">
+            {visible
+              .filter((token) => token.group === group)
+              .map((token) => (
+                <article className="palette-card" key={token.name}>
+                  <div className="palette-swatch-base">
+                    <div
+                      className="palette-swatch"
+                      style={
+                        token.effect
+                          ? { boxShadow: `var(${token.name})`, background: 'var(--bg-elevated)' }
+                          : { background: token.value }
+                      }
+                    />
+                  </div>
+                  <div className="palette-token">
+                    <code>{token.name}</code>
+                    <span>{token.value}</span>
+                  </div>
+                </article>
+              ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
 }

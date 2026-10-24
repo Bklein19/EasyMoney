@@ -17,9 +17,16 @@ test('income overlays aggregate cumulative, monthly, quarterly and yearly amount
 });
 
 test('many source categories remain bounded without dropping receipts', () => {
-  const overlay = incomeSourceSeries(Array.from({ length: 8 }, (_, i) => ({
-    account_id: 1, month: '2026-01', source: String(i), label: `Category ${i}`, amount_cents: (i + 1) * 100,
-  })), new Set([1]));
+  const overlay = incomeSourceSeries(
+    Array.from({ length: 8 }, (_, i) => ({
+      account_id: 1,
+      month: '2026-01',
+      source: String(i),
+      label: `Category ${i}`,
+      amount_cents: (i + 1) * 100,
+    })),
+    new Set([1]),
+  );
   expect(overlay.series).toHaveLength(6);
   expect(Object.values(overlay.at('2026-01', true)).reduce((a, b) => a + b, 0)).toBe(36);
 });

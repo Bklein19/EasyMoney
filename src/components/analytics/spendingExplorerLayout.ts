@@ -8,13 +8,17 @@ export interface SpendingSegment {
   familyId: string;
 }
 
-export function spendingSegments(root: SpendingNode, familyId = root.id, maxDepth = 3): SpendingSegment[] {
+export function spendingSegments(
+  root: SpendingNode,
+  familyId = root.id,
+  maxDepth = 3,
+): SpendingSegment[] {
   const segments: SpendingSegment[] = [];
   function visit(parent: SpendingNode, start: number, end: number, depth: number, family: string) {
     if (!parent.amountCents || depth >= maxDepth) return;
     let angle = start;
     for (const node of parent.children) {
-      const next = angle + (end - start) * node.amountCents / parent.amountCents;
+      const next = angle + ((end - start) * node.amountCents) / parent.amountCents;
       const nodeFamily = root.kind === 'root' && depth === 0 ? node.id : family;
       segments.push({ node, start: angle, end: next, depth, familyId: nodeFamily });
       // Long-tail groups are one honest segment until explicitly explored.
@@ -33,14 +37,15 @@ export function spendingArc(start: number, end: number, inner: number, outer: nu
   const from = start + gap;
   const to = end - gap;
   const mid = (from + to) / 2;
-  const point = (radius: number, angle: number) => `${240 + radius * Math.sin(angle)},${240 - radius * Math.cos(angle)}`;
+  const point = (radius: number, angle: number) =>
+    `${240 + radius * Math.sin(angle)},${240 - radius * Math.cos(angle)}`;
   return `M ${point(outer, from)} A ${outer},${outer} 0 0 1 ${point(outer, mid)} A ${outer},${outer} 0 0 1 ${point(outer, to)} L ${point(inner, to)} A ${inner},${inner} 0 0 0 ${point(inner, mid)} A ${inner},${inner} 0 0 0 ${point(inner, from)} Z`;
 }
 
 export function resolveSpendingPath(root: SpendingNode, ids: string[]): SpendingNode[] {
   const path = [root];
   for (const id of ids) {
-    const next = path[path.length - 1]!.children.find(node => node.id === id);
+    const next = path[path.length - 1]!.children.find((node) => node.id === id);
     if (!next) break;
     path.push(next);
   }

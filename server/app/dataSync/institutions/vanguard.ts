@@ -199,8 +199,10 @@ function isVanguardHost(hostname: string): boolean {
 function isVanguardLoginUrl(value: string): boolean {
   try {
     const url = new URL(value);
-    return /^(?:login|log[-_]?on)\.vanguard\.com$/i.test(url.hostname) ||
-      /\/(?:login|log[-_]?on|sign[-_]?in|authenticate|authorize)(?:\/|$)/i.test(url.pathname);
+    return (
+      /^(?:login|log[-_]?on)\.vanguard\.com$/i.test(url.hostname) ||
+      /\/(?:login|log[-_]?on|sign[-_]?in|authenticate|authorize)(?:\/|$)/i.test(url.pathname)
+    );
   } catch {
     return true;
   }
@@ -211,12 +213,12 @@ export function isVanguardAuthenticatedPath(pathname: string): boolean {
 }
 
 export async function isVanguardAuthenticatedPage(page: Page): Promise<boolean> {
-  const authenticationFields = await page.locator(AUTHENTICATION_FIELD_SELECTOR).count() > 0;
+  const authenticationFields = (await page.locator(AUTHENTICATION_FIELD_SELECTOR).count()) > 0;
   if (authenticationFields) return false;
   const url = new URL(page.url());
   if (isVanguardAuthenticatedPath(url.pathname)) return true;
   if (!isVanguardHost(url.hostname) || isVanguardLoginUrl(url.toString())) return false;
-  return await page.getByRole('link', { name: /^Log off$/i }).count() > 0;
+  return (await page.getByRole('link', { name: /^Log off$/i }).count()) > 0;
 }
 
 async function prepareVanguardInteractiveAuthentication(
@@ -239,7 +241,7 @@ async function prepareVanguardInteractiveAuthentication(
     // Cookie removal is authoritative; storage may be inaccessible during navigation.
   }
   await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
-  const hasAuthenticationFields = await page.locator(AUTHENTICATION_FIELD_SELECTOR).count() > 0;
+  const hasAuthenticationFields = (await page.locator(AUTHENTICATION_FIELD_SELECTOR).count()) > 0;
   if (!isVanguardLoginUrl(page.url()) && !hasAuthenticationFields) {
     throw new Error('Vanguard did not open a fresh sign-in page after authentication expired');
   }
@@ -257,22 +259,30 @@ export async function transitionVanguardToInteractiveAuthentication(
 }
 
 export async function waitUntilVanguardAuthenticated(page: Page, timeoutMs: number): Promise<void> {
-  await page.waitForFunction((authenticatedPathPattern: string) => {
-    const isVisible = (element: Element) => {
-      const style = getComputedStyle(element);
-      return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
-    };
-    const hasAuthenticationFields = Array.from(document.querySelectorAll(
-      'input[type="password"], input[autocomplete="username"]',
-    )).some(isVisible);
-    if (hasAuthenticationFields) return false;
-    if (new RegExp(authenticatedPathPattern, 'i').test(location.pathname)) return true;
-    if (!/(?:^|\.)vanguard\.com$/i.test(location.hostname)) return false;
-    if (/^(?:login|logon)\.vanguard\.com$/i.test(location.hostname)) return false;
-    return Array.from(document.querySelectorAll('a')).some(link =>
-      /^Log off$/i.test(link.textContent?.trim() ?? '') && isVisible(link),
-    );
-  }, AUTHENTICATED_PATH_PATTERN, { timeout: timeoutMs });
+  await page.waitForFunction(
+    (authenticatedPathPattern: string) => {
+      const isVisible = (element: Element) => {
+        const style = getComputedStyle(element);
+        return (
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          element.getClientRects().length > 0
+        );
+      };
+      const hasAuthenticationFields = Array.from(
+        document.querySelectorAll('input[type="password"], input[autocomplete="username"]'),
+      ).some(isVisible);
+      if (hasAuthenticationFields) return false;
+      if (new RegExp(authenticatedPathPattern, 'i').test(location.pathname)) return true;
+      if (!/(?:^|\.)vanguard\.com$/i.test(location.hostname)) return false;
+      if (/^(?:login|logon)\.vanguard\.com$/i.test(location.hostname)) return false;
+      return Array.from(document.querySelectorAll('a')).some(
+        (link) => /^Log off$/i.test(link.textContent?.trim() ?? '') && isVisible(link),
+      );
+    },
+    AUTHENTICATED_PATH_PATTERN,
+    { timeout: timeoutMs },
+  );
 }
 
 export function vanguardThroughDate(requestedThrough: string, value = new Date()): string {
@@ -305,9 +315,11 @@ function validateProfileLabel(value: string): void {
 
 function validateIsoDate(value: string): void {
   const parsed = new Date(`${value}T00:00:00Z`);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) ||
-      Number.isNaN(parsed.getTime()) ||
-      parsed.toISOString().slice(0, 10) !== value) {
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
+    Number.isNaN(parsed.getTime()) ||
+    parsed.toISOString().slice(0, 10) !== value
+  ) {
     throw new Error('Vanguard dates must use YYYY-MM-DD');
   }
 }
@@ -326,17 +338,18 @@ export function vanguardAccountLast4FromText(text: string): string | null {
   return match?.[1] ?? null;
 }
 
-function apiString(
-  record: Record<string, unknown>,
-  field: string,
-): string {
+function apiString(record: Record<string, unknown>, field: string): string {
   const value = record[field];
   return typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
 }
 
 export function parseVanguardAccountApiResponse(value: unknown): VanguardRemoteAccount[] {
-  if (!value || typeof value !== 'object' || !('accounts' in value) ||
-      !Array.isArray(value.accounts)) {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    !('accounts' in value) ||
+    !Array.isArray(value.accounts)
+  ) {
     throw new Error('Vanguard account API returned an invalid account collection');
   }
   const accounts = value.accounts.map((record, index) => {
@@ -359,11 +372,9 @@ export function parseVanguardAccountApiResponse(value: unknown): VanguardRemoteA
       throw new Error(`Vanguard account API record ${index + 1} has no usable identity`);
     }
     return {
-      accountKind: vanguardAccountKindFromText([
-        apiAccount.accountName,
-        apiAccount.nickname,
-        apiAccount.productType,
-      ].join(' ')),
+      accountKind: vanguardAccountKindFromText(
+        [apiAccount.accountName, apiAccount.nickname, apiAccount.productType].join(' '),
+      ),
       accountLast4: accountNumber.slice(-4),
       apiAccount,
     };
@@ -403,7 +414,9 @@ export function mapVanguardRemoteAccounts(
   const usedPlannedAccounts = new Set<VanguardSyncAccount>();
   const unresolvedRemoteAccounts: VanguardRemoteAccount[] = [];
   for (const remote of remoteAccounts) {
-    const matches = plannedAccounts.filter(planned => planned.accountLast4 === remote.accountLast4);
+    const matches = plannedAccounts.filter(
+      (planned) => planned.accountLast4 === remote.accountLast4,
+    );
     if (matches.length === 0) {
       unresolvedRemoteAccounts.push(remote);
       continue;
@@ -421,11 +434,11 @@ export function mapVanguardRemoteAccounts(
     if (!remote.accountKind) {
       throw new Error('A Vanguard remote account has no unambiguous local account route');
     }
-    const remoteKindCount = unresolvedRemoteAccounts.filter(candidate =>
-      candidate.accountKind === remote.accountKind,
+    const remoteKindCount = unresolvedRemoteAccounts.filter(
+      (candidate) => candidate.accountKind === remote.accountKind,
     ).length;
-    const candidates = plannedAccounts.filter(planned =>
-      !usedPlannedAccounts.has(planned) && planned.accountKind === remote.accountKind,
+    const candidates = plannedAccounts.filter(
+      (planned) => !usedPlannedAccounts.has(planned) && planned.accountKind === remote.accountKind,
     );
     if (remoteKindCount !== 1 || candidates.length !== 1) {
       throw new Error('A Vanguard remote account has no unambiguous local account route');
@@ -435,7 +448,7 @@ export function mapVanguardRemoteAccounts(
     usedPlannedAccounts.add(planned);
   }
 
-  return remoteAccounts.map(remote => ({ remote, planned: plannedForRemote.get(remote)! }));
+  return remoteAccounts.map((remote) => ({ remote, planned: plannedForRemote.get(remote)! }));
 }
 
 export function vanguardStatementAccountRoutes(
@@ -443,17 +456,19 @@ export function vanguardStatementAccountRoutes(
   mappedAccounts: readonly VanguardMappedAccount[],
   requestedAccountIds?: ReadonlySet<number>,
 ): VanguardStatementAccountRoute[] {
-  return plannedAccounts.filter(account => (
-    !requestedAccountIds || requestedAccountIds.has(account.accountId)
-  )).map(account => ({
-    account,
-    identityLast4s: [...new Set([
-      account.accountLast4,
-      ...mappedAccounts
-        .filter(mapped => mapped.planned.accountId === account.accountId)
-        .map(mapped => mapped.remote.accountLast4),
-    ])],
-  }));
+  return plannedAccounts
+    .filter((account) => !requestedAccountIds || requestedAccountIds.has(account.accountId))
+    .map((account) => ({
+      account,
+      identityLast4s: [
+        ...new Set([
+          account.accountLast4,
+          ...mappedAccounts
+            .filter((mapped) => mapped.planned.accountId === account.accountId)
+            .map((mapped) => mapped.remote.accountLast4),
+        ]),
+      ],
+    }));
 }
 
 export type VanguardStatementRouteDate = {
@@ -488,10 +503,10 @@ export function vanguardStatementRouteSummary(
 
 export function vanguardCsvAccountLast4s(text: string): string[] {
   const accountNumbers = parseCsvRows(text)
-    .filter(row => row[0]?.trim().toLowerCase() !== 'account number')
-    .map(row => row[0]?.replace(/\D/g, '') ?? '')
-    .filter(value => value.length >= 4)
-    .map(value => value.slice(-4));
+    .filter((row) => row[0]?.trim().toLowerCase() !== 'account number')
+    .map((row) => row[0]?.replace(/\D/g, '') ?? '')
+    .filter((value) => value.length >= 4)
+    .map((value) => value.slice(-4));
   return [...new Set(accountNumbers)];
 }
 
@@ -543,11 +558,15 @@ async function validatePdf(path: string, expectedLast4: string | readonly string
     throw new Error(`${basename(path)} has no Vanguard statement balance record`);
   }
   const accounts = [...parsed.transactions, ...parsed.balances]
-    .map(record => record?.account)
+    .map((record) => record?.account)
     .filter((value): value is string => Boolean(value));
-  const actualLast4s = [...new Set(accounts
-    .map(account => account.match(/(\d{4})(?!.*\d)/)?.[1])
-    .filter((value): value is string => Boolean(value)))];
+  const actualLast4s = [
+    ...new Set(
+      accounts
+        .map((account) => account.match(/(\d{4})(?!.*\d)/)?.[1])
+        .filter((value): value is string => Boolean(value)),
+    ),
+  ];
   assertVanguardArtifactAccount(expectedLast4, actualLast4s);
 }
 
@@ -568,7 +587,11 @@ export async function validateVanguardArtifact(
   else await validateCsv(path, expectedLast4);
 }
 
-async function isValid(path: string, format: ArtifactFormat, expectedLast4: string): Promise<boolean> {
+async function isValid(
+  path: string,
+  format: ArtifactFormat,
+  expectedLast4: string,
+): Promise<boolean> {
   try {
     await validateVanguardArtifact(path, format, expectedLast4);
     return true;
@@ -682,15 +705,12 @@ export function vanguardActivityApiRequest(
   };
 }
 
-function vanguardEnvelopeHeader(
-  headers: Record<string, unknown>,
-  expectedName: string,
-): string {
+function vanguardEnvelopeHeader(headers: Record<string, unknown>, expectedName: string): string {
   const entry = Object.entries(headers).find(([name]) => name.toLowerCase() === expectedName);
   if (!entry) return '';
   const value = entry[1];
   if (typeof value === 'string') return value;
-  if (Array.isArray(value)) return value.filter(item => typeof item === 'string').join(', ');
+  if (Array.isArray(value)) return value.filter((item) => typeof item === 'string').join(', ');
   return '';
 }
 
@@ -699,23 +719,32 @@ export function vanguardActivityCsvFromEnvelope(value: unknown): string {
     throw new Error('Vanguard activity API returned an invalid download envelope');
   }
   const envelope = value as Record<string, unknown>;
-  if (typeof envelope.body !== 'string' || !envelope.headers ||
-      typeof envelope.headers !== 'object' || Array.isArray(envelope.headers)) {
+  if (
+    typeof envelope.body !== 'string' ||
+    !envelope.headers ||
+    typeof envelope.headers !== 'object' ||
+    Array.isArray(envelope.headers)
+  ) {
     throw new Error('Vanguard activity API returned an invalid download envelope');
   }
   const contentType = vanguardEnvelopeHeader(
     envelope.headers as Record<string, unknown>,
     'content-type',
   ).toLowerCase();
-  if (!contentType.includes('csv') && !contentType.includes('text/plain') &&
-      !contentType.includes('octet-stream')) {
+  if (
+    !contentType.includes('csv') &&
+    !contentType.includes('text/plain') &&
+    !contentType.includes('octet-stream')
+  ) {
     throw new Error('Vanguard activity download has an unexpected content type');
   }
-  if (!vanguardActivityCsvParser.matches({
-    fileName: 'vanguard-activity.csv',
-    headers: [],
-    sample: envelope.body,
-  })) {
+  if (
+    !vanguardActivityCsvParser.matches({
+      fileName: 'vanguard-activity.csv',
+      headers: [],
+      sample: envelope.body,
+    })
+  ) {
     throw new Error('Vanguard activity download does not match the expected CSV format');
   }
   return envelope.body;
@@ -760,7 +789,9 @@ function vanguardStatementIdentityValues(record: Record<string, unknown>): strin
     'productAccountData',
     'statementDescription',
     'statementNumber',
-  ].map(field => apiString(record, field)).filter(Boolean);
+  ]
+    .map((field) => apiString(record, field))
+    .filter(Boolean);
 }
 
 function vanguardIdentityIncludesLast4(value: string, last4: string): boolean {
@@ -771,8 +802,12 @@ export function parseVanguardStatementApiResponse(
   value: unknown,
   accountRoutes: readonly VanguardStatementAccountRoute[],
 ): VanguardRemoteStatement[] {
-  if (!value || typeof value !== 'object' || !('statements' in value) ||
-      !Array.isArray(value.statements)) {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    !('statements' in value) ||
+    !Array.isArray(value.statements)
+  ) {
     throw new Error('Vanguard statement API returned an invalid statement collection');
   }
   const statementIds = new Set<string>();
@@ -783,9 +818,11 @@ export function parseVanguardStatementApiResponse(
     }
     const record = statement as Record<string, unknown>;
     const identityValues = vanguardStatementIdentityValues(record);
-    const matches = accountRoutes.filter(route => route.identityLast4s.some(last4 =>
-      identityValues.some(identity => vanguardIdentityIncludesLast4(identity, last4)),
-    ));
+    const matches = accountRoutes.filter((route) =>
+      route.identityLast4s.some((last4) =>
+        identityValues.some((identity) => vanguardIdentityIncludesLast4(identity, last4)),
+      ),
+    );
     if (matches.length > 1) {
       throw new Error('Vanguard statement metadata is ambiguous across local accounts');
     }
@@ -843,8 +880,9 @@ export function vanguardApiResponseRequiresAuthentication(
 }
 
 function vanguardApiPageUrl(request: VanguardApiRequest): string {
-  const referer = Object.entries(request.headers ?? {})
-    .find(([name]) => name.toLowerCase() === 'referer')?.[1];
+  const referer = Object.entries(request.headers ?? {}).find(
+    ([name]) => name.toLowerCase() === 'referer',
+  )?.[1];
   return referer ?? ACTIVITY_REFERER_URL;
 }
 
@@ -873,24 +911,34 @@ async function fetchVanguardApiResponse(
     current = new URL(page.url());
   }
   if (isVanguardLoginUrl(current.toString())) throw new Error(AUTHENTICATION_REQUIRED);
-  if (!isVanguardHost(current.hostname) ||
-      (current.origin !== apiPage.origin && current.origin !== target.origin)) {
+  if (
+    !isVanguardHost(current.hostname) ||
+    (current.origin !== apiPage.origin && current.origin !== target.origin)
+  ) {
     throw new Error('Vanguard did not open the approved API application');
   }
 
   try {
-    return await runBrowserNativeRequest(page, {
-      url: request.url,
-      method: request.method,
-      headers: request.headers,
-      ...(request.body === undefined ? {} : {
-        bodyBase64: Buffer.from(request.body, 'utf8').toString('base64'),
-      }),
-    }, current.origin === target.origin ? undefined : {
-      applicationOrigin: current.origin,
-      destinationOrigin: target.origin,
-      institutionHostname: 'vanguard.com',
-    });
+    return await runBrowserNativeRequest(
+      page,
+      {
+        url: request.url,
+        method: request.method,
+        headers: request.headers,
+        ...(request.body === undefined
+          ? {}
+          : {
+              bodyBase64: Buffer.from(request.body, 'utf8').toString('base64'),
+            }),
+      },
+      current.origin === target.origin
+        ? undefined
+        : {
+            applicationOrigin: current.origin,
+            destinationOrigin: target.origin,
+            institutionHostname: 'vanguard.com',
+          },
+    );
   } catch (error) {
     if (page.isClosed() || isVanguardLoginUrl(page.url())) {
       throw new Error(AUTHENTICATION_REQUIRED);
@@ -921,13 +969,18 @@ async function saveVanguardArtifact(
     throw new Error(AUTHENTICATION_REQUIRED);
   }
   if (response.status < 200 || response.status >= 300) {
-    throw new Error(`Vanguard ${job.format.toUpperCase()} request failed with status ${response.status}`);
+    throw new Error(
+      `Vanguard ${job.format.toUpperCase()} request failed with status ${response.status}`,
+    );
   }
   const contentType = response.headers['content-type']?.toLowerCase() ?? '';
-  const validContentType = job.format === 'pdf'
-    ? contentType.includes('pdf') || contentType.includes('octet-stream')
-    : contentType.includes('csv') || contentType.includes('excel') ||
-      contentType.includes('text/plain') || contentType.includes('octet-stream');
+  const validContentType =
+    job.format === 'pdf'
+      ? contentType.includes('pdf') || contentType.includes('octet-stream')
+      : contentType.includes('csv') ||
+        contentType.includes('excel') ||
+        contentType.includes('text/plain') ||
+        contentType.includes('octet-stream');
   if (!validContentType) {
     if (contentType.includes('html')) throw new Error(AUTHENTICATION_REQUIRED);
     throw new Error(`Vanguard ${job.format.toUpperCase()} response has an unexpected content type`);
@@ -984,8 +1037,11 @@ export async function discoverVanguardAccounts(page: Page): Promise<VanguardRemo
   if (vanguardApiResponseRequiresAuthentication(response)) {
     throw new Error(AUTHENTICATION_REQUIRED);
   }
-  if (response.status < 200 || response.status >= 300 ||
-      !/json/i.test(response.headers['content-type'] ?? '')) {
+  if (
+    response.status < 200 ||
+    response.status >= 300 ||
+    !/json/i.test(response.headers['content-type'] ?? '')
+  ) {
     throw new Error(`Vanguard account API request failed with status ${response.status}`);
   }
   return parseVanguardAccountApiResponse(vanguardApiResponseJson(response));
@@ -998,7 +1054,7 @@ async function activityRequestForAccount(
   through: string,
 ): Promise<VanguardApiRequest> {
   const cookies = await page.context().cookies(ACTIVITY_REFERER_URL);
-  const xsrfCookie = cookies.find(cookie => cookie.name.toLowerCase() === 'xsrf-token');
+  const xsrfCookie = cookies.find((cookie) => cookie.name.toLowerCase() === 'xsrf-token');
   if (!xsrfCookie?.value) throw new Error(AUTHENTICATION_REQUIRED);
   const userAgent = await page.evaluate(() => navigator.userAgent);
   return vanguardActivityApiRequest(
@@ -1022,11 +1078,16 @@ async function discoverVanguardStatements(
     if (vanguardApiResponseRequiresAuthentication(response)) {
       throw new Error(AUTHENTICATION_REQUIRED);
     }
-    if (response.status < 200 || response.status >= 300 ||
-        !/json/i.test(response.headers['content-type'] ?? '')) {
+    if (
+      response.status < 200 ||
+      response.status >= 300 ||
+      !/json/i.test(response.headers['content-type'] ?? '')
+    ) {
       throw new Error(`Vanguard statement API request failed with status ${response.status}`);
     }
-    statements.push(...parseVanguardStatementApiResponse(vanguardApiResponseJson(response), accountRoutes));
+    statements.push(
+      ...parseVanguardStatementApiResponse(vanguardApiResponseJson(response), accountRoutes),
+    );
   }
   return statements;
 }
@@ -1035,16 +1096,20 @@ export function vanguardStatementForRequest(
   job: VanguardStatementRequest,
   statements: VanguardRemoteStatement[],
 ): VanguardRemoteStatement | null {
-  const exact = statements.filter(statement =>
-    statement.statementDate === job.statementDate && statement.accountLast4 === job.accountLast4,
+  const exact = statements.filter(
+    (statement) =>
+      statement.statementDate === job.statementDate && statement.accountLast4 === job.accountLast4,
   );
-  if (exact.length > 1) throw new Error('Multiple Vanguard statement artifacts matched one local account');
+  if (exact.length > 1)
+    throw new Error('Multiple Vanguard statement artifacts matched one local account');
   return exact[0] ?? null;
 }
 
 export function safeVanguardError(error: unknown): string {
-  const raw = String(error instanceof Error ? error.message : error)
-    .replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+  const raw = String(error instanceof Error ? error.message : error).replace(
+    /\x1b\[[0-?]*[ -/]*[@-~]/g,
+    '',
+  );
   const summary = raw.split(/\bCall log:/i, 1)[0]?.trim() || 'Vanguard request failed';
   if (/timeout \d+ms exceeded/i.test(summary)) return 'Vanguard request timed out';
   if (/(?:^|\s)(?:cookie|set-cookie|authorization|x-xsrf-token)\s*:/i.test(summary)) {
@@ -1067,7 +1132,7 @@ async function executeVanguardProfile(
 ): Promise<VanguardProfileProgramResult> {
   const authenticationAction = vanguardAuthenticationAction(profile);
   try {
-    if (!await isVanguardAuthenticatedPage(page)) {
+    if (!(await isVanguardAuthenticatedPage(page))) {
       progress(
         'authentication',
         'authentication',
@@ -1098,10 +1163,10 @@ async function executeVanguardProfile(
 
     const saved: string[] = [];
     const unavailable: string[] = [];
-    const activityJobs = pending.filter(job => job.artifactType === 'activity');
+    const activityJobs = pending.filter((job) => job.artifactType === 'activity');
     for (let index = 0; index < activityJobs.length; index += 1) {
       const job = activityJobs[index]!;
-      const mapped = mappedAccounts.find(account => account.planned.accountId === job.accountId);
+      const mapped = mappedAccounts.find((account) => account.planned.accountId === job.accountId);
       const requestKey = `activity-request-${index}`;
       if (!mapped) {
         unavailable.push(job.fileName);
@@ -1157,7 +1222,7 @@ async function executeVanguardProfile(
       saved.push(job.fileName);
     }
 
-    const statementJobs = pending.filter(job => job.artifactType === 'statement');
+    const statementJobs = pending.filter((job) => job.artifactType === 'statement');
     if (statementJobs.length > 0) {
       progress(
         'statement-discovery',
@@ -1169,8 +1234,8 @@ async function executeVanguardProfile(
           requestedStatementRoutes: vanguardStatementRouteSummary(profile.accounts, statementJobs),
         },
       );
-      const years = [...new Set(statementJobs.map(job => job.statementDate!.slice(0, 4)))].sort();
-      const requestedAccountIds = new Set(statementJobs.map(job => job.accountId));
+      const years = [...new Set(statementJobs.map((job) => job.statementDate!.slice(0, 4)))].sort();
+      const requestedAccountIds = new Set(statementJobs.map((job) => job.accountId));
       const statements = await discoverVanguardStatements(
         page,
         years,
@@ -1255,12 +1320,7 @@ async function executeVanguardProfile(
           profilePath,
         });
       } catch (resetError) {
-        progress(
-          'profile',
-          'sync',
-          'error',
-          `Vanguard sync failed for ${profile.accountHolder}`,
-        );
+        progress('profile', 'sync', 'error', `Vanguard sync failed for ${profile.accountHolder}`);
         return { status: 'error', message: safeVanguardError(resetError) };
       }
       progress(
@@ -1271,12 +1331,7 @@ async function executeVanguardProfile(
       );
       return authenticationRequired;
     }
-    progress(
-      'profile',
-      'sync',
-      'error',
-      `Vanguard sync failed for ${profile.accountHolder}`,
-    );
+    progress('profile', 'sync', 'error', `Vanguard sync failed for ${profile.accountHolder}`);
     return { status: 'error', message: safeVanguardError(error) };
   }
 }
@@ -1299,17 +1354,26 @@ async function runProfile(
   const jobs = jobsForProfile(config, profile);
   const pending: ArtifactJob[] = [];
   for (const job of jobs) {
-    if (!await isValid(job.targetPath, job.format, job.accountLast4)) pending.push(job);
+    if (!(await isValid(job.targetPath, job.format, job.accountLast4))) pending.push(job);
   }
   if (pending.length === 0) {
-    progress('profile', 'sync', 'complete', `Vanguard data is already current for ${profile.accountHolder}`, {
-      artifactCount: 0,
-    });
+    progress(
+      'profile',
+      'sync',
+      'complete',
+      `Vanguard data is already current for ${profile.accountHolder}`,
+      {
+        artifactCount: 0,
+      },
+    );
     return [];
   }
 
   const profilePath = playwrightProfilePath(profile.session);
-  const hasSavedAuthentication = await playwrightHasSavedAuthentication(profile.session, profilePath);
+  const hasSavedAuthentication = await playwrightHasSavedAuthentication(
+    profile.session,
+    profilePath,
+  );
   progress(
     'authentication',
     'authentication',
@@ -1326,31 +1390,30 @@ async function runProfile(
     saved: string[];
     unavailable: string[];
     accountCount: number;
-  }>(
-    { name: profile.session, startUrl: LOGIN_URL, profilePath },
-    browserProgram(),
-    {
-      authenticationTimeoutMs: VANGUARD_AUTHENTICATION_TIMEOUT_MS,
-      completionDescription: `Vanguard (${profile.accountHolder}) downloads are complete.`,
-      isAuthenticated: isVanguardAuthenticatedPage,
-      waitUntilAuthenticated: waitUntilVanguardAuthenticated,
-      onProgress: message => {
-        if (!authenticationWaiting && /waiting|authentication required|needs attention/i.test(message)) {
-          authenticationWaiting = true;
-          progress(
-            'authentication',
-            'authentication',
-            'waiting',
-            `Waiting for Vanguard authentication for ${profile.accountHolder}`,
-          );
-        }
-      },
-      programBindings: {
-        execute: (page: Page) =>
-          executeVanguardProfile(page, profile, profilePath, pending, config.through, progress),
-      },
+  }>({ name: profile.session, startUrl: LOGIN_URL, profilePath }, browserProgram(), {
+    authenticationTimeoutMs: VANGUARD_AUTHENTICATION_TIMEOUT_MS,
+    completionDescription: `Vanguard (${profile.accountHolder}) downloads are complete.`,
+    isAuthenticated: isVanguardAuthenticatedPage,
+    waitUntilAuthenticated: waitUntilVanguardAuthenticated,
+    onProgress: (message) => {
+      if (
+        !authenticationWaiting &&
+        /waiting|authentication required|needs attention/i.test(message)
+      ) {
+        authenticationWaiting = true;
+        progress(
+          'authentication',
+          'authentication',
+          'waiting',
+          `Waiting for Vanguard authentication for ${profile.accountHolder}`,
+        );
+      }
     },
-  );
+    programBindings: {
+      execute: (page: Page) =>
+        executeVanguardProfile(page, profile, profilePath, pending, config.through, progress),
+    },
+  });
   if (result.status === 'login-required') {
     throw new Error(`Vanguard ${profile.id}: interactive login is required`);
   }
@@ -1358,7 +1421,7 @@ async function runProfile(
     throw new Error(`Vanguard ${profile.id}: ${result.message ?? 'sync failed'}`);
   }
 
-  const byName = new Map(jobs.map(job => [job.fileName, job]));
+  const byName = new Map(jobs.map((job) => [job.fileName, job]));
   const downloaded: VanguardDownloadedArtifact[] = [];
   for (const fileName of result.saved ?? []) {
     const job = byName.get(fileName);
@@ -1375,10 +1438,16 @@ async function runProfile(
       artifactType: job.artifactType,
     });
   }
-  progress('profile', 'sync', 'complete', `Vanguard downloads are ready for ${profile.accountHolder}`, {
-    artifactCount: downloaded.length,
-    unavailableArtifactCount: result.unavailable?.length ?? 0,
-  });
+  progress(
+    'profile',
+    'sync',
+    'complete',
+    `Vanguard downloads are ready for ${profile.accountHolder}`,
+    {
+      artifactCount: downloaded.length,
+      unavailableArtifactCount: result.unavailable?.length ?? 0,
+    },
+  );
   return downloaded;
 }
 
@@ -1386,7 +1455,7 @@ export async function runVanguardProfilesConcurrently<T>(
   profiles: readonly VanguardSyncProfile[],
   run: (profile: VanguardSyncProfile) => Promise<T>,
 ): Promise<T[]> {
-  return Promise.all(profiles.map(profile => run(profile)));
+  return Promise.all(profiles.map((profile) => run(profile)));
 }
 
 export async function runVanguardSync(
@@ -1407,17 +1476,13 @@ export async function runVanguardSync(
     `Starting ${normalizedConfig.profiles.length} Vanguard profile${normalizedConfig.profiles.length === 1 ? '' : 's'}`,
     { profileCount: normalizedConfig.profiles.length },
   );
-  const results = await runVanguardProfilesConcurrently(
-    normalizedConfig.profiles,
-    profile => runProfile(normalizedConfig, profile, onProgress),
+  const results = await runVanguardProfilesConcurrently(normalizedConfig.profiles, (profile) =>
+    runProfile(normalizedConfig, profile, onProgress),
   );
   const artifacts = results.flat();
-  progress(
-    'sync',
-    'sync',
-    'complete',
-    `Vanguard downloads are ready for review`,
-    { artifactCount: artifacts.length, profileCount: normalizedConfig.profiles.length },
-  );
+  progress('sync', 'sync', 'complete', `Vanguard downloads are ready for review`, {
+    artifactCount: artifacts.length,
+    profileCount: normalizedConfig.profiles.length,
+  });
   return artifacts;
 }

@@ -29,10 +29,19 @@ export function reportIncomeSources(transactions: ReportIncomeTransaction[]): Re
     const label = transaction.category_name ?? 'Income';
     const key = `${transaction.month}|${transaction.account_id}|${source}`;
     const row = sources.get(key) ?? {
-      month: transaction.month, account_id: transaction.account_id, source, label, amount_cents: 0,
+      month: transaction.month,
+      account_id: transaction.account_id,
+      source,
+      label,
+      amount_cents: 0,
     };
     row.amount_cents += transaction.amount_cents;
     sources.set(key, row);
   }
-  return [...sources.values()].sort((a, b) => a.month.localeCompare(b.month) || a.account_id - b.account_id || a.source.localeCompare(b.source));
+  return [...sources.values()].sort(
+    (a, b) =>
+      a.month.localeCompare(b.month) ||
+      a.account_id - b.account_id ||
+      a.source.localeCompare(b.source),
+  );
 }

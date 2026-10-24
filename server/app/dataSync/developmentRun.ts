@@ -40,7 +40,11 @@ export async function createConnectorDevelopmentRun(
     String(options.processId ?? process.pid),
   ].join('-');
   const runId = safeLabel(options.runId ?? generatedRunId, 'Run id');
-  const root = resolve(options.root ?? process.env.EASYMONEY_CONNECTOR_DEV_ROOT ?? join(tmpdir(), 'easymoney-connector-dev'));
+  const root = resolve(
+    options.root ??
+      process.env.EASYMONEY_CONNECTOR_DEV_ROOT ??
+      join(tmpdir(), 'easymoney-connector-dev'),
+  );
   const outputDir = resolve(root, institutionId, runId, 'artifacts');
   await mkdir(outputDir, { recursive: true, mode: 0o700 });
 

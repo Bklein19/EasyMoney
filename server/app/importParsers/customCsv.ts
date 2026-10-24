@@ -1,4 +1,9 @@
-import type { AppImportParseInput, AppImportParseResult, ImportProfile, ParsedImportTransaction } from '../importTypes.ts';
+import type {
+  AppImportParseInput,
+  AppImportParseResult,
+  ImportProfile,
+  ParsedImportTransaction,
+} from '../importTypes.ts';
 import { enhanceProfileWithHeaders, normalizeMappedCsvTransaction } from './csvMapping.ts';
 
 export const CUSTOM_CSV_PARSER_ID = 'custom-csv';
@@ -6,7 +11,7 @@ export const CUSTOM_CSV_PARSER_ID = 'custom-csv';
 function toParsedTransaction(
   row: Record<string, string>,
   profile: ImportProfile,
-  sourceRowIndex: number
+  sourceRowIndex: number,
 ): ParsedImportTransaction | null {
   const normalized = normalizeMappedCsvTransaction(row, profile);
   if (!normalized) return null;
@@ -30,7 +35,10 @@ function toParsedTransaction(
   };
 }
 
-export function parseCustomCsv(input: AppImportParseInput, profile: ImportProfile): AppImportParseResult {
+export function parseCustomCsv(
+  input: AppImportParseInput,
+  profile: ImportProfile,
+): AppImportParseResult {
   const resolvedProfile = enhanceProfileWithHeaders(profile, input.headers);
   return {
     transactions: input.rows.map((row, index) => toParsedTransaction(row, resolvedProfile, index)),

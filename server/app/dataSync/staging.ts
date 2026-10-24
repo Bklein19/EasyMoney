@@ -1,9 +1,6 @@
 import { join } from 'node:path';
 
-import {
-  discardSyncPreviewIds,
-  stageSyncArtifactWithProvenance,
-} from './review.ts';
+import { discardSyncPreviewIds, stageSyncArtifactWithProvenance } from './review.ts';
 import type {
   SyncArtifactManifest,
   SyncArtifactReview,
@@ -43,9 +40,10 @@ export async function stageSyncArtifactManifest(
       if (!shouldContinue()) throw new Error('Sync manifest staging was cancelled');
       report({
         type: 'artifact',
-        message: review.status === 'already-imported'
-          ? `${artifact.fileName} was already imported`
-          : `Parsed ${artifact.fileName}`,
+        message:
+          review.status === 'already-imported'
+            ? `${artifact.fileName} was already imported`
+            : `Parsed ${artifact.fileName}`,
         data: {
           transactions: review.transactionCount,
           balances: review.balanceCount,
@@ -63,8 +61,8 @@ export async function stageSyncArtifactManifest(
       runId: manifest.runId,
       institutionId: manifest.institutionId,
       downloaded: manifest.artifacts.length,
-      readyToImport: reviews.filter(review => review.status === 'ready').length,
-      alreadyImported: reviews.filter(review => review.status === 'already-imported').length,
+      readyToImport: reviews.filter((review) => review.status === 'ready').length,
+      alreadyImported: reviews.filter((review) => review.status === 'already-imported').length,
       artifacts: reviews,
     },
     createdImportFileIds,

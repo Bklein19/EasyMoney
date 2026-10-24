@@ -23,7 +23,8 @@ function bankOfAmericaAccounts(context: SyncConnectorContext): SyncAccountCovera
 }
 
 function accountKind(account: SyncAccountCoverage): BankOfAmericaAccountKind {
-  const value = `${account.type} ${account.name} ${account.sourceAccountNames.join(' ')}`.toLowerCase();
+  const value =
+    `${account.type} ${account.name} ${account.sourceAccountNames.join(' ')}`.toLowerCase();
   if (/credit|card|visa|mastercard/.test(value)) return 'credit-card';
   if (/savings|money market/.test(value)) return 'savings';
   if (/checking|banking/.test(value)) return 'checking';
@@ -37,8 +38,10 @@ function accountLast4(account: SyncAccountCoverage): string | null {
     account.sourceAccountName,
     ...account.sourceAccountNames,
     ...account.accountAliases,
-  ].filter((candidate): candidate is string => Boolean(candidate)).join(' ');
-  const matches = [...value.matchAll(/\b(\d{4})\b/g)].map(match => match[1]!);
+  ]
+    .filter((candidate): candidate is string => Boolean(candidate))
+    .join(' ');
+  const matches = [...value.matchAll(/\b(\d{4})\b/g)].map((match) => match[1]!);
   const unique = [...new Set(matches)];
   return unique.length === 1 ? unique[0]! : null;
 }
@@ -77,10 +80,8 @@ function accountPlans(context: SyncConnectorRunContext): BankOfAmericaAccountPla
   return plans;
 }
 
-function routeArtifacts(
-  fileNames: string[],
-): RoutedSyncArtifact[] {
-  return fileNames.map(fileName => ({
+function routeArtifacts(fileNames: string[]): RoutedSyncArtifact[] {
+  return fileNames.map((fileName) => ({
     fileName,
     routing: 'source',
   }));
@@ -98,10 +99,14 @@ export function createBankOfAmericaConnector(
     },
     async run(context) {
       const accounts = bankOfAmericaAccounts(context);
-      const fallbackWindow = goalWindowForCoverage(context.goal, {
-        latestFactDate: null,
-        earliestFactDate: null,
-      }, context.today);
+      const fallbackWindow = goalWindowForCoverage(
+        context.goal,
+        {
+          latestFactDate: null,
+          earliestFactDate: null,
+        },
+        context.today,
+      );
       const plans = accountPlans(context);
 
       context.report({
@@ -109,22 +114,25 @@ export function createBankOfAmericaConnector(
         message: 'Opening Bank of America',
         data: { goal: context.goal.kind },
       });
-      const downloaded = await syncRunner({
-        outputDir: context.outputDir,
-        through: fallbackWindow.endDate,
-        checkingThrough: fallbackWindow.endDate,
-        savingsThrough: fallbackWindow.endDate,
-        cardThrough: fallbackWindow.endDate,
-        checkingFrom: fallbackWindow.startDate,
-        savingsFrom: fallbackWindow.startDate,
-        cardFrom: fallbackWindow.startDate,
-        accounts: plans,
-        session: 'bank-of-america',
-        scope: null,
-        dryRun: false,
-      }, message => {
-        context.report({ type: 'action', message });
-      });
+      const downloaded = await syncRunner(
+        {
+          outputDir: context.outputDir,
+          through: fallbackWindow.endDate,
+          checkingThrough: fallbackWindow.endDate,
+          savingsThrough: fallbackWindow.endDate,
+          cardThrough: fallbackWindow.endDate,
+          checkingFrom: fallbackWindow.startDate,
+          savingsFrom: fallbackWindow.startDate,
+          cardFrom: fallbackWindow.startDate,
+          accounts: plans,
+          session: 'bank-of-america',
+          scope: null,
+          dryRun: false,
+        },
+        (message) => {
+          context.report({ type: 'action', message });
+        },
+      );
 
       for (const artifact of downloaded.artifacts) {
         context.report({

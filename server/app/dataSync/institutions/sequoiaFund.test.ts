@@ -24,9 +24,9 @@ import type { AuthenticatedHttpResponse } from '../authenticatedHttp.ts';
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(temporaryDirectories.splice(0).map(path =>
-    rm(path, { recursive: true, force: true })
-  ));
+  await Promise.all(
+    temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
+  );
 });
 
 describe('Sequoia Fund canonical account', () => {
@@ -47,9 +47,11 @@ describe('Sequoia Fund canonical account', () => {
 
 describe('Sequoia Fund statement discovery', () => {
   test('matches the authenticated site JSON AJAX headers', () => {
-    expect(sequoiaFundAjaxHeaders(
-      'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistory',
-    )).toEqual({
+    expect(
+      sequoiaFundAjaxHeaders(
+        'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistory',
+      ),
+    ).toEqual({
       Accept: 'application/json, text/javascript, */*; q=0.01',
       'X-Requested-With': 'XMLHttpRequest',
       Referer: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistory',
@@ -57,10 +59,12 @@ describe('Sequoia Fund statement discovery', () => {
   });
 
   test('posts the statement-list query with the page CSRF state', () => {
-    expect(sequoiaFundStatementListRequest({
-      csrfToken: 'opaque-csrf',
-      referer: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/viewStatements',
-    })).toEqual({
+    expect(
+      sequoiaFundStatementListRequest({
+        csrfToken: 'opaque-csrf',
+        referer: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/viewStatements',
+      }),
+    ).toEqual({
       url: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/statements/getStatementList?csrf_token=opaque-csrf',
       method: 'POST',
       form: { queryType: 'all' },
@@ -110,20 +114,26 @@ describe('Sequoia Fund statement discovery', () => {
     );
 
     expect(jobs).toHaveLength(2);
-    expect(jobs.every(job => job.account.accountToken === 'last4-1111')).toBe(true);
-    expect(jobs.every(job => job.request.method === 'GET')).toBe(true);
-    expect(jobs.every(job => job.request.url.startsWith(
-      'https://secureaccountview.com/BFWeb/clients/sequoiafund/statements/',
-    ))).toBe(true);
-    expect(jobs.map(job => job.request.url)).toEqual([
+    expect(jobs.every((job) => job.account.accountToken === 'last4-1111')).toBe(true);
+    expect(jobs.every((job) => job.request.method === 'GET')).toBe(true);
+    expect(
+      jobs.every((job) =>
+        job.request.url.startsWith(
+          'https://secureaccountview.com/BFWeb/clients/sequoiafund/statements/',
+        ),
+      ),
+    ).toBe(true);
+    expect(jobs.map((job) => job.request.url)).toEqual([
       'https://secureaccountview.com/BFWeb/clients/sequoiafund/statements/document-a/pdf/fixture-session?csrf_token=fixture-csrf',
       'https://secureaccountview.com/BFWeb/clients/sequoiafund/statements/document-b/pdf/fixture-session?csrf_token=fixture-csrf',
     ]);
-    expect(jobs.every(job =>
-      /^sequoia-fund-account-last4-\d{4}-\d{4}-\d{2}-\d{2}-statement-[a-f0-9]{10}\.pdf$/.test(
-        job.fileName,
-      )
-    )).toBe(true);
+    expect(
+      jobs.every((job) =>
+        /^sequoia-fund-account-last4-\d{4}-\d{4}-\d{2}-\d{2}-statement-[a-f0-9]{10}\.pdf$/.test(
+          job.fileName,
+        ),
+      ),
+    ).toBe(true);
   });
 
   test('rejects statement documents without complete direct-download state', () => {
@@ -132,23 +142,27 @@ describe('Sequoia Fund statement discovery', () => {
       success: true,
       data: {
         sessionId: 'fixture-session',
-        statements: [{
-          documentId: 'document-a',
-          statementDate: '2026-03-31',
-        }],
+        statements: [
+          {
+            documentId: 'document-a',
+            statementDate: '2026-03-31',
+          },
+        ],
       },
     });
 
-    expect(() => sequoiaFundStatementJobs(
-      account,
-      list,
-      {
-        csrfToken: '',
-        referer: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/viewStatements',
-      },
-      '2026-01-01',
-      '2026-12-31',
-    )).toThrow('download metadata is unavailable');
+    expect(() =>
+      sequoiaFundStatementJobs(
+        account,
+        list,
+        {
+          csrfToken: '',
+          referer: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/viewStatements',
+        },
+        '2026-01-01',
+        '2026-12-31',
+      ),
+    ).toThrow('download metadata is unavailable');
   });
 });
 
@@ -156,7 +170,9 @@ describe('Sequoia Fund parser validation', () => {
   test('redacts discovered server values from errors', () => {
     const sensitiveValue = 'opaqueValue-9qZ';
     const message = safeSequoiaFundErrorMessage(
-      new Error('request failed for ' + sensitiveValue + ' at https://secureaccountview.com/private'),
+      new Error(
+        'request failed for ' + sensitiveValue + ' at https://secureaccountview.com/private',
+      ),
       [sensitiveValue],
     );
 
@@ -167,15 +183,19 @@ describe('Sequoia Fund parser validation', () => {
   });
 
   test('does not let short protocol constants corrupt safe diagnostics', () => {
-    expect(safeSequoiaFundErrorMessage(
-      new Error('Authenticated HTTP response content type "text/html" was not accepted'),
-      ['H', '90'],
-    )).toBe('Authenticated HTTP response content type "text/html" was not accepted');
+    expect(
+      safeSequoiaFundErrorMessage(
+        new Error('Authenticated HTTP response content type "text/html" was not accepted'),
+        ['H', '90'],
+      ),
+    ).toBe('Authenticated HTTP response content type "text/html" was not accepted');
   });
 
   test('validates history JSON by body when the legacy server mislabels its media type', () => {
-    const response = (body: string, overrides: Partial<AuthenticatedHttpResponse> = {}):
-    AuthenticatedHttpResponse => ({
+    const response = (
+      body: string,
+      overrides: Partial<AuthenticatedHttpResponse> = {},
+    ): AuthenticatedHttpResponse => ({
       requestUrl: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistoryJSON',
       finalUrl: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistoryJSON',
       status: 200,
@@ -186,18 +206,33 @@ describe('Sequoia Fund parser validation', () => {
       ...overrides,
     });
 
-    expect(parseSequoiaFundHistoryHttpResponse(response(JSON.stringify({
-      data: { portHistList: [{}, {}] },
-    })))).toBe(2);
-    expect(parseSequoiaFundHistoryHttpResponse(response(JSON.stringify({
-      data: { portHistList: [] },
-    }), { headers: {} }))).toBe(0);
-    expect(() => parseSequoiaFundHistoryHttpResponse(
-      response('<html><body>Session expired</body></html>'),
-    )).toThrow('history response was not valid JSON');
-    expect(() => parseSequoiaFundHistoryHttpResponse(
-      response('{"data":{"portHistList":[]}}', { status: 500, statusText: 'Error' }),
-    )).toThrow('status 500');
+    expect(
+      parseSequoiaFundHistoryHttpResponse(
+        response(
+          JSON.stringify({
+            data: { portHistList: [{}, {}] },
+          }),
+        ),
+      ),
+    ).toBe(2);
+    expect(
+      parseSequoiaFundHistoryHttpResponse(
+        response(
+          JSON.stringify({
+            data: { portHistList: [] },
+          }),
+          { headers: {} },
+        ),
+      ),
+    ).toBe(0);
+    expect(() =>
+      parseSequoiaFundHistoryHttpResponse(response('<html><body>Session expired</body></html>')),
+    ).toThrow('history response was not valid JSON');
+    expect(() =>
+      parseSequoiaFundHistoryHttpResponse(
+        response('{"data":{"portHistList":[]}}', { status: 500, statusText: 'Error' }),
+      ),
+    ).toThrow('status 500');
   });
 
   test('classifies parser-safe and rejected artifact byte signatures without exposing content', () => {
@@ -205,15 +240,15 @@ describe('Sequoia Fund parser validation', () => {
     expect(classifySequoiaFundArtifactBytes(Buffer.from('%PDF-1.7 fixture'))).toBe('pdf');
     expect(classifySequoiaFundArtifactBytes(Buffer.from('<html>login</html>'))).toBe('html');
     expect(classifySequoiaFundArtifactBytes(Buffer.from('{"error":true}'))).toBe('json');
-    expect(classifySequoiaFundArtifactBytes(
-      Buffer.from('Date,Amount\n01/01/2026,1.00'),
-    )).toBe('csv');
-    expect(classifySequoiaFundArtifactBytes(
-      Buffer.from('Date\tAmount\n01/01/2026\t1.00'),
-    )).toBe('tabular-text');
-    expect(classifySequoiaFundArtifactBytes(
-      Uint8Array.from([65, 0, 66, 0]),
-    )).toBe('utf16-or-binary');
+    expect(classifySequoiaFundArtifactBytes(Buffer.from('Date,Amount\n01/01/2026,1.00'))).toBe(
+      'csv',
+    );
+    expect(classifySequoiaFundArtifactBytes(Buffer.from('Date\tAmount\n01/01/2026\t1.00'))).toBe(
+      'tabular-text',
+    );
+    expect(classifySequoiaFundArtifactBytes(Uint8Array.from([65, 0, 66, 0]))).toBe(
+      'utf16-or-binary',
+    );
     expect(classifySequoiaFundArtifactBytes(Buffer.from('plain text'))).toBe('text');
   });
 
@@ -221,14 +256,16 @@ describe('Sequoia Fund parser validation', () => {
     const directory = await mkdtemp('/private/tmp/easymoney-sequoia-test-');
     temporaryDirectories.push(directory);
     const account = sequoiaFundCanonicalAccount('last4-1111');
-    const fileName =
-      'sequoia-fund-account-last4-1111-activity-2026-01-01-to-2026-08-23.csv';
+    const fileName = 'sequoia-fund-account-last4-1111-activity-2026-01-01-to-2026-08-23.csv';
     const path = join(directory, fileName);
-    await writeFile(path, [
-      'Transaction Date,Transaction Type,Description,Dollar Amount',
-      '08/01/2026,Fund Purchase,Electronic contribution,"$400.00"',
-      '08/02/2026,Withdrawal,Distribution,"$25.00"',
-    ].join('\n'));
+    await writeFile(
+      path,
+      [
+        'Transaction Date,Transaction Type,Description,Dollar Amount',
+        '08/01/2026,Fund Purchase,Electronic contribution,"$400.00"',
+        '08/02/2026,Withdrawal,Distribution,"$25.00"',
+      ].join('\n'),
+    );
 
     const validated = await validateSequoiaFundArtifact(path, 'activity', account);
     expect(validated).toMatchObject({
@@ -272,17 +309,14 @@ describe('Sequoia Fund parser validation', () => {
   });
 
   test('statement parser accepts account-identifiable names and checks visible last four digits', () => {
-    const fileName =
-      'sequoia-fund-account-last4-1111-2026-06-30-statement-a1b2c3d4e5.pdf';
+    const fileName = 'sequoia-fund-account-last4-1111-2026-06-30-statement-a1b2c3d4e5.pdf';
     expect(sequoiaFundStatementMeta.matches({ filename: fileName, sample: '' })).toBe(true);
-    expect(sequoiaFundStatementAccount(
-      fileName,
-      'Fund account number: XXXX1111',
-    )).toBe('Sequoia Fund - 1111');
-    expect(() => sequoiaFundStatementAccount(
-      fileName,
-      'Fund account number: XXXX2222',
-    )).toThrow('does not match its artifact identity');
+    expect(sequoiaFundStatementAccount(fileName, 'Fund account number: XXXX1111')).toBe(
+      'Sequoia Fund - 1111',
+    );
+    expect(() => sequoiaFundStatementAccount(fileName, 'Fund account number: XXXX2222')).toThrow(
+      'does not match its artifact identity',
+    );
   });
 });
 
@@ -305,15 +339,13 @@ test('Sequoia Fund uses direct authenticated HTTP after login', async () => {
 });
 
 test('Sequoia Fund restores its headed session at the authenticated history route instead of the login entrypoint', () => {
-  expect(sequoiaFundBrowserSession(
-    'sequoia-fund-catchup',
-    '/private/tmp/fixture-profile',
-  )).toEqual({
-    name: 'sequoia-fund-catchup',
-    startUrl: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistory',
-    profilePath: '/private/tmp/fixture-profile',
-    persistAuthentication: true,
-    contextOptions: { headless: false },
-  });
-
+  expect(sequoiaFundBrowserSession('sequoia-fund-catchup', '/private/tmp/fixture-profile')).toEqual(
+    {
+      name: 'sequoia-fund-catchup',
+      startUrl: 'https://secureaccountview.com/BFWeb/clients/sequoiafund/transactionhistory',
+      profilePath: '/private/tmp/fixture-profile',
+      persistAuthentication: true,
+      contextOptions: { headless: false },
+    },
+  );
 });

@@ -20,13 +20,37 @@ const BULK_CATEGORY_UNSET = '__bulk_category_unset__';
 const BULK_CATEGORY_UNCATEGORIZED = '__bulk_category_uncategorized__';
 const TRANSACTION_SORT_COLUMNS = [
   { key: 'date', label: 'Date', asc: 'date_asc', desc: 'date_desc', initial: 'date_desc' },
-  { key: 'description', label: 'Description', asc: 'description_asc', desc: 'description_desc', initial: 'description_asc' },
-  { key: 'category', label: 'Category', asc: 'category_asc', desc: 'category_desc', initial: 'category_asc' },
-  { key: 'account', label: 'Account', asc: 'account_asc', desc: 'account_desc', initial: 'account_asc' },
-  { key: 'amount', label: 'Amount', asc: 'amount_asc', desc: 'amount_desc', initial: 'amount_desc' },
+  {
+    key: 'description',
+    label: 'Description',
+    asc: 'description_asc',
+    desc: 'description_desc',
+    initial: 'description_asc',
+  },
+  {
+    key: 'category',
+    label: 'Category',
+    asc: 'category_asc',
+    desc: 'category_desc',
+    initial: 'category_asc',
+  },
+  {
+    key: 'account',
+    label: 'Account',
+    asc: 'account_asc',
+    desc: 'account_desc',
+    initial: 'account_asc',
+  },
+  {
+    key: 'amount',
+    label: 'Amount',
+    asc: 'amount_asc',
+    desc: 'amount_desc',
+    initial: 'amount_desc',
+  },
 ] as const;
 
-type TransactionSortColumn = typeof TRANSACTION_SORT_COLUMNS[number];
+type TransactionSortColumn = (typeof TRANSACTION_SORT_COLUMNS)[number];
 
 interface BulkCategoryUndo {
   id: string | number;
@@ -52,7 +76,9 @@ export default function TransactionsPage() {
   const [isApplyingBulkCategory, setIsApplyingBulkCategory] = useState(false);
   const [isRestoringBulkCategory, setIsRestoringBulkCategory] = useState(false);
   const [showTransactionsWorking, setShowTransactionsWorking] = useState(false);
-  const [transactionsScrollElement, setTransactionsScrollElement] = useState<HTMLElement | null>(null);
+  const [transactionsScrollElement, setTransactionsScrollElement] = useState<HTMLElement | null>(
+    null,
+  );
   const [transactionsListOffsetTop, setTransactionsListOffsetTop] = useState(0);
   const transactionsListRef = useRef<HTMLDivElement | null>(null);
   const deferredFilters = useDeferredValue(filters);
@@ -106,7 +132,8 @@ export default function TransactionsPage() {
   useEffect(() => {
     let cancelled = false;
 
-    trpcClient.transactions.latestCategoryUndo.query()
+    trpcClient.transactions.latestCategoryUndo
+      .query()
       .then((undoOperation) => {
         if (!cancelled && undoOperation) setBulkCategoryUndo(undoOperation as BulkCategoryUndo);
       })
@@ -130,7 +157,7 @@ export default function TransactionsPage() {
       const listRect = transactionsListRef.current.getBoundingClientRect();
       const scrollRect = transactionsScrollElement.getBoundingClientRect();
       setTransactionsListOffsetTop(
-        listRect.top - scrollRect.top + transactionsScrollElement.scrollTop
+        listRect.top - scrollRect.top + transactionsScrollElement.scrollTop,
       );
       rowVirtualizer.measure();
     };
@@ -146,7 +173,12 @@ export default function TransactionsPage() {
       resizeObserver.disconnect();
       window.removeEventListener('resize', updateOffset);
     };
-  }, [isCreatingBulkCategory, rowVirtualizer, transactionsScrollElement, visibleTransactions.length]);
+  }, [
+    isCreatingBulkCategory,
+    rowVirtualizer,
+    transactionsScrollElement,
+    visibleTransactions.length,
+  ]);
 
   useEffect(() => {
     const lastVirtualRow = virtualRows[virtualRows.length - 1];
@@ -161,20 +193,23 @@ export default function TransactionsPage() {
   }, [fetchNextPage, hasNextPage, isFetchingNextPage, virtualRows, visibleTransactions.length]);
 
   const bulkCategorySelectValue = BULK_CATEGORY_UNSET;
-  const formatTransactionCount = (count: number) => `${count.toLocaleString()} matching transaction${count === 1 ? '' : 's'}`;
+  const formatTransactionCount = (count: number) =>
+    `${count.toLocaleString()} matching transaction${count === 1 ? '' : 's'}`;
   const activeSortBy = filters.sortBy || 'date_desc';
-  const sortColumn = TRANSACTION_SORT_COLUMNS.find(column =>
-    activeSortBy === column.asc || activeSortBy === column.desc
-  ) || TRANSACTION_SORT_COLUMNS[0];
+  const sortColumn =
+    TRANSACTION_SORT_COLUMNS.find(
+      (column) => activeSortBy === column.asc || activeSortBy === column.desc,
+    ) || TRANSACTION_SORT_COLUMNS[0];
   const sortDirection = activeSortBy === sortColumn.asc ? 'asc' : 'desc';
 
   const setColumnSort = (column: TransactionSortColumn) => {
-    const nextSortBy = activeSortBy === column.asc
-      ? column.desc
-      : activeSortBy === column.desc
-        ? column.asc
-        : column.initial;
-    handleFilterChange(previous => ({
+    const nextSortBy =
+      activeSortBy === column.asc
+        ? column.desc
+        : activeSortBy === column.desc
+          ? column.asc
+          : column.initial;
+    handleFilterChange((previous) => ({
       ...previous,
       sortBy: nextSortBy === 'date_desc' ? undefined : nextSortBy,
     }));
@@ -188,7 +223,7 @@ export default function TransactionsPage() {
   const confirmLargeBulkChange = (count: number, categoryName: string) => {
     if (count <= 50) return true;
     return window.confirm(
-      `This will set the category for ${formatTransactionCount(count)} to "${categoryName}".\n\nContinue?`
+      `This will set the category for ${formatTransactionCount(count)} to "${categoryName}".\n\nContinue?`,
     );
   };
 
@@ -250,13 +285,17 @@ export default function TransactionsPage() {
 
     if (!confirmLargeBulkChange(totalCount, name)) return;
 
-    const existing = categories.find(category => category.name.toLowerCase() === name.toLowerCase());
-    const categoryId = existing?.id || await addCategory({
-      name,
-      type: inferBulkCategoryType(),
-      color: 'var(--cat-uncategorized)',
-      icon: 'tag'
-    });
+    const existing = categories.find(
+      (category) => category.name.toLowerCase() === name.toLowerCase(),
+    );
+    const categoryId =
+      existing?.id ||
+      (await addCategory({
+        name,
+        type: inferBulkCategoryType(),
+        color: 'var(--cat-uncategorized)',
+        icon: 'tag',
+      }));
 
     const result = await handleBulkCategoryChange(categoryId);
     setBulkCategoryUndo(result.undoOperation ?? null);
@@ -268,19 +307,27 @@ export default function TransactionsPage() {
     setFilters(nextFilters);
   }, []);
 
-  const totals: TransactionTotals = serverTotals ?? { income: 0, expenses: 0, internalMovement: 0, investments: 0, net: 0 };
+  const totals: TransactionTotals = serverTotals ?? {
+    income: 0,
+    expenses: 0,
+    internalMovement: 0,
+    investments: 0,
+    net: 0,
+  };
 
   return (
     <div className="page">
-      {inspectedId && <TransactionDetails ledgerTransactionId={inspectedId} onClose={() => setInspectedId(null)} />}
+      {inspectedId && (
+        <TransactionDetails
+          ledgerTransactionId={inspectedId}
+          onClose={() => setInspectedId(null)}
+        />
+      )}
       <div className="page__header transactions-page__header stagger-in">
         <div>
           <h1 className="page__title">Transactions</h1>
         </div>
-        <TransactionFilters
-          filters={filters}
-          setFilters={handleFilterChange}
-        />
+        <TransactionFilters filters={filters} setFilters={handleFilterChange} />
         {showTransactionsWorking && (
           <div className="transactions-working" role="status" aria-live="polite">
             <span className="transactions-working__spinner" aria-hidden="true" />
@@ -305,7 +352,8 @@ export default function TransactionsPage() {
                 {bulkCategoryUndo && (
                   <div className="transactions-bulk-undo" role="status" aria-live="polite">
                     <span>
-                      Categorized {formatTransactionCount(bulkCategoryUndo.count)} as {bulkCategoryUndo.categoryName}.
+                      Categorized {formatTransactionCount(bulkCategoryUndo.count)} as{' '}
+                      {bulkCategoryUndo.categoryName}.
                     </span>
                     <button
                       className="btn btn--ghost btn--sm"
@@ -333,7 +381,7 @@ export default function TransactionsPage() {
                     value={bulkCategorySelectValue}
                     disabled={totalCount === 0 || isApplyingBulkCategory || isRestoringBulkCategory}
                     aria-label="Bulk category"
-                    categories={categories.filter(category => !isUncategorized(category))}
+                    categories={categories.filter((category) => !isUncategorized(category))}
                     leadingOptions={[
                       {
                         value: BULK_CATEGORY_UNSET,
@@ -364,7 +412,10 @@ export default function TransactionsPage() {
               </div>
             </div>
             {isCreatingBulkCategory && (
-              <form className="inline-create transactions-inline-create" onSubmit={handleCreateBulkCategory}>
+              <form
+                className="inline-create transactions-inline-create"
+                onSubmit={handleCreateBulkCategory}
+              >
                 <input
                   className="input input--sm inline-create__input"
                   value={newBulkCategoryName}
@@ -373,10 +424,18 @@ export default function TransactionsPage() {
                   autoFocus
                 />
                 <div className="inline-create__actions">
-                  <button className="btn btn--primary btn--sm" type="submit" disabled={!newBulkCategoryName.trim()}>
+                  <button
+                    className="btn btn--primary btn--sm"
+                    type="submit"
+                    disabled={!newBulkCategoryName.trim()}
+                  >
                     Add
                   </button>
-                  <button className="btn btn--ghost btn--sm" type="button" onClick={resetBulkCategoryCreate}>
+                  <button
+                    className="btn btn--ghost btn--sm"
+                    type="button"
+                    onClick={resetBulkCategoryCreate}
+                  >
                     Cancel
                   </button>
                 </div>
@@ -385,7 +444,7 @@ export default function TransactionsPage() {
           </div>
 
           <div className="transactions-table-header" role="row">
-            {TRANSACTION_SORT_COLUMNS.map(column => (
+            {TRANSACTION_SORT_COLUMNS.map((column) => (
               <button
                 key={column.key}
                 className={`transactions-table-header__cell transactions-table-header__cell--${column.key} ${sortColumn.key === column.key ? 'is-active' : ''}`}
@@ -407,7 +466,7 @@ export default function TransactionsPage() {
           >
             {visibleTransactions.length > 0 ? (
               <>
-                {virtualRows.map(virtualRow => {
+                {virtualRows.map((virtualRow) => {
                   const tx = visibleTransactions[virtualRow.index];
                   const isLoaderRow = !tx;
 

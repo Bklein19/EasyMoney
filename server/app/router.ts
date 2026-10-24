@@ -3,9 +3,18 @@ import { databaseBackupStatus } from '../database.ts';
 import { createBackup, inspectBackup, listBackups, restoreBackup } from './backups.ts';
 import { hasActiveSyncJobs } from './dataSync/jobs.ts';
 import { hasActiveCategorizationJobs } from './aiCategorization.ts';
-import { automaticCategorizationStatus, retryAutomaticCategorization } from './automaticCategorization.ts';
+import {
+  automaticCategorizationStatus,
+  retryAutomaticCategorization,
+} from './automaticCategorization.ts';
 import { z } from 'zod';
-import { archiveAccount, closeAccount, listAccounts, unarchiveAccount, updateAccountMetadata } from './accounts.ts';
+import {
+  archiveAccount,
+  closeAccount,
+  listAccounts,
+  unarchiveAccount,
+  updateAccountMetadata,
+} from './accounts.ts';
 import { getAnalyticsReport, getSpendingExplorerTransactions } from './analytics.ts';
 import { getBudgetingReport } from './budgetingReport.ts';
 import {
@@ -18,7 +27,12 @@ import {
   startAutoApplyAiCategorizationJob,
 } from './aiCategorization.ts';
 import { listBudgets, setBudget, deleteBudget } from './budgets.ts';
-import { budgetPlansSchema, getBudgetPlans, migrateBudgetPlans, saveBudgetPlans } from './budgetPlans.ts';
+import {
+  budgetPlansSchema,
+  getBudgetPlans,
+  migrateBudgetPlans,
+  saveBudgetPlans,
+} from './budgetPlans.ts';
 import {
   createCategorizationRule,
   deleteCategorizationRule,
@@ -28,12 +42,27 @@ import {
 import { createCategory, deleteCategory, listCategories, updateCategory } from './categories.ts';
 import { getDataFreshnessReport } from './dataFreshness.ts';
 import { getDataCompleteness } from './dataCompleteness.ts';
-import { cancelSyncJob, confirmSyncJob, discardSyncJob, getSyncJob, listSyncJobs, startSyncJob } from './dataSync/jobs.ts';
+import {
+  cancelSyncJob,
+  confirmSyncJob,
+  discardSyncJob,
+  getSyncJob,
+  listSyncJobs,
+  startSyncJob,
+} from './dataSync/jobs.ts';
 import { previewSyncReviewOutcomes } from './dataSync/reviewOutcomes.ts';
 import { isSyncInstitutionId } from './dataSync/registry.ts';
 import { listSyncTargets } from './dataSync/executionPlan.ts';
 import type { SyncInstitutionId } from './dataSync/types.ts';
-import { commitImport, listImportHistory, previewImport, reimportFile, reimportFiles, unimportFile, unimportFiles } from './imports.ts';
+import {
+  commitImport,
+  listImportHistory,
+  previewImport,
+  reimportFile,
+  reimportFiles,
+  unimportFile,
+  unimportFiles,
+} from './imports.ts';
 import { parserMaintenanceStatus, refreshChangedParsers } from './parserRefresh';
 import { listImportProfiles, upsertImportProfile } from './importProfiles.ts';
 import { getInvestmentNetWorthReport, getSavingsRateReport } from './investmentReports.ts';
@@ -52,12 +81,20 @@ import {
 
 const base = initTRPC.create();
 let activeMutations = 0;
-const t = { ...base, procedure: base.procedure.use(async ({ type, next }) => {
-  if (type !== 'mutation') return next();
-  if (databaseBackupStatus().restorePending) throw new Error('A backup restore is scheduled. Restart EasyMoney before making changes.');
-  activeMutations++;
-  try { return await next(); } finally { activeMutations--; }
-}) };
+const t = {
+  ...base,
+  procedure: base.procedure.use(async ({ type, next }) => {
+    if (type !== 'mutation') return next();
+    if (databaseBackupStatus().restorePending)
+      throw new Error('A backup restore is scheduled. Restart EasyMoney before making changes.');
+    activeMutations++;
+    try {
+      return await next();
+    } finally {
+      activeMutations--;
+    }
+  }),
+};
 
 const optionalId = z.union([z.string(), z.number()]).nullish();
 const analyticsInput = z.object({
@@ -94,40 +131,55 @@ const accountMetadataInput = z.object({
   }),
 });
 const accountMappingIdInput = z.coerce.number().int().positive();
-const accountMappingLast4Input = z.string().trim().regex(/^\d{4}$/).nullable().optional();
+const accountMappingLast4Input = z
+  .string()
+  .trim()
+  .regex(/^\d{4}$/)
+  .nullable()
+  .optional();
 const accountMappingDecisionSchema = z.discriminatedUnion('mode', [
-  z.object({
-    sourceAccountId: accountMappingIdInput,
-    last4: accountMappingLast4Input,
-    mode: z.literal('existing'),
-    accountId: accountMappingIdInput.nullable(),
-  }).strict(),
-  z.object({
-    sourceAccountId: accountMappingIdInput,
-    last4: accountMappingLast4Input,
-    mode: z.literal('auto'),
-    accountId: accountMappingIdInput.nullable().optional(),
-  }).strict(),
-  z.object({
-    sourceAccountId: accountMappingIdInput,
-    last4: accountMappingLast4Input,
-    mode: z.literal('unarchive'),
-    accountId: accountMappingIdInput,
-  }).strict(),
-  z.object({
-    sourceAccountId: accountMappingIdInput,
-    last4: accountMappingLast4Input,
-    mode: z.literal('create'),
-    account: z.object({
-      name: z.string().nullable().optional(),
-      institution: z.string().nullable().optional(),
-      type: z.string().nullable().optional(),
-      currency: z.string().nullable().optional(),
-      accountHolder: z.string().nullable().optional(),
-    }).strict(),
-  }).strict(),
+  z
+    .object({
+      sourceAccountId: accountMappingIdInput,
+      last4: accountMappingLast4Input,
+      mode: z.literal('existing'),
+      accountId: accountMappingIdInput.nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      sourceAccountId: accountMappingIdInput,
+      last4: accountMappingLast4Input,
+      mode: z.literal('auto'),
+      accountId: accountMappingIdInput.nullable().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      sourceAccountId: accountMappingIdInput,
+      last4: accountMappingLast4Input,
+      mode: z.literal('unarchive'),
+      accountId: accountMappingIdInput,
+    })
+    .strict(),
+  z
+    .object({
+      sourceAccountId: accountMappingIdInput,
+      last4: accountMappingLast4Input,
+      mode: z.literal('create'),
+      account: z
+        .object({
+          name: z.string().nullable().optional(),
+          institution: z.string().nullable().optional(),
+          type: z.string().nullable().optional(),
+          currency: z.string().nullable().optional(),
+          accountHolder: z.string().nullable().optional(),
+        })
+        .strict(),
+    })
+    .strict(),
 ]);
-const accountMappingDecisionInput = z.preprocess(value => {
+const accountMappingDecisionInput = z.preprocess((value) => {
   if (!value || typeof value !== 'object' || Array.isArray(value) || 'mode' in value) return value;
   return { ...value, mode: 'existing' };
 }, accountMappingDecisionSchema);
@@ -156,9 +208,16 @@ export const appRouter = t.router({
   backups: t.router({
     list: t.procedure.query(() => listBackups()),
     create: t.procedure.mutation(() => createBackup()),
-    inspect: t.procedure.input(z.object({ id: z.string() })).query(({ input }) => inspectBackup(input.id)),
+    inspect: t.procedure
+      .input(z.object({ id: z.string() }))
+      .query(({ input }) => inspectBackup(input.id)),
     restore: t.procedure.input(z.object({ id: z.string() })).mutation(({ input }) => {
-      if (activeMutations > 1 || hasActiveSyncJobs() || hasActiveCategorizationJobs() || automaticCategorizationStatus().pending > 0) {
+      if (
+        activeMutations > 1 ||
+        hasActiveSyncJobs() ||
+        hasActiveCategorizationJobs() ||
+        automaticCategorizationStatus().pending > 0
+      ) {
         throw new Error('Wait for imports, sync, and categorization to finish before restoring.');
       }
       return restoreBackup(input.id);
@@ -166,9 +225,13 @@ export const appRouter = t.router({
   }),
   accounts: t.router({
     list: t.procedure
-      .input(z.object({
-        includeArchived: z.boolean().optional(),
-      }).optional())
+      .input(
+        z
+          .object({
+            includeArchived: z.boolean().optional(),
+          })
+          .optional(),
+      )
       .query(({ input }) => listAccounts(input ?? {})),
 
     updateMetadata: t.procedure
@@ -180,7 +243,13 @@ export const appRouter = t.router({
       .mutation(({ input }) => archiveAccount(input.id)),
 
     markClosed: t.procedure
-      .input(z.object({ id: z.union([z.string(), z.number()]), closedOn: z.string().optional(), destinationAccountId: z.number().int().positive().optional() }))
+      .input(
+        z.object({
+          id: z.union([z.string(), z.number()]),
+          closedOn: z.string().optional(),
+          destinationAccountId: z.number().int().positive().optional(),
+        }),
+      )
       .mutation(({ input }) => closeAccount(input.id, input.closedOn, input.destinationAccountId)),
 
     unarchive: t.procedure
@@ -191,16 +260,12 @@ export const appRouter = t.router({
   categories: t.router({
     list: t.procedure.query(() => listCategories()),
 
-    create: t.procedure
-      .input(categoryInput)
-      .mutation(({ input }) => createCategory(input)),
+    create: t.procedure.input(categoryInput).mutation(({ input }) => createCategory(input)),
 
-    update: t.procedure
-      .input(categoryUpdateInput)
-      .mutation(({ input }) => {
-        const { id, ...changes } = input;
-        return updateCategory(id, changes);
-      }),
+    update: t.procedure.input(categoryUpdateInput).mutation(({ input }) => {
+      const { id, ...changes } = input;
+      return updateCategory(id, changes);
+    }),
 
     delete: t.procedure
       .input(z.object({ id: z.union([z.string(), z.number()]) }))
@@ -211,22 +276,26 @@ export const appRouter = t.router({
     list: t.procedure.query(() => listCategorizationRules()),
 
     create: t.procedure
-      .input(z.object({
-        categoryId: z.union([z.string(), z.number()]),
-        pattern: z.string().min(1),
-        matchType: z.string().nullish(),
-        priority: z.union([z.string(), z.number()]).nullish(),
-      }))
+      .input(
+        z.object({
+          categoryId: z.union([z.string(), z.number()]),
+          pattern: z.string().min(1),
+          matchType: z.string().nullish(),
+          priority: z.union([z.string(), z.number()]).nullish(),
+        }),
+      )
       .mutation(({ input }) => createCategorizationRule(input)),
 
     update: t.procedure
-      .input(z.object({
-        id: z.union([z.string(), z.number()]),
-        categoryId: z.union([z.string(), z.number()]).optional(),
-        pattern: z.string().optional(),
-        matchType: z.string().nullish(),
-        priority: z.union([z.string(), z.number()]).nullish(),
-      }))
+      .input(
+        z.object({
+          id: z.union([z.string(), z.number()]),
+          categoryId: z.union([z.string(), z.number()]).optional(),
+          pattern: z.string().optional(),
+          matchType: z.string().nullish(),
+          priority: z.union([z.string(), z.number()]).nullish(),
+        }),
+      )
       .mutation(({ input }) => {
         const { id, ...changes } = input;
         return updateCategorizationRule(id, changes);
@@ -239,30 +308,39 @@ export const appRouter = t.router({
 
   budgets: t.router({
     plans: t.procedure.query(() => getBudgetPlans()),
-    migratePlans: t.procedure.input(budgetPlansSchema).mutation(({ input }) => migrateBudgetPlans(input)),
-    savePlans: t.procedure.input(z.object({ plans: budgetPlansSchema, revision: z.number().int().nonnegative() }))
+    migratePlans: t.procedure
+      .input(budgetPlansSchema)
+      .mutation(({ input }) => migrateBudgetPlans(input)),
+    savePlans: t.procedure
+      .input(z.object({ plans: budgetPlansSchema, revision: z.number().int().nonnegative() }))
       .mutation(({ input }) => saveBudgetPlans(input)),
     list: t.procedure
       .input(z.object({ month: z.string().nullish() }).optional())
       .query(({ input }) => listBudgets(input ?? {})),
 
     report: t.procedure
-      .input(z.object({
-        startDate: z.string().nullish(),
-        endDate: z.string().nullish(),
-        month: z.string().nullish(),
-        globalBudget: z.number().nullish(),
-        categoryPercents: z.record(z.string(), z.number()).nullish(),
-        periodScale: z.number().nullish(),
-      }).optional())
+      .input(
+        z
+          .object({
+            startDate: z.string().nullish(),
+            endDate: z.string().nullish(),
+            month: z.string().nullish(),
+            globalBudget: z.number().nullish(),
+            categoryPercents: z.record(z.string(), z.number()).nullish(),
+            periodScale: z.number().nullish(),
+          })
+          .optional(),
+      )
       .query(({ input }) => getBudgetingReport(input ?? {})),
 
     set: t.procedure
-      .input(z.object({
-        categoryId: z.union([z.string(), z.number()]),
-        month: z.string().min(1),
-        amount: z.number(),
-      }))
+      .input(
+        z.object({
+          categoryId: z.union([z.string(), z.number()]),
+          month: z.string().min(1),
+          amount: z.number(),
+        }),
+      )
       .mutation(({ input }) => setBudget(input)),
 
     delete: t.procedure
@@ -274,35 +352,46 @@ export const appRouter = t.router({
     list: t.procedure.query(() => listImportProfiles()),
 
     upsert: t.procedure
-      .input(z.object({
-        headerSignature: z.string().min(1),
-        profileName: z.string().nullish(),
-        profileJson: z.string().min(1),
-        mappingJson: z.string().nullish(),
-        lastAccountId: optionalId,
-      }))
+      .input(
+        z.object({
+          headerSignature: z.string().min(1),
+          profileName: z.string().nullish(),
+          profileJson: z.string().min(1),
+          mappingJson: z.string().nullish(),
+          lastAccountId: optionalId,
+        }),
+      )
       .mutation(({ input }) => upsertImportProfile(input)),
   }),
 
   imports: t.router({
     parserRefreshStatus: t.procedure.query(() => parserMaintenanceStatus()),
     refreshParsers: t.procedure.mutation(() => refreshChangedParsers(true)),
-    previewParserRefresh: t.procedure.mutation(() => refreshChangedParsers(true, { validateOnly: true })),
-    applyParserRefresh: t.procedure.input(z.object({ inputRevision: z.string().min(1) }))
-      .mutation(({ input }) => refreshChangedParsers(true, { expectedRevision: input.inputRevision })),
+    previewParserRefresh: t.procedure.mutation(() =>
+      refreshChangedParsers(true, { validateOnly: true }),
+    ),
+    applyParserRefresh: t.procedure
+      .input(z.object({ inputRevision: z.string().min(1) }))
+      .mutation(({ input }) =>
+        refreshChangedParsers(true, { expectedRevision: input.inputRevision }),
+      ),
     preview: t.procedure
-      .input(z.object({
-        fileName: z.string().min(1),
-        text: z.string(),
-        fileBase64: z.string().nullish(),
-        customProfile: z.any().nullish(),
-      }))
-      .mutation(({ input }) => previewImport({
-        fileName: input.fileName,
-        text: input.text,
-        fileBytes: bytesFromBase64(input.fileBase64),
-        customProfile: input.customProfile,
-      })),
+      .input(
+        z.object({
+          fileName: z.string().min(1),
+          text: z.string(),
+          fileBase64: z.string().nullish(),
+          customProfile: z.any().nullish(),
+        }),
+      )
+      .mutation(({ input }) =>
+        previewImport({
+          fileName: input.fileName,
+          text: input.text,
+          fileBytes: bytesFromBase64(input.fileBase64),
+          customProfile: input.customProfile,
+        }),
+      ),
 
     commit: t.procedure
       .input(commitImportInput)
@@ -328,10 +417,17 @@ export const appRouter = t.router({
   }),
 
   dataFreshness: t.router({
-    completeness: t.procedure.input(z.object({
-      accountIds: z.array(z.number().int().positive()).optional(),
-      startDate: z.iso.date().nullish(), endDate: z.iso.date().nullish(),
-    }).optional()).query(({ input }) => getDataCompleteness(input)),
+    completeness: t.procedure
+      .input(
+        z
+          .object({
+            accountIds: z.array(z.number().int().positive()).optional(),
+            startDate: z.iso.date().nullish(),
+            endDate: z.iso.date().nullish(),
+          })
+          .optional(),
+      )
+      .query(({ input }) => getDataCompleteness(input)),
     report: t.procedure
       .input(z.object({ today: z.string().optional() }).optional())
       .query(({ input }) => getDataFreshnessReport(input ?? {})),
@@ -346,11 +442,16 @@ export const appRouter = t.router({
     targets: t.procedure.query(() => listSyncTargets()),
 
     start: t.procedure
-      .input(z.object({
-        institutionId: z.custom<SyncInstitutionId>(isSyncInstitutionId, 'Unsupported institution connector'),
-        connectionId: z.string().optional(),
-        goal: syncGoalInput,
-      }))
+      .input(
+        z.object({
+          institutionId: z.custom<SyncInstitutionId>(
+            isSyncInstitutionId,
+            'Unsupported institution connector',
+          ),
+          connectionId: z.string().optional(),
+          goal: syncGoalInput,
+        }),
+      )
       .mutation(({ input }) => startSyncJob(input)),
 
     status: t.procedure
@@ -362,18 +463,28 @@ export const appRouter = t.router({
       .mutation(({ input }) => cancelSyncJob(input.runId)),
 
     confirm: t.procedure
-      .input(z.object({
-        runId: z.string().min(1),
-        accountMappings: z.array(accountMappingDecisionSchema).nullish(),
-        outcomeRevision: z.string().min(1),
-      }))
-      .mutation(({ input }) => confirmSyncJob(input.runId, input.accountMappings, input.outcomeRevision)),
+      .input(
+        z.object({
+          runId: z.string().min(1),
+          accountMappings: z.array(accountMappingDecisionSchema).nullish(),
+          outcomeRevision: z.string().min(1),
+        }),
+      )
+      .mutation(({ input }) =>
+        confirmSyncJob(input.runId, input.accountMappings, input.outcomeRevision),
+      ),
 
     outcomes: t.procedure
-      .input(z.object({ runId: z.string().min(1), accountMappings: z.array(accountMappingDecisionSchema).nullish() }))
+      .input(
+        z.object({
+          runId: z.string().min(1),
+          accountMappings: z.array(accountMappingDecisionSchema).nullish(),
+        }),
+      )
       .query(async ({ input }) => {
         const job = await getSyncJob(input.runId);
-        if (job?.status !== 'awaiting-confirmation' || !job.review) throw new Error('No pending import review.');
+        if (job?.status !== 'awaiting-confirmation' || !job.review)
+          throw new Error('No pending import review.');
         return previewSyncReviewOutcomes(job.review, input.accountMappings);
       }),
 
@@ -383,130 +494,180 @@ export const appRouter = t.router({
   }),
 
   transactions: t.router({
-    applyReviewedCategories: t.procedure.input(z.object({
-      label: z.string().min(1).max(200),
-      changes: z.array(z.object({
-        transactionId: z.string().min(1), categoryId: z.number().int().positive().nullable(),
-        expected: z.object({ categoryId: z.number().int().nullable(), accountId: z.number().int(),
-          date: z.string(), amountCents: z.number().int(), description: z.string().nullable() }),
-      })).min(1).max(5000),
-    })).mutation(({ input }) => {
-      createBackup();
-      return applyReviewedCategoryChanges(input);
-    }),
-    details: t.procedure.input(z.object({ ledgerTransactionId: z.string().min(1) }))
+    applyReviewedCategories: t.procedure
+      .input(
+        z.object({
+          label: z.string().min(1).max(200),
+          changes: z
+            .array(
+              z.object({
+                transactionId: z.string().min(1),
+                categoryId: z.number().int().positive().nullable(),
+                expected: z.object({
+                  categoryId: z.number().int().nullable(),
+                  accountId: z.number().int(),
+                  date: z.string(),
+                  amountCents: z.number().int(),
+                  description: z.string().nullable(),
+                }),
+              }),
+            )
+            .min(1)
+            .max(5000),
+        }),
+      )
+      .mutation(({ input }) => {
+        createBackup();
+        return applyReviewedCategoryChanges(input);
+      }),
+    details: t.procedure
+      .input(z.object({ ledgerTransactionId: z.string().min(1) }))
       .query(({ input }) => getTransactionDetails(input.ledgerTransactionId)),
     list: t.procedure
-      .input(z.object({
-        accountId: optionalId,
-        accountIds: z.array(z.number().int().positive()).optional(),
-        categoryId: optionalId,
-        accountKind: z.string().nullish(),
-        startDate: z.string().nullish(),
-        endDate: z.string().nullish(),
-        search: z.string().nullish(),
-        type: z.string().nullish(),
-        flowType: z.string().nullish(),
-        sortBy: z.string().nullish(),
-        limit: optionalId,
-        offset: optionalId,
-        includeArchived: z.boolean().nullish(),
-      }).optional())
+      .input(
+        z
+          .object({
+            accountId: optionalId,
+            accountIds: z.array(z.number().int().positive()).optional(),
+            categoryId: optionalId,
+            accountKind: z.string().nullish(),
+            startDate: z.string().nullish(),
+            endDate: z.string().nullish(),
+            search: z.string().nullish(),
+            type: z.string().nullish(),
+            flowType: z.string().nullish(),
+            sortBy: z.string().nullish(),
+            limit: optionalId,
+            offset: optionalId,
+            includeArchived: z.boolean().nullish(),
+          })
+          .optional(),
+      )
       .query(({ input }) => listTransactions(input ?? {})),
 
     categorize: t.procedure
-      .input(z.object({
-        transactionIds: z.array(z.union([z.string(), z.number()])).min(1),
-        categoryId: optionalId,
-      }))
+      .input(
+        z.object({
+          transactionIds: z.array(z.union([z.string(), z.number()])).min(1),
+          categoryId: optionalId,
+        }),
+      )
       .mutation(({ input }) => categorizeTransactions(input)),
 
     categorizeMatching: t.procedure
-      .input(z.object({
-        query: z.object({
-          accountId: optionalId,
-          accountIds: z.array(z.number().int().positive()).optional(),
+      .input(
+        z.object({
+          query: z
+            .object({
+              accountId: optionalId,
+              accountIds: z.array(z.number().int().positive()).optional(),
+              categoryId: optionalId,
+              accountKind: z.string().nullish(),
+              startDate: z.string().nullish(),
+              endDate: z.string().nullish(),
+              search: z.string().nullish(),
+              type: z.string().nullish(),
+              flowType: z.string().nullish(),
+              sortBy: z.string().nullish(),
+              includeArchived: z.boolean().nullish(),
+            })
+            .optional(),
           categoryId: optionalId,
-          accountKind: z.string().nullish(),
-          startDate: z.string().nullish(),
-          endDate: z.string().nullish(),
-          search: z.string().nullish(),
-          type: z.string().nullish(),
-          flowType: z.string().nullish(),
-          sortBy: z.string().nullish(),
-          includeArchived: z.boolean().nullish(),
-        }).optional(),
-        categoryId: optionalId,
-      }))
+        }),
+      )
       .mutation(({ input }) => categorizeTransactionsByQuery(input)),
 
     restoreCategories: t.procedure
-      .input(z.object({
-        undoOperationId: z.union([z.string(), z.number()]),
-      }))
+      .input(
+        z.object({
+          undoOperationId: z.union([z.string(), z.number()]),
+        }),
+      )
       .mutation(({ input }) => restoreTransactionCategories(input)),
 
-    latestCategoryUndo: t.procedure
-      .query(() => getLatestTransactionCategoryUndoOperation()),
+    latestCategoryUndo: t.procedure.query(() => getLatestTransactionCategoryUndoOperation()),
 
-    categorizationCoverage: t.procedure
-      .query(() => getTransactionCategorizationCoverage()),
+    categorizationCoverage: t.procedure.query(() => getTransactionCategorizationCoverage()),
 
     automaticCategorizationStatus: t.procedure.query(() => automaticCategorizationStatus()),
     retryAutomaticCategorization: t.procedure.mutation(() => retryAutomaticCategorization()),
 
     aiCategorizationPreview: t.procedure
-      .input(z.object({
-        limit: z.number().optional(),
-        sort: z.enum(['count', 'money']).optional(),
-      }).optional())
+      .input(
+        z
+          .object({
+            limit: z.number().optional(),
+            sort: z.enum(['count', 'money']).optional(),
+          })
+          .optional(),
+      )
       .mutation(({ input }) => previewAiCategorization(input ?? {})),
 
     createMerchantGroupingRule: t.procedure
-      .input(z.object({
-        sourceMerchantKey: z.string().min(1),
-        strategy: z.enum(['bank_description_counterparty', 'individual_transactions']).optional(),
-      }))
+      .input(
+        z.object({
+          sourceMerchantKey: z.string().min(1),
+          strategy: z.enum(['bank_description_counterparty', 'individual_transactions']).optional(),
+        }),
+      )
       .mutation(({ input }) => createMerchantGroupingRule(input)),
 
     applyAiCategorization: t.procedure
-      .input(z.object({
-        suggestions: z.array(z.object({
-          transactionId: z.string().min(1),
-          categoryId: z.union([z.string(), z.number()]),
-        })),
-      }))
+      .input(
+        z.object({
+          suggestions: z.array(
+            z.object({
+              transactionId: z.string().min(1),
+              categoryId: z.union([z.string(), z.number()]),
+            }),
+          ),
+        }),
+      )
       .mutation(({ input }) => applyAiCategorizationSuggestions(input)),
 
     autoApplyAiCategorization: t.procedure
-      .input(z.object({
-        sort: z.enum(['count', 'money']).optional(),
-      }).optional())
+      .input(
+        z
+          .object({
+            sort: z.enum(['count', 'money']).optional(),
+          })
+          .optional(),
+      )
       .mutation(({ input }) => autoApplyAiCategorization(input ?? {})),
 
     startAutoApplyAiCategorization: t.procedure
-      .input(z.object({
-        sort: z.enum(['count', 'money']).optional(),
-      }).optional())
+      .input(
+        z
+          .object({
+            sort: z.enum(['count', 'money']).optional(),
+          })
+          .optional(),
+      )
       .mutation(({ input }) => startAutoApplyAiCategorizationJob(input ?? {})),
 
     autoApplyAiCategorizationJob: t.procedure
-      .input(z.object({
-        jobId: z.string().min(1),
-      }))
+      .input(
+        z.object({
+          jobId: z.string().min(1),
+        }),
+      )
       .query(({ input }) => getAutoApplyAiCategorizationJob(input)),
 
     aiCategorizationTransactionDetails: t.procedure
-      .input(z.object({
-        transactionIds: z.array(z.string()).min(1),
-      }))
+      .input(
+        z.object({
+          transactionIds: z.array(z.string()).min(1),
+        }),
+      )
       .query(({ input }) => getAiCategorizationTransactionDetails(input)),
 
     saveOpenAiCategorizationSettings: t.procedure
-      .input(z.object({
-        apiKey: z.string().min(1),
-        model: z.string().optional(),
-      }))
+      .input(
+        z.object({
+          apiKey: z.string().min(1),
+          model: z.string().optional(),
+        }),
+      )
       .mutation(({ input }) => {
         saveLocalEnvValue('OPENAI_API_KEY', input.apiKey.trim());
         if (input.model?.trim()) {
@@ -526,13 +687,17 @@ export const appRouter = t.router({
   }),
 
   analytics: t.router({
-    spendingTransactions: t.procedure.input(z.object({
-      scope: analyticsInput.optional(),
-      nodeId: z.string().min(1).max(10000),
-      search: z.string().max(1000).optional(),
-      sortBy: z.enum(['date_desc', 'date_asc', 'absolute_desc', 'absolute_asc']).optional(),
-      offset: z.number().int().nonnegative().optional(),
-    })).query(({ input }) => getSpendingExplorerTransactions(input)),
+    spendingTransactions: t.procedure
+      .input(
+        z.object({
+          scope: analyticsInput.optional(),
+          nodeId: z.string().min(1).max(10000),
+          search: z.string().max(1000).optional(),
+          sortBy: z.enum(['date_desc', 'date_asc', 'absolute_desc', 'absolute_asc']).optional(),
+          offset: z.number().int().nonnegative().optional(),
+        }),
+      )
+      .query(({ input }) => getSpendingExplorerTransactions(input)),
     report: t.procedure
       .input(analyticsInput.optional())
       .query(({ input }) => getAnalyticsReport(input ?? {})),

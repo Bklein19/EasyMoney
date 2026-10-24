@@ -82,7 +82,10 @@ function assertHttpApplicationUrl(value: string): URL {
   } catch {
     throw new Error('Authenticated HTTP request requires an open application URL');
   }
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopbackHostname(url.hostname))) {
+  if (
+    url.protocol !== 'https:' &&
+    !(url.protocol === 'http:' && isLoopbackHostname(url.hostname))
+  ) {
     throw new Error('Authenticated HTTP application URL must be secure');
   }
   return url;
@@ -96,8 +99,11 @@ export function authenticatedHttpSameOriginUrl(candidate: string, applicationUrl
   } catch {
     throw new Error('Authenticated HTTP request URL is invalid');
   }
-  if (target.origin !== application.origin ||
-      (target.protocol !== 'https:' && !(target.protocol === 'http:' && isLoopbackHostname(target.hostname)))) {
+  if (
+    target.origin !== application.origin ||
+    (target.protocol !== 'https:' &&
+      !(target.protocol === 'http:' && isLoopbackHostname(target.hostname)))
+  ) {
     throw new Error('Authenticated HTTP request must stay on the open application origin');
   }
   return target;
@@ -105,8 +111,9 @@ export function authenticatedHttpSameOriginUrl(candidate: string, applicationUrl
 
 function redirectTarget(response: APIResponse, applicationUrl: string): URL | null {
   if (!redirectStatuses.has(response.status())) return null;
-  const location = response.headersArray()
-    .find(header => header.name.toLowerCase() === 'location')?.value;
+  const location = response
+    .headersArray()
+    .find((header) => header.name.toLowerCase() === 'location')?.value;
   if (!location) return null;
   const responseUrl = authenticatedHttpSameOriginUrl(response.url(), applicationUrl);
   const target = new URL(location, responseUrl);
@@ -141,7 +148,9 @@ function redirectedRequest(
 }
 
 function normalizedResponseHeaders(response: APIResponse): Record<string, string> {
-  return Object.fromEntries(response.headersArray().map(header => [header.name.toLowerCase(), header.value]));
+  return Object.fromEntries(
+    response.headersArray().map((header) => [header.name.toLowerCase(), header.value]),
+  );
 }
 
 export async function runAuthenticatedHttpRequest(
@@ -221,11 +230,8 @@ export function authenticatedHttpResponseIsLoginRedirect(
   isLoginUrl: (url: URL) => boolean,
 ): boolean {
   if (response.status === 401 || response.status === 403) return true;
-  const urls = [
-    ...response.redirects.map(redirect => redirect.toUrl),
-    response.finalUrl,
-  ];
-  return urls.some(value => {
+  const urls = [...response.redirects.map((redirect) => redirect.toUrl), response.finalUrl];
+  return urls.some((value) => {
     try {
       return isLoginUrl(new URL(value));
     } catch {
@@ -236,25 +242,31 @@ export function authenticatedHttpResponseIsLoginRedirect(
 
 export function assertAuthenticatedHttpStatus(
   response: AuthenticatedHttpResponse,
-  expected: number | readonly number[] | ((status: number) => boolean) = status => status >= 200 && status < 300,
+  expected: number | readonly number[] | ((status: number) => boolean) = (status) =>
+    status >= 200 && status < 300,
 ): void {
-  const valid = typeof expected === 'function'
-    ? expected(response.status)
-    : typeof expected === 'number'
-      ? response.status === expected
-      : expected.includes(response.status);
-  if (!valid) throw new Error(`Authenticated HTTP response status ${response.status} was not accepted`);
+  const valid =
+    typeof expected === 'function'
+      ? expected(response.status)
+      : typeof expected === 'number'
+        ? response.status === expected
+        : expected.includes(response.status);
+  if (!valid)
+    throw new Error(`Authenticated HTTP response status ${response.status} was not accepted`);
 }
 
 export function assertAuthenticatedHttpContentType(
   response: AuthenticatedHttpResponse,
   expected: readonly AuthenticatedHttpContentTypeExpectation[],
 ): string {
-  if (expected.length === 0) throw new Error('Authenticated HTTP content-type expectation is empty');
+  if (expected.length === 0)
+    throw new Error('Authenticated HTTP content-type expectation is empty');
   const contentType = authenticatedHttpContentType(response);
-  const valid = expected.some(expectation => typeof expectation === 'string'
-    ? contentType === expectation.toLowerCase()
-    : expectation.test(contentType));
+  const valid = expected.some((expectation) =>
+    typeof expectation === 'string'
+      ? contentType === expectation.toLowerCase()
+      : expectation.test(contentType),
+  );
   if (!valid) {
     throw new Error(
       `Authenticated HTTP response content type "${contentType || '<missing>'}" was not accepted`,
@@ -279,8 +291,11 @@ export function assertAuthenticatedHttpBody(
   if (response.body.length < minimumBytes) {
     throw new Error('Authenticated HTTP response body is too small');
   }
-  if (expectation.startsWith && expectation.startsWith.length > 0 &&
-      !expectation.startsWith.some(signature => startsWith(response.body, signature))) {
+  if (
+    expectation.startsWith &&
+    expectation.startsWith.length > 0 &&
+    !expectation.startsWith.some((signature) => startsWith(response.body, signature))
+  ) {
     throw new Error('Authenticated HTTP response body signature was not accepted');
   }
   if (expectation.validate && !expectation.validate(response.body)) {
@@ -293,10 +308,14 @@ export function assertAuthenticatedHttpResponse(
   response: AuthenticatedHttpResponse,
   expectation: AuthenticatedHttpResponseExpectation = {},
 ): Buffer {
-  if (expectation.isLoginUrl && authenticatedHttpResponseIsLoginRedirect(response, expectation.isLoginUrl)) {
+  if (
+    expectation.isLoginUrl &&
+    authenticatedHttpResponseIsLoginRedirect(response, expectation.isLoginUrl)
+  ) {
     throw new Error('Authenticated HTTP response requires authentication');
   }
   assertAuthenticatedHttpStatus(response, expectation.status);
-  if (expectation.contentTypes) assertAuthenticatedHttpContentType(response, expectation.contentTypes);
+  if (expectation.contentTypes)
+    assertAuthenticatedHttpContentType(response, expectation.contentTypes);
   return assertAuthenticatedHttpBody(response, expectation.body);
 }

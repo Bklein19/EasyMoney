@@ -5,14 +5,15 @@ test('downloads overlap across institutions, serialize shared logins, and free s
   const queue = new SyncDownloadQueue(2);
   const started: string[] = [];
   const gates = new Map<string, () => void>();
-  const run = (id: string, key: string, fail = false) => queue.enqueue(key, async () => {
-    started.push(id);
-    await new Promise<void>(resolve => gates.set(id, resolve));
-    if (fail) throw new Error('download failed');
-  });
+  const run = (id: string, key: string, fail = false) =>
+    queue.enqueue(key, async () => {
+      started.push(id);
+      await new Promise<void>((resolve) => gates.set(id, resolve));
+      if (fail) throw new Error('download failed');
+    });
   const first = run('first', 'vanguard');
   const second = run('second', 'vanguard');
-  const third = run('third', 'tiaa', true).catch(error => error.message);
+  const third = run('third', 'tiaa', true).catch((error) => error.message);
   const fourth = run('fourth', 'fidelity');
   expect(started).toEqual(['first', 'third']);
   gates.get('third')!();

@@ -2,8 +2,18 @@ import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import './ContextMenu.css';
 
-export function ContextMenu({ x, y, label, onClose, children }: {
-  x: number; y: number; label: string; onClose: () => void; children: ReactNode;
+export function ContextMenu({
+  x,
+  y,
+  label,
+  onClose,
+  children,
+}: {
+  x: number;
+  y: number;
+  label: string;
+  onClose: () => void;
+  children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const returnFocus = useRef<Element | null>(null);
@@ -19,7 +29,9 @@ export function ContextMenu({ x, y, label, onClose, children }: {
     returnFocus.current = previousFocus;
     const items = () => [...ref.current!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
     items()[0]?.focus({ preventScroll: true });
-    const outside = (event: PointerEvent) => { if (!ref.current?.contains(event.target as Node)) onClose(); };
+    const outside = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) onClose();
+    };
     const key = (event: KeyboardEvent) => {
       if (event.key === 'Escape' || event.key === 'Tab') {
         onClose();
@@ -30,13 +42,28 @@ export function ContextMenu({ x, y, label, onClose, children }: {
       }
       const entries = items();
       const index = entries.indexOf(document.activeElement as HTMLElement);
-      if (event.key === ' ' && index >= 0) { event.preventDefault(); entries[index]?.click(); }
-      const next = event.key === 'ArrowDown' ? (index + 1) % entries.length
-        : event.key === 'ArrowUp' ? (index - 1 + entries.length) % entries.length
-        : event.key === 'Home' ? 0 : event.key === 'End' ? entries.length - 1 : null;
-      if (next !== null) { event.preventDefault(); entries[next]?.focus(); }
+      if (event.key === ' ' && index >= 0) {
+        event.preventDefault();
+        entries[index]?.click();
+      }
+      const next =
+        event.key === 'ArrowDown'
+          ? (index + 1) % entries.length
+          : event.key === 'ArrowUp'
+            ? (index - 1 + entries.length) % entries.length
+            : event.key === 'Home'
+              ? 0
+              : event.key === 'End'
+                ? entries.length - 1
+                : null;
+      if (next !== null) {
+        event.preventDefault();
+        entries[next]?.focus();
+      }
     };
-    const scroll = (event: Event) => { if (!ref.current?.contains(event.target as Node)) onClose(); };
+    const scroll = (event: Event) => {
+      if (!ref.current?.contains(event.target as Node)) onClose();
+    };
     document.addEventListener('pointerdown', outside);
     document.addEventListener('keydown', key);
     window.addEventListener('scroll', scroll, true);
@@ -50,6 +77,17 @@ export function ContextMenu({ x, y, label, onClose, children }: {
       window.removeEventListener('blur', onClose);
     };
   }, [onClose]);
-  return createPortal(<div ref={ref} role="menu" aria-label={label} className="web-context-menu"
-    onContextMenu={event => event.preventDefault()} style={{ left: x, top: y }}>{children}</div>, document.body);
+  return createPortal(
+    <div
+      ref={ref}
+      role="menu"
+      aria-label={label}
+      className="web-context-menu"
+      onContextMenu={(event) => event.preventDefault()}
+      style={{ left: x, top: y }}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
 }

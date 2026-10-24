@@ -9,7 +9,14 @@ test('packaged runtime comes from Electrobun metadata, not the development Bun v
 });
 
 test('runtime audit rejects missing, invalid, and additional runtimes', () => {
-  const cases: Array<Record<string, string> | undefined> = [undefined, {}, { node: '26.3.0' }, { bun: '1.4.0', cottontail: '1.0.0' }, { bun: '' }, { bun: 'latest' }];
+  const cases: Array<Record<string, string> | undefined> = [
+    undefined,
+    {},
+    { node: '26.3.0' },
+    { bun: '1.4.0', cottontail: '1.0.0' },
+    { bun: '' },
+    { bun: 'latest' },
+  ];
   for (const runtimes of cases) {
     expect(() => packagedBunVersion(runtimes)).toThrow();
   }

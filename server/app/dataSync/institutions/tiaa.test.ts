@@ -31,9 +31,9 @@ import {
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(temporaryDirectories.splice(0).map(path =>
-    rm(path, { recursive: true, force: true })
-  ));
+  await Promise.all(
+    temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
+  );
 });
 
 async function temporaryDirectory(): Promise<string> {
@@ -62,23 +62,33 @@ describe('TIAA live metadata mapping', () => {
   });
 
   test('accepts only the live-proven retirement activity selection', () => {
-    expect(tiaaActivityAccountTypes({
-      availableAccountTypes: [{ id: 'retirement', description: 'Retirement Accounts', selected: true }],
-    })).toEqual([{
-      id: 'retirement',
-      description: 'Retirement Accounts',
-      selected: true,
-      routingKey: expect.stringMatching(/^[a-f0-9]{12}$/),
-    }]);
-    expect(() => tiaaActivityAccountTypes({
-      availableAccountTypes: [
-        { id: 'retirement', description: 'Retirement Accounts', selected: true },
-        { id: 'trust', description: 'Trust Accounts', selected: false },
-      ],
-    })).toThrow('unsupported account selections');
-    expect(() => tiaaActivityAccountTypes({
-      availableAccountTypes: [{ id: 'trust', description: 'Trust Accounts', selected: true }],
-    })).toThrow('unsupported account selections');
+    expect(
+      tiaaActivityAccountTypes({
+        availableAccountTypes: [
+          { id: 'retirement', description: 'Retirement Accounts', selected: true },
+        ],
+      }),
+    ).toEqual([
+      {
+        id: 'retirement',
+        description: 'Retirement Accounts',
+        selected: true,
+        routingKey: expect.stringMatching(/^[a-f0-9]{12}$/),
+      },
+    ]);
+    expect(() =>
+      tiaaActivityAccountTypes({
+        availableAccountTypes: [
+          { id: 'retirement', description: 'Retirement Accounts', selected: true },
+          { id: 'trust', description: 'Trust Accounts', selected: false },
+        ],
+      }),
+    ).toThrow('unsupported account selections');
+    expect(() =>
+      tiaaActivityAccountTypes({
+        availableAccountTypes: [{ id: 'trust', description: 'Trust Accounts', selected: true }],
+      }),
+    ).toThrow('unsupported account selections');
   });
 
   test('requires the captured request to preserve the selected period and account', () => {
@@ -91,24 +101,38 @@ describe('TIAA live metadata mapping', () => {
       noAccountSelected: false,
     };
     expect(validateTiaaActivityRequestBody(request, period, account)).toBe(request);
-    expect(() => validateTiaaActivityRequestBody({ ...request, selectedTimePeriod: '1' }, period, account))
-      .toThrow('did not match the selected period');
-    expect(() => validateTiaaActivityRequestBody({
-      ...request,
-      selectedAccountTypes: [
-        { ...account, selected: true },
-        { id: 'trust', description: 'Trust Accounts', selected: true },
-      ],
-    }, period, account)).toThrow('did not isolate the supported account selection');
-    expect(() => validateTiaaActivityRequestBody({ ...request, downloadCSV: false }, period, account))
-      .toThrow('did not select an isolated CSV export');
-    expect(() => validateTiaaActivityRequestBody({ ...request, noAccountSelected: true }, period, account))
-      .toThrow('did not select an isolated CSV export');
+    expect(() =>
+      validateTiaaActivityRequestBody({ ...request, selectedTimePeriod: '1' }, period, account),
+    ).toThrow('did not match the selected period');
+    expect(() =>
+      validateTiaaActivityRequestBody(
+        {
+          ...request,
+          selectedAccountTypes: [
+            { ...account, selected: true },
+            { id: 'trust', description: 'Trust Accounts', selected: true },
+          ],
+        },
+        period,
+        account,
+      ),
+    ).toThrow('did not isolate the supported account selection');
+    expect(() =>
+      validateTiaaActivityRequestBody({ ...request, downloadCSV: false }, period, account),
+    ).toThrow('did not select an isolated CSV export');
+    expect(() =>
+      validateTiaaActivityRequestBody({ ...request, noAccountSelected: true }, period, account),
+    ).toThrow('did not select an isolated CSV export');
 
-    expect(() => validateTiaaActivityCoverage({
-      coveredFrom: '2025-01-01',
-      coveredThrough: '2025-12-31',
-    }, period)).toThrow('outside the selected period');
+    expect(() =>
+      validateTiaaActivityCoverage(
+        {
+          coveredFrom: '2025-01-01',
+          coveredThrough: '2025-12-31',
+        },
+        period,
+      ),
+    ).toThrow('outside the selected period');
   });
 
   test('maps quarterly periods from the live additionalDescription field', () => {
@@ -127,36 +151,41 @@ describe('TIAA live metadata mapping', () => {
       success: true,
       data: {
         apiData: {
-          categories: [{
-            statements: [{
-              additionalDescription: 'RETIREMENT Q2/2026',
-              description: 'Quarterly Statements',
-              docID: 'document-1',
-              docLocation: 'location-1',
-              docTypeID: 'document-type',
-              categoryID: '100001',
-              productType: 'retirement-account',
-              destinationName: 'masked',
-            }, {
-              additionalDescription: 'RETIREMENT Q1/2026',
-              description: 'Quarterly Statements',
-              docID: 'document-2',
-              docLocation: 'location-2',
-              docTypeID: 'document-type',
-              categoryID: '100001',
-              productType: 'retirement-account',
-              destinationName: 'masked',
-            }],
-          }],
+          categories: [
+            {
+              statements: [
+                {
+                  additionalDescription: 'RETIREMENT Q2/2026',
+                  description: 'Quarterly Statements',
+                  docID: 'document-1',
+                  docLocation: 'location-1',
+                  docTypeID: 'document-type',
+                  categoryID: '100001',
+                  productType: 'retirement-account',
+                  destinationName: 'masked',
+                },
+                {
+                  additionalDescription: 'RETIREMENT Q1/2026',
+                  description: 'Quarterly Statements',
+                  docID: 'document-2',
+                  docLocation: 'location-2',
+                  docTypeID: 'document-type',
+                  categoryID: '100001',
+                  productType: 'retirement-account',
+                  destinationName: 'masked',
+                },
+              ],
+            },
+          ],
         },
       },
     };
     const documents = tiaaStatementDocuments(metadata);
-    expect(documents.map(document => document.label)).toEqual([
+    expect(documents.map((document) => document.label)).toEqual([
       'RETIREMENT Q2/2026',
       'RETIREMENT Q1/2026',
     ]);
-    expect(new Set(documents.map(document => document.routingKey)).size).toBe(1);
+    expect(new Set(documents.map((document) => document.routingKey)).size).toBe(1);
     expect(() => validateTiaaStatementDocumentIdentities(documents)).not.toThrow();
 
     const url = new URL(tiaaStatementRequestUrl(documents[0]!));
@@ -182,28 +211,33 @@ describe('TIAA live metadata mapping', () => {
       productType: 'retirement-account',
       destinationName: '',
     };
-    expect(() => tiaaStatementDocuments({ statements: [statement] }))
-      .toThrow('missing a stable account identity');
+    expect(() => tiaaStatementDocuments({ statements: [statement] })).toThrow(
+      'missing a stable account identity',
+    );
 
-    const documents = tiaaStatementDocuments({ statements: [
-      { ...statement, destinationName: 'masked-one' },
-      {
-        ...statement,
-        docID: 'document-2',
-        docLocation: 'location-2',
-        destinationName: 'masked-two',
-      },
-    ] });
-    expect(() => validateTiaaStatementDocumentIdentities(documents))
-      .toThrow('multiple accounts that the parser cannot distinguish');
+    const documents = tiaaStatementDocuments({
+      statements: [
+        { ...statement, destinationName: 'masked-one' },
+        {
+          ...statement,
+          docID: 'document-2',
+          docLocation: 'location-2',
+          destinationName: 'masked-two',
+        },
+      ],
+    });
+    expect(() => validateTiaaStatementDocumentIdentities(documents)).toThrow(
+      'multiple accounts that the parser cannot distinguish',
+    );
   });
 });
 
 describe('TIAA parser claim identity', () => {
   test('uses the exact parser source-account key for connector routing', () => {
     expect(tiaaActivitySourceAccountName('RET123')).toBe('Retirement Annuity RET123');
-    expect(tiaaSourceAccountClaimKey('Retirement Annuity RET123'))
-      .toBe('TIAA||Retirement Annuity RET123');
+    expect(tiaaSourceAccountClaimKey('Retirement Annuity RET123')).toBe(
+      'TIAA||Retirement Annuity RET123',
+    );
     expect(tiaaActivityRemoteAccount('RET123')).toEqual({
       routingKey: expect.stringMatching(/^[a-f0-9]{12}$/),
       remoteAccountId: 'RET123',
@@ -227,18 +261,36 @@ describe('TIAA parser claim identity', () => {
   });
 
   test('classifies authenticated request expiry for headed recovery', () => {
-    expect(tiaaResponseRequiresAuthentication(401, 'https://my.tiaa.org/secure/account-statements/api/type'))
-      .toBe(true);
-    expect(tiaaResponseRequiresAuthentication(200, 'https://auth.tiaa.org/public/authentication/securelogin'))
-      .toBe(true);
-    expect(tiaaResponseRequiresAuthentication(200, 'https://my.tiaa.org/private/documentdelivery/documents/one'))
-      .toBe(false);
-    expect(tiaaResponseBodyRequiresAuthentication(
-      'text/html',
-      Buffer.from('<html><input type="password" autocomplete="current-password"></html>'),
-    )).toBe(true);
-    expect(tiaaResponseBodyRequiresAuthentication('text/html', Buffer.from('<html>Service unavailable</html>')))
-      .toBe(false);
+    expect(
+      tiaaResponseRequiresAuthentication(
+        401,
+        'https://my.tiaa.org/secure/account-statements/api/type',
+      ),
+    ).toBe(true);
+    expect(
+      tiaaResponseRequiresAuthentication(
+        200,
+        'https://auth.tiaa.org/public/authentication/securelogin',
+      ),
+    ).toBe(true);
+    expect(
+      tiaaResponseRequiresAuthentication(
+        200,
+        'https://my.tiaa.org/private/documentdelivery/documents/one',
+      ),
+    ).toBe(false);
+    expect(
+      tiaaResponseBodyRequiresAuthentication(
+        'text/html',
+        Buffer.from('<html><input type="password" autocomplete="current-password"></html>'),
+      ),
+    ).toBe(true);
+    expect(
+      tiaaResponseBodyRequiresAuthentication(
+        'text/html',
+        Buffer.from('<html>Service unavailable</html>'),
+      ),
+    ).toBe(false);
   });
 
   test('does not misclassify an opaque document redirect as expired authentication', async () => {
@@ -247,12 +299,18 @@ describe('TIAA parser claim identity', () => {
       on() {},
       off() {},
       async evaluate() {
-        return { status: 0, url: 'https://my.tiaa.org/private/ahstatementsui/getreport',
-          headers: {}, bodyBase64: '', redirected: true };
+        return {
+          status: 0,
+          url: 'https://my.tiaa.org/private/ahstatementsui/getreport',
+          headers: {},
+          bodyBase64: '',
+          redirected: true,
+        };
       },
     } as unknown as Page;
-    await expect(browserFetch(page, 'https://my.tiaa.org/private/ahstatementsui/getreport'))
-      .rejects.toThrow('opaque redirect without authentication evidence');
+    await expect(
+      browserFetch(page, 'https://my.tiaa.org/private/ahstatementsui/getreport'),
+    ).rejects.toThrow('opaque redirect without authentication evidence');
   });
 
   test('maps a CORS-failed login redirect request chain to authentication required', async () => {
@@ -297,8 +355,9 @@ describe('TIAA parser claim identity', () => {
           status: 200,
           url: destination,
           headers: { 'content-type': 'text/html' },
-          bodyBase64: Buffer.from('<html><input autocomplete="username"><input type="password"></html>')
-            .toString('base64'),
+          bodyBase64: Buffer.from(
+            '<html><input autocomplete="username"><input type="password"></html>',
+          ).toString('base64'),
           redirected: false,
         };
       },
@@ -324,21 +383,26 @@ describe('TIAA artifact phase isolation', () => {
   test('statement-only discovery never depends on the activity SPA', async () => {
     let activityDiscoveryCalls = 0;
     let statementDiscoveryCalls = 0;
-    const result = await runAuthenticatedTiaa({} as Page, {
-      outputDir: '/tmp/tiaa-statement-only-test',
-      from: '2026-07-01',
-      through: '2026-08-24',
-      artifactTypes: ['statement'],
-    }, undefined, {
-      discoverActivityMetadata: async () => {
-        activityDiscoveryCalls += 1;
-        throw new Error('activity discovery must not run');
+    const result = await runAuthenticatedTiaa(
+      {} as Page,
+      {
+        outputDir: '/tmp/tiaa-statement-only-test',
+        from: '2026-07-01',
+        through: '2026-08-24',
+        artifactTypes: ['statement'],
       },
-      discoverStatementDocuments: async () => {
-        statementDiscoveryCalls += 1;
-        return [];
+      undefined,
+      {
+        discoverActivityMetadata: async () => {
+          activityDiscoveryCalls += 1;
+          throw new Error('activity discovery must not run');
+        },
+        discoverStatementDocuments: async () => {
+          statementDiscoveryCalls += 1;
+          return [];
+        },
       },
-    });
+    );
 
     expect(activityDiscoveryCalls).toBe(0);
     expect(statementDiscoveryCalls).toBe(1);
@@ -353,32 +417,41 @@ describe('TIAA artifact phase isolation', () => {
   });
 
   test('does not count an account selection when every activity export is empty', async () => {
-    const result = await runAuthenticatedTiaa({} as Page, {
-      outputDir: '/tmp/tiaa-empty-activity-test',
-      from: '2026-01-01',
-      through: '2026-08-24',
-      artifactTypes: ['activity'],
-    }, undefined, {
-      discoverActivityMetadata: async () => ({
-        accountTypes: [{
-          id: 'retirement',
-          description: 'Retirement Accounts',
-          selected: true,
-          routingKey: 'aaaaaaaaaaaa',
-        }],
-        periods: [{
-          label: 'Current year',
-          value: '0',
-          year: 2026,
-          coveredFrom: '2026-01-01',
-          coveredThrough: '2026-12-31',
-        }],
-      }),
-      captureActivityRequestBody: async () => ({}),
-      downloadActivityArtifact: async () => {
-        throw new Error('TIAA CSV artifact contains no parser-visible activity');
+    const result = await runAuthenticatedTiaa(
+      {} as Page,
+      {
+        outputDir: '/tmp/tiaa-empty-activity-test',
+        from: '2026-01-01',
+        through: '2026-08-24',
+        artifactTypes: ['activity'],
       },
-    });
+      undefined,
+      {
+        discoverActivityMetadata: async () => ({
+          accountTypes: [
+            {
+              id: 'retirement',
+              description: 'Retirement Accounts',
+              selected: true,
+              routingKey: 'aaaaaaaaaaaa',
+            },
+          ],
+          periods: [
+            {
+              label: 'Current year',
+              value: '0',
+              year: 2026,
+              coveredFrom: '2026-01-01',
+              coveredThrough: '2026-12-31',
+            },
+          ],
+        }),
+        captureActivityRequestBody: async () => ({}),
+        downloadActivityArtifact: async () => {
+          throw new Error('TIAA CSV artifact contains no parser-visible activity');
+        },
+      },
+    );
 
     expect(result.accountsDiscovered).toBe(0);
     expect(result.accountSelectionsDiscovered).toBe(1);
@@ -389,7 +462,8 @@ describe('TIAA artifact phase isolation', () => {
 describe('TIAA parser-backed artifact validation', () => {
   test('validates every source-account claim in a consolidated activity export', async () => {
     const directory = await temporaryDirectory();
-    const fileName = 'tiaa-retirement-annuity-2026-account-acde1234abcd-2026-01-01-to-2026-12-31.csv';
+    const fileName =
+      'tiaa-retirement-annuity-2026-account-acde1234abcd-2026-01-01-to-2026-12-31.csv';
     const path = join(directory, fileName);
     const text = [
       'Date,AccountId,Action,Security,Price,Quantity,Amount,Text,Memo,Commission',
@@ -417,79 +491,112 @@ describe('TIAA parser-backed artifact validation', () => {
     await writeFile(path, body);
 
     expect(tiaaStatementMeta.matches({ filename: fileName, sample: '' })).toBe(true);
-    await expect(validateTiaaStatementArtifact(path, fileName, async () => ({
-      transactions: [{
-        id: 'statement-transaction',
-        date: '2026-06-30',
-        amount_cents: 100,
-        description: 'TIAA employee contribution',
-        account: 'Retirement Annuity',
-        institution: 'TIAA',
-        category: 'statement-summary',
-        raw: {},
-      }],
-      balances: [{
-        date: '2026-06-30',
-        account: 'Retirement Annuity',
-        institution: 'TIAA',
-        balance_cents: 123_45,
-      }],
-      covered_from: '2026-04-01',
-      covered_to: '2026-06-30',
-    }), {
-      coveredFrom: '2026-04-01',
-      coveredThrough: '2026-06-30',
-    })).resolves.toEqual({
+    await expect(
+      validateTiaaStatementArtifact(
+        path,
+        fileName,
+        async () => ({
+          transactions: [
+            {
+              id: 'statement-transaction',
+              date: '2026-06-30',
+              amount_cents: 100,
+              description: 'TIAA employee contribution',
+              account: 'Retirement Annuity',
+              institution: 'TIAA',
+              category: 'statement-summary',
+              raw: {},
+            },
+          ],
+          balances: [
+            {
+              date: '2026-06-30',
+              account: 'Retirement Annuity',
+              institution: 'TIAA',
+              balance_cents: 123_45,
+            },
+          ],
+          covered_from: '2026-04-01',
+          covered_to: '2026-06-30',
+        }),
+        {
+          coveredFrom: '2026-04-01',
+          coveredThrough: '2026-06-30',
+        },
+      ),
+    ).resolves.toEqual({
       size: body.length,
-      remoteAccounts: [{
-        routingKey: expect.stringMatching(/^[a-f0-9]{12}$/),
-        remoteAccountId: 'Retirement Annuity',
-        sourceAccountName: 'Retirement Annuity',
-        claimKey: 'TIAA||Retirement Annuity',
-      }],
+      remoteAccounts: [
+        {
+          routingKey: expect.stringMatching(/^[a-f0-9]{12}$/),
+          remoteAccountId: 'Retirement Annuity',
+          sourceAccountName: 'Retirement Annuity',
+          claimKey: 'TIAA||Retirement Annuity',
+        },
+      ],
       coveredFrom: '2026-04-01',
       coveredThrough: '2026-06-30',
       transactionCount: 1,
       balanceCount: 1,
     });
 
-    await expect(validateTiaaStatementArtifact(path, fileName, async () => ({
-      transactions: [],
-      balances: [{
-        date: '2026-06-30',
-        account: 'Retirement Annuity',
-        institution: 'TIAA',
-        balance_cents: 123_45,
-      }],
-      covered_from: '2026-01-01',
-      covered_to: '2026-03-31',
-    }), {
-      coveredFrom: '2026-04-01',
-      coveredThrough: '2026-06-30',
-    })).rejects.toThrow('coverage did not match');
+    await expect(
+      validateTiaaStatementArtifact(
+        path,
+        fileName,
+        async () => ({
+          transactions: [],
+          balances: [
+            {
+              date: '2026-06-30',
+              account: 'Retirement Annuity',
+              institution: 'TIAA',
+              balance_cents: 123_45,
+            },
+          ],
+          covered_from: '2026-01-01',
+          covered_to: '2026-03-31',
+        }),
+        {
+          coveredFrom: '2026-04-01',
+          coveredThrough: '2026-06-30',
+        },
+      ),
+    ).rejects.toThrow('coverage did not match');
 
-    await expect(validateTiaaStatementArtifact(path, fileName, async () => ({
-      transactions: [{
-        id: 'unexpected-account',
-        date: '2026-06-30',
-        amount_cents: 100,
-        description: 'Summary',
-        account: 'Different TIAA Account',
-        institution: 'TIAA',
-        category: 'statement-summary',
-        raw: {},
-      }],
-      balances: [{
-        date: '2026-06-30',
-        account: 'Retirement Annuity',
-        institution: 'TIAA',
-        balance_cents: 123_45,
-      }],
-      covered_from: '2026-04-01',
-      covered_to: '2026-06-30',
-    }), {
-      coveredFrom: '2026-04-01',
-      coveredThrough: '2026-06-30',
-    })).rejects.toThrow('unexpected account identity');
+    await expect(
+      validateTiaaStatementArtifact(
+        path,
+        fileName,
+        async () => ({
+          transactions: [
+            {
+              id: 'unexpected-account',
+              date: '2026-06-30',
+              amount_cents: 100,
+              description: 'Summary',
+              account: 'Different TIAA Account',
+              institution: 'TIAA',
+              category: 'statement-summary',
+              raw: {},
+            },
+          ],
+          balances: [
+            {
+              date: '2026-06-30',
+              account: 'Retirement Annuity',
+              institution: 'TIAA',
+              balance_cents: 123_45,
+            },
+          ],
+          covered_from: '2026-04-01',
+          covered_to: '2026-06-30',
+        }),
+        {
+          coveredFrom: '2026-04-01',
+          coveredThrough: '2026-06-30',
+        },
+      ),
+    ).rejects.toThrow('unexpected account identity');
   });
 });

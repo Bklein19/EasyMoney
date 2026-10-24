@@ -2,7 +2,12 @@ import { expect, test } from 'bun:test';
 import { accountContextMenu, accountIdFromMenuEvent } from '../../desktop/accountContextMenu';
 
 test('native edit action preserves the clicked account identity', () => {
-  const menu = accountContextMenu({ accountId: 42, name: 'Checking', institution: 'Bank', owner: 'Annie' });
+  const menu = accountContextMenu({
+    accountId: 42,
+    name: 'Checking',
+    institution: 'Bank',
+    owner: 'Annie',
+  });
   expect(menu).toEqual([
     { label: 'Checking', enabled: false },
     { label: 'Bank · Annie', enabled: false },
@@ -14,9 +19,13 @@ test('native edit action preserves the clicked account identity', () => {
 });
 
 test('unrelated and malformed native events cannot navigate to an account', () => {
-  for (const event of [null, {}, { data: { action: 'other', data: { accountId: 42 } } },
+  for (const event of [
+    null,
+    {},
+    { data: { action: 'other', data: { accountId: 42 } } },
     { data: { action: 'edit-account', data: { accountId: '42' } } },
-    { data: { action: 'edit-account', data: { accountId: -1 } } }]) {
+    { data: { action: 'edit-account', data: { accountId: -1 } } },
+  ]) {
     expect(accountIdFromMenuEvent(event)).toBeNull();
   }
   expect(() => accountContextMenu({ accountId: -1, name: 'Invalid' })).toThrow();

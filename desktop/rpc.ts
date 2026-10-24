@@ -13,9 +13,7 @@ export interface DesktopTrpcRequest {
   input: unknown;
 }
 
-export type DesktopTrpcResponse =
-  | { ok: true; data: unknown }
-  | { ok: false; error: unknown };
+export type DesktopTrpcResponse = { ok: true; data: unknown } | { ok: false; error: unknown };
 
 export type EasyMoneyDesktopRpc = {
   bun: {
@@ -34,6 +32,11 @@ export type EasyMoneyDesktopRpc = {
   };
   webview: {
     requests: {};
-    messages: { editAccount: { accountId: number }; navigateHistory: { delta: -1 | 1 }; customizeSidebar: {}; toggleDebug: {} };
+    messages: {
+      editAccount: { accountId: number };
+      navigateHistory: { delta: -1 | 1 };
+      customizeSidebar: {};
+      toggleDebug: {};
+    };
   };
 };

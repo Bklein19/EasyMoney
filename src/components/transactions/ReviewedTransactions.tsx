@@ -12,40 +12,72 @@ export function useReviewedCategories() {
   const [error, setError] = useState('');
   const [undo, setUndo] = useState<{ id: number; count: number } | null>(null);
   const apply = async (rows: TransactionListItem[], categoryId: number | null, label: string) => {
-    setPending(true); setError('');
+    setPending(true);
+    setError('');
     try {
-      const result = await trpcClient.transactions.applyReviewedCategories.mutate({ label,
-        changes: rows.map(row => ({ ...reviewedTransaction(row), categoryId })) });
+      const result = await trpcClient.transactions.applyReviewedCategories.mutate({
+        label,
+        changes: rows.map((row) => ({ ...reviewedTransaction(row), categoryId })),
+      });
       setUndo(result.undoOperation);
       await queryClient.invalidateQueries();
       return true;
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); return false; }
-    finally { setPending(false); }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      return false;
+    } finally {
+      setPending(false);
+    }
   };
   const restore = async () => {
     if (!undo) return;
-    setPending(true); setError('');
+    setPending(true);
+    setError('');
     try {
       await trpcClient.transactions.restoreCategories.mutate({ undoOperationId: undo.id });
-      setUndo(null); await queryClient.invalidateQueries();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { setPending(false); }
+      setUndo(null);
+      await queryClient.invalidateQueries();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setPending(false);
+    }
   };
   return { pending, error, undo, apply, restore };
 }
 
-export function CategoryChangeFeedback({ state }: { state: ReturnType<typeof useReviewedCategories> }) {
-  return <>
-    {state.error && <p role="alert">{state.error}</p>}
-    {state.undo && <p className="category-review-feedback" role="status">
-      Updated {state.undo.count} transaction{state.undo.count === 1 ? '' : 's'}. Backup saved.
-      <button className="btn btn--ghost btn--sm" disabled={state.pending} onClick={() => void state.restore()}>Undo</button>
-    </p>}
-  </>;
+export function CategoryChangeFeedback({
+  state,
+}: {
+  state: ReturnType<typeof useReviewedCategories>;
+}) {
+  return (
+    <>
+      {state.error && <p role="alert">{state.error}</p>}
+      {state.undo && (
+        <p className="category-review-feedback" role="status">
+          Updated {state.undo.count} transaction{state.undo.count === 1 ? '' : 's'}. Backup saved.
+          <button
+            className="btn btn--ghost btn--sm"
+            disabled={state.pending}
+            onClick={() => void state.restore()}
+          >
+            Undo
+          </button>
+        </p>
+      )}
+    </>
+  );
 }
 
-export default function ReviewedTransactions({ transactions, onInspect, label }: {
-  transactions: TransactionListItem[]; onInspect: (id: string) => void; label: string;
+export default function ReviewedTransactions({
+  transactions,
+  onInspect,
+  label,
+}: {
+  transactions: TransactionListItem[];
+  onInspect: (id: string) => void;
+  label: string;
 }) {
   const { categories } = useCategories();
   const state = useReviewedCategories();
@@ -56,31 +88,110 @@ export default function ReviewedTransactions({ transactions, onInspect, label }:
   // replace the expected facts; the server rejects stale selections atomically.
   const rows = [...selected.values()];
   const visible = transactions.slice(0, limit);
-  const toggle = (row: TransactionListItem) => setSelected(previous => { const next = new Map(previous); const id = row.ledgerTransactionId!; if (next.has(id)) next.delete(id); else next.set(id, row); return next; });
-  return <div className="category-review-list">
-    <div className="category-review-controls">
-      <button type="button" className="btn btn--ghost btn--sm" disabled={state.pending} onClick={() => setSelected(new Map(transactions.map(row => [row.ledgerTransactionId!, row])))}>Select all {transactions.length}</button>
-      {selected.size > 0 && <button type="button" className="btn btn--ghost btn--sm" disabled={state.pending} onClick={() => setSelected(new Map())}>Clear selection</button>}
-      <GroupedCategorySelect value={categoryId} categories={categories.filter(category => category.name.toLowerCase() !== 'uncategorized')} leadingOptions={[{ value: '', label: 'Choose category…' }, { value: '__uncategorized', label: 'Uncategorized' }]}
-        aria-label="Category for selected transactions" disabled={state.pending} onChange={setCategoryId} />
-      <button type="button" className="btn btn--primary btn--sm" disabled={state.pending || !rows.length || !categoryId}
-        onClick={async () => { if (await state.apply(rows, categoryId === '__uncategorized' ? null : Number(categoryId), label)) setSelected(new Map()); }}>
-        {state.pending ? 'Saving…' : `Apply to ${rows.length} selected`}
-      </button>
-    </div>
-    {rows.length > 0 && <p className="category-review-impact">Only these {rows.length} selected transactions ({formatCurrency(rows.reduce((sum, row) => sum + Math.abs(row.amount), 0))} in activity) will change. Notes and source data stay intact.</p>}
-    <CategoryChangeFeedback state={state} />
-    <ul className="related-transactions" aria-label="Transactions to review">
-      {visible.map(row => <li key={row.ledgerTransactionId}>
-        <input type="checkbox" aria-label={`Select ${row.merchant || row.description} on ${row.date.slice(0, 10)}`} disabled={state.pending}
-          checked={selected.has(row.ledgerTransactionId!)} onChange={() => toggle(row)} />
-        <button type="button" className="related-transactions__name" disabled={state.pending} onClick={() => onInspect(row.ledgerTransactionId!)}>
-          <strong>{row.merchant || row.description || 'Transaction'}</strong>
-          <span>{formatDate(row.date, 'medium')} · {row.category?.name || 'Uncategorized'}</span>
+  const toggle = (row: TransactionListItem) =>
+    setSelected((previous) => {
+      const next = new Map(previous);
+      const id = row.ledgerTransactionId!;
+      if (next.has(id)) next.delete(id);
+      else next.set(id, row);
+      return next;
+    });
+  return (
+    <div className="category-review-list">
+      <div className="category-review-controls">
+        <button
+          type="button"
+          className="btn btn--ghost btn--sm"
+          disabled={state.pending}
+          onClick={() =>
+            setSelected(new Map(transactions.map((row) => [row.ledgerTransactionId!, row])))
+          }
+        >
+          Select all {transactions.length}
         </button>
-        <span>{formatCurrency(row.amount, true)}</span>
-      </li>)}
-    </ul>
-    {limit < transactions.length && <button type="button" className="btn btn--ghost btn--sm" onClick={() => setLimit(previous => previous + 20)}>Show more ({transactions.length - limit} remaining)</button>}
-  </div>;
+        {selected.size > 0 && (
+          <button
+            type="button"
+            className="btn btn--ghost btn--sm"
+            disabled={state.pending}
+            onClick={() => setSelected(new Map())}
+          >
+            Clear selection
+          </button>
+        )}
+        <GroupedCategorySelect
+          value={categoryId}
+          categories={categories.filter(
+            (category) => category.name.toLowerCase() !== 'uncategorized',
+          )}
+          leadingOptions={[
+            { value: '', label: 'Choose category…' },
+            { value: '__uncategorized', label: 'Uncategorized' },
+          ]}
+          aria-label="Category for selected transactions"
+          disabled={state.pending}
+          onChange={setCategoryId}
+        />
+        <button
+          type="button"
+          className="btn btn--primary btn--sm"
+          disabled={state.pending || !rows.length || !categoryId}
+          onClick={async () => {
+            if (
+              await state.apply(
+                rows,
+                categoryId === '__uncategorized' ? null : Number(categoryId),
+                label,
+              )
+            )
+              setSelected(new Map());
+          }}
+        >
+          {state.pending ? 'Saving…' : `Apply to ${rows.length} selected`}
+        </button>
+      </div>
+      {rows.length > 0 && (
+        <p className="category-review-impact">
+          Only these {rows.length} selected transactions (
+          {formatCurrency(rows.reduce((sum, row) => sum + Math.abs(row.amount), 0))} in activity)
+          will change. Notes and source data stay intact.
+        </p>
+      )}
+      <CategoryChangeFeedback state={state} />
+      <ul className="related-transactions" aria-label="Transactions to review">
+        {visible.map((row) => (
+          <li key={row.ledgerTransactionId}>
+            <input
+              type="checkbox"
+              aria-label={`Select ${row.merchant || row.description} on ${row.date.slice(0, 10)}`}
+              disabled={state.pending}
+              checked={selected.has(row.ledgerTransactionId!)}
+              onChange={() => toggle(row)}
+            />
+            <button
+              type="button"
+              className="related-transactions__name"
+              disabled={state.pending}
+              onClick={() => onInspect(row.ledgerTransactionId!)}
+            >
+              <strong>{row.merchant || row.description || 'Transaction'}</strong>
+              <span>
+                {formatDate(row.date, 'medium')} · {row.category?.name || 'Uncategorized'}
+              </span>
+            </button>
+            <span>{formatCurrency(row.amount, true)}</span>
+          </li>
+        ))}
+      </ul>
+      {limit < transactions.length && (
+        <button
+          type="button"
+          className="btn btn--ghost btn--sm"
+          onClick={() => setLimit((previous) => previous + 20)}
+        >
+          Show more ({transactions.length - limit} remaining)
+        </button>
+      )}
+    </div>
+  );
 }

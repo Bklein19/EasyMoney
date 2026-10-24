@@ -4,7 +4,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { commonAccountLast4 } from './app/accountLast4.ts';
 import { hashContent } from './hash.ts';
-import { selectedDatabasePath, writeSnapshot, validateSnapshot, flushSnapshotFile } from './databaseSnapshots.ts';
+import {
+  selectedDatabasePath,
+  writeSnapshot,
+  validateSnapshot,
+  flushSnapshotFile,
+} from './databaseSnapshots.ts';
 
 type DatabaseValue = string | number | bigint | boolean | null | Uint8Array | Date;
 type DatabaseParams = DatabaseValue | object | undefined;
@@ -21,7 +26,9 @@ interface WrappedDatabase {
   close: () => void;
   exec: (sql: string) => void;
   prepare: (sql: string) => WrappedStatement;
-  transaction: <Args extends unknown[], Result>(fn: (...args: Args) => Result) => (...args: Args) => Result;
+  transaction: <Args extends unknown[], Result>(
+    fn: (...args: Args) => Result,
+  ) => (...args: Args) => Result;
 }
 
 interface TransactionIdentityInput {
@@ -157,11 +164,17 @@ function normalizeSql(sql: string) {
 }
 
 function normalizeParams(params: DatabaseParams) {
-  if (!params || typeof params !== 'object' || Array.isArray(params) || ArrayBuffer.isView(params)) return params;
+  if (!params || typeof params !== 'object' || Array.isArray(params) || ArrayBuffer.isView(params))
+    return params;
   return Object.fromEntries(
-    Object.entries(params).flatMap(([key, value]) => (
-      key.startsWith('$') ? [[key, value]] : [[key, value], [`$${key}`, value]]
-    ))
+    Object.entries(params).flatMap(([key, value]) =>
+      key.startsWith('$')
+        ? [[key, value]]
+        : [
+            [key, value],
+            [`$${key}`, value],
+          ],
+    ),
   );
 }
 
@@ -185,13 +198,16 @@ function transactionIdentityBaseKey(transaction: TransactionIdentityInput) {
     transaction.accountId || '',
     normalizeIdentityDate(transaction.date),
     Number(transaction.amount || 0).toFixed(2),
-    normalizeIdentityText(transaction.originalDescription || transaction.description || transaction.merchant || ''),
+    normalizeIdentityText(
+      transaction.originalDescription || transaction.description || transaction.merchant || '',
+    ),
     normalizeIdentityText(transaction.sourceRole || transaction.transactionKind || 'activity'),
   ].join('|');
 }
 
 function transactionOccurrenceSortKey(transaction: TransactionIdentityInput) {
-  const token = (value: string | number | null | undefined) => typeof value === 'number' ? String(value).padStart(16, '0') : String(value || '');
+  const token = (value: string | number | null | undefined) =>
+    typeof value === 'number' ? String(value).padStart(16, '0') : String(value || '');
   return [
     transaction.stableSourceId || '',
     token(transaction.importFileId),
@@ -202,7 +218,9 @@ function transactionOccurrenceSortKey(transaction: TransactionIdentityInput) {
     token(transaction.id),
     normalizeIdentityDate(transaction.date),
     Number(transaction.amount || 0).toFixed(2),
-    normalizeIdentityText(transaction.originalDescription || transaction.description || transaction.merchant || ''),
+    normalizeIdentityText(
+      transaction.originalDescription || transaction.description || transaction.merchant || '',
+    ),
   ].join('|');
 }
 
@@ -215,31 +233,48 @@ function isCreditAccountType(type: string | null | undefined) {
 }
 
 function isLikelyCreditCardPaymentDescription(description: string | null | undefined = '') {
-  return /\b(payment|pmt|autopay|auto pay|online transfer|thank you)\b/i.test(String(description || ''));
+  return /\b(payment|pmt|autopay|auto pay|online transfer|thank you)\b/i.test(
+    String(description || ''),
+  );
 }
 
-function transactionFingerprintFor({ accountId, date, amount, originalDescription, description, merchant }: TransactionFingerprintInput) {
+function transactionFingerprintFor({
+  accountId,
+  date,
+  amount,
+  originalDescription,
+  description,
+  merchant,
+}: TransactionFingerprintInput) {
   const text = normalizeIdentityText(originalDescription || description || merchant || '');
-  return [
-    accountId,
-    normalizeIdentityDate(date),
-    Number(amount || 0).toFixed(2),
-    text,
-  ].join('|');
+  return [accountId, normalizeIdentityDate(date), Number(amount || 0).toFixed(2), text].join('|');
 }
 
-function stableSourceTransactionIdFor({ importFileId, sourceRowIndex, date, amountCents, description, sourceRole }: StableSourceTransactionInput) {
-  return `src_txn_${hashContent([
-    importFileId,
-    sourceRowIndex,
-    date,
-    amountCents,
-    normalizeIdentityText(description),
-    sourceRole,
-  ].join('|')).slice(0, 32)}`;
+function stableSourceTransactionIdFor({
+  importFileId,
+  sourceRowIndex,
+  date,
+  amountCents,
+  description,
+  sourceRole,
+}: StableSourceTransactionInput) {
+  return `src_txn_${hashContent(
+    [
+      importFileId,
+      sourceRowIndex,
+      date,
+      amountCents,
+      normalizeIdentityText(description),
+      sourceRole,
+    ].join('|'),
+  ).slice(0, 32)}`;
 }
 
-function wrapStatement(statement: { all: (...params: any[]) => any[]; get: (...params: any[]) => any; run: (...params: any[]) => { changes: number; lastInsertRowid: number | bigint } }): WrappedStatement {
+function wrapStatement(statement: {
+  all: (...params: any[]) => any[];
+  get: (...params: any[]) => any;
+  run: (...params: any[]) => { changes: number; lastInsertRowid: number | bigint };
+}): WrappedStatement {
   return {
     all: (...params) => statement.all(...params.map(normalizeParams)),
     get: (...params) => statement.get(...params.map(normalizeParams)),
@@ -258,38 +293,52 @@ const db: WrappedDatabase = {
 };
 
 function tableColumnNames(tableName: string) {
-  return (db.prepare(`PRAGMA table_info(${tableName})`).all() as TableInfoRow[]).map(column => column.name);
+  return (db.prepare(`PRAGMA table_info(${tableName})`).all() as TableInfoRow[]).map(
+    (column) => column.name,
+  );
 }
 
 function runSchemaMigration(name: string, migrate: () => void) {
-  db.prepare(`
+  db.prepare(
+    `
     CREATE TABLE IF NOT EXISTS schemaMigrations (
       name TEXT PRIMARY KEY,
       appliedAt TEXT NOT NULL
     )
-  `).run();
+  `,
+  ).run();
 
   const existing = db.prepare('SELECT name FROM schemaMigrations WHERE name = ?').get(name);
   if (existing) return;
 
-  if (!migrationSnapshotCreated && db.prepare("SELECT name FROM sqlite_master WHERE name = 'sourceTransactions'").get()) {
+  if (
+    !migrationSnapshotCreated &&
+    db.prepare("SELECT name FROM sqlite_master WHERE name = 'sourceTransactions'").get()
+  ) {
     createDatabaseBackup('before-migration');
     migrationSnapshotCreated = true;
   }
 
   db.transaction(() => {
     migrate();
-    db.prepare('INSERT INTO schemaMigrations (name, appliedAt) VALUES (?, ?)').run(name, new Date().toISOString());
+    db.prepare('INSERT INTO schemaMigrations (name, appliedAt) VALUES (?, ?)').run(
+      name,
+      new Date().toISOString(),
+    );
   })();
 }
 
 function backfillBlankAccountLast4s() {
-  const accounts = db.prepare(`
+  const accounts = db
+    .prepare(
+      `
     SELECT id, name
     FROM accounts
     WHERE last4 IS NULL OR TRIM(last4) = ''
     ORDER BY id
-  `).all() as AccountLast4BackfillRow[];
+  `,
+    )
+    .all() as AccountLast4BackfillRow[];
   const identityRows = db.prepare(`
     SELECT sourceAccountName AS value
     FROM sourceAccounts
@@ -311,10 +360,14 @@ function backfillBlankAccountLast4s() {
   `);
 
   for (const account of accounts) {
-    const identities = identityRows.all(account.id, account.id, account.id) as AccountLast4IdentityRow[];
+    const identities = identityRows.all(
+      account.id,
+      account.id,
+      account.id,
+    ) as AccountLast4IdentityRow[];
     const last4 = commonAccountLast4([
       account.name,
-      ...identities.map(identity => identity.value),
+      ...identities.map((identity) => identity.value),
     ]);
     if (last4) update.run(last4, account.id);
   }
@@ -330,20 +383,28 @@ function legacyYearLikeAccountLast4(value: string | null | undefined): string | 
 }
 
 function repairYearLikeBackfilledAccountLast4s() {
-  const backfillMigration = db.prepare(`
+  const backfillMigration = db
+    .prepare(
+      `
     SELECT appliedAt
     FROM schemaMigrations
     WHERE name = '2026-08-27-account-last4-backfill'
-  `).get() as { appliedAt: string } | undefined;
+  `,
+    )
+    .get() as { appliedAt: string } | undefined;
   if (!backfillMigration) return;
 
-  const accounts = db.prepare(`
+  const accounts = db
+    .prepare(
+      `
     SELECT id, name, last4, updatedAt
     FROM accounts
     WHERE LENGTH(TRIM(last4)) = 4
       AND CAST(last4 AS INTEGER) BETWEEN 1900 AND 2099
     ORDER BY id
-  `).all() as AccountLast4RepairRow[];
+  `,
+    )
+    .all() as AccountLast4RepairRow[];
   const identityRows = db.prepare(`
     SELECT sourceAccountName AS value
     FROM sourceAccounts
@@ -364,13 +425,17 @@ function repairYearLikeBackfilledAccountLast4s() {
     // edit at or after that migration is therefore user-authored provenance.
     if (account.updatedAt && account.updatedAt >= backfillMigration.appliedAt) continue;
 
-    const identities = identityRows.all(account.id, account.id, account.id) as AccountLast4IdentityRow[];
-    const values = [account.name, ...identities.map(identity => identity.value)];
+    const identities = identityRows.all(
+      account.id,
+      account.id,
+      account.id,
+    ) as AccountLast4IdentityRow[];
+    const values = [account.name, ...identities.map((identity) => identity.value)];
     if (commonAccountLast4(values) === account.last4) continue;
 
-    const legacyCandidates = new Set(values
-      .map(legacyYearLikeAccountLast4)
-      .filter((value): value is string => value !== null));
+    const legacyCandidates = new Set(
+      values.map(legacyYearLikeAccountLast4).filter((value): value is string => value !== null),
+    );
     if (legacyCandidates.size === 1 && legacyCandidates.has(account.last4)) {
       clear.run(account.id, account.last4);
     }
@@ -378,7 +443,9 @@ function repairYearLikeBackfilledAccountLast4s() {
 }
 
 function repairCreditCardCashflowSigns() {
-  const sourceAccounts = db.prepare(`
+  const sourceAccounts = db
+    .prepare(
+      `
     SELECT
       sa.id,
       a.id AS accountId,
@@ -386,17 +453,23 @@ function repairCreditCardCashflowSigns() {
     FROM sourceAccounts sa
     JOIN accounts a ON a.id = sa.accountId
     WHERE a.type IN ('credit', 'credit_card', 'credit-card')
-  `).all() as SourceAccountRepairRow[];
+  `,
+    )
+    .all() as SourceAccountRepairRow[];
 
   const sourceAccountIdsToFlip = [];
   for (const sourceAccount of sourceAccounts) {
     if (!isCreditAccountType(sourceAccount.accountType)) continue;
-    const rows = db.prepare(`
+    const rows = db
+      .prepare(
+        `
       SELECT amountCents, description, rawJson
       FROM sourceTransactions
       WHERE sourceAccountId = ?
-    `).all(sourceAccount.id) as SourceTransactionRepairRow[];
-    const moneyRows = rows.filter(row => {
+    `,
+      )
+      .all(sourceAccount.id) as SourceTransactionRepairRow[];
+    const moneyRows = rows.filter((row) => {
       try {
         const raw = JSON.parse(row.rawJson || '{}');
         return Boolean(raw.moneyCategory);
@@ -406,9 +479,11 @@ function repairCreditCardCashflowSigns() {
     });
     if (!moneyRows.length) continue;
 
-    const purchaseRows = moneyRows.filter(row => !isLikelyCreditCardPaymentDescription(row.description));
-    const positivePurchases = purchaseRows.filter(row => Number(row.amountCents) > 0).length;
-    const negativePurchases = purchaseRows.filter(row => Number(row.amountCents) < 0).length;
+    const purchaseRows = moneyRows.filter(
+      (row) => !isLikelyCreditCardPaymentDescription(row.description),
+    );
+    const positivePurchases = purchaseRows.filter((row) => Number(row.amountCents) > 0).length;
+    const negativePurchases = purchaseRows.filter((row) => Number(row.amountCents) < 0).length;
     if (positivePurchases > negativePurchases) {
       sourceAccountIdsToFlip.push(sourceAccount.id);
     }
@@ -447,7 +522,7 @@ function repairCreditCardCashflowSigns() {
     for (const row of sourceRowsToFlip.all(sourceAccountId) as SourceTransactionFlipRow[]) {
       const amountCents = -Number(row.amountCents || 0);
       const sourceRowIndex = row.normalizedJson
-        ? JSON.parse(row.normalizedJson).sourceRowIndex ?? row.rowIndex
+        ? (JSON.parse(row.normalizedJson).sourceRowIndex ?? row.rowIndex)
         : row.rowIndex;
       const stableSourceId = stableSourceTransactionIdFor({
         importFileId: row.importFileId,
@@ -543,52 +618,189 @@ function repairCreditCardCashflowSigns() {
 }
 
 const TABLES = {
-  accounts: ['id', 'name', 'institution', 'type', 'currentBalance', 'currency', 'accountHolder', 'last4', 'status', 'archivedAt', 'reportingClosedOn', 'createdAt', 'updatedAt'],
-  transferRecords: ['id', 'sourceAccountId', 'destinationAccountId', 'effectiveDate', 'reason', 'status', 'createdAt', 'updatedAt'],
+  accounts: [
+    'id',
+    'name',
+    'institution',
+    'type',
+    'currentBalance',
+    'currency',
+    'accountHolder',
+    'last4',
+    'status',
+    'archivedAt',
+    'reportingClosedOn',
+    'createdAt',
+    'updatedAt',
+  ],
+  transferRecords: [
+    'id',
+    'sourceAccountId',
+    'destinationAccountId',
+    'effectiveDate',
+    'reason',
+    'status',
+    'createdAt',
+    'updatedAt',
+  ],
   accountAliases: ['id', 'institution', 'alias', 'accountId', 'createdAt', 'updatedAt'],
   transactions: [
-    'id', 'accountId', 'categoryId', 'date', 'amount', 'importBatchId', 'description', 'merchant',
-    'originalDescription', 'originalCategory', 'type', 'transactionKind', 'status', 'notes', 'fingerprint',
-    'ledgerTransactionId', 'occurrenceIndex', 'createdAt'
+    'id',
+    'accountId',
+    'categoryId',
+    'date',
+    'amount',
+    'importBatchId',
+    'description',
+    'merchant',
+    'originalDescription',
+    'originalCategory',
+    'type',
+    'transactionKind',
+    'status',
+    'notes',
+    'fingerprint',
+    'ledgerTransactionId',
+    'occurrenceIndex',
+    'createdAt',
   ],
   ledgerTransactions: [
-    'id', 'ledgerTransactionId', 'legacyTransactionId', 'accountId', 'date', 'amountCents',
-    'importBatchId', 'description', 'merchant', 'originalDescription', 'originalCategory',
-    'type', 'transactionKind', 'status', 'fingerprint', 'sourceRole', 'occurrenceIndex',
-    'importFileId', 'importRowId', 'sourceTransactionId', 'createdAt', 'updatedAt'
+    'id',
+    'ledgerTransactionId',
+    'legacyTransactionId',
+    'accountId',
+    'date',
+    'amountCents',
+    'importBatchId',
+    'description',
+    'merchant',
+    'originalDescription',
+    'originalCategory',
+    'type',
+    'transactionKind',
+    'status',
+    'fingerprint',
+    'sourceRole',
+    'occurrenceIndex',
+    'importFileId',
+    'importRowId',
+    'sourceTransactionId',
+    'createdAt',
+    'updatedAt',
   ],
   transactionAnnotations: ['ledgerTransactionId', 'categoryId', 'notes', 'createdAt', 'updatedAt'],
-  transactionCategoryUndoOperations: ['id', 'categoryName', 'transactionCount', 'payloadJson', 'status', 'createdAt', 'consumedAt'],
+  transactionCategoryUndoOperations: [
+    'id',
+    'categoryName',
+    'transactionCount',
+    'payloadJson',
+    'status',
+    'createdAt',
+    'consumedAt',
+  ],
   merchantGroupingRules: ['id', 'sourceMerchantKey', 'strategy', 'createdAt', 'updatedAt'],
   categories: ['id', 'name', 'parentId', 'type', 'categoryGroup', 'description', 'color', 'icon'],
   budgets: ['id', 'categoryId', 'month', 'amount'],
   balanceSnapshots: ['id', 'accountId', 'month', 'balance', 'capturedAt'],
-  ledgerBalances: ['id', 'accountId', 'month', 'balanceCents', 'capturedAt', 'sourceBalanceId', 'createdAt', 'updatedAt'],
+  ledgerBalances: [
+    'id',
+    'accountId',
+    'month',
+    'balanceCents',
+    'capturedAt',
+    'sourceBalanceId',
+    'createdAt',
+    'updatedAt',
+  ],
   categorizationRules: ['id', 'categoryId', 'pattern', 'matchType', 'priority'],
-  importProfiles: ['id', 'headerSignature', 'profileName', 'profileJson', 'mappingJson', 'lastAccountId', 'createdAt', 'updatedAt'],
+  importProfiles: [
+    'id',
+    'headerSignature',
+    'profileName',
+    'profileJson',
+    'mappingJson',
+    'lastAccountId',
+    'createdAt',
+    'updatedAt',
+  ],
   importFiles: [
-    'id', 'fileName', 'contentHash', 'parserName', 'headerSignature', 'rowCount',
-    'sourceType', 'parserPriority', 'institution', 'status', 'importBatchId', 'createdAt', 'committedAt'
+    'id',
+    'fileName',
+    'contentHash',
+    'parserName',
+    'headerSignature',
+    'rowCount',
+    'sourceType',
+    'parserPriority',
+    'institution',
+    'status',
+    'importBatchId',
+    'createdAt',
+    'committedAt',
   ],
   importRows: [
-    'id', 'importFileId', 'rowIndex', 'rowType', 'rawJson', 'normalizedJson',
-    'fingerprint', 'transactionId', 'createdAt'
+    'id',
+    'importFileId',
+    'rowIndex',
+    'rowType',
+    'rawJson',
+    'normalizedJson',
+    'fingerprint',
+    'transactionId',
+    'createdAt',
   ],
   sourceFiles: [
-    'id', 'importFileId', 'fileName', 'contentHash', 'parserName', 'sourceType',
-    'parserPriority', 'institution', 'coveredFrom', 'coveredTo', 'coverageBasis', 'status', 'createdAt', 'committedAt'
+    'id',
+    'importFileId',
+    'fileName',
+    'contentHash',
+    'parserName',
+    'sourceType',
+    'parserPriority',
+    'institution',
+    'coveredFrom',
+    'coveredTo',
+    'coverageBasis',
+    'status',
+    'createdAt',
+    'committedAt',
   ],
   sourceAccounts: [
-    'id', 'sourceFileId', 'accountId', 'institution', 'sourceAccountKey', 'sourceAccountName', 'accountHolder', 'rawJson', 'createdAt'
+    'id',
+    'sourceFileId',
+    'accountId',
+    'institution',
+    'sourceAccountKey',
+    'sourceAccountName',
+    'accountHolder',
+    'rawJson',
+    'createdAt',
   ],
   sourceTransactions: [
-    'id', 'sourceFileId', 'sourceAccountId', 'importRowId', 'stableSourceId', 'date',
-    'amountCents', 'description', 'sourceRole', 'priority', 'rawJson', 'createdAt'
+    'id',
+    'sourceFileId',
+    'sourceAccountId',
+    'importRowId',
+    'stableSourceId',
+    'date',
+    'amountCents',
+    'description',
+    'sourceRole',
+    'priority',
+    'rawJson',
+    'createdAt',
   ],
   sourceBalances: [
-    'id', 'sourceFileId', 'sourceAccountId', 'importRowId', 'date', 'balanceCents',
-    'priority', 'rawJson', 'createdAt'
-  ]
+    'id',
+    'sourceFileId',
+    'sourceAccountId',
+    'importRowId',
+    'date',
+    'balanceCents',
+    'priority',
+    'rawJson',
+    'createdAt',
+  ],
 } as const;
 
 type TableName = keyof typeof TABLES;
@@ -611,7 +823,7 @@ const ORDER_BY: Partial<Record<TableName, string>> = {
   sourceFiles: 'createdAt DESC, id DESC',
   sourceAccounts: 'sourceFileId ASC, id ASC',
   sourceTransactions: 'date DESC, id DESC',
-  sourceBalances: 'date DESC, id DESC'
+  sourceBalances: 'date DESC, id DESC',
 };
 
 export function initDatabase() {
@@ -912,7 +1124,8 @@ export function initDatabase() {
     }
   });
   runSchemaMigration('2026-09-07-source-coverage-basis', () => {
-    if (!tableColumnNames('sourceFiles').includes('coverageBasis')) db.exec('ALTER TABLE sourceFiles ADD COLUMN coverageBasis TEXT');
+    if (!tableColumnNames('sourceFiles').includes('coverageBasis'))
+      db.exec('ALTER TABLE sourceFiles ADD COLUMN coverageBasis TEXT');
   });
   runSchemaMigration('2026-09-12-parser-derivations', () => {
     db.exec(`
@@ -947,9 +1160,13 @@ export function initDatabase() {
   });
 
   runSchemaMigration('2026-09-13-parser-refresh-diagnostics', () => {
-    db.exec(`CREATE TABLE parserRefreshDiagnostics (id INTEGER PRIMARY KEY CHECK (id=1), payloadJson TEXT NOT NULL)`);
+    db.exec(
+      `CREATE TABLE parserRefreshDiagnostics (id INTEGER PRIMARY KEY CHECK (id=1), payloadJson TEXT NOT NULL)`,
+    );
     // Retry old blanket reports once to replace them with attributable evidence.
-    db.prepare("UPDATE parserDerivations SET attemptedRevision=NULL WHERE status='review-required'").run();
+    db.prepare(
+      "UPDATE parserDerivations SET attemptedRevision=NULL WHERE status='review-required'",
+    ).run();
   });
 
   runSchemaMigration('2026-09-13-parser-refresh-account-choices', () => {
@@ -976,7 +1193,9 @@ export function initDatabase() {
   });
 
   runSchemaMigration('2026-09-14-reporting-closure-destination', () => {
-    db.exec('ALTER TABLE accounts ADD COLUMN reportingClosureDestinationId INTEGER REFERENCES accounts(id)');
+    db.exec(
+      'ALTER TABLE accounts ADD COLUMN reportingClosureDestinationId INTEGER REFERENCES accounts(id)',
+    );
   });
 
   runSchemaMigration('2026-09-14-reporting-closure', () => {
@@ -1019,7 +1238,9 @@ export function initDatabase() {
   });
 
   runSchemaMigration('2026-09-24-ledger-rebuild-state', () => {
-    db.exec('CREATE TABLE ledgerRebuildState (id INTEGER PRIMARY KEY CHECK (id = 1), policyVersion TEXT NOT NULL)');
+    db.exec(
+      'CREATE TABLE ledgerRebuildState (id INTEGER PRIMARY KEY CHECK (id = 1), policyVersion TEXT NOT NULL)',
+    );
   });
 
   runSchemaMigration('2026-10-18-category-choice-origin', () => {
@@ -1072,10 +1293,14 @@ export function initDatabase() {
   if (!transactionColumns.includes('occurrenceIndex')) {
     db.prepare('ALTER TABLE transactions ADD COLUMN occurrenceIndex INTEGER DEFAULT 0').run();
   }
-  db.prepare('CREATE INDEX IF NOT EXISTS idx_transactions_ledger_id ON transactions (ledgerTransactionId)').run();
+  db.prepare(
+    'CREATE INDEX IF NOT EXISTS idx_transactions_ledger_id ON transactions (ledgerTransactionId)',
+  ).run();
 
   runSchemaMigration('2026-09-07-legacy-annotations', () => {
-  const transactionsNeedingLedgerIds = db.prepare(`
+    const transactionsNeedingLedgerIds = db
+      .prepare(
+        `
     SELECT
       t.id,
       t.accountId,
@@ -1097,37 +1322,45 @@ export function initDatabase() {
     LEFT JOIN importRows ir ON ir.transactionId = t.id
     LEFT JOIN sourceTransactions st ON st.importRowId = ir.id
     WHERE t.ledgerTransactionId IS NULL OR t.ledgerTransactionId = ''
-  `).all();
-  const groups = new Map<string, TransactionIdentityInput[]>();
-  for (const transaction of transactionsNeedingLedgerIds) {
-    const baseKey = transactionIdentityBaseKey(transaction);
-    const group = groups.get(baseKey);
-    if (group) {
-      group.push(transaction);
-    } else {
-      groups.set(baseKey, [transaction]);
+  `,
+      )
+      .all();
+    const groups = new Map<string, TransactionIdentityInput[]>();
+    for (const transaction of transactionsNeedingLedgerIds) {
+      const baseKey = transactionIdentityBaseKey(transaction);
+      const group = groups.get(baseKey);
+      if (group) {
+        group.push(transaction);
+      } else {
+        groups.set(baseKey, [transaction]);
+      }
     }
-  }
-  for (const group of groups.values()) {
-    group
-      .sort((a, b) => transactionOccurrenceSortKey(a).localeCompare(transactionOccurrenceSortKey(b)))
-      .forEach((transaction, occurrenceIndex) => {
-        db.prepare('UPDATE transactions SET ledgerTransactionId = ?, occurrenceIndex = ? WHERE id = ?').run(
-          ledgerTransactionIdFor(transaction, occurrenceIndex),
-          occurrenceIndex,
-          transaction.id
-        );
-      });
-  }
+    for (const group of groups.values()) {
+      group
+        .sort((a, b) =>
+          transactionOccurrenceSortKey(a).localeCompare(transactionOccurrenceSortKey(b)),
+        )
+        .forEach((transaction, occurrenceIndex) => {
+          db.prepare(
+            'UPDATE transactions SET ledgerTransactionId = ?, occurrenceIndex = ? WHERE id = ?',
+          ).run(
+            ledgerTransactionIdFor(transaction, occurrenceIndex),
+            occurrenceIndex,
+            transaction.id,
+          );
+        });
+    }
 
-  db.prepare(`
+    db.prepare(
+      `
     INSERT OR IGNORE INTO transactionAnnotations (ledgerTransactionId, categoryId, notes, createdAt, updatedAt)
     SELECT ledgerTransactionId, categoryId, notes, COALESCE(createdAt, datetime('now')), datetime('now')
     FROM transactions
     WHERE ledgerTransactionId IS NOT NULL
       AND ledgerTransactionId != ''
       AND (categoryId IS NOT NULL OR COALESCE(notes, '') != '')
-  `).run();
+  `,
+    ).run();
   });
 
   const importFileColumns = tableColumnNames('importFiles');
@@ -1149,7 +1382,9 @@ export function initDatabase() {
   const accountColumns = tableColumnNames('accounts');
   runSchemaMigration('2026-09-21-account-freshness-policy', () => {
     if (!tableColumnNames('accounts').includes('freshnessPolicy')) {
-      db.exec("ALTER TABLE accounts ADD COLUMN freshnessPolicy TEXT NOT NULL DEFAULT 'regular' CHECK (freshnessPolicy IN ('regular', 'on-demand'))");
+      db.exec(
+        "ALTER TABLE accounts ADD COLUMN freshnessPolicy TEXT NOT NULL DEFAULT 'regular' CHECK (freshnessPolicy IN ('regular', 'on-demand'))",
+      );
     }
   });
   if (!accountColumns.includes('status')) {
@@ -1167,11 +1402,16 @@ export function initDatabase() {
 
   runSchemaMigration('2026-06-23-credit-card-cashflow-signs', repairCreditCardCashflowSigns);
 
-  const sourceBalanceIndexes = db.prepare('PRAGMA index_list(sourceBalances)').all() as IndexListRow[];
-  const hasLegacySourceBalanceUniqueIndex = sourceBalanceIndexes.some(index =>
-    index.unique === 1 &&
-    index.origin === 'u' &&
-    (db.prepare(`PRAGMA index_info(${index.name})`).all() as TableInfoRow[]).map(column => column.name).join(',') === 'sourceFileId,sourceAccountId,date'
+  const sourceBalanceIndexes = db
+    .prepare('PRAGMA index_list(sourceBalances)')
+    .all() as IndexListRow[];
+  const hasLegacySourceBalanceUniqueIndex = sourceBalanceIndexes.some(
+    (index) =>
+      index.unique === 1 &&
+      index.origin === 'u' &&
+      (db.prepare(`PRAGMA index_info(${index.name})`).all() as TableInfoRow[])
+        .map((column) => column.name)
+        .join(',') === 'sourceFileId,sourceAccountId,date',
   );
   if (hasLegacySourceBalanceUniqueIndex) {
     db.transaction(() => {
@@ -1191,13 +1431,15 @@ export function initDatabase() {
           FOREIGN KEY(importRowId) REFERENCES importRows(id) ON DELETE SET NULL
         );
       `);
-      db.prepare(`
+      db.prepare(
+        `
         INSERT INTO sourceBalances_next (
           id, sourceFileId, sourceAccountId, importRowId, date, balanceCents, priority, rawJson, createdAt
         )
         SELECT id, sourceFileId, sourceAccountId, importRowId, date, balanceCents, priority, rawJson, createdAt
         FROM sourceBalances
-      `).run();
+      `,
+      ).run();
       db.exec(`
         DROP TABLE sourceBalances;
         ALTER TABLE sourceBalances_next RENAME TO sourceBalances;
@@ -1205,10 +1447,18 @@ export function initDatabase() {
     })();
   }
 
-  db.prepare('CREATE INDEX IF NOT EXISTS idx_ledger_transactions_account_date ON ledgerTransactions (accountId, date)').run();
-  db.prepare('CREATE INDEX IF NOT EXISTS idx_ledger_transactions_legacy_id ON ledgerTransactions (legacyTransactionId)').run();
-  db.prepare('CREATE INDEX IF NOT EXISTS idx_ledger_balances_account_month ON ledgerBalances (accountId, month)').run();
-  runSchemaMigration('2026-09-07-ledger-read-cutover', () => syncLedgerReadModelFromLegacyTables({ onlyMissing: true }));
+  db.prepare(
+    'CREATE INDEX IF NOT EXISTS idx_ledger_transactions_account_date ON ledgerTransactions (accountId, date)',
+  ).run();
+  db.prepare(
+    'CREATE INDEX IF NOT EXISTS idx_ledger_transactions_legacy_id ON ledgerTransactions (legacyTransactionId)',
+  ).run();
+  db.prepare(
+    'CREATE INDEX IF NOT EXISTS idx_ledger_balances_account_month ON ledgerBalances (accountId, month)',
+  ).run();
+  runSchemaMigration('2026-09-07-ledger-read-cutover', () =>
+    syncLedgerReadModelFromLegacyTables({ onlyMissing: true }),
+  );
 }
 
 // Compatibility migration and legacy fixture setup only. Application reads never synchronize tables.
@@ -1216,7 +1466,8 @@ export function syncLedgerReadModelFromLegacyTables(options: { onlyMissing?: boo
   assignMissingLegacyTransactionIds();
   const now = new Date().toISOString();
   db.transaction(() => {
-    db.prepare(`
+    db.prepare(
+      `
       INSERT INTO ledgerTransactions (
         ledgerTransactionId,
         legacyTransactionId,
@@ -1293,9 +1544,11 @@ export function syncLedgerReadModelFromLegacyTables(options: { onlyMissing?: boo
         sourceTransactionId = excluded.sourceTransactionId,
         updatedAt = excluded.updatedAt
       WHERE @overwriteExisting = 1
-    `).run({ now, overwriteExisting: options.onlyMissing ? 0 : 1 });
+    `,
+    ).run({ now, overwriteExisting: options.onlyMissing ? 0 : 1 });
 
-    db.prepare(`
+    db.prepare(
+      `
       INSERT INTO ledgerBalances (
         accountId,
         month,
@@ -1330,12 +1583,15 @@ export function syncLedgerReadModelFromLegacyTables(options: { onlyMissing?: boo
         sourceBalanceId = excluded.sourceBalanceId,
         updatedAt = excluded.updatedAt
       WHERE @overwriteExisting = 1
-    `).run({ now, overwriteExisting: options.onlyMissing ? 0 : 1 });
+    `,
+    ).run({ now, overwriteExisting: options.onlyMissing ? 0 : 1 });
   })();
 }
 
 function assignMissingLegacyTransactionIds() {
-  const transactionsNeedingLedgerIds = db.prepare(`
+  const transactionsNeedingLedgerIds = db
+    .prepare(
+      `
     SELECT
       t.id,
       t.accountId,
@@ -1357,7 +1613,9 @@ function assignMissingLegacyTransactionIds() {
     LEFT JOIN importRows ir ON ir.transactionId = t.id
     LEFT JOIN sourceTransactions st ON st.importRowId = ir.id
     WHERE t.ledgerTransactionId IS NULL OR t.ledgerTransactionId = ''
-  `).all();
+  `,
+    )
+    .all();
   const groups = new Map<string, TransactionIdentityInput[]>();
   for (const transaction of transactionsNeedingLedgerIds) {
     const baseKey = transactionIdentityBaseKey(transaction);
@@ -1370,12 +1628,16 @@ function assignMissingLegacyTransactionIds() {
   }
   for (const group of groups.values()) {
     group
-      .sort((a, b) => transactionOccurrenceSortKey(a).localeCompare(transactionOccurrenceSortKey(b)))
+      .sort((a, b) =>
+        transactionOccurrenceSortKey(a).localeCompare(transactionOccurrenceSortKey(b)),
+      )
       .forEach((transaction, occurrenceIndex) => {
-        db.prepare('UPDATE transactions SET ledgerTransactionId = ?, occurrenceIndex = ? WHERE id = ?').run(
+        db.prepare(
+          'UPDATE transactions SET ledgerTransactionId = ?, occurrenceIndex = ? WHERE id = ?',
+        ).run(
           ledgerTransactionIdFor(transaction, occurrenceIndex),
           occurrenceIndex,
-          transaction.id
+          transaction.id,
         );
       });
   }
@@ -1386,13 +1648,18 @@ export function assertTable(table: string): asserts table is TableName {
 }
 
 function cleanRow(table: TableName, row: DatabaseRow | null | undefined, includeId = false) {
-  const allowed = new Set<string>(includeId ? [...TABLES[table]] : TABLES[table].filter(column => column !== 'id'));
+  const allowed = new Set<string>(
+    includeId ? [...TABLES[table]] : TABLES[table].filter((column) => column !== 'id'),
+  );
   return Object.fromEntries(
-    Object.entries(row || {}).filter(([key]) => allowed.has(key))
+    Object.entries(row || {}).filter(([key]) => allowed.has(key)),
   ) as MutableDatabaseRow;
 }
 
-export function listRows(table: string, query: Record<string, string | number | null | undefined> = {}) {
+export function listRows(
+  table: string,
+  query: Record<string, string | number | null | undefined> = {},
+) {
   assertTable(table);
   const clauses: string[] = [];
   const params: MutableDatabaseRow = {};
@@ -1405,18 +1672,22 @@ export function listRows(table: string, query: Record<string, string | number | 
   }
 
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-  return db.prepare(`SELECT * FROM ${table} ${where} ORDER BY ${ORDER_BY[table] ?? 'id ASC'}`).all(params);
+  return db
+    .prepare(`SELECT * FROM ${table} ${where} ORDER BY ${ORDER_BY[table] ?? 'id ASC'}`)
+    .all(params);
 }
 
 export function insertRow(table: string, row: DatabaseRow, preserveId = false): number {
   assertTable(table);
   const data = cleanRow(table, row, preserveId);
   const columns = Object.keys(data);
-  const placeholders = columns.map(column => `@${column}`);
-  const result = db.prepare(
-    `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders.join(', ')})`
-  ).run(data);
-  return preserveId && data.id !== undefined && data.id !== null ? Number(data.id) : result.lastInsertRowid;
+  const placeholders = columns.map((column) => `@${column}`);
+  const result = db
+    .prepare(`INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders.join(', ')})`)
+    .run(data);
+  return preserveId && data.id !== undefined && data.id !== null
+    ? Number(data.id)
+    : result.lastInsertRowid;
 }
 
 export function insertRows(table: string, rows: DatabaseRow[], preserveIds = false) {
@@ -1432,8 +1703,9 @@ export function updateRow(table: string, id: string | number, changes: DatabaseR
   const data = cleanRow(table, changes);
   const columns = Object.keys(data);
   if (columns.length === 0) return 0;
-  const assignments = columns.map(column => `${column} = @${column}`).join(', ');
-  return db.prepare(`UPDATE ${table} SET ${assignments} WHERE id = @id`).run({ ...data, id }).changes;
+  const assignments = columns.map((column) => `${column} = @${column}`).join(', ');
+  return db.prepare(`UPDATE ${table} SET ${assignments} WHERE id = @id`).run({ ...data, id })
+    .changes;
 }
 
 export function deleteRow(table: string, id: string | number) {

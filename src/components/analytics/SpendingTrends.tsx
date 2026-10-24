@@ -7,7 +7,7 @@ import {
   CartesianGrid,
   Legend,
   Tooltip,
-  ResponsiveContainer
+  ResponsiveContainer,
 } from 'recharts';
 import PeriodClickOverlay, { type AnalyticsPeriodRow } from './PeriodClickOverlay';
 
@@ -64,13 +64,18 @@ export function getActivePeriodPayload(state: unknown, data: AnalyticsPeriodRow[
   return activePayload?.[0]?.payload ?? null;
 }
 
-const formatCurrency = (val: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val);
+const formatCurrency = (val: number) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 0,
+  }).format(val);
 
 const CustomTooltip = ({ active, payload, showTotalSpend }: TooltipProps) => {
   if (active && payload && payload.length) {
-    const totalPayload = payload.find(p => p.dataKey === TOTAL_SPEND_KEY);
+    const totalPayload = payload.find((p) => p.dataKey === TOTAL_SPEND_KEY);
     const activePayloads = payload
-      .filter(p => p.value > 0 && p.dataKey !== TOTAL_SPEND_KEY)
+      .filter((p) => p.value > 0 && p.dataKey !== TOTAL_SPEND_KEY)
       .sort((a, b) => b.value - a.value);
 
     return (
@@ -97,17 +102,19 @@ const CustomTooltip = ({ active, payload, showTotalSpend }: TooltipProps) => {
 export default function SpendingTrends({
   rows = [],
   showTotalSpend = true,
-  onSelectPeriod
+  onSelectPeriod,
 }: SpendingTrendsProps) {
-  const activeCategories = Array.from(new Set(rows.flatMap(row => Object.keys(row.categoryAmounts ?? {}))));
-  const data = rows.map(row => {
+  const activeCategories = Array.from(
+    new Set(rows.flatMap((row) => Object.keys(row.categoryAmounts ?? {}))),
+  );
+  const data = rows.map((row) => {
     const item: SpendingTrendChartRow = {
       ...row,
       timeKey: row.key,
       displayLabel: row.label,
       [TOTAL_SPEND_KEY]: row.expenses,
     };
-    activeCategories.forEach(category => {
+    activeCategories.forEach((category) => {
       item[category] = row.categoryAmounts?.[category] ?? 0;
     });
     return item;
@@ -158,7 +165,11 @@ export default function SpendingTrends({
             verticalAlign="top"
             align="left"
             iconType="plainline"
-            wrapperStyle={{ color: 'var(--text-secondary)', fontSize: '12px', paddingBottom: '8px' }}
+            wrapperStyle={{
+              color: 'var(--text-secondary)',
+              fontSize: '12px',
+              paddingBottom: '8px',
+            }}
           />
           {showTotalSpend && (
             <Line

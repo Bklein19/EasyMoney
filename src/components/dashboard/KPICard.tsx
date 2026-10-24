@@ -10,9 +10,16 @@ interface KPICardProps {
   detail?: ReactNode;
 }
 
-export default function KPICard({ title, amount, trend, icon: Icon, trendLabel, detail }: KPICardProps) {
+export default function KPICard({
+  title,
+  amount,
+  trend,
+  icon: Icon,
+  trendLabel,
+  detail,
+}: KPICardProps) {
   const isPositive = (trend ?? 0) >= 0;
-  
+
   return (
     <div className="glass-card kpi-card">
       <div className="kpi-card__header">
@@ -31,9 +38,7 @@ export default function KPICard({ title, amount, trend, icon: Icon, trendLabel, 
             <span className="trend-label">{trendLabel || 'vs last month'}</span>
           </div>
         )}
-        {detail && (
-          <div className="kpi-card__detail">{detail}</div>
-        )}
+        {detail && <div className="kpi-card__detail">{detail}</div>}
       </div>
     </div>
   );

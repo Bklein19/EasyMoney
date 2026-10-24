@@ -49,7 +49,9 @@ export default function CategoryPicker({
     const name = newCategoryName.trim();
     if (!name) return;
 
-    const existing = categories.find(category => category.name.toLowerCase() === name.toLowerCase());
+    const existing = categories.find(
+      (category) => category.name.toLowerCase() === name.toLowerCase(),
+    );
     if (existing) {
       onChange(existing.id);
       resetCreateState();
@@ -70,10 +72,14 @@ export default function CategoryPicker({
     <div className="category-picker-wrapper">
       <GroupedCategorySelect
         className="filter-input category-picker-select"
-        value={categoryId === null || categoryId === undefined ? UNCATEGORIZED_CATEGORY : String(categoryId)}
+        value={
+          categoryId === null || categoryId === undefined
+            ? UNCATEGORIZED_CATEGORY
+            : String(categoryId)
+        }
         disabled={disabled}
         aria-label="Transaction category"
-        categories={categories.filter(category => !isUncategorized(category))}
+        categories={categories.filter((category) => !isUncategorized(category))}
         leadingOptions={[{ value: UNCATEGORIZED_CATEGORY, label: 'Uncategorized' }]}
         trailingOptions={[{ value: ADD_CUSTOM_CATEGORY, label: '+ Add custom category' }]}
         onChange={handleSelectChange}
@@ -89,10 +95,19 @@ export default function CategoryPicker({
             onChange={(event) => setNewCategoryName(event.target.value)}
           />
           <div className="inline-create__actions">
-            <button className="btn btn--primary btn--sm" type="submit" disabled={disabled || !newCategoryName.trim()}>
+            <button
+              className="btn btn--primary btn--sm"
+              type="submit"
+              disabled={disabled || !newCategoryName.trim()}
+            >
               Add
             </button>
-            <button className="btn btn--ghost btn--sm" type="button" disabled={disabled} onClick={resetCreateState}>
+            <button
+              className="btn btn--ghost btn--sm"
+              type="button"
+              disabled={disabled}
+              onClick={resetCreateState}
+            >
               Cancel
             </button>
           </div>

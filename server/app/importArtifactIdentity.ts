@@ -67,9 +67,11 @@ function semanticTransactionRaw(rawJson: string | null): Record<string, unknown>
   if (!rawJson) return {};
   try {
     const parsed = JSON.parse(rawJson) as Record<string, unknown>;
-    return Object.fromEntries(transactionSemanticRawKeys
-      .filter(key => parsed[key] !== undefined)
-      .map(key => [key, canonicalJsonValue(parsed[key])]));
+    return Object.fromEntries(
+      transactionSemanticRawKeys
+        .filter((key) => parsed[key] !== undefined)
+        .map((key) => [key, canonicalJsonValue(parsed[key])]),
+    );
   } catch {
     return {};
   }
@@ -78,22 +80,26 @@ function semanticTransactionRaw(rawJson: string | null): Record<string, unknown>
 function canonicalJsonValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalJsonValue);
   if (value && typeof value === 'object') {
-    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, nestedValue]) => [key, canonicalJsonValue(nestedValue)]));
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nestedValue]) => [key, canonicalJsonValue(nestedValue)]),
+    );
   }
   return value;
 }
 
 function sortedCanonicalRows(rows: unknown[]): unknown[] {
   return rows
-    .map(row => JSON.stringify(row))
+    .map((row) => JSON.stringify(row))
     .sort()
-    .map(row => JSON.parse(row) as unknown);
+    .map((row) => JSON.parse(row) as unknown);
 }
 
 function artifactMetadata(importFileId: number, db: AppDatabase): ArtifactMetadataRow | null {
-  const row = db.prepare(`
+  const row = db
+    .prepare(
+      `
     SELECT
       sf.importFileId,
       sf.parserName,
@@ -105,7 +111,9 @@ function artifactMetadata(importFileId: number, db: AppDatabase): ArtifactMetada
       sf.coverageBasis
     FROM sourceFiles sf
     WHERE sf.importFileId = ?
-  `).get(importFileId) as ArtifactMetadataRow | undefined;
+  `,
+    )
+    .get(importFileId) as ArtifactMetadataRow | undefined;
   return row ?? null;
 }
 
@@ -116,12 +124,18 @@ export function canonicalImportArtifactFacts(
   const metadata = artifactMetadata(importFileId, db);
   if (!metadata) return null;
 
-  const accounts = db.prepare(`
+  const accounts = db
+    .prepare(
+      `
     SELECT institution, sourceAccountKey, sourceAccountName, accountHolder
     FROM sourceAccounts
     WHERE sourceFileId = (SELECT id FROM sourceFiles WHERE importFileId = ?)
-  `).all(importFileId) as ArtifactAccountRow[];
-  const transactions = db.prepare(`
+  `,
+    )
+    .all(importFileId) as ArtifactAccountRow[];
+  const transactions = db
+    .prepare(
+      `
     SELECT
       sa.institution AS accountInstitution,
       sa.sourceAccountKey,
@@ -135,8 +149,12 @@ export function canonicalImportArtifactFacts(
     JOIN sourceAccounts sa ON sa.id = st.sourceAccountId
     JOIN sourceFiles sf ON sf.id = st.sourceFileId
     WHERE sf.importFileId = ?
-  `).all(importFileId) as ArtifactTransactionRow[];
-  const balances = db.prepare(`
+  `,
+    )
+    .all(importFileId) as ArtifactTransactionRow[];
+  const balances = db
+    .prepare(
+      `
     SELECT
       sa.institution AS accountInstitution,
       sa.sourceAccountKey,
@@ -147,7 +165,9 @@ export function canonicalImportArtifactFacts(
     JOIN sourceAccounts sa ON sa.id = sb.sourceAccountId
     JOIN sourceFiles sf ON sf.id = sb.sourceFileId
     WHERE sf.importFileId = ?
-  `).all(importFileId) as ArtifactBalanceRow[];
+  `,
+    )
+    .all(importFileId) as ArtifactBalanceRow[];
 
   return {
     parser: {
@@ -161,33 +181,39 @@ export function canonicalImportArtifactFacts(
       to: normalizedOptionalText(metadata.coveredTo),
       basis: normalizedOptionalText(metadata.coverageBasis),
     },
-    accounts: sortedCanonicalRows(accounts.map(account => ({
-      institution: normalizedOptionalText(account.institution),
-      key: normalizedRequiredText(account.sourceAccountKey),
-      name: normalizedOptionalText(account.sourceAccountName),
-      holder: normalizedOptionalText(account.accountHolder),
-    }))),
-    transactions: sortedCanonicalRows(transactions.map(transaction => ({
-      account: {
-        institution: normalizedOptionalText(transaction.accountInstitution),
-        key: normalizedRequiredText(transaction.sourceAccountKey),
-      },
-      date: normalizedRequiredText(transaction.date),
-      amountCents: Number(transaction.amountCents),
-      description: normalizedOptionalText(transaction.description),
-      sourceRole: normalizedOptionalText(transaction.sourceRole),
-      priority: transaction.priority === null ? null : Number(transaction.priority),
-      raw: semanticTransactionRaw(transaction.rawJson),
-    }))),
-    balances: sortedCanonicalRows(balances.map(balance => ({
-      account: {
-        institution: normalizedOptionalText(balance.accountInstitution),
-        key: normalizedRequiredText(balance.sourceAccountKey),
-      },
-      date: normalizedRequiredText(balance.date),
-      balanceCents: Number(balance.balanceCents),
-      priority: balance.priority === null ? null : Number(balance.priority),
-    }))),
+    accounts: sortedCanonicalRows(
+      accounts.map((account) => ({
+        institution: normalizedOptionalText(account.institution),
+        key: normalizedRequiredText(account.sourceAccountKey),
+        name: normalizedOptionalText(account.sourceAccountName),
+        holder: normalizedOptionalText(account.accountHolder),
+      })),
+    ),
+    transactions: sortedCanonicalRows(
+      transactions.map((transaction) => ({
+        account: {
+          institution: normalizedOptionalText(transaction.accountInstitution),
+          key: normalizedRequiredText(transaction.sourceAccountKey),
+        },
+        date: normalizedRequiredText(transaction.date),
+        amountCents: Number(transaction.amountCents),
+        description: normalizedOptionalText(transaction.description),
+        sourceRole: normalizedOptionalText(transaction.sourceRole),
+        priority: transaction.priority === null ? null : Number(transaction.priority),
+        raw: semanticTransactionRaw(transaction.rawJson),
+      })),
+    ),
+    balances: sortedCanonicalRows(
+      balances.map((balance) => ({
+        account: {
+          institution: normalizedOptionalText(balance.accountInstitution),
+          key: normalizedRequiredText(balance.sourceAccountKey),
+        },
+        date: normalizedRequiredText(balance.date),
+        balanceCents: Number(balance.balanceCents),
+        priority: balance.priority === null ? null : Number(balance.priority),
+      })),
+    ),
   };
 }
 
@@ -208,7 +234,9 @@ export function findCommittedImportArtifactFactDuplicate(
   const fingerprint = importArtifactFactFingerprint(importFileId, db);
   if (!fingerprint) return null;
 
-  const candidates = db.prepare(`
+  const candidates = db
+    .prepare(
+      `
     SELECT ifs.id
     FROM importFiles ifs
     JOIN sourceFiles sf ON sf.importFileId = ifs.id
@@ -223,7 +251,9 @@ export function findCommittedImportArtifactFactDuplicate(
       AND sf.coveredTo IS @coveredTo
       AND sf.coverageBasis IS @coverageBasis
     ORDER BY ifs.committedAt DESC, ifs.id DESC
-  `).all(metadata) as Array<{ id: number }>;
+  `,
+    )
+    .all(metadata) as Array<{ id: number }>;
   for (const candidate of candidates) {
     if (importArtifactFactFingerprint(candidate.id, db) === fingerprint) return candidate.id;
   }
@@ -234,7 +264,9 @@ export function findCommittedImportArtifactDuplicate(
   importFileId: number,
   db: AppDatabase = getDb(),
 ): number | null {
-  const exact = db.prepare(`
+  const exact = db
+    .prepare(
+      `
     SELECT committedFile.id
     FROM importFiles currentFile
     JOIN importFiles committedFile ON committedFile.contentHash = currentFile.contentHash
@@ -245,7 +277,9 @@ export function findCommittedImportArtifactDuplicate(
       AND committedSource.status = 'committed'
     ORDER BY committedFile.committedAt DESC, committedFile.id DESC
     LIMIT 1
-  `).get(importFileId) as { id: number } | undefined;
+  `,
+    )
+    .get(importFileId) as { id: number } | undefined;
   return exact?.id ?? findCommittedImportArtifactFactDuplicate(importFileId, db);
 }
 
@@ -253,14 +287,18 @@ export function discardImportArtifactPreview(
   importFileId: number,
   db: AppDatabase = getDb(),
 ): void {
-  db.prepare(`
+  db.prepare(
+    `
     UPDATE sourceFiles
     SET status = 'discarded'
     WHERE importFileId = ? AND status = 'previewed'
-  `).run(importFileId);
-  db.prepare(`
+  `,
+  ).run(importFileId);
+  db.prepare(
+    `
     UPDATE importFiles
     SET status = 'discarded'
     WHERE id = ? AND status = 'previewed'
-  `).run(importFileId);
+  `,
+  ).run(importFileId);
 }

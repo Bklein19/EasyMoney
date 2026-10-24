@@ -12,7 +12,7 @@ const GENERIC_SUFFIXES = new Set([
   'i',
   'osv',
   'debits',
-  'credits'
+  'credits',
 ]);
 
 const SMALL_WORDS = new Set(['and', 'of', 'the', 'a', 'an']);
@@ -92,23 +92,28 @@ export function normalizeMerchantName(value: string | null | undefined) {
   }
 
   cleaned = tokens.join(' ').trim();
-  if (!cleaned) cleaned = merchantText.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() || 'unknown';
+  if (!cleaned)
+    cleaned =
+      merchantText
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim() || 'unknown';
 
   const key = cleaned.toUpperCase();
   return {
     key,
     displayName: toTitleCase(cleaned),
-    originalName: original
+    originalName: original,
   };
 }
 
 export function groupMerchantTransactions<T extends MerchantTransactionLike>(
   transactions: T[],
-  getName: (transaction: T) => string
+  getName: (transaction: T) => string,
 ) {
   const groups: Record<string, MutableMerchantGroup> = {};
 
-  transactions.forEach(transaction => {
+  transactions.forEach((transaction) => {
     const { key, displayName, originalName } = normalizeMerchantName(getName(transaction));
     if (!groups[key]) {
       groups[key] = {
@@ -130,26 +135,26 @@ export function groupMerchantTransactions<T extends MerchantTransactionLike>(
     groups[key].transactionIds.push(transaction.id);
   });
 
-  return Object.values(groups).map(group => ({
+  return Object.values(groups).map((group) => ({
     ...group,
-    aliases: Array.from(group.aliases).sort((a, b) => a.localeCompare(b))
+    aliases: Array.from(group.aliases).sort((a, b) => a.localeCompare(b)),
   }));
 }
 
 export function applyManualStacks(
   groups: MerchantGroup[],
   stackMap: Record<string, string> = {},
-  labelMap: Record<string, string> = {}
+  labelMap: Record<string, string> = {},
 ): StackedMerchantGroup[] {
   const byKey: Record<string, MutableMerchantGroup> = {};
-  groups.forEach(group => {
+  groups.forEach((group) => {
     byKey[group.normalized] = {
       ...group,
       aliases: new Set(group.aliases),
       transactionIds: [...group.transactionIds],
       customName: '',
       stackedKeys: [group.normalized],
-      manuallyStackedKeys: []
+      manuallyStackedKeys: [],
     };
   });
 
@@ -161,20 +166,20 @@ export function applyManualStacks(
 
     target.amount += source.amount;
     target.count += source.count;
-    source.aliases.forEach(alias => target.aliases.add(alias));
+    source.aliases.forEach((alias) => target.aliases.add(alias));
     target.transactionIds.push(...source.transactionIds);
     target.stackedKeys.push(...source.stackedKeys);
     target.manuallyStackedKeys.push(sourceKey);
     delete byKey[sourceKey];
   });
 
-  return Object.values(byKey).map(group => ({
+  return Object.values(byKey).map((group) => ({
     ...group,
     name: labelMap[group.normalized] || group.name,
     customName: labelMap[group.normalized] || '',
     aliases: Array.from(group.aliases).sort((a, b) => a.localeCompare(b)),
     transactionIds: Array.from(new Set(group.transactionIds)),
     stackedKeys: Array.from(new Set(group.stackedKeys)),
-    manuallyStackedKeys: Array.from(new Set(group.manuallyStackedKeys))
+    manuallyStackedKeys: Array.from(new Set(group.manuallyStackedKeys)),
   }));
 }

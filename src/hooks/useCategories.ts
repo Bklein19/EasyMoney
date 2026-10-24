@@ -10,12 +10,17 @@ export function useCategories() {
   const rules = rulesQuery.data ?? [];
 
   async function addCategory(category: Record<string, unknown>) {
-    const result = await trpcClient.categories.create.mutate(category as Parameters<typeof trpcClient.categories.create.mutate>[0]);
+    const result = await trpcClient.categories.create.mutate(
+      category as Parameters<typeof trpcClient.categories.create.mutate>[0],
+    );
     await queryClient.invalidateQueries();
     return result.id;
   }
 
-  async function updateCategory(id: number | string, changes: Omit<Parameters<typeof trpcClient.categories.update.mutate>[0], 'id'>) {
+  async function updateCategory(
+    id: number | string,
+    changes: Omit<Parameters<typeof trpcClient.categories.update.mutate>[0], 'id'>,
+  ) {
     const result = await trpcClient.categories.update.mutate({ ...changes, id });
     await queryClient.invalidateQueries();
     return result;
@@ -29,7 +34,9 @@ export function useCategories() {
   }
 
   async function addRule(rule: Record<string, unknown>) {
-    const result = await trpcClient.categorizationRules.create.mutate(rule as Parameters<typeof trpcClient.categorizationRules.create.mutate>[0]);
+    const result = await trpcClient.categorizationRules.create.mutate(
+      rule as Parameters<typeof trpcClient.categorizationRules.create.mutate>[0],
+    );
     await queryClient.invalidateQueries({ queryKey: trpc.categorizationRules.list.queryKey() });
     return result.id;
   }
@@ -40,8 +47,8 @@ export function useCategories() {
     return result;
   }
 
-  const expenseCategories = categories.filter(category => category.type === 'expense');
-  const incomeCategories = categories.filter(category => category.type === 'income');
+  const expenseCategories = categories.filter((category) => category.type === 'expense');
+  const incomeCategories = categories.filter((category) => category.type === 'income');
 
   return {
     categories,

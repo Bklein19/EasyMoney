@@ -2,9 +2,7 @@ export type { SyncEvent, SyncGoal, SyncReporter } from './protocol.ts';
 import type { RoutedSyncArtifact, SyncAccountCoverage } from './connector.ts';
 import type { SyncGoal } from './protocol.ts';
 import type { SyncInstitutionId as RegisteredSyncInstitutionId } from './registry.ts';
-import type {
-  ImportAccountMappingResolution,
-} from '../importTypes.ts';
+import type { ImportAccountMappingResolution } from '../importTypes.ts';
 
 export type SyncInstitutionId = RegisteredSyncInstitutionId;
 

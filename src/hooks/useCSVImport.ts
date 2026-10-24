@@ -52,35 +52,38 @@ export function useCSVImport() {
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const processImport = useCallback(async (
-    file: File,
-    customProfile: ImportProfile | null = null,
-    options: { throwOnError?: boolean } = {}
-  ): Promise<ImportPreviewResult | null> => {
-    setIsParsing(true);
-    setError(null);
+  const processImport = useCallback(
+    async (
+      file: File,
+      customProfile: ImportProfile | null = null,
+      options: { throwOnError?: boolean } = {},
+    ): Promise<ImportPreviewResult | null> => {
+      setIsParsing(true);
+      setError(null);
 
-    try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      return await trpcClient.imports.preview.mutate({
-        fileName: file.name || 'import.csv',
-        text: new TextDecoder().decode(bytes),
-        fileBase64: bytesToBase64(bytes),
-        customProfile,
-      }) as ImportPreviewResult;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Import preview failed';
-      const fileLabel = file.webkitRelativePath || file.name || 'selected file';
-      const labeledMessage = `${fileLabel}: ${message}`;
-      setError(labeledMessage);
-      if (options.throwOnError) {
-        throw new Error(labeledMessage);
+      try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        return (await trpcClient.imports.preview.mutate({
+          fileName: file.name || 'import.csv',
+          text: new TextDecoder().decode(bytes),
+          fileBase64: bytesToBase64(bytes),
+          customProfile,
+        })) as ImportPreviewResult;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Import preview failed';
+        const fileLabel = file.webkitRelativePath || file.name || 'selected file';
+        const labeledMessage = `${fileLabel}: ${message}`;
+        setError(labeledMessage);
+        if (options.throwOnError) {
+          throw new Error(labeledMessage);
+        }
+        return null;
+      } finally {
+        setIsParsing(false);
       }
-      return null;
-    } finally {
-      setIsParsing(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   return { processImport, isParsing, error };
 }

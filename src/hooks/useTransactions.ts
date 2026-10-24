@@ -32,67 +32,87 @@ const normalizeId = (value: string | number | null | undefined) => {
 export function useTransactions(filters: TransactionFilters = {}) {
   const accountId = normalizeId(filters.accountId);
   const categoryId = normalizeId(filters.categoryId);
-  const query = useMemo(() => ({
-    accountIds: filters.accountIds,
-    accountId,
-    categoryId,
-    accountKind: filters.accountKind,
-    startDate: filters.startDate,
-    endDate: filters.endDate,
-    search: filters.searchQuery,
-    flowType: filters.flowType,
-    sortBy: filters.sortBy,
-  }), [accountId, categoryId, filters.accountIds, filters.accountKind, filters.startDate, filters.endDate, filters.searchQuery, filters.flowType, filters.sortBy]);
+  const query = useMemo(
+    () => ({
+      accountIds: filters.accountIds,
+      accountId,
+      categoryId,
+      accountKind: filters.accountKind,
+      startDate: filters.startDate,
+      endDate: filters.endDate,
+      search: filters.searchQuery,
+      flowType: filters.flowType,
+      sortBy: filters.sortBy,
+    }),
+    [
+      accountId,
+      categoryId,
+      filters.accountIds,
+      filters.accountKind,
+      filters.startDate,
+      filters.endDate,
+      filters.searchQuery,
+      filters.flowType,
+      filters.sortBy,
+    ],
+  );
 
   const pageSize = filters.limit ?? 100;
   const isInfinite = filters.infinite === true;
-  const transactionsQuery = useQuery(trpc.transactions.list.queryOptions(query, {
-    enabled: !isInfinite,
-    placeholderData: keepPreviousData,
-    select: data => data.transactions.map(fromAppTransaction),
-  }));
+  const transactionsQuery = useQuery(
+    trpc.transactions.list.queryOptions(query, {
+      enabled: !isInfinite,
+      placeholderData: keepPreviousData,
+      select: (data) => data.transactions.map(fromAppTransaction),
+    }),
+  );
   const infiniteTransactionsQuery = useInfiniteQuery({
     queryKey: ['app', 'transactions', 'infinite', query, pageSize],
     enabled: isInfinite,
     initialPageParam: 0,
-    queryFn: ({ pageParam }) => trpcClient.transactions.list.query({
-      ...query,
-      limit: pageSize,
-      offset: pageParam,
-    }),
+    queryFn: ({ pageParam }) =>
+      trpcClient.transactions.list.query({
+        ...query,
+        limit: pageSize,
+        offset: pageParam,
+      }),
     getNextPageParam: (lastPage) => lastPage.nextOffset ?? undefined,
     placeholderData: keepPreviousData,
-    select: data => ({
+    select: (data) => ({
       ...data,
-      pages: data.pages.map(page => ({
+      pages: data.pages.map((page) => ({
         ...page,
         transactions: page.transactions.map(fromAppTransaction),
       })),
     }),
   });
 
-  const categorize = useMutation(trpc.transactions.categorize.mutationOptions({
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() });
-      queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] });
-    },
-  }));
-  const categorizeMatching = useMutation(trpc.transactions.categorizeMatching.mutationOptions({
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() });
-      queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] });
-    },
-  }));
+  const categorize = useMutation(
+    trpc.transactions.categorize.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() });
+        queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] });
+      },
+    }),
+  );
+  const categorizeMatching = useMutation(
+    trpc.transactions.categorizeMatching.mutationOptions({
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: trpc.transactions.list.queryKey() });
+        queryClient.invalidateQueries({ queryKey: ['app', 'transactions', 'infinite'] });
+      },
+    }),
+  );
 
   const transactions = useMemo(() => {
     let result = isInfinite
-      ? infiniteTransactionsQuery.data?.pages.flatMap(page => page.transactions) ?? []
-      : transactionsQuery.data ?? [];
+      ? (infiniteTransactionsQuery.data?.pages.flatMap((page) => page.transactions) ?? [])
+      : (transactionsQuery.data ?? []);
 
     if (!isInfinite && filters.type === 'income') {
-      result = result.filter(t => t.amount > 0);
+      result = result.filter((t) => t.amount > 0);
     } else if (!isInfinite && filters.type === 'expense') {
-      result = result.filter(t => t.amount < 0);
+      result = result.filter((t) => t.amount < 0);
     }
 
     return result;
@@ -102,9 +122,11 @@ export function useTransactions(filters: TransactionFilters = {}) {
 
   async function updateTransaction(id: number | string, changes: TransactionAnnotationChanges) {
     const fields = Object.keys(changes);
-    const unsupported = fields.filter(field => field !== 'categoryId');
+    const unsupported = fields.filter((field) => field !== 'categoryId');
     if (unsupported.length) {
-      throw new Error(`Transactions only support categorization updates: ${unsupported.join(', ')}`);
+      throw new Error(
+        `Transactions only support categorization updates: ${unsupported.join(', ')}`,
+      );
     }
 
     const categoryIdChanged = Object.hasOwn(changes, 'categoryId');
@@ -117,7 +139,10 @@ export function useTransactions(filters: TransactionFilters = {}) {
     return { ok: true, count: categoryIdChanged ? 1 : 0 };
   }
 
-  async function categorizeTransactions(transactionIds: Array<number | string>, categoryId: string | number | null) {
+  async function categorizeTransactions(
+    transactionIds: Array<number | string>,
+    categoryId: string | number | null,
+  ) {
     if (!transactionIds.length) return { ok: true, count: 0 };
     return categorize.mutateAsync({
       transactionIds,
@@ -142,7 +167,7 @@ export function useTransactions(filters: TransactionFilters = {}) {
     isFetchingNextPage: infiniteTransactionsQuery.isFetchingNextPage,
     fetchNextPage: infiniteTransactionsQuery.fetchNextPage,
     hasNextPage: Boolean(infiniteTransactionsQuery.hasNextPage),
-    totalCount: isInfinite ? firstInfinitePage?.totalCount ?? 0 : transactions.length,
+    totalCount: isInfinite ? (firstInfinitePage?.totalCount ?? 0) : transactions.length,
     totals: firstInfinitePage?.totals,
     error: isInfinite ? infiniteTransactionsQuery.error : transactionsQuery.error,
   };

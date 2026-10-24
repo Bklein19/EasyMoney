@@ -3,10 +3,7 @@ import { mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Page } from 'playwright';
-import {
-  playwrightAuthStatePath,
-  playwrightSessionStoragePath,
-} from '../browserSession.ts';
+import { playwrightAuthStatePath, playwrightSessionStoragePath } from '../browserSession.ts';
 
 import {
   assertVanguardArtifactAccount,
@@ -79,41 +76,49 @@ test('Vanguard authentication recognizes the signed-in download center', async (
 });
 
 test('Vanguard API redirects to login require interactive authentication', () => {
-  const response = (
-    status: number,
-    url: string,
-    location?: string,
-  ) => ({
+  const response = (status: number, url: string, location?: string) => ({
     status,
     url,
     headers: (location ? { location } : {}) as Record<string, string>,
     redirected: false,
   });
 
-  expect(vanguardApiResponseRequiresAuthentication(response(
-    302,
-    'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
-    'https://logon.vanguard.com/logon',
-  ))).toBe(true);
-  expect(vanguardApiResponseRequiresAuthentication(response(
-    302,
-    'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
-    'https://investor.vanguard.com/my-account/log-on',
-  ))).toBe(true);
-  expect(vanguardApiResponseRequiresAuthentication(response(
-    302,
-    'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
-  ))).toBe(true);
-  expect(vanguardApiResponseRequiresAuthentication(response(
-    200,
-    'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
-  ))).toBe(false);
-  expect(vanguardApiResponseRequiresAuthentication({
-    status: 0,
-    url: 'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
-    headers: {},
-    redirected: true,
-  })).toBe(true);
+  expect(
+    vanguardApiResponseRequiresAuthentication(
+      response(
+        302,
+        'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
+        'https://logon.vanguard.com/logon',
+      ),
+    ),
+  ).toBe(true);
+  expect(
+    vanguardApiResponseRequiresAuthentication(
+      response(
+        302,
+        'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
+        'https://investor.vanguard.com/my-account/log-on',
+      ),
+    ),
+  ).toBe(true);
+  expect(
+    vanguardApiResponseRequiresAuthentication(
+      response(302, 'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts'),
+    ),
+  ).toBe(true);
+  expect(
+    vanguardApiResponseRequiresAuthentication(
+      response(200, 'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts'),
+    ),
+  ).toBe(false);
+  expect(
+    vanguardApiResponseRequiresAuthentication({
+      status: 0,
+      url: 'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
+      headers: {},
+      redirected: true,
+    }),
+  ).toBe(true);
 });
 
 test('Vanguard account discovery moves browser fetch onto the authenticated API application origin', async () => {
@@ -132,9 +137,13 @@ test('Vanguard account discovery moves browser fetch onto the authenticated API 
       return null;
     },
     evaluate: async (_operation: unknown, request: Record<string, unknown>) => {
-      requests.push(Object.fromEntries(Object.entries(request).filter(([name]) => (
-        name !== 'applicationOrigin' && name !== 'destinationOrigin'
-      ))));
+      requests.push(
+        Object.fromEntries(
+          Object.entries(request).filter(
+            ([name]) => name !== 'applicationOrigin' && name !== 'destinationOrigin',
+          ),
+        ),
+      );
       return {
         status: 200,
         url: 'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
@@ -150,11 +159,13 @@ test('Vanguard account discovery moves browser fetch onto the authenticated API 
   expect(navigations).toEqual([
     'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofx-welcome',
   ]);
-  expect(requests).toEqual([{
-    url: 'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
-    method: 'GET',
-  }]);
-  expect(accounts.map(account => account.accountLast4)).toEqual(['1111']);
+  expect(requests).toEqual([
+    {
+      url: 'https://personal1.vanguard.com/ofu-open-fin-exchange-webapp/ofu-accounts',
+      method: 'GET',
+    },
+  ]);
+  expect(accounts.map((account) => account.accountLast4)).toEqual(['1111']);
 });
 
 test('Vanguard expired API auth leaves stale portfolio UI for a genuine sign-in page', async () => {
@@ -169,12 +180,16 @@ test('Vanguard expired API auth leaves stale portfolio UI for a genuine sign-in 
   const calls: string[] = [];
   const page = {
     url: () => url,
-    locator: () => ({ count: async () => authenticationFields ? 1 : 0 }),
-    getByRole: () => ({ count: async () => url.includes('/portfolio/') ? 1 : 0 }),
+    locator: () => ({ count: async () => (authenticationFields ? 1 : 0) }),
+    getByRole: () => ({ count: async () => (url.includes('/portfolio/') ? 1 : 0) }),
     context: () => ({
-      clearCookies: async () => { calls.push('clear-cookies'); },
+      clearCookies: async () => {
+        calls.push('clear-cookies');
+      },
     }),
-    evaluate: async () => { calls.push('clear-storage'); },
+    evaluate: async () => {
+      calls.push('clear-storage');
+    },
     goto: async (nextUrl: string, options: unknown) => {
       calls.push(`goto:${nextUrl}:${JSON.stringify(options)}`);
       url = 'https://logon.vanguard.com/logon';
@@ -193,7 +208,8 @@ test('Vanguard expired API auth leaves stale portfolio UI for a genuine sign-in 
 
     expect(result).toEqual({
       status: 'login-required',
-      action: 'Sign in to Vanguard for Example One and complete MFA. EasyMoney will continue automatically.',
+      action:
+        'Sign in to Vanguard for Example One and complete MFA. EasyMoney will continue automatically.',
     });
     expect(calls).toEqual([
       'clear-cookies',
@@ -235,7 +251,7 @@ test('Vanguard progress records profile identity and elapsed dependency time', (
   const events: VanguardProgressEvent[] = [];
   let now = 100;
   const progress = createVanguardProgress(
-    event => events.push(event),
+    (event) => events.push(event),
     'current',
     () => now,
     () => '2026-08-24T00:00:00.000Z',
@@ -291,9 +307,9 @@ test('Vanguard artifacts must match the planned account before import', () => {
 });
 
 test('Vanguard extracts account identity from statement text without confusing dates', () => {
-  expect(vanguardAccountLast4FromText(
-    'Individual brokerage account XXXX1111 statement date 07/31/2026',
-  )).toBe('1111');
+  expect(
+    vanguardAccountLast4FromText('Individual brokerage account XXXX1111 statement date 07/31/2026'),
+  ).toBe('1111');
   expect(vanguardAccountLast4FromText('Roth IRA brokerage account ending in 2222')).toBe('2222');
   expect(vanguardAccountLast4FromText('Statement date 07/31/2026')).toBeNull();
 });
@@ -305,10 +321,14 @@ test('Vanguard starts independent cached profiles concurrently', async () => {
   ];
   const started: string[] = [];
   const releases = new Map<string, () => void>();
-  const running = runVanguardProfilesConcurrently(profiles, profile => new Promise<string>(resolve => {
-    started.push(profile.id);
-    releases.set(profile.id, () => resolve(profile.id));
-  }));
+  const running = runVanguardProfilesConcurrently(
+    profiles,
+    (profile) =>
+      new Promise<string>((resolve) => {
+        started.push(profile.id);
+        releases.set(profile.id, () => resolve(profile.id));
+      }),
+  );
 
   await Promise.resolve();
   expect(started).toEqual(['first', 'second']);
@@ -341,13 +361,17 @@ test('Vanguard maps every remote account to exactly one local route in remote or
       statementDates: [],
     },
   ];
-  const remote = parseVanguardAccountApiResponse({ accounts: [
-    apiAccount('3333', 'Traditional IRA', 'Rollover IRA'),
-    apiAccount('1111', 'Individual brokerage', 'Brokerage'),
-    apiAccount('2222', 'Roth IRA', 'Roth IRA'),
-  ] });
+  const remote = parseVanguardAccountApiResponse({
+    accounts: [
+      apiAccount('3333', 'Traditional IRA', 'Rollover IRA'),
+      apiAccount('1111', 'Individual brokerage', 'Brokerage'),
+      apiAccount('2222', 'Roth IRA', 'Roth IRA'),
+    ],
+  });
 
-  expect(mapVanguardRemoteAccounts(remote, planned).map(account => account.planned.accountId)).toEqual([30, 10, 20]);
+  expect(
+    mapVanguardRemoteAccounts(remote, planned).map((account) => account.planned.accountId),
+  ).toEqual([30, 10, 20]);
 });
 
 test('Vanguard discovers any number of API accounts without relying on browser controls', () => {
@@ -360,11 +384,13 @@ test('Vanguard discovers any number of API accounts without relying on browser c
     ],
   });
 
-  expect(accounts.map(account => ({
-    accountKind: account.accountKind,
-    accountLast4: account.accountLast4,
-    accountId: account.apiAccount.accountId,
-  }))).toEqual([
+  expect(
+    accounts.map((account) => ({
+      accountKind: account.accountKind,
+      accountLast4: account.accountLast4,
+      accountId: account.apiAccount.accountId,
+    })),
+  ).toEqual([
     { accountKind: 'brokerage', accountLast4: '1111', accountId: 'account-1111' },
     { accountKind: 'roth-ira', accountLast4: '2222', accountId: 'account-2222' },
     { accountKind: 'traditional-ira', accountLast4: '3333', accountId: 'account-3333' },
@@ -373,63 +399,91 @@ test('Vanguard discovers any number of API accounts without relying on browser c
 });
 
 test('Vanguard account API routing rejects invalid and ambiguous identities', () => {
-  expect(() => parseVanguardAccountApiResponse({ accounts: [{
-    accountId: 'missing-number',
-    accountName: 'Brokerage without number',
-    fundAccountNumber: '',
-  }] })).toThrow('no usable identity');
+  expect(() =>
+    parseVanguardAccountApiResponse({
+      accounts: [
+        {
+          accountId: 'missing-number',
+          accountName: 'Brokerage without number',
+          fundAccountNumber: '',
+        },
+      ],
+    }),
+  ).toThrow('no usable identity');
 
-  expect(() => parseVanguardAccountApiResponse({ accounts: [
-    apiAccount('1111', 'Individual brokerage A', 'First'),
-    apiAccount('1111', 'Individual brokerage B', 'Second'),
-  ] })).toThrow('ambiguous account identities');
+  expect(() =>
+    parseVanguardAccountApiResponse({
+      accounts: [
+        apiAccount('1111', 'Individual brokerage A', 'First'),
+        apiAccount('1111', 'Individual brokerage B', 'Second'),
+      ],
+    }),
+  ).toThrow('ambiguous account identities');
 });
 
 test('Vanguard uses only a unique kind fallback and rejects ambiguous account routes', () => {
-  const planned: VanguardSyncAccount[] = [{
-    accountId: 10,
-    accountKind: 'brokerage',
-    accountLast4: '1111',
-    startDate: '2026-01-01',
-    statementDates: [],
-  }];
-
-  expect(mapVanguardRemoteAccounts([
-    ...parseVanguardAccountApiResponse({
-      accounts: [apiAccount('2222', 'Individual brokerage', 'Brokerage')],
-    }),
-  ], planned).map(account => account.planned.accountId)).toEqual([10]);
-  expect(() => mapVanguardRemoteAccounts(
-    parseVanguardAccountApiResponse({
-      accounts: [apiAccount('1111', 'Roth IRA', 'Roth IRA')],
-    }),
-    planned,
-  )).toThrow('conflicts with its planned local account kind');
-  expect(() => mapVanguardRemoteAccounts([
+  const planned: VanguardSyncAccount[] = [
     {
-      ...parseVanguardAccountApiResponse({
-        accounts: [apiAccount('1111', 'Individual brokerage', 'Brokerage')],
-      })[0]!,
-    },
-    {
-      ...parseVanguardAccountApiResponse({
-        accounts: [apiAccount('2222', 'Individual brokerage', 'Brokerage')],
-      })[0]!,
+      accountId: 10,
+      accountKind: 'brokerage',
       accountLast4: '1111',
+      startDate: '2026-01-01',
+      statementDates: [],
     },
-  ], planned)).toThrow('ambiguous remote account identities');
+  ];
+
+  expect(
+    mapVanguardRemoteAccounts(
+      [
+        ...parseVanguardAccountApiResponse({
+          accounts: [apiAccount('2222', 'Individual brokerage', 'Brokerage')],
+        }),
+      ],
+      planned,
+    ).map((account) => account.planned.accountId),
+  ).toEqual([10]);
+  expect(() =>
+    mapVanguardRemoteAccounts(
+      parseVanguardAccountApiResponse({
+        accounts: [apiAccount('1111', 'Roth IRA', 'Roth IRA')],
+      }),
+      planned,
+    ),
+  ).toThrow('conflicts with its planned local account kind');
+  expect(() =>
+    mapVanguardRemoteAccounts(
+      [
+        {
+          ...parseVanguardAccountApiResponse({
+            accounts: [apiAccount('1111', 'Individual brokerage', 'Brokerage')],
+          })[0]!,
+        },
+        {
+          ...parseVanguardAccountApiResponse({
+            accounts: [apiAccount('2222', 'Individual brokerage', 'Brokerage')],
+          })[0]!,
+          accountLast4: '1111',
+        },
+      ],
+      planned,
+    ),
+  ).toThrow('ambiguous remote account identities');
 
   const twoBrokerages: VanguardSyncAccount[] = [
     planned[0]!,
     { ...planned[0]!, accountId: 20, accountLast4: '3333' },
   ];
-  expect(() => mapVanguardRemoteAccounts(
-    parseVanguardAccountApiResponse({ accounts: [
-      apiAccount('2222', 'Individual brokerage A', 'Brokerage A'),
-      apiAccount('4444', 'Individual brokerage B', 'Brokerage B'),
-    ] }),
-    twoBrokerages,
-  )).toThrow('no unambiguous local account route');
+  expect(() =>
+    mapVanguardRemoteAccounts(
+      parseVanguardAccountApiResponse({
+        accounts: [
+          apiAccount('2222', 'Individual brokerage A', 'Brokerage A'),
+          apiAccount('4444', 'Individual brokerage B', 'Brokerage B'),
+        ],
+      }),
+      twoBrokerages,
+    ),
+  ).toThrow('no unambiguous local account route');
 });
 
 test('Vanguard allows a planned dormant account to be absent from activity downloads', () => {
@@ -450,21 +504,28 @@ test('Vanguard allows a planned dormant account to be absent from activity downl
     },
   ];
 
-  expect(mapVanguardRemoteAccounts([
-    ...parseVanguardAccountApiResponse({
-      accounts: [apiAccount('1111', 'Individual brokerage', 'Brokerage')],
-    }),
-  ], planned).map(account => account.planned.accountId)).toEqual([10]);
+  expect(
+    mapVanguardRemoteAccounts(
+      [
+        ...parseVanguardAccountApiResponse({
+          accounts: [apiAccount('1111', 'Individual brokerage', 'Brokerage')],
+        }),
+      ],
+      planned,
+    ).map((account) => account.planned.accountId),
+  ).toEqual([10]);
 });
 
 test('Vanguard carries a safely matched remote identity into statement routing', () => {
-  const planned: VanguardSyncAccount[] = [{
-    accountId: 10,
-    accountKind: 'brokerage',
-    accountLast4: '1111',
-    startDate: '2026-01-01',
-    statementDates: ['2026-07-31'],
-  }];
+  const planned: VanguardSyncAccount[] = [
+    {
+      accountId: 10,
+      accountKind: 'brokerage',
+      accountLast4: '1111',
+      startDate: '2026-01-01',
+      statementDates: ['2026-07-31'],
+    },
+  ];
   const mapped = mapVanguardRemoteAccounts(
     parseVanguardAccountApiResponse({
       accounts: [apiAccount('9999', 'Individual brokerage', 'Brokerage')],
@@ -473,15 +534,26 @@ test('Vanguard carries a safely matched remote identity into statement routing',
   );
   const routes = vanguardStatementAccountRoutes(planned, mapped);
 
-  expect(routes).toEqual([{
-    account: planned[0],
-    identityLast4s: ['1111', '9999'],
-  }]);
-  expect(parseVanguardStatementApiResponse({ statements: [{
-    endDate: '2026-07-31',
-    statementDescription: 'Individual brokerage XXXX9999',
-    statementId: 'statement-document',
-  }] }, routes)[0]).toMatchObject({
+  expect(routes).toEqual([
+    {
+      account: planned[0],
+      identityLast4s: ['1111', '9999'],
+    },
+  ]);
+  expect(
+    parseVanguardStatementApiResponse(
+      {
+        statements: [
+          {
+            endDate: '2026-07-31',
+            statementDescription: 'Individual brokerage XXXX9999',
+            statementId: 'statement-document',
+          },
+        ],
+      },
+      routes,
+    )[0],
+  ).toMatchObject({
     accountId: 10,
     accountKind: 'brokerage',
     accountLast4: '1111',
@@ -513,44 +585,66 @@ test('Vanguard statement discovery keeps only pending routes including a dormant
       statementDates: ['2026-05-31', '2026-06-30', '2026-07-31'],
     },
   ];
-  const mapped = mapVanguardRemoteAccounts(parseVanguardAccountApiResponse({ accounts: [
-    apiAccount('1111', 'Individual brokerage', 'Brokerage'),
-    apiAccount('2222', 'Roth IRA', 'Roth IRA'),
-  ] }), planned);
+  const mapped = mapVanguardRemoteAccounts(
+    parseVanguardAccountApiResponse({
+      accounts: [
+        apiAccount('1111', 'Individual brokerage', 'Brokerage'),
+        apiAccount('2222', 'Roth IRA', 'Roth IRA'),
+      ],
+    }),
+    planned,
+  );
   const routes = vanguardStatementAccountRoutes(planned, mapped, new Set([30]));
-  const candidates = parseVanguardStatementApiResponse({ statements: [
+  const candidates = parseVanguardStatementApiResponse(
     {
-      endDate: '2026-07-31',
-      statementDescription: 'Individual brokerage XXXX1111',
-      statementId: 'brokerage-july',
+      statements: [
+        {
+          endDate: '2026-07-31',
+          statementDescription: 'Individual brokerage XXXX1111',
+          statementId: 'brokerage-july',
+        },
+        {
+          endDate: '2026-07-31',
+          statementDescription: 'Roth IRA XXXX2222',
+          statementId: 'roth-july',
+        },
+        {
+          endDate: '2026-04-30',
+          statementDescription: 'Traditional IRA XXXX3333',
+          statementId: 'traditional-april',
+        },
+      ],
     },
-    {
-      endDate: '2026-07-31',
-      statementDescription: 'Roth IRA XXXX2222',
-      statementId: 'roth-july',
-    },
-    {
-      endDate: '2026-04-30',
-      statementDescription: 'Traditional IRA XXXX3333',
-      statementId: 'traditional-april',
-    },
-  ] }, routes);
+    routes,
+  );
 
-  expect(routes.map(route => route.account.accountId)).toEqual([30]);
-  expect(candidates.map(candidate => [candidate.accountId, candidate.statementDate])).toEqual([
+  expect(routes.map((route) => route.account.accountId)).toEqual([30]);
+  expect(candidates.map((candidate) => [candidate.accountId, candidate.statementDate])).toEqual([
     [30, '2026-04-30'],
   ]);
-  expect(planned[2]!.statementDates.map(statementDate => vanguardStatementForRequest({
-    accountLast4: '3333',
-    statementDate,
-  }, candidates))).toEqual([null, null, null]);
+  expect(
+    planned[2]!.statementDates.map((statementDate) =>
+      vanguardStatementForRequest(
+        {
+          accountLast4: '3333',
+          statementDate,
+        },
+        candidates,
+      ),
+    ),
+  ).toEqual([null, null, null]);
   expect(vanguardStatementRouteSummary(planned, candidates)).toBe(
     'route-3/traditional-ira[2026-04-30]',
   );
-  expect(vanguardStatementRouteSummary(planned, planned[2]!.statementDates.map(statementDate => ({
-    accountId: 30,
-    statementDate,
-  })))).toBe('route-3/traditional-ira[2026-05-31,2026-06-30,2026-07-31]');
+  expect(
+    vanguardStatementRouteSummary(
+      planned,
+      planned[2]!.statementDates.map((statementDate) => ({
+        accountId: 30,
+        statementDate,
+      })),
+    ),
+  ).toBe('route-3/traditional-ira[2026-05-31,2026-06-30,2026-07-31]');
 });
 
 test('Vanguard builds direct statement list and PDF requests', () => {
@@ -601,37 +695,44 @@ test('Vanguard routes statement API records to planned accounts without guessing
       statementDates: [],
     },
   ];
-  const routes = planned.map(account => ({ account, identityLast4s: [account.accountLast4] }));
-  const statements = parseVanguardStatementApiResponse({ statements: [
+  const routes = planned.map((account) => ({ account, identityLast4s: [account.accountLast4] }));
+  const statements = parseVanguardStatementApiResponse(
     {
-      endDate: '2026-07-31',
-      productAccountData: 'XXXX1111',
-      statementDescription: 'Individual brokerage XXXX1111',
-      statementId: 'brokerage-document',
+      statements: [
+        {
+          endDate: '2026-07-31',
+          productAccountData: 'XXXX1111',
+          statementDescription: 'Individual brokerage XXXX1111',
+          statementId: 'brokerage-document',
+        },
+        {
+          endDate: '2026-06-30T00:00:00Z',
+          accountId: 'remote-account-2222',
+          statementId: 'roth-document',
+        },
+        {
+          endDate: '2026-03-31',
+          statementDescription: 'Traditional IRA account 00003333',
+          statementId: 'traditional-document',
+        },
+        {
+          endDate: '2026-07-31',
+          statementDescription: 'Unrelated account 00004444',
+          statementId: 'unrelated-document',
+        },
+      ],
     },
-    {
-      endDate: '2026-06-30T00:00:00Z',
-      accountId: 'remote-account-2222',
-      statementId: 'roth-document',
-    },
-    {
-      endDate: '2026-03-31',
-      statementDescription: 'Traditional IRA account 00003333',
-      statementId: 'traditional-document',
-    },
-    {
-      endDate: '2026-07-31',
-      statementDescription: 'Unrelated account 00004444',
-      statementId: 'unrelated-document',
-    },
-  ] }, routes);
+    routes,
+  );
 
-  expect(statements.map(statement => ({
-    accountKind: statement.accountKind,
-    accountLast4: statement.accountLast4,
-    statementDate: statement.statementDate,
-    statementId: statement.request.headers?.statementid,
-  }))).toEqual([
+  expect(
+    statements.map((statement) => ({
+      accountKind: statement.accountKind,
+      accountLast4: statement.accountLast4,
+      statementDate: statement.statementDate,
+      statementId: statement.request.headers?.statementid,
+    })),
+  ).toEqual([
     {
       accountKind: 'brokerage',
       accountLast4: '1111',
@@ -651,16 +752,34 @@ test('Vanguard routes statement API records to planned accounts without guessing
       statementId: 'traditional-document',
     },
   ]);
-  expect(() => parseVanguardStatementApiResponse({ statements: [{
-    endDate: '2026-07-31',
-    statementDescription: 'Accounts XXXX1111 and XXXX2222',
-    statementId: 'ambiguous-document',
-  }] }, routes)).toThrow('ambiguous across local accounts');
-  expect(() => parseVanguardStatementApiResponse({ statements: [{
-    endDate: '2026-07-31',
-    statementDescription: 'Account XXXX1111',
-    statementId: '',
-  }] }, routes)).toThrow('no document identity');
+  expect(() =>
+    parseVanguardStatementApiResponse(
+      {
+        statements: [
+          {
+            endDate: '2026-07-31',
+            statementDescription: 'Accounts XXXX1111 and XXXX2222',
+            statementId: 'ambiguous-document',
+          },
+        ],
+      },
+      routes,
+    ),
+  ).toThrow('ambiguous across local accounts');
+  expect(() =>
+    parseVanguardStatementApiResponse(
+      {
+        statements: [
+          {
+            endDate: '2026-07-31',
+            statementDescription: 'Account XXXX1111',
+            statementId: '',
+          },
+        ],
+      },
+      routes,
+    ),
+  ).toThrow('no document identity');
 });
 
 test('Vanguard builds the authenticated activity API request without browser controls', () => {
@@ -692,13 +811,15 @@ test('Vanguard builds the authenticated activity API request without browser con
     userAgent: 'Example Browser',
     isSingle: false,
   });
-  expect(() => vanguardActivityApiRequest(
-    account,
-    '2026-08-03',
-    '2026-01-02',
-    'Example Browser',
-    'example-xsrf-token',
-  )).toThrow('cannot be after');
+  expect(() =>
+    vanguardActivityApiRequest(
+      account,
+      '2026-08-03',
+      '2026-01-02',
+      'Example Browser',
+      'example-xsrf-token',
+    ),
+  ).toThrow('cannot be after');
 });
 
 test('Vanguard unwraps only a CSV activity API envelope', () => {
@@ -707,18 +828,24 @@ test('Vanguard unwraps only a CSV activity API envelope', () => {
     '00001111,2026-07-16,2026-07-16,Funds Received,Electronic Bank Transfer,CASH,,0,0,400.00,0,400.00,0,CASH,',
   ].join('\n');
 
-  expect(vanguardActivityCsvFromEnvelope({
-    body: csv,
-    headers: { 'Content-Type': ['text/csv;charset=UTF-8'] },
-  })).toBe(csv);
-  expect(() => vanguardActivityCsvFromEnvelope({
-    body: csv,
-    headers: { 'content-type': 'text/html' },
-  })).toThrow('unexpected content type');
-  expect(() => vanguardActivityCsvFromEnvelope({
-    body: 'not,csv',
-    headers: { 'content-type': 'text/csv' },
-  })).toThrow('expected CSV format');
+  expect(
+    vanguardActivityCsvFromEnvelope({
+      body: csv,
+      headers: { 'Content-Type': ['text/csv;charset=UTF-8'] },
+    }),
+  ).toBe(csv);
+  expect(() =>
+    vanguardActivityCsvFromEnvelope({
+      body: csv,
+      headers: { 'content-type': 'text/html' },
+    }),
+  ).toThrow('unexpected content type');
+  expect(() =>
+    vanguardActivityCsvFromEnvelope({
+      body: 'not,csv',
+      headers: { 'content-type': 'text/csv' },
+    }),
+  ).toThrow('expected CSV format');
 });
 
 test('Vanguard validates activity signature, account identity, and the matching EasyMoney parser', async () => {
@@ -743,7 +870,7 @@ test('Vanguard validates activity signature, account identity, and the matching 
 test('Vanguard institution code uses direct requests and no fixed browser sleeps', async () => {
   const source = await Bun.file(new URL('./vanguard.ts', import.meta.url)).text();
 
-  expect(source).toContain('runBrowserNativeRequest(page');
+  expect(source).toMatch(/\brunBrowserNativeRequest\(\s*page\b/);
   expect(source).not.toContain('page.context().request');
   expect(source).not.toContain('waitForTimeout');
   expect(source).not.toContain("waitForEvent('download'");

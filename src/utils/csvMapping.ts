@@ -52,25 +52,29 @@ interface CsvProfile {
 }
 
 function normalizeHeader(value = '') {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }
 
 function findHeader(headers: string[], hints: string[]) {
-  const normalizedHeaders = headers.map(header => ({
+  const normalizedHeaders = headers.map((header) => ({
     original: header,
     normalized: normalizeHeader(header),
   }));
 
   for (const hint of hints) {
     const normalizedHint = normalizeHeader(hint);
-    const exact = normalizedHeaders.find(header => header.normalized === normalizedHint);
+    const exact = normalizedHeaders.find((header) => header.normalized === normalizedHint);
     if (exact) return exact.original;
   }
 
   for (const hint of hints) {
     const normalizedHint = normalizeHeader(hint);
-    const partial = normalizedHeaders.find(header =>
-      header.normalized.includes(normalizedHint) || normalizedHint.includes(header.normalized)
+    const partial = normalizedHeaders.find(
+      (header) =>
+        header.normalized.includes(normalizedHint) || normalizedHint.includes(header.normalized),
     );
     if (partial) return partial.original;
   }
@@ -137,8 +141,10 @@ export function mappingFromProfile(profile: CsvProfile | null | undefined, heade
     categoryColumn: profile.categoryColumn || inferred.categoryColumn || '',
     splitAmount: amountConfig.type === 'split',
     amountColumn: amountConfig.column || inferred.amountColumn || '',
-    debitColumn: amountConfig.chargeColumn || amountConfig.debitColumn || inferred.debitColumn || '',
-    creditColumn: amountConfig.paymentColumn || amountConfig.creditColumn || inferred.creditColumn || '',
+    debitColumn:
+      amountConfig.chargeColumn || amountConfig.debitColumn || inferred.debitColumn || '',
+    creditColumn:
+      amountConfig.paymentColumn || amountConfig.creditColumn || inferred.creditColumn || '',
     negativeIsDebit: amountConfig.negativeIsDebit !== false,
     positiveIsCharge: amountConfig.positiveIsCharge !== false,
   };

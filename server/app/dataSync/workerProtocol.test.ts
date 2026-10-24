@@ -3,10 +3,7 @@ import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import {
-  SYNC_WORKER_PROTOCOL_VERSION,
-  type SyncExecutionPlan,
-} from './types.ts';
+import { SYNC_WORKER_PROTOCOL_VERSION, type SyncExecutionPlan } from './types.ts';
 import {
   parseSyncExecutionPlan,
   parseSyncWorkerLine,
@@ -22,23 +19,27 @@ function executionPlan(outputDir = '/runtime/sync/artifacts'): SyncExecutionPlan
     runId: 'sync-vanguard-test',
     institutionId: 'vanguard',
     today: '2026-08-24',
-    accounts: [{
-      id: 42,
-      name: 'Synthetic Brokerage 1234',
-      institution: 'Vanguard',
-      type: 'investment',
-      last4: '1234',
-      latestFactDate: '2026-08-01',
-      earliestFactDate: '2025-01-01',
-      latestBalanceDate: '2026-07-31',
-      earliestBalanceDate: '2025-01-31',
-      balanceDates: ['2026-07-31'],
-      sourceAccountName: 'Synthetic brokerage ending in 1234',
-      sourceAccountNames: [],
-      accountAliases: [],
-      accountHolder: 'Synthetic Holder',
-      artifactFileNames: ['vanguard-current-brokerage-2026-08-01-to-2026-08-24-activity-1234.csv'],
-    }],
+    accounts: [
+      {
+        id: 42,
+        name: 'Synthetic Brokerage 1234',
+        institution: 'Vanguard',
+        type: 'investment',
+        last4: '1234',
+        latestFactDate: '2026-08-01',
+        earliestFactDate: '2025-01-01',
+        latestBalanceDate: '2026-07-31',
+        earliestBalanceDate: '2025-01-31',
+        balanceDates: ['2026-07-31'],
+        sourceAccountName: 'Synthetic brokerage ending in 1234',
+        sourceAccountNames: [],
+        accountAliases: [],
+        accountHolder: 'Synthetic Holder',
+        artifactFileNames: [
+          'vanguard-current-brokerage-2026-08-01-to-2026-08-24-activity-1234.csv',
+        ],
+      },
+    ],
     connectionId: 'current',
     goal: { kind: 'current', overlapDays: 7 },
     outputDir,
@@ -48,10 +49,14 @@ function executionPlan(outputDir = '/runtime/sync/artifacts'): SyncExecutionPlan
 test('runtime execution plans round-trip through the strict stdin protocol', () => {
   const plan = executionPlan();
   expect(parseSyncExecutionPlan(serializeSyncExecutionPlan(plan))).toEqual(plan);
-  expect(() => parseSyncExecutionPlan(JSON.stringify({
-    ...plan,
-    institutionId: 'unsupported-bank',
-  }))).toThrow('unsupported institution connector');
+  expect(() =>
+    parseSyncExecutionPlan(
+      JSON.stringify({
+        ...plan,
+        institutionId: 'unsupported-bank',
+      }),
+    ),
+  ).toThrow('unsupported institution connector');
 });
 
 test('the registered Fidelity institution is accepted by the typed worker protocol', () => {
@@ -63,16 +68,20 @@ test('the registered Fidelity institution is accepted by the typed worker protoc
   };
 
   expect(parseSyncExecutionPlan(serializeSyncExecutionPlan(plan))).toEqual(plan);
-  expect(parseSyncWorkerMessage(JSON.stringify({
-    protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
-    kind: 'manifest',
-    manifest: {
-      protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
-      runId: plan.runId,
-      institutionId: 'fidelity',
-      artifacts: [],
-    },
-  }))).toEqual({
+  expect(
+    parseSyncWorkerMessage(
+      JSON.stringify({
+        protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+        kind: 'manifest',
+        manifest: {
+          protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+          runId: plan.runId,
+          institutionId: 'fidelity',
+          artifacts: [],
+        },
+      }),
+    ),
+  ).toEqual({
     protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
     kind: 'manifest',
     manifest: {
@@ -85,82 +94,102 @@ test('the registered Fidelity institution is accepted by the typed worker protoc
 });
 
 test('worker manifests reject path-shaped artifacts before parent staging', () => {
-  expect(() => parseSyncWorkerMessage(JSON.stringify({
-    protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
-    kind: 'manifest',
-    manifest: {
-      protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
-      runId: 'sync-vanguard-test',
-      institutionId: 'vanguard',
-      artifacts: [{
-        fileName: '../outside.csv',
-        accountId: 42,
-        sizeBytes: 1,
-        sha256: 'a'.repeat(64),
-      }],
-    },
-  }))).toThrow('Artifact file name must not contain a path');
+  expect(() =>
+    parseSyncWorkerMessage(
+      JSON.stringify({
+        protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+        kind: 'manifest',
+        manifest: {
+          protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+          runId: 'sync-vanguard-test',
+          institutionId: 'vanguard',
+          artifacts: [
+            {
+              fileName: '../outside.csv',
+              accountId: 42,
+              sizeBytes: 1,
+              sha256: 'a'.repeat(64),
+            },
+          ],
+        },
+      }),
+    ),
+  ).toThrow('Artifact file name must not contain a path');
 });
 
 test('worker manifests round-trip destinationless multi-account routes', () => {
-  const message = parseSyncWorkerMessage(JSON.stringify({
-    protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
-    kind: 'manifest',
-    manifest: {
+  const message = parseSyncWorkerMessage(
+    JSON.stringify({
       protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
-      runId: 'sync-vanguard-test',
-      institutionId: 'vanguard',
-      artifacts: [{
-        fileName: 'consolidated.csv',
-        accountRoutes: [
-          { remoteAccountId: 'remote:first', accountId: 42 },
-          { remoteAccountId: 'remote:new' },
+      kind: 'manifest',
+      manifest: {
+        protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+        runId: 'sync-vanguard-test',
+        institutionId: 'vanguard',
+        artifacts: [
+          {
+            fileName: 'consolidated.csv',
+            accountRoutes: [
+              { remoteAccountId: 'remote:first', accountId: 42 },
+              { remoteAccountId: 'remote:new' },
+            ],
+            sizeBytes: 12,
+            sha256: 'a'.repeat(64),
+          },
         ],
-        sizeBytes: 12,
-        sha256: 'a'.repeat(64),
-      }],
-    },
-  }));
-  expect(message).toEqual(expect.objectContaining({
-    kind: 'manifest',
-    manifest: expect.objectContaining({
-      artifacts: [expect.objectContaining({
-        accountRoutes: [
-          { remoteAccountId: 'remote:first', accountId: 42 },
-          { remoteAccountId: 'remote:new' },
-        ],
-      })],
+      },
     }),
-  }));
+  );
+  expect(message).toEqual(
+    expect.objectContaining({
+      kind: 'manifest',
+      manifest: expect.objectContaining({
+        artifacts: [
+          expect.objectContaining({
+            accountRoutes: [
+              { remoteAccountId: 'remote:first', accountId: 42 },
+              { remoteAccountId: 'remote:new' },
+            ],
+          }),
+        ],
+      }),
+    }),
+  );
 });
 
 test('worker manifests require exactly one complete account routing form', () => {
-  const parseArtifact = (artifact: unknown) => parseSyncWorkerMessage(JSON.stringify({
-    protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
-    kind: 'manifest',
-    manifest: {
-      protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
-      runId: 'sync-vanguard-test',
-      institutionId: 'vanguard',
-      artifacts: [{
-        fileName: 'artifact.csv',
-        sizeBytes: 1,
-        sha256: 'a'.repeat(64),
-        ...(artifact as object),
-      }],
-    },
-  }));
+  const parseArtifact = (artifact: unknown) =>
+    parseSyncWorkerMessage(
+      JSON.stringify({
+        protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+        kind: 'manifest',
+        manifest: {
+          protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
+          runId: 'sync-vanguard-test',
+          institutionId: 'vanguard',
+          artifacts: [
+            {
+              fileName: 'artifact.csv',
+              sizeBytes: 1,
+              sha256: 'a'.repeat(64),
+              ...(artifact as object),
+            },
+          ],
+        },
+      }),
+    );
 
   expect(() => parseArtifact({})).toThrow();
-  expect(() => parseArtifact({ accountId: 42, accountRoutes: [{ remoteAccountId: 'remote:first' }] })).toThrow();
+  expect(() =>
+    parseArtifact({ accountId: 42, accountRoutes: [{ remoteAccountId: 'remote:first' }] }),
+  ).toThrow();
   expect(() => parseArtifact({ accountRoutes: [] })).toThrow();
   expect(() => parseArtifact({ accountRoutes: [{ remoteAccountId: '  ' }] })).toThrow();
-  expect(() => parseArtifact({
-    accountRoutes: [
-      { remoteAccountId: 'remote:first' },
-      { remoteAccountId: 'remote:first' },
-    ],
-  })).toThrow('Duplicate remote account identity');
+  expect(() =>
+    parseArtifact({
+      accountRoutes: [{ remoteAccountId: 'remote:first' }, { remoteAccountId: 'remote:first' }],
+    }),
+  ).toThrow('Duplicate remote account identity');
 });
 
 test('parent manifest validation checks only concrete route destinations against the plan', () => {
@@ -169,21 +198,30 @@ test('parent manifest validation checks only concrete route destinations against
     protocolVersion: SYNC_WORKER_PROTOCOL_VERSION,
     runId: plan.runId,
     institutionId: plan.institutionId,
-    artifacts: [{
-      fileName: 'consolidated.csv',
-      accountRoutes: [{ remoteAccountId: 'remote:new' }],
-      sizeBytes: 1,
-      sha256: 'a'.repeat(64),
-    }],
+    artifacts: [
+      {
+        fileName: 'consolidated.csv',
+        accountRoutes: [{ remoteAccountId: 'remote:new' }],
+        sizeBytes: 1,
+        sha256: 'a'.repeat(64),
+      },
+    ],
   };
   expect(() => validateSyncArtifactManifestForPlan(manifest, plan)).not.toThrow();
-  expect(() => validateSyncArtifactManifestForPlan({
-    ...manifest,
-    artifacts: [{
-      ...manifest.artifacts[0]!,
-      accountRoutes: [{ remoteAccountId: 'remote:routed', accountId: 99 }],
-    }],
-  }, plan)).toThrow('outside its execution plan');
+  expect(() =>
+    validateSyncArtifactManifestForPlan(
+      {
+        ...manifest,
+        artifacts: [
+          {
+            ...manifest.artifacts[0]!,
+            accountRoutes: [{ remoteAccountId: 'remote:routed', accountId: 99 }],
+          },
+        ],
+      },
+      plan,
+    ),
+  ).toThrow('outside its execution plan');
 });
 
 test('typed worker output is distinguishable from browser diagnostics on stdout', () => {
@@ -220,11 +258,16 @@ test('loading the child entrypoint cannot initialize a database from its environ
   });
 
   try {
-    if (!child.stdin || typeof child.stdin === 'number') throw new Error('Test child stdin is unavailable');
+    if (!child.stdin || typeof child.stdin === 'number')
+      throw new Error('Test child stdin is unavailable');
     child.stdin.write('{}');
     child.stdin.end();
     expect(await child.exited).not.toBe(0);
-    expect(await stat(databasePath).then(() => true).catch(() => false)).toBe(false);
+    expect(
+      await stat(databasePath)
+        .then(() => true)
+        .catch(() => false),
+    ).toBe(false);
   } finally {
     child.kill();
     await rm(directory, { recursive: true, force: true });
@@ -256,21 +299,28 @@ test('the real child entrypoint accepts a typed plan on stdin and emits framed p
   const stderr = new Response(child.stderr).text();
 
   try {
-    if (!child.stdin || typeof child.stdin === 'number') throw new Error('Test child stdin is unavailable');
+    if (!child.stdin || typeof child.stdin === 'number')
+      throw new Error('Test child stdin is unavailable');
     child.stdin.write(serializeSyncExecutionPlan(plan));
     child.stdin.end();
     expect(await child.exited).toBe(1);
     const messages = (await stdout).trim().split('\n').filter(Boolean).map(parseSyncWorkerLine);
-    expect(messages).toContainEqual(expect.objectContaining({
-      kind: 'event',
-      event: expect.objectContaining({
-        runId: plan.runId,
-        type: 'error',
-        message: 'Vanguard connection is unavailable: current',
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        kind: 'event',
+        event: expect.objectContaining({
+          runId: plan.runId,
+          type: 'error',
+          message: 'Vanguard connection is unavailable: current',
+        }),
       }),
-    }));
+    );
     expect(await stderr).toBe('');
-    expect(await stat(databasePath).then(() => true).catch(() => false)).toBe(false);
+    expect(
+      await stat(databasePath)
+        .then(() => true)
+        .catch(() => false),
+    ).toBe(false);
   } finally {
     child.kill();
     await rm(directory, { recursive: true, force: true });

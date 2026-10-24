@@ -16,8 +16,15 @@ test('restore switches databases after restart, preserves annotations and plans,
   `;
   const run = (code: string) => {
     const child = Bun.spawnSync([process.execPath, '--eval', imports + code], {
-      env: { ...process.env, EASYMONEY_DB_PATH: databasePath, EASYMONEY_ENV_PATH: path.join(directory, '.env.local'), NODE_ENV: 'test' },
-      stdout: 'pipe', stderr: 'pipe', timeout: 15000,
+      env: {
+        ...process.env,
+        EASYMONEY_DB_PATH: databasePath,
+        EASYMONEY_ENV_PATH: path.join(directory, '.env.local'),
+        NODE_ENV: 'test',
+      },
+      stdout: 'pipe',
+      stderr: 'pipe',
+      timeout: 15000,
     });
     if (child.exitCode !== 0) throw new Error(child.stderr.toString());
     return JSON.parse(child.stdout.toString());
@@ -45,11 +52,17 @@ test('restore switches databases after restart, preserves annotations and plans,
     expect(fs.existsSync(`${stage.restored.beforeRestore.path}-wal`)).toBe(false);
     expect(fs.existsSync(`${stage.restored.beforeRestore.path}-shm`)).toBe(false);
     const portableBackup = new Database(stage.restored.beforeRestore.path, { readonly: true });
-    try { expect(portableBackup.query('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'delete' }); }
-    finally { portableBackup.close(); }
+    try {
+      expect(portableBackup.query('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'delete' });
+    } finally {
+      portableBackup.close();
+    }
     const original = new Database(databasePath, { readonly: true });
-    try { expect(original.query('SELECT name FROM accounts').get()).toEqual({ name: 'After backup' }); }
-    finally { original.close(); }
+    try {
+      expect(original.query('SELECT name FROM accounts').get()).toEqual({ name: 'After backup' });
+    } finally {
+      original.close();
+    }
     const reopened = run(`
       console.log(JSON.stringify({ status: databaseBackupStatus(), plans: await caller.budgets.plans(),
         account: getDb().prepare('SELECT name FROM accounts').get(),
@@ -61,7 +74,11 @@ test('restore switches databases after restart, preserves annotations and plans,
     expect(reopened.status.restorePending).toBe(false);
     expect(reopened.status.databasePath).not.toBe(databasePath);
     expect(reopened.account.name).toBe('Before backup');
-    expect(reopened.transfer).toEqual({id:'closure:1',status:'confirmed',effectiveDate:'2026-01-31'});
+    expect(reopened.transfer).toEqual({
+      id: 'closure:1',
+      status: 'confirmed',
+      effectiveDate: '2026-01-31',
+    });
     expect(reopened.note.notes).toBe('Keep this note');
     expect(reopened.mapping.accountId).toBe(1);
     expect(reopened.plans.plans.globalBudgets['year:2026']).toBe(1200);

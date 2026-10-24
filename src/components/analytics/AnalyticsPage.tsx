@@ -1,8 +1,30 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent, UIEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { addMonths, endOfDay, endOfMonth, endOfWeek, endOfYear, format, parseISO, startOfMonth, startOfWeek, startOfYear, subMonths, subWeeks } from 'date-fns';
-import { Calendar, ChevronLeft, ChevronRight, HelpCircle, Maximize2, RotateCcw, Search, X } from 'lucide-react';
+import {
+  addMonths,
+  endOfDay,
+  endOfMonth,
+  endOfWeek,
+  endOfYear,
+  format,
+  parseISO,
+  startOfMonth,
+  startOfWeek,
+  startOfYear,
+  subMonths,
+  subWeeks,
+} from 'date-fns';
+import {
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  HelpCircle,
+  Maximize2,
+  RotateCcw,
+  Search,
+  X,
+} from 'lucide-react';
 import { SidebarAccountList } from '../layout/SidebarContext';
 import { useCategories } from '../../hooks/useCategories';
 import { useAccounts } from '../../hooks/useAccounts';
@@ -11,7 +33,10 @@ import { formatCurrency, formatDate, getAmountClass } from '../../utils/formatte
 
 import SpendingExplorer from './SpendingExplorer';
 import SpendingTransactions from './SpendingTransactions';
-import { CategoryChangeFeedback, useReviewedCategories } from '../transactions/ReviewedTransactions';
+import {
+  CategoryChangeFeedback,
+  useReviewedCategories,
+} from '../transactions/ReviewedTransactions';
 import WorthReviewing from './WorthReviewing';
 import TransactionDetails from '../transactions/TransactionDetails';
 import type { ReviewGroup } from '../../../server/app/transactionReview';
@@ -25,7 +50,11 @@ import { sortAnalyticsPeriodsChronologically } from './periodOrder';
 import Tooltip from '../shared/Tooltip';
 import Modal from '../shared/Modal';
 import GroupedCategorySelect, { isUncategorized } from '../shared/GroupedCategorySelect';
-import type { AnalyticsGroupMode, AnalyticsTransaction, CategoryFilterMode } from '../../../server/app/analytics.ts';
+import type {
+  AnalyticsGroupMode,
+  AnalyticsTransaction,
+  CategoryFilterMode,
+} from '../../../server/app/analytics.ts';
 import type { CategorySummary } from '../../../server/app/types.ts';
 import type { AnalyticsPeriodRow } from './PeriodClickOverlay';
 
@@ -37,7 +66,7 @@ const DATE_RANGES = {
   LAST_WEEK: 'Last Week',
   THIS_YEAR: 'This Year',
   CUSTOM: 'Custom',
-  ALL_TIME: 'All Time'
+  ALL_TIME: 'All Time',
 } as const;
 
 const CASH_FLOW_GROUPS = {
@@ -45,21 +74,20 @@ const CASH_FLOW_GROUPS = {
   DAY: 'Daily',
   WEEK: 'Weekly',
   MONTH: 'Monthly',
-  YEAR: 'Yearly'
+  YEAR: 'Yearly',
 } as const;
 
 const DRILLDOWN_PAGE_SIZE = 20;
 const CATEGORY_FILTER_MODES = {
   INCLUDE: 'include',
-  EXCLUDE: 'exclude'
+  EXCLUDE: 'exclude',
 } as const;
 
-type DateRange = typeof DATE_RANGES[keyof typeof DATE_RANGES];
-type CategoryFilterModeValue = typeof CATEGORY_FILTER_MODES[keyof typeof CATEGORY_FILTER_MODES];
+type DateRange = (typeof DATE_RANGES)[keyof typeof DATE_RANGES];
+type CategoryFilterModeValue = (typeof CATEGORY_FILTER_MODES)[keyof typeof CATEGORY_FILTER_MODES];
 type CategoryFilterIdsByMode = Record<CategoryFilterModeValue, string[]>;
 type DrilldownSort = 'date_desc' | 'date_asc' | 'amount_desc' | 'amount_asc';
 type ExpandedChart = 'incomeExpense' | 'spendingTrends' | null;
-
 
 interface AnalyticsSummary {
   income: number;
@@ -124,11 +152,13 @@ interface AddCategoryFilterOptions {
 
 const toDateInput = (date: Date) => format(date, 'yyyy-MM-dd');
 
-
 function getMonthSpan(startDate: string, endDate: string) {
   const start = parseISO(startDate);
   const end = parseISO(endDate);
-  return Math.max(1, ((end.getFullYear() - start.getFullYear()) * 12) + end.getMonth() - start.getMonth() + 1);
+  return Math.max(
+    1,
+    (end.getFullYear() - start.getFullYear()) * 12 + end.getMonth() - start.getMonth() + 1,
+  );
 }
 
 function isCategoryFilterMode(value: string): value is CategoryFilterModeValue {
@@ -143,7 +173,6 @@ function isDateRange(value: string): value is DateRange {
   return Object.values(DATE_RANGES).includes(value as DateRange);
 }
 
-
 export default function AnalyticsPage() {
   const explorerChanges = useReviewedCategories();
   const [inspectedId, setInspectedId] = useState<string | null>(null);
@@ -153,9 +182,11 @@ export default function AnalyticsPage() {
   const [accountIds, setAccountIds] = useState<number[]>();
   const [categoryFilterIdsByMode, setCategoryFilterIdsByMode] = useState<CategoryFilterIdsByMode>({
     [CATEGORY_FILTER_MODES.INCLUDE]: [],
-    [CATEGORY_FILTER_MODES.EXCLUDE]: []
+    [CATEGORY_FILTER_MODES.EXCLUDE]: [],
   });
-  const [categoryFilterMode, setCategoryFilterMode] = useState<CategoryFilterModeValue>(CATEGORY_FILTER_MODES.INCLUDE);
+  const [categoryFilterMode, setCategoryFilterMode] = useState<CategoryFilterModeValue>(
+    CATEGORY_FILTER_MODES.INCLUDE,
+  );
   const [pendingCategoryFilterId, setPendingCategoryFilterId] = useState('');
   const [cashFlowGroup, setCashFlowGroup] = useState<AnalyticsGroupMode>(CASH_FLOW_GROUPS.AUTO);
   const [drilldown, setDrilldown] = useState<DrilldownState | null>(null);
@@ -163,31 +194,45 @@ export default function AnalyticsPage() {
   const [drilldownSort, setDrilldownSort] = useState<DrilldownSort>('date_desc');
   const [isCreatingDrilldownCategory, setIsCreatingDrilldownCategory] = useState(false);
   const [newDrilldownCategoryName, setNewDrilldownCategoryName] = useState('');
-  const [pendingDrilldownCategoryValue, setPendingDrilldownCategoryValue] = useState<string | null>(null);
+  const [pendingDrilldownCategoryValue, setPendingDrilldownCategoryValue] = useState<string | null>(
+    null,
+  );
   const [drilldownVisibleCount, setDrilldownVisibleCount] = useState(DRILLDOWN_PAGE_SIZE);
   const [expandedChart, setExpandedChart] = useState<ExpandedChart>(null);
   const [showTotalSpendTrend, setShowTotalSpendTrend] = useState(false);
   const drilldownRef = useRef<HTMLDivElement | null>(null);
-  
+
   const { startDate, endDate } = useMemo(() => {
     const today = new Date();
     switch (dateRange) {
       case DATE_RANGES.THIS_MONTH:
-        return { startDate: startOfMonth(today).toISOString(), endDate: endOfMonth(today).toISOString() };
+        return {
+          startDate: startOfMonth(today).toISOString(),
+          endDate: endOfMonth(today).toISOString(),
+        };
       case DATE_RANGES.LAST_MONTH: {
         const lastMonth = subMonths(today, 1);
-        return { startDate: startOfMonth(lastMonth).toISOString(), endDate: endOfMonth(lastMonth).toISOString() };
+        return {
+          startDate: startOfMonth(lastMonth).toISOString(),
+          endDate: endOfMonth(lastMonth).toISOString(),
+        };
       }
       case DATE_RANGES.LAST_WEEK: {
         const lastWeek = subWeeks(today, 1);
-        return { startDate: startOfWeek(lastWeek).toISOString(), endDate: endOfWeek(lastWeek).toISOString() };
+        return {
+          startDate: startOfWeek(lastWeek).toISOString(),
+          endDate: endOfWeek(lastWeek).toISOString(),
+        };
       }
       case DATE_RANGES.THIS_YEAR:
-        return { startDate: startOfYear(today).toISOString(), endDate: endOfYear(today).toISOString() };
+        return {
+          startDate: startOfYear(today).toISOString(),
+          endDate: endOfYear(today).toISOString(),
+        };
       case DATE_RANGES.CUSTOM:
         return {
           startDate: customStartDate ? parseISO(customStartDate).toISOString() : null,
-          endDate: customEndDate ? endOfDay(parseISO(customEndDate)).toISOString() : null
+          endDate: customEndDate ? endOfDay(parseISO(customEndDate)).toISOString() : null,
         };
       case DATE_RANGES.ALL_TIME:
       default:
@@ -199,29 +244,29 @@ export default function AnalyticsPage() {
   const { accounts } = useAccounts();
   const categoryFilterIds = useMemo(
     () => categoryFilterIdsByMode[categoryFilterMode] || [],
-    [categoryFilterIdsByMode, categoryFilterMode]
+    [categoryFilterIdsByMode, categoryFilterMode],
   );
-  const analyticsInput = useMemo(() => ({
-    startDate,
-    endDate,
-    accountIds,
-    categoryFilterIds,
-    categoryFilterMode: categoryFilterMode as CategoryFilterMode,
-    groupMode: cashFlowGroup,
-  }), [accountIds, cashFlowGroup, categoryFilterIds, categoryFilterMode, endDate, startDate]);
+  const analyticsInput = useMemo(
+    () => ({
+      startDate,
+      endDate,
+      accountIds,
+      categoryFilterIds,
+      categoryFilterMode: categoryFilterMode as CategoryFilterMode,
+      groupMode: cashFlowGroup,
+    }),
+    [accountIds, cashFlowGroup, categoryFilterIds, categoryFilterMode, endDate, startDate],
+  );
   const analyticsReportQuery = useQuery(trpc.analytics.report.queryOptions(analyticsInput));
   const analyticsReport = analyticsReportQuery.data as AnalyticsReport | undefined;
   const reportTransactions = useMemo(
     () => analyticsReport?.transactions ?? [],
-    [analyticsReport?.transactions]
+    [analyticsReport?.transactions],
   );
-  const reportAnalysisTransactions = useMemo(
-    () => {
-      const ids = new Set(analyticsReport?.analysisTransactionIds ?? []);
-      return reportTransactions.filter(transaction => ids.has(transaction.id));
-    },
-    [analyticsReport?.analysisTransactionIds, reportTransactions]
-  );
+  const reportAnalysisTransactions = useMemo(() => {
+    const ids = new Set(analyticsReport?.analysisTransactionIds ?? []);
+    return reportTransactions.filter((transaction) => ids.has(transaction.id));
+  }, [analyticsReport?.analysisTransactionIds, reportTransactions]);
   const reportSummary = analyticsReport?.summary ?? {
     income: 0,
     expenses: 0,
@@ -259,7 +304,9 @@ export default function AnalyticsPage() {
   // Create a fast map for category lookup
   const categoryMap = useMemo(() => {
     const map: Record<string, CategorySummary> = {};
-    deferredCategories.forEach(c => { map[c.id] = c; });
+    deferredCategories.forEach((c) => {
+      map[c.id] = c;
+    });
     return map;
   }, [deferredCategories]);
 
@@ -271,14 +318,15 @@ export default function AnalyticsPage() {
   const filteredInvestments = reportSummary.investments;
   const cashFlowRows = useMemo(
     () => sortAnalyticsPeriodsChronologically(deferredCashFlow),
-    [deferredCashFlow]
+    [deferredCashFlow],
   );
 
   const drilldownTransactions = useMemo(() => {
     if (!drilldown) return [];
-    const sourceTransactions = drilldown.type === 'investmentPeriod' ? categoryScopedTransactions : analysisTransactions;
+    const sourceTransactions =
+      drilldown.type === 'investmentPeriod' ? categoryScopedTransactions : analysisTransactions;
 
-    return sourceTransactions.filter(t => {
+    return sourceTransactions.filter((t) => {
       if (drilldown.type === 'category') {
         return drilldown.ids?.has(t.id);
       }
@@ -301,15 +349,14 @@ export default function AnalyticsPage() {
   const visibleDrilldownTransactions = useMemo(() => {
     const query = drilldownSearch.trim().toLowerCase();
     const searched = query
-      ? drilldownTransactions.filter(transaction => {
-        const categoryName = transaction.categoryId ? categoryMap[String(transaction.categoryId)]?.name || 'Uncategorized' : 'Uncategorized';
-        return [
-          transaction.label,
-          transaction.notes,
-          categoryName,
-          String(transaction.amount)
-        ].filter(Boolean).some(value => String(value).toLowerCase().includes(query));
-      })
+      ? drilldownTransactions.filter((transaction) => {
+          const categoryName = transaction.categoryId
+            ? categoryMap[String(transaction.categoryId)]?.name || 'Uncategorized'
+            : 'Uncategorized';
+          return [transaction.label, transaction.notes, categoryName, String(transaction.amount)]
+            .filter(Boolean)
+            .some((value) => String(value).toLowerCase().includes(query));
+        })
       : drilldownTransactions;
 
     return [...searched].sort((a, b) => {
@@ -330,7 +377,9 @@ export default function AnalyticsPage() {
   const drilldownCategoryValue = useMemo(() => {
     if (visibleDrilldownTransactions.length === 0) return '';
     const firstCategory = visibleDrilldownTransactions[0].categoryId || '';
-    const hasMixedCategories = visibleDrilldownTransactions.some(transaction => (transaction.categoryId || '') !== firstCategory);
+    const hasMixedCategories = visibleDrilldownTransactions.some(
+      (transaction) => (transaction.categoryId || '') !== firstCategory,
+    );
     return hasMixedCategories ? '__mixed__' : String(firstCategory);
   }, [visibleDrilldownTransactions]);
 
@@ -354,14 +403,14 @@ export default function AnalyticsPage() {
   const confirmLargeDrilldownChange = (count: number, categoryName: string) => {
     if (count <= 50) return true;
     return window.confirm(
-      `This will set the category for ${count} visible drilldown transactions to "${categoryName}". This is a bulk edit and cannot be automatically undone.\n\nContinue?`
+      `This will set the category for ${count} visible drilldown transactions to "${categoryName}". This is a bulk edit and cannot be automatically undone.\n\nContinue?`,
     );
   };
 
   const handleBulkCategoryChange = async (categoryId: string | number | null) => {
     const nextCategoryId = categoryId ? Number(categoryId) : null;
     await trpcClient.transactions.categorize.mutate({
-      transactionIds: visibleDrilldownTransactions.map(transaction => transaction.id),
+      transactionIds: visibleDrilldownTransactions.map((transaction) => transaction.id),
       categoryId: nextCategoryId,
     });
     await Promise.all([
@@ -375,7 +424,8 @@ export default function AnalyticsPage() {
     if (categoryValue === '__mixed__' || visibleDrilldownTransactions.length === 0) return;
 
     const categoryName = categoryValue
-      ? categories.find(category => String(category.id) === String(categoryValue))?.name || 'selected category'
+      ? categories.find((category) => String(category.id) === String(categoryValue))?.name ||
+        'selected category'
       : 'Uncategorized';
 
     if (!confirmLargeDrilldownChange(visibleDrilldownTransactions.length, categoryName)) return;
@@ -403,13 +453,17 @@ export default function AnalyticsPage() {
 
     if (!confirmLargeDrilldownChange(visibleDrilldownTransactions.length, name)) return;
 
-    const existing = categories.find(category => category.name.toLowerCase() === name.toLowerCase());
-    const categoryId = existing?.id || await addCategory({
-      name,
-      type: inferDrilldownCategoryType(),
-      color: 'var(--cat-uncategorized)',
-      icon: 'tag'
-    });
+    const existing = categories.find(
+      (category) => category.name.toLowerCase() === name.toLowerCase(),
+    );
+    const categoryId =
+      existing?.id ||
+      (await addCategory({
+        name,
+        type: inferDrilldownCategoryType(),
+        color: 'var(--cat-uncategorized)',
+        icon: 'tag',
+      }));
 
     await handleBulkCategoryChange(categoryId);
     setPendingDrilldownCategoryValue(null);
@@ -448,8 +502,8 @@ export default function AnalyticsPage() {
 
     const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
     if (scrollHeight - scrollTop - clientHeight < 96) {
-      setDrilldownVisibleCount(previous =>
-        Math.min(previous + DRILLDOWN_PAGE_SIZE, visibleDrilldownTransactions.length)
+      setDrilldownVisibleCount((previous) =>
+        Math.min(previous + DRILLDOWN_PAGE_SIZE, visibleDrilldownTransactions.length),
       );
     }
   };
@@ -465,14 +519,18 @@ export default function AnalyticsPage() {
     resetAnalyticsSelection();
   };
 
-  const addCategoryFilter = (categoryId: string, mode: CategoryFilterModeValue = categoryFilterMode, options: AddCategoryFilterOptions = {}) => {
+  const addCategoryFilter = (
+    categoryId: string,
+    mode: CategoryFilterModeValue = categoryFilterMode,
+    options: AddCategoryFilterOptions = {},
+  ) => {
     if (!categoryId) return;
     setCategoryFilterMode(mode);
-    setCategoryFilterIdsByMode(previous => {
+    setCategoryFilterIdsByMode((previous) => {
       const current = previous[mode] || [];
       return {
         ...previous,
-        [mode]: current.includes(categoryId) ? current : [...current, categoryId]
+        [mode]: current.includes(categoryId) ? current : [...current, categoryId],
       };
     });
     setPendingCategoryFilterId('');
@@ -480,17 +538,17 @@ export default function AnalyticsPage() {
   };
 
   const removeCategoryFilter = (categoryId: string) => {
-    setCategoryFilterIdsByMode(previous => ({
+    setCategoryFilterIdsByMode((previous) => ({
       ...previous,
-      [categoryFilterMode]: (previous[categoryFilterMode] || []).filter(id => id !== categoryId)
+      [categoryFilterMode]: (previous[categoryFilterMode] || []).filter((id) => id !== categoryId),
     }));
     resetAnalyticsSelection();
   };
 
   const clearCategoryFilters = () => {
-    setCategoryFilterIdsByMode(previous => ({
+    setCategoryFilterIdsByMode((previous) => ({
       ...previous,
-      [categoryFilterMode]: []
+      [categoryFilterMode]: [],
     }));
     setPendingCategoryFilterId('');
     resetAnalyticsSelection();
@@ -504,7 +562,9 @@ export default function AnalyticsPage() {
 
   const getCategoryFilterLabel = (categoryId: string) => {
     if (categoryId === 'uncategorized') return 'Uncategorized';
-    return categories.find(category => String(category.id) === categoryId)?.name || 'Unknown category';
+    return (
+      categories.find((category) => String(category.id) === categoryId)?.name || 'Unknown category'
+    );
   };
 
   const handleShiftMonthWindow = (direction: number) => {
@@ -537,13 +597,12 @@ export default function AnalyticsPage() {
     openDrilldown({
       type: 'investmentPeriod',
       title: `${investmentPeriod.displayLabel || investmentPeriod.label} Investments`,
-      ids: new Set(investmentPeriod.transactionIds)
+      ids: new Set(investmentPeriod.transactionIds),
     });
   };
 
   const renderAnalyticsFilters = (variant = 'page') => (
     <div className={`analytics-controls analytics-controls--${variant}`}>
-
       <div className="analytics-control analytics-control--categories">
         <span className="analytics-control__label">Categories</span>
         <div className="category-filter-control__row">
@@ -551,7 +610,8 @@ export default function AnalyticsPage() {
             className="input input--sm"
             value={categoryFilterMode}
             onChange={(event) => {
-              if (isCategoryFilterMode(event.target.value)) handleCategoryFilterModeChange(event.target.value);
+              if (isCategoryFilterMode(event.target.value))
+                handleCategoryFilterModeChange(event.target.value);
             }}
             aria-label="Category filter mode"
           >
@@ -571,20 +631,20 @@ export default function AnalyticsPage() {
               Uncategorized
             </option>
             {categories
-              .filter(category => category.name.toLowerCase() !== 'uncategorized')
-              .map(category => {
+              .filter((category) => category.name.toLowerCase() !== 'uncategorized')
+              .map((category) => {
                 const id = String(category.id);
                 return (
                   <option key={category.id} value={id} disabled={categoryFilterIds.includes(id)}>
                     {category.name}
                   </option>
                 );
-            })}
+              })}
           </select>
         </div>
         {categoryFilterIds.length > 0 && (
           <div className="category-filter-chips" aria-label="Active category filters">
-            {categoryFilterIds.map(categoryId => (
+            {categoryFilterIds.map((categoryId) => (
               <button
                 key={categoryId}
                 className="category-filter-chip"
@@ -616,13 +676,18 @@ export default function AnalyticsPage() {
             if (isDateRange(e.target.value)) handleDateRangeChange(e.target.value);
           }}
         >
-          {Object.values(DATE_RANGES).map(range => (
-            <option key={range} value={range}>{range}</option>
+          {Object.values(DATE_RANGES).map((range) => (
+            <option key={range} value={range}>
+              {range}
+            </option>
           ))}
         </select>
       </label>
 
-      <div className="analytics-control analytics-control--dates date-navigator" aria-label="Date range navigation">
+      <div
+        className="analytics-control analytics-control--dates date-navigator"
+        aria-label="Date range navigation"
+      >
         <span className="analytics-control__label">Dates</span>
         <button
           className="btn btn--ghost btn--icon"
@@ -694,24 +759,35 @@ export default function AnalyticsPage() {
             if (isAnalyticsGroupMode(e.target.value)) setCashFlowGroup(e.target.value);
           }}
         >
-          {Object.values(CASH_FLOW_GROUPS).map(group => (
-            <option key={group} value={group}>{group}</option>
+          {Object.values(CASH_FLOW_GROUPS).map((group) => (
+            <option key={group} value={group}>
+              {group}
+            </option>
           ))}
         </select>
       </label>
     </div>
   );
 
-  const renderAnalyticsWorking = () => isAnalyticsWorking && (
-    <div className="analytics-working" role="status" aria-live="polite">
-      <span className="analytics-working__spinner" aria-hidden="true" />
-      <span>Recalculating analytics...</span>
-    </div>
-  );
+  const renderAnalyticsWorking = () =>
+    isAnalyticsWorking && (
+      <div className="analytics-working" role="status" aria-live="polite">
+        <span className="analytics-working__spinner" aria-hidden="true" />
+        <span>Recalculating analytics...</span>
+      </div>
+    );
 
   return (
     <div className="page analytics-page stagger-in">
-      <SidebarAccountList accounts={accounts} value={accountIds} onChange={value => { setAccountIds(value); setPendingDrilldownCategoryValue(null); setDrilldown(null); }} />
+      <SidebarAccountList
+        accounts={accounts}
+        value={accountIds}
+        onChange={(value) => {
+          setAccountIds(value);
+          setPendingDrilldownCategoryValue(null);
+          setDrilldown(null);
+        }}
+      />
       <div className="page__header analytics-page__header">
         <div>
           <h1 className="page__title">Analytics</h1>
@@ -725,8 +801,9 @@ export default function AnalyticsPage() {
       {filteredInternalMovement > 0 && (
         <div className="analytics-scope-note">
           <span>
-            Internal money movement totaling {formatCurrency(filteredInternalMovement)} is excluded from spending and net flow,
-            including credit card payments and transfers between your own accounts.
+            Internal money movement totaling {formatCurrency(filteredInternalMovement)} is excluded
+            from spending and net flow, including credit card payments and transfers between your
+            own accounts.
           </span>
         </div>
       )}
@@ -734,11 +811,15 @@ export default function AnalyticsPage() {
       <div className="analytics-summary grid-4">
         <div className="glass-card kpi-card">
           <div className="kpi-card__label">Total Income</div>
-          <div className="kpi-card__value amount amount--positive">{formatCurrency(totalIncome)}</div>
+          <div className="kpi-card__value amount amount--positive">
+            {formatCurrency(totalIncome)}
+          </div>
         </div>
         <div className="glass-card kpi-card">
           <div className="kpi-card__label">Total Expense</div>
-          <div className="kpi-card__value amount amount--negative">{formatCurrency(totalExpense)}</div>
+          <div className="kpi-card__value amount amount--negative">
+            {formatCurrency(totalExpense)}
+          </div>
         </div>
         <div className="glass-card kpi-card">
           <div className="kpi-card__label analytics-kpi-label">
@@ -752,11 +833,15 @@ export default function AnalyticsPage() {
               </span>
             </Tooltip>
           </div>
-          <div className="kpi-card__value amount amount--investment">{formatCurrency(filteredInvestments)}</div>
+          <div className="kpi-card__value amount amount--investment">
+            {formatCurrency(filteredInvestments)}
+          </div>
         </div>
         <div className="glass-card kpi-card">
           <div className="kpi-card__label">Net Flow</div>
-          <div className={`kpi-card__value amount ${totalIncome - totalExpense >= 0 ? 'amount--positive' : 'amount--negative'}`}>
+          <div
+            className={`kpi-card__value amount ${totalIncome - totalExpense >= 0 ? 'amount--positive' : 'amount--negative'}`}
+          >
             {formatCurrency(totalIncome - totalExpense)}
           </div>
         </div>
@@ -775,12 +860,9 @@ export default function AnalyticsPage() {
               <Maximize2 size={16} />
             </button>
           </div>
-          <IncomeVsExpense
-            rows={cashFlowRows}
-            onSelectPeriod={handlePeriodSelect}
-          />
+          <IncomeVsExpense rows={cashFlowRows} onSelectPeriod={handlePeriodSelect} />
         </div>
-        
+
         <div className="analytics-card glass-card">
           <div className="analytics-chart-header">
             <h3 className="analytics-card__title">Spending Trends</h3>
@@ -813,33 +895,43 @@ export default function AnalyticsPage() {
         <div className="analytics-card glass-card analytics-card--explorer">
           <div className="analytics-card__heading">
             <h3 className="analytics-card__title">Explore spending</h3>
-            <p>
-              Follow the money from categories to merchants and the transactions behind them.
-            </p>
+            <p>Follow the money from categories to merchants and the transactions behind them.</p>
           </div>
           <SpendingExplorer
             key={JSON.stringify(analyticsInput)}
             root={deferredSpendingExplorer}
             saving={explorerChanges.pending}
-            renderTransactions={node => <SpendingTransactions key={node.id} scope={analyticsInput} nodeId={node.id} changes={explorerChanges} onInspect={setInspectedId} />}
+            renderTransactions={(node) => (
+              <SpendingTransactions
+                key={node.id}
+                scope={analyticsInput}
+                nodeId={node.id}
+                changes={explorerChanges}
+                onInspect={setInspectedId}
+              />
+            )}
           />
           <CategoryChangeFeedback state={explorerChanges} />
         </div>
         <div className="analytics-card glass-card analytics-card--explorer">
-          <WorthReviewing report={analyticsReport?.worthReviewing ?? { groups: [], totalGroups: 0 }} />
+          <WorthReviewing
+            report={analyticsReport?.worthReviewing ?? { groups: [], totalGroups: 0 }}
+          />
         </div>
-        
+
         <div className="analytics-card glass-card">
           <h3 className="analytics-card__title">Top Merchants</h3>
           <TopMerchants
             rows={deferredTopMerchants}
-            onSelectMerchant={(merchant) => openDrilldown({
-              type: 'merchant',
-              id: merchant.normalized,
-              ids: new Set(merchant.transactionIds),
-              title: `${merchant.name} Transactions`,
-              aliases: merchant.aliases
-            })}
+            onSelectMerchant={(merchant) =>
+              openDrilldown({
+                type: 'merchant',
+                id: merchant.normalized,
+                ids: new Set(merchant.transactionIds),
+                title: `${merchant.name} Transactions`,
+                aliases: merchant.aliases,
+              })
+            }
           />
         </div>
 
@@ -847,13 +939,15 @@ export default function AnalyticsPage() {
           <h3 className="analytics-card__title">Income Streams</h3>
           <IncomeStreams
             rows={deferredIncomeStreams}
-            onSelectStream={(stream) => openDrilldown({
-              type: 'incomeStream',
-              id: stream.normalized,
-              ids: new Set(stream.transactionIds),
-              title: `${stream.name} Income`,
-              aliases: stream.aliases
-            })}
+            onSelectStream={(stream) =>
+              openDrilldown({
+                type: 'incomeStream',
+                id: stream.normalized,
+                ids: new Set(stream.transactionIds),
+                title: `${stream.name} Income`,
+                aliases: stream.aliases,
+              })
+            }
           />
         </div>
 
@@ -869,24 +963,30 @@ export default function AnalyticsPage() {
       <div className="analytics-card glass-card analytics-card--table">
         <h3 className="analytics-card__title">Cash Flow Summary</h3>
         <div className="cash-flow-table">
-          {cashFlowRows.length > 0 ? cashFlowRows.map(row => (
-            <button
-              key={row.key}
-              className="cash-flow-row"
-              onClick={() => openDrilldown({
-                type: 'period',
-                title: `${row.label} Cash Flow`,
-                scrollIntoView: true,
-                ids: new Set(row.transactionIds)
-              })}
-            >
-              <span>{row.label}</span>
-              <span className="amount amount--positive">{formatCurrency(row.income)}</span>
-              <span className="amount amount--negative">{formatCurrency(row.expenses)}</span>
-              <span className={`amount ${getAmountClass(row.net)}`}>{formatCurrency(row.net, true)}</span>
-              <span>{row.transactionIds.length} tx</span>
-            </button>
-          )) : (
+          {cashFlowRows.length > 0 ? (
+            cashFlowRows.map((row) => (
+              <button
+                key={row.key}
+                className="cash-flow-row"
+                onClick={() =>
+                  openDrilldown({
+                    type: 'period',
+                    title: `${row.label} Cash Flow`,
+                    scrollIntoView: true,
+                    ids: new Set(row.transactionIds),
+                  })
+                }
+              >
+                <span>{row.label}</span>
+                <span className="amount amount--positive">{formatCurrency(row.income)}</span>
+                <span className="amount amount--negative">{formatCurrency(row.expenses)}</span>
+                <span className={`amount ${getAmountClass(row.net)}`}>
+                  {formatCurrency(row.net, true)}
+                </span>
+                <span>{row.transactionIds.length} tx</span>
+              </button>
+            ))
+          ) : (
             <div className="empty-state-simple">No cash flow data for this period.</div>
           )}
         </div>
@@ -899,8 +999,9 @@ export default function AnalyticsPage() {
               <h3 className="analytics-card__title">{drilldown.title}</h3>
               <p>
                 {Math.min(drilldownVisibleCount, visibleDrilldownTransactions.length)} shown
-                {visibleDrilldownTransactions.length !== drilldownTransactions.length && ` of ${drilldownTransactions.length}`}
-                {' '}matching transaction{visibleDrilldownTransactions.length === 1 ? '' : 's'}
+                {visibleDrilldownTransactions.length !== drilldownTransactions.length &&
+                  ` of ${drilldownTransactions.length}`}{' '}
+                matching transaction{visibleDrilldownTransactions.length === 1 ? '' : 's'}
               </p>
               <div className="drilldown-total">
                 <span>Filtered total</span>
@@ -910,10 +1011,12 @@ export default function AnalyticsPage() {
               </div>
               {(drilldown.aliases?.length ?? 0) > 1 && (
                 <div className="drilldown-aliases">
-                  {(drilldown.aliases ?? []).slice(0, 6).map(alias => (
+                  {(drilldown.aliases ?? []).slice(0, 6).map((alias) => (
                     <span key={alias}>{alias}</span>
                   ))}
-                  {(drilldown.aliases?.length ?? 0) > 6 && <span>+{(drilldown.aliases?.length ?? 0) - 6} more</span>}
+                  {(drilldown.aliases?.length ?? 0) > 6 && (
+                    <span>+{(drilldown.aliases?.length ?? 0) - 6} more</span>
+                  )}
                 </div>
               )}
             </div>
@@ -927,7 +1030,7 @@ export default function AnalyticsPage() {
                 className="input input--sm"
                 value={drilldownCategorySelectValue}
                 disabled={visibleDrilldownTransactions.length === 0}
-                categories={categories.filter(category => !isUncategorized(category))}
+                categories={categories.filter((category) => !isUncategorized(category))}
                 leadingOptions={[
                   ...(drilldownCategoryValue === '__mixed__'
                     ? [{ value: '__mixed__', label: 'Mixed categories' }]
@@ -966,17 +1069,29 @@ export default function AnalyticsPage() {
                     autoFocus
                   />
                   <div className="inline-create__actions">
-                    <button className="btn btn--primary btn--sm" type="submit" disabled={!newDrilldownCategoryName.trim()}>
+                    <button
+                      className="btn btn--primary btn--sm"
+                      type="submit"
+                      disabled={!newDrilldownCategoryName.trim()}
+                    >
                       Add
                     </button>
-                    <button className="btn btn--ghost btn--sm" type="button" onClick={resetDrilldownCategoryCreate}>
+                    <button
+                      className="btn btn--ghost btn--sm"
+                      type="button"
+                      onClick={resetDrilldownCategoryCreate}
+                    >
                       Cancel
                     </button>
                   </div>
                 </form>
               )}
             </div>
-            <button className="btn btn--ghost btn--icon" onClick={() => setDrilldown(null)} aria-label="Close drilldown">
+            <button
+              className="btn btn--ghost btn--icon"
+              onClick={() => setDrilldown(null)}
+              aria-label="Close drilldown"
+            >
               <X size={18} />
             </button>
           </div>
@@ -998,7 +1113,12 @@ export default function AnalyticsPage() {
               value={drilldownSort}
               onChange={(event) => {
                 const value = event.target.value;
-                if (value === 'date_desc' || value === 'date_asc' || value === 'amount_desc' || value === 'amount_asc') {
+                if (
+                  value === 'date_desc' ||
+                  value === 'date_asc' ||
+                  value === 'amount_desc' ||
+                  value === 'amount_asc'
+                ) {
                   setDrilldownSort(value);
                 }
                 setDrilldownVisibleCount(DRILLDOWN_PAGE_SIZE);
@@ -1010,13 +1130,28 @@ export default function AnalyticsPage() {
               <option value="amount_asc">Lowest cost first</option>
             </select>
           </div>
-          <div className="drilldown-list drilldown-list--scrollable" onScroll={handleDrilldownScroll}>
-            {loadedDrilldownTransactions.map(transaction => (
+          <div
+            className="drilldown-list drilldown-list--scrollable"
+            onScroll={handleDrilldownScroll}
+          >
+            {loadedDrilldownTransactions.map((transaction) => (
               <div key={transaction.id} className="drilldown-row">
                 <span>{formatDate(transaction.date, 'medium')}</span>
-                <button type="button" className="transaction-source-button truncate" onClick={() => setInspectedId(transaction.ledgerTransactionId)}>{transaction.label}</button>
-                <span>{transaction.categoryId ? categoryMap[String(transaction.categoryId)]?.name || 'Uncategorized' : 'Uncategorized'}</span>
-                <span className={`amount ${getAmountClass(transaction.amount)}`}>{formatCurrency(transaction.amount, true)}</span>
+                <button
+                  type="button"
+                  className="transaction-source-button truncate"
+                  onClick={() => setInspectedId(transaction.ledgerTransactionId)}
+                >
+                  {transaction.label}
+                </button>
+                <span>
+                  {transaction.categoryId
+                    ? categoryMap[String(transaction.categoryId)]?.name || 'Uncategorized'
+                    : 'Uncategorized'}
+                </span>
+                <span className={`amount ${getAmountClass(transaction.amount)}`}>
+                  {formatCurrency(transaction.amount, true)}
+                </span>
               </div>
             ))}
             {hasMoreDrilldownTransactions && (
@@ -1029,7 +1164,13 @@ export default function AnalyticsPage() {
         </div>
       )}
 
-      {inspectedId && <TransactionDetails key={inspectedId} ledgerTransactionId={inspectedId} onClose={() => setInspectedId(null)} />}
+      {inspectedId && (
+        <TransactionDetails
+          key={inspectedId}
+          ledgerTransactionId={inspectedId}
+          onClose={() => setInspectedId(null)}
+        />
+      )}
       <Modal
         isOpen={expandedChart === 'incomeExpense'}
         onClose={() => setExpandedChart(null)}

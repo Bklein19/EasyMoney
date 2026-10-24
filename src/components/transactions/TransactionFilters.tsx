@@ -37,9 +37,9 @@ export default function TransactionFilters({ filters, setFilters }: TransactionF
   };
 
   const setFilterValue = (name: string, value: string) => {
-    setFilters(prev => ({
+    setFilters((prev) => ({
       ...prev,
-      [name]: value === '' ? undefined : value
+      [name]: value === '' ? undefined : value,
     }));
   };
 
@@ -64,13 +64,17 @@ export default function TransactionFilters({ filters, setFilters }: TransactionF
         />
       </div>
 
-      <SidebarAccountList accounts={accounts} value={filters.accountIds} onChange={accountIds => setFilters(prev => ({ ...prev, accountIds }))} />
+      <SidebarAccountList
+        accounts={accounts}
+        value={filters.accountIds}
+        onChange={(accountIds) => setFilters((prev) => ({ ...prev, accountIds }))}
+      />
 
       <GroupedCategorySelect
         name="categoryId"
         className="filter-input"
         value={filters.categoryId || ''}
-        categories={categories.filter(category => !isUncategorized(category))}
+        categories={categories.filter((category) => !isUncategorized(category))}
         leadingOptions={[
           { value: '', label: 'All Categories' },
           { value: 'uncategorized', label: 'Uncategorized' },
@@ -79,9 +83,7 @@ export default function TransactionFilters({ filters, setFilters }: TransactionF
       />
 
       <details className="transaction-filter-more">
-        <summary>
-          More filters{advancedFilterCount > 0 ? ` (${advancedFilterCount})` : ''}
-        </summary>
+        <summary>More filters{advancedFilterCount > 0 ? ` (${advancedFilterCount})` : ''}</summary>
         <div className="transaction-filter-more__panel">
           <select
             name="accountKind"

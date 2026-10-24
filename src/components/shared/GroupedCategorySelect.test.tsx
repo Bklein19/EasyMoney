@@ -10,7 +10,9 @@ const categories = [
 ];
 
 test('manual category picker exposes the same income hierarchy as the category editor', () => {
-  const html = renderToStaticMarkup(createElement(GroupedCategorySelect, { categories, value: 2, onChange: () => {} }));
+  const html = renderToStaticMarkup(
+    createElement(GroupedCategorySelect, { categories, value: 2, onChange: () => {} }),
+  );
   expect(html).toContain('<optgroup label="Income">');
   expect(html).toContain('<option value="2" selected="">Income › Payroll</option>');
   expect(html).toContain('Income › Gifts Received');
@@ -19,7 +21,16 @@ test('manual category picker exposes the same income hierarchy as the category e
 });
 
 test('suggested categories retain their hierarchy and are not listed twice', () => {
-  const html = renderToStaticMarkup(createElement(GroupedCategorySelect, { categories, value: 2, suggestedCategoryId: 2, onChange: () => {} }));
-  expect(html).toContain('<optgroup label="Suggested"><option value="2" selected="">Income › Payroll</option>');
+  const html = renderToStaticMarkup(
+    createElement(GroupedCategorySelect, {
+      categories,
+      value: 2,
+      suggestedCategoryId: 2,
+      onChange: () => {},
+    }),
+  );
+  expect(html).toContain(
+    '<optgroup label="Suggested"><option value="2" selected="">Income › Payroll</option>',
+  );
   expect(html.match(/value="2"/g)).toHaveLength(1);
 });

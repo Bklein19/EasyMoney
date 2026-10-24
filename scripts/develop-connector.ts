@@ -17,11 +17,13 @@ interface Options {
 }
 
 function usage(): never {
-  console.log([
-    'Usage: bun scripts/develop-connector.ts --institution ID --source-plan PATH',
-    '       [--goal current] [--overlap-days DAYS] [--root PATH]',
-    '       [--profile NAME] [--run-id ID] [--today YYYY-MM-DD]',
-  ].join('\n'));
+  console.log(
+    [
+      'Usage: bun scripts/develop-connector.ts --institution ID --source-plan PATH',
+      '       [--goal current] [--overlap-days DAYS] [--root PATH]',
+      '       [--profile NAME] [--run-id ID] [--today YYYY-MM-DD]',
+    ].join('\n'),
+  );
   process.exit(0);
 }
 
@@ -63,56 +65,68 @@ function parseArguments(argv: string[]): Options {
 async function main(): Promise<void> {
   if (process.env.EASYMONEY_DEVELOPMENT_INSPECTOR) {
     const inspector = await import(resolve(process.env.EASYMONEY_DEVELOPMENT_INSPECTOR));
-    if (typeof inspector.inspect !== 'function') throw new Error('Development inspector must export inspect');
+    if (typeof inspector.inspect !== 'function')
+      throw new Error('Development inspector must export inspect');
     setDevelopmentPageInspector(inspector.inspect);
   }
   const options = parseArguments(Bun.argv.slice(2));
   if (!isSyncInstitutionId(options.institutionId)) {
     throw new Error('Connector development names an unsupported institution');
   }
-  const result = await runConnectorDevelopment({
-    institutionId: options.institutionId,
-    sourcePlanPath: options.sourcePlanPath,
-    goal: { kind: 'current', overlapDays: options.overlapDays },
-    ...(options.root ? { root: options.root } : {}),
-    ...(options.profileName ? { profileName: options.profileName } : {}),
-    ...(options.runId ? { runId: options.runId } : {}),
-    ...(options.today ? { today: options.today } : {}),
-  }, {
-    onRunCreated(run) {
-      console.log(JSON.stringify({
-        type: 'connector-development-run',
-        status: 'started',
-        institutionId: run.institutionId,
-        runId: run.runId,
-      }));
+  const result = await runConnectorDevelopment(
+    {
+      institutionId: options.institutionId,
+      sourcePlanPath: options.sourcePlanPath,
+      goal: { kind: 'current', overlapDays: options.overlapDays },
+      ...(options.root ? { root: options.root } : {}),
+      ...(options.profileName ? { profileName: options.profileName } : {}),
+      ...(options.runId ? { runId: options.runId } : {}),
+      ...(options.today ? { today: options.today } : {}),
     },
-    onSafeEvent(event) {
-      if (event.diagnostic) console.log(event.diagnostic);
+    {
+      onRunCreated(run) {
+        console.log(
+          JSON.stringify({
+            type: 'connector-development-run',
+            status: 'started',
+            institutionId: run.institutionId,
+            runId: run.runId,
+          }),
+        );
+      },
+      onSafeEvent(event) {
+        if (event.diagnostic) console.log(event.diagnostic);
+      },
     },
-  });
-  console.log(JSON.stringify({
-    type: 'connector-development-run',
-    status: result.status,
-    institutionId: result.institutionId,
-    runId: result.runId,
-    eventCount: result.eventCount,
-    parserValidationCount: result.parserValidationCount,
-    artifactCount: result.artifactCount,
-    artifactTypes: result.artifactTypes,
-    ...(result.failure ? { failure: result.failure } : {}),
-  }));
+  );
+  console.log(
+    JSON.stringify({
+      type: 'connector-development-run',
+      status: result.status,
+      institutionId: result.institutionId,
+      runId: result.runId,
+      eventCount: result.eventCount,
+      parserValidationCount: result.parserValidationCount,
+      artifactCount: result.artifactCount,
+      artifactTypes: result.artifactTypes,
+      ...(result.failure ? { failure: result.failure } : {}),
+    }),
+  );
   if (result.status !== 'complete') process.exitCode = 1;
 }
 
-main().finally(() => setDevelopmentPageInspector(undefined)).catch(() => {
-  console.error(JSON.stringify({
-    type: 'connector-development-run',
-    status: 'failed-to-start',
-    failure: {
-      code: 'runner-configuration-failed',
-      summary: 'Connector development runner could not start',
-    },
-  }));
-  process.exitCode = 1;
-});
+main()
+  .finally(() => setDevelopmentPageInspector(undefined))
+  .catch(() => {
+    console.error(
+      JSON.stringify({
+        type: 'connector-development-run',
+        status: 'failed-to-start',
+        failure: {
+          code: 'runner-configuration-failed',
+          summary: 'Connector development runner could not start',
+        },
+      }),
+    );
+    process.exitCode = 1;
+  });

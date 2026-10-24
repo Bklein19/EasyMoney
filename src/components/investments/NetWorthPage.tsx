@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import React, { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import {
   ComposedChart,
@@ -13,9 +13,9 @@ import {
   Legend,
   CartesianGrid,
   ResponsiveContainer,
-} from "recharts";
-import "./ReportPages.css";
-import { trpc } from "../../api/trpc";
+} from 'recharts';
+import './ReportPages.css';
+import { trpc } from '../../api/trpc';
 import type { AccountType } from '../../domain/accountType';
 import { CalendarAxisTick, calendarTicks } from './calendarAxis';
 import { incomeSourceSeries } from './incomeSourceSeries';
@@ -46,7 +46,7 @@ interface NetWorthReport {
   income_sources: ReportIncomeSource[];
 }
 
-type Period = "month" | "quarter" | "year";
+type Period = 'month' | 'quarter' | 'year';
 
 interface ChartPoint {
   month: string;
@@ -90,56 +90,64 @@ interface InvestmentReturnPoint {
 }
 
 const fmtUsd = (v: number) =>
-  v.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  v.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 
 const fmtPct = (v: number | null) =>
   v === null
-    ? "—"
-    : v.toLocaleString("en-US", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    ? '—'
+    : v.toLocaleString('en-US', {
+        style: 'percent',
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+      });
 
 const fmtUsdAxis = (v: number) =>
   Math.abs(v) >= 999_500_000
-    ? `$${(v / 1_000_000_000).toFixed(Math.abs(v) >= 10_000_000_000 ? 0 : 1).replace(/\.0$/, "")}B`
+    ? `$${(v / 1_000_000_000).toFixed(Math.abs(v) >= 10_000_000_000 ? 0 : 1).replace(/\.0$/, '')}B`
     : Math.abs(v) >= 999_500
-    ? `$${(v / 1_000_000).toFixed(Math.abs(v) >= 10_000_000 ? 0 : 1).replace(/\.0$/, "")}M`
-    : Math.abs(v) >= 1000
-      ? `$${(v / 1000).toFixed(0)}k`
-      : `$${v.toFixed(0)}`;
+      ? `$${(v / 1_000_000).toFixed(Math.abs(v) >= 10_000_000 ? 0 : 1).replace(/\.0$/, '')}M`
+      : Math.abs(v) >= 1000
+        ? `$${(v / 1000).toFixed(0)}k`
+        : `$${v.toFixed(0)}`;
 
 const monthToTime = (month: string) => Date.parse(`${month}-01T00:00:00Z`);
 
 const formatMonthTick = (time: number) => {
   const date = new Date(time);
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
 };
 
 const accountColor = (index: number) => `var(--account-series-${index % 8})`;
 
 const chartTheme = {
-  axis: "var(--chart-axis)",
-  grid: "var(--chart-grid)",
-  zero: "var(--chart-zero)",
-  tooltipContent: { background: "var(--tooltip-bg)", border: "1px solid var(--tooltip-border)", borderRadius: 8 },
-  tooltipLabel: { color: "var(--text-muted)" },
+  axis: 'var(--chart-axis)',
+  grid: 'var(--chart-grid)',
+  zero: 'var(--chart-zero)',
+  tooltipContent: {
+    background: 'var(--tooltip-bg)',
+    border: '1px solid var(--tooltip-border)',
+    borderRadius: 8,
+  },
+  tooltipLabel: { color: 'var(--text-muted)' },
 };
 
 const series = {
-  contributions: "var(--series-contributions)",
-  gains: "var(--series-gains)",
-  netWorth: "var(--series-net-worth)",
-  positive: "var(--series-positive)",
-  negative: "var(--series-negative)",
+  contributions: 'var(--series-contributions)',
+  gains: 'var(--series-gains)',
+  netWorth: 'var(--series-net-worth)',
+  positive: 'var(--series-positive)',
+  negative: 'var(--series-negative)',
 };
 
 interface NetWorthPageProps {
-  view: "networth" | "performance";
+  view: 'networth' | 'performance';
   selectedIds?: Set<number>;
 }
 
 export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPageProps) {
   const reportQuery = useQuery(trpc.reports.netWorth.queryOptions());
   const report = (reportQuery.data || null) as NetWorthReport | null;
-  const [derivativePeriod, setDerivativePeriod] = useState<Period>("month");
+  const [derivativePeriod, setDerivativePeriod] = useState<Period>('month');
   const [chartWidth, setChartWidth] = useState(960);
   const [showIncomeSources, setShowIncomeSources] = useState(false);
 
@@ -164,11 +172,21 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
 
     for (const row of report.rows) {
       if (!selectedIds.has(row.account_id)) continue;
-      monthlyContribs.set(row.month, (monthlyContribs.get(row.month) ?? 0) + row.contributions_cents / 100);
-      monthlyGains.set(row.month, (monthlyGains.get(row.month) ?? 0) + (row.dividends_cents + row.interest_cents + (row.gains_cents ?? 0)) / 100);
+      monthlyContribs.set(
+        row.month,
+        (monthlyContribs.get(row.month) ?? 0) + row.contributions_cents / 100,
+      );
+      monthlyGains.set(
+        row.month,
+        (monthlyGains.get(row.month) ?? 0) +
+          (row.dividends_cents + row.interest_cents + (row.gains_cents ?? 0)) / 100,
+      );
       if (row.end_balance_cents !== null) {
         let m = balanceByMonthAccount.get(row.month);
-        if (!m) { m = new Map(); balanceByMonthAccount.set(row.month, m); }
+        if (!m) {
+          m = new Map();
+          balanceByMonthAccount.set(row.month, m);
+        }
         m.set(row.account_id, row.end_balance_cents / 100);
         accountsEverSnapped.add(row.account_id);
       }
@@ -227,9 +245,9 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
     if (!report) return [];
 
     const periodKey = (month: string): string => {
-      if (derivativePeriod === "month") return month;
+      if (derivativePeriod === 'month') return month;
       const year = month.slice(0, 4);
-      if (derivativePeriod === "year") return year;
+      if (derivativePeriod === 'year') return year;
       const monthIndex = Number(month.slice(5, 7));
       return `${year} Q${Math.ceil(monthIndex / 3)}`;
     };
@@ -245,7 +263,8 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
       }
       if (row.month < point.sortKey) point.sortKey = row.month;
       point.contributions += row.contributions_cents / 100;
-      point.marketGains += (row.dividends_cents + row.interest_cents + (row.gains_cents ?? 0)) / 100;
+      point.marketGains +=
+        (row.dividends_cents + row.interest_cents + (row.gains_cents ?? 0)) / 100;
     }
 
     return [...byPeriod.values()].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
@@ -268,9 +287,9 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
     if (!report) return [];
 
     const periodKey = (month: string): string => {
-      if (derivativePeriod === "month") return month;
+      if (derivativePeriod === 'month') return month;
       const year = month.slice(0, 4);
-      if (derivativePeriod === "year") return year;
+      if (derivativePeriod === 'year') return year;
       const monthIndex = Number(month.slice(5, 7));
       return `${year} Q${Math.ceil(monthIndex / 3)}`;
     };
@@ -290,15 +309,23 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
       rows.sort((a, b) => a.month.localeCompare(b.month));
 
       let estimatedStartBalance: number | null = null;
-      const linkedByPeriod = new Map<string, { sortKey: string; linked: number; periods: number }>();
+      const linkedByPeriod = new Map<
+        string,
+        { sortKey: string; linked: number; periods: number }
+      >();
 
       for (const row of rows) {
         const period = periodKey(row.month);
-        const periodState = linkedByPeriod.get(period) ?? { sortKey: row.month, linked: 1, periods: 0 };
+        const periodState = linkedByPeriod.get(period) ?? {
+          sortKey: row.month,
+          linked: 1,
+          periods: 0,
+        };
         if (row.month < periodState.sortKey) periodState.sortKey = row.month;
 
         const externalFlow = row.contributions_cents / 100;
-        const investmentReturn = (row.dividends_cents + row.interest_cents + (row.gains_cents ?? 0)) / 100;
+        const investmentReturn =
+          (row.dividends_cents + row.interest_cents + (row.gains_cents ?? 0)) / 100;
         const capitalBase =
           estimatedStartBalance === null
             ? Math.max(0, externalFlow)
@@ -332,7 +359,9 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
       }
     }
 
-    return [...byPeriod.values()].sort((a, b) => String(a.sortKey).localeCompare(String(b.sortKey)));
+    return [...byPeriod.values()].sort((a, b) =>
+      String(a.sortKey).localeCompare(String(b.sortKey)),
+    );
   }, [report, returnRows, selectedIds, derivativePeriod]);
 
   const returnAccountBars = useMemo(
@@ -357,7 +386,11 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
 
   const investmentReturnData: InvestmentReturnPoint[] = useMemo(() => {
     const points: InvestmentReturnPoint[] = [];
-    const makePoint = (month: string, time: number, investmentReturns: number): InvestmentReturnPoint => ({
+    const makePoint = (
+      month: string,
+      time: number,
+      investmentReturns: number,
+    ): InvestmentReturnPoint => ({
       time,
       month,
       investmentReturns,
@@ -386,17 +419,46 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
     return points;
   }, [data]);
 
-  const incomeOverlay = useMemo(() => incomeSourceSeries(report?.income_sources ?? [], selectedIds), [report, selectedIds]);
-  const incomeChartData = useMemo(() => data.map(point => ({ ...point, ...incomeOverlay.at(point.month, true) })), [data, incomeOverlay]);
-  const incomeDerivativeData = useMemo(() => derivativeData.map(point => ({ ...point, ...incomeOverlay.at(point.period, false) })), [derivativeData, incomeOverlay]);
-  const incomeLines = showIncomeSources ? incomeOverlay.series.map((source, index) => (
-    <Line key={source.key} dataKey={source.key} name={source.label}
-      stroke={accountColor(index + 2)} strokeWidth={2} strokeDasharray="5 3" dot={false}
-      type="linear" isAnimationActive={false} />
-  )) : null;
+  const incomeOverlay = useMemo(
+    () => incomeSourceSeries(report?.income_sources ?? [], selectedIds),
+    [report, selectedIds],
+  );
+  const incomeChartData = useMemo(
+    () => data.map((point) => ({ ...point, ...incomeOverlay.at(point.month, true) })),
+    [data, incomeOverlay],
+  );
+  const incomeDerivativeData = useMemo(
+    () => derivativeData.map((point) => ({ ...point, ...incomeOverlay.at(point.period, false) })),
+    [derivativeData, incomeOverlay],
+  );
+  const incomeLines = showIncomeSources
+    ? incomeOverlay.series.map((source, index) => (
+        <Line
+          key={source.key}
+          dataKey={source.key}
+          name={source.label}
+          stroke={accountColor(index + 2)}
+          strokeWidth={2}
+          strokeDasharray="5 3"
+          dot={false}
+          type="linear"
+          isAnimationActive={false}
+        />
+      ))
+    : null;
 
-  if (reportQuery.error) return <div className="page"><div className="meta import-error">{String(reportQuery.error)}</div></div>;
-  if (!report) return <div className="page"><div className="meta">Loading…</div></div>;
+  if (reportQuery.error)
+    return (
+      <div className="page">
+        <div className="meta import-error">{String(reportQuery.error)}</div>
+      </div>
+    );
+  if (!report)
+    return (
+      <div className="page">
+        <div className="meta">Loading…</div>
+      </div>
+    );
   if (report.rows.length === 0) {
     return (
       <div className="page">
@@ -406,17 +468,29 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
   }
 
   const hasGains = report.rows.some((r) => r.gains_cents !== null);
-  const monthlyTicks = calendarTicks(data.map(point => point.month), chartWidth);
-  const derivativeTicks = calendarTicks(derivativeData.map(point => point.period), chartWidth);
-  const returnTicks = calendarTicks(periodReturnData.map(point => point.period), chartWidth);
-  const timeTicks = monthlyTicks.map(tick => ({ ...tick, value: String(monthToTime(tick.value)) }));
+  const monthlyTicks = calendarTicks(
+    data.map((point) => point.month),
+    chartWidth,
+  );
+  const derivativeTicks = calendarTicks(
+    derivativeData.map((point) => point.period),
+    chartWidth,
+  );
+  const returnTicks = calendarTicks(
+    periodReturnData.map((point) => point.period),
+    chartWidth,
+  );
+  const timeTicks = monthlyTicks.map((tick) => ({
+    ...tick,
+    value: String(monthToTime(tick.value)),
+  }));
   const latest = data[data.length - 1];
   const totalCards = (
     <div className="totals-row">
       <div className="total-card total-card-highlight">
         <div className="total-label">Net worth</div>
         <div className="total-value">{fmtUsd(latest?.cumulative ?? 0)}</div>
-        <div className="total-asof">as of {latest?.month ?? "—"}</div>
+        <div className="total-asof">as of {latest?.month ?? '—'}</div>
       </div>
       <div className="total-card">
         <div className="total-label">Contributions</div>
@@ -424,17 +498,17 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
       </div>
       <div className="total-card">
         <div className="total-label">Market gains</div>
-        <div className="total-value">{hasGains ? fmtUsd(totals.gains) : "—"}</div>
+        <div className="total-value">{hasGains ? fmtUsd(totals.gains) : '—'}</div>
       </div>
     </div>
   );
   const periodPicker = (
     <div className="segmented-control" role="group" aria-label="Period">
-      {(["month", "quarter", "year"] as const).map((period) => (
+      {(['month', 'quarter', 'year'] as const).map((period) => (
         <button
           key={period}
           type="button"
-          className={derivativePeriod === period ? "active" : ""}
+          className={derivativePeriod === period ? 'active' : ''}
           onClick={() => setDerivativePeriod(period)}
         >
           {period}
@@ -444,40 +518,64 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
   );
 
   return (
-    <div className={`page page-networth ${view === "networth" ? "page-networth-dashboard" : "page-performance-dashboard"}`}>
+    <div
+      className={`page page-networth ${view === 'networth' ? 'page-networth-dashboard' : 'page-performance-dashboard'}`}
+    >
       <div className="page__header report-page__header">
         <div>
-          <h1 className="page__title">{view === "networth" ? "Net Worth" : "Performance"}</h1>
+          <h1 className="page__title">{view === 'networth' ? 'Net Worth' : 'Performance'}</h1>
           <p className="page__subtitle">
-            {view === "networth"
-              ? "Ledger balances, contributions, and investment gains over time."
-              : "Investment returns calculated from imported balances and cash flows."}
+            {view === 'networth'
+              ? 'Ledger balances, contributions, and investment gains over time.'
+              : 'Investment returns calculated from imported balances and cash flows.'}
           </p>
         </div>
       </div>
 
-      {view === "networth" ? (
+      {view === 'networth' ? (
         <div className="networth-dashboard">
           <div className="networth-dashboard-main">
-            <div className="networth-summary">
-              {totalCards}
-            </div>
+            <div className="networth-summary">{totalCards}</div>
 
             <div className="chart-container networth-primary-chart">
               <div className="income-overlay-control">
-                <label><input type="checkbox" checked={showIncomeSources} onChange={event => setShowIncomeSources(event.target.checked)} /> Compare income sources</label>
-                {showIncomeSources && <p className="chart-subtitle">
-                  Dashed lines show cash received, not money retained or additional net worth. Payroll is deposited pay, not gross W-2 income.
-                  {' '}Lines use your saved income categories, with no extra classification. Existing broad Income assignments remain Income until recategorized; unresolved transfers, loans and expense reimbursements are not inferred as gifts.
-                  {' '}<Link to="/categories?group=income">Manage income categories</Link>
-                </p>}
-                {showIncomeSources && incomeOverlay.series.length === 0 && <p className="chart-subtitle">No categorized income for the selected accounts. Categorize gifts and payroll as income to see them here.</p>}
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={showIncomeSources}
+                    onChange={(event) => setShowIncomeSources(event.target.checked)}
+                  />{' '}
+                  Compare income sources
+                </label>
+                {showIncomeSources && (
+                  <p className="chart-subtitle">
+                    Dashed lines show cash received, not money retained or additional net worth.
+                    Payroll is deposited pay, not gross W-2 income. Lines use your saved income
+                    categories, with no extra classification. Existing broad Income assignments
+                    remain Income until recategorized; unresolved transfers, loans and expense
+                    reimbursements are not inferred as gifts.{' '}
+                    <Link to="/categories?group=income">Manage income categories</Link>
+                  </p>
+                )}
+                {showIncomeSources && incomeOverlay.series.length === 0 && (
+                  <p className="chart-subtitle">
+                    No categorized income for the selected accounts. Categorize gifts and payroll as
+                    income to see them here.
+                  </p>
+                )}
               </div>
               <ResponsiveContainer width="100%" height={420} onResize={setChartWidth}>
                 <ComposedChart data={showIncomeSources ? incomeChartData : data} stackOffset="sign">
                   <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
-                  <XAxis dataKey="month" stroke={chartTheme.axis} ticks={monthlyTicks.map(tick => tick.value)}
-                    interval={0} height={45} tickLine={false} tick={<CalendarAxisTick ticks={monthlyTicks} />} />
+                  <XAxis
+                    dataKey="month"
+                    stroke={chartTheme.axis}
+                    ticks={monthlyTicks.map((tick) => tick.value)}
+                    interval={0}
+                    height={45}
+                    tickLine={false}
+                    tick={<CalendarAxisTick ticks={monthlyTicks} />}
+                  />
                   <YAxis
                     stroke={chartTheme.axis}
                     tick={{ fontSize: 11 }}
@@ -490,8 +588,20 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
                     labelStyle={chartTheme.tooltipLabel}
                   />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
-                  <Bar dataKey="cumulativeContributions" name="Contributions" stackId="stack" fill={series.contributions} />
-                  {hasGains && <Bar dataKey="cumulativeGains" name="Market gains" stackId="stack" fill={series.gains} />}
+                  <Bar
+                    dataKey="cumulativeContributions"
+                    name="Contributions"
+                    stackId="stack"
+                    fill={series.contributions}
+                  />
+                  {hasGains && (
+                    <Bar
+                      dataKey="cumulativeGains"
+                      name="Market gains"
+                      stackId="stack"
+                      fill={series.gains}
+                    />
+                  )}
                   <Line
                     type="monotone"
                     dataKey="cumulative"
@@ -515,10 +625,20 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
 
             <div className="chart-container derivative-chart">
               <ResponsiveContainer width="100%" height={340}>
-                <ComposedChart data={showIncomeSources ? incomeDerivativeData : derivativeData} stackOffset="sign">
+                <ComposedChart
+                  data={showIncomeSources ? incomeDerivativeData : derivativeData}
+                  stackOffset="sign"
+                >
                   <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
-                  <XAxis dataKey="period" stroke={chartTheme.axis} ticks={derivativeTicks.map(tick => tick.value)}
-                    interval={0} height={45} tickLine={false} tick={<CalendarAxisTick ticks={derivativeTicks} />} />
+                  <XAxis
+                    dataKey="period"
+                    stroke={chartTheme.axis}
+                    ticks={derivativeTicks.map((tick) => tick.value)}
+                    interval={0}
+                    height={45}
+                    tickLine={false}
+                    tick={<CalendarAxisTick ticks={derivativeTicks} />}
+                  />
                   <YAxis
                     stroke={chartTheme.axis}
                     tick={{ fontSize: 11 }}
@@ -540,130 +660,155 @@ export function NetWorthPage({ view, selectedIds: selectedIdsProp }: NetWorthPag
           </div>
         </div>
       ) : (
-      <section className="returns-section performance-page">
-        <div className="return-subsection-title">Investment Returns</div>
-        <div className="chart-container returns-investment-chart">
-          <ResponsiveContainer width="100%" height={320} onResize={setChartWidth}>
-            <ComposedChart data={investmentReturnData} margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
-              <XAxis
-                dataKey="time"
-                type="number"
-                scale="time"
-                domain={["dataMin", "dataMax"]}
-                stroke={chartTheme.axis}
-                ticks={timeTicks.map(tick => Number(tick.value))}
-                interval={0}
-                height={45}
-                tickLine={false}
-                tick={<CalendarAxisTick ticks={timeTicks} />}
-              />
-              <YAxis
-                stroke={chartTheme.axis}
-                tick={{ fontSize: 11 }}
-                tickFormatter={fmtUsdAxis}
-              />
-              <Tooltip
-                isAnimationActive={false}
-                formatter={(value) => fmtUsd(Number(value))}
-                labelFormatter={(value) => formatMonthTick(Number(value))}
-                contentStyle={chartTheme.tooltipContent}
-                labelStyle={chartTheme.tooltipLabel}
-              />
-              <ReferenceLine y={0} stroke={chartTheme.zero} />
-              <Area
-                type="monotone"
-                dataKey="positiveReturns"
-                name="Investment returns"
-                stroke={series.positive}
-                fill={series.positive}
-                fillOpacity={0.16}
-                dot={false}
-                connectNulls={false}
-              />
-              <Area
-                type="monotone"
-                dataKey="negativeReturns"
-                name="Investment losses"
-                stroke={series.negative}
-                fill={series.negative}
-                fillOpacity={0.16}
-                dot={false}
-                connectNulls={false}
-              />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
-        <div className="return-subsection-header">
-          <div className="return-subsection-title">Period Returns</div>
-          {periodPicker}
-        </div>
-        <div className="chart-container returns-chart">
-          <ResponsiveContainer width="100%" height={340}>
-            <ComposedChart data={periodReturnData} margin={{ top: 8, right: 24, bottom: 8, left: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
-              <XAxis dataKey="period" stroke={chartTheme.axis} ticks={returnTicks.map(tick => tick.value)}
-                interval={0} height={45} tickLine={false} tick={<CalendarAxisTick ticks={returnTicks} />} />
-              <YAxis stroke={chartTheme.axis} tick={{ fontSize: 11 }} tickFormatter={(value) => fmtPct(Number(value))} />
-              <Tooltip
-                isAnimationActive={false}
-                formatter={(value, name) => [fmtPct(Number(value)), name]}
-                contentStyle={chartTheme.tooltipContent}
-                labelStyle={chartTheme.tooltipLabel}
-              />
-              <ReferenceLine y={0} stroke={chartTheme.zero} />
-              {returnAccountBars.map((account) => (
-                <Bar key={account.key} dataKey={account.key} name={account.label} fill={account.color} />
-              ))}
-            </ComposedChart>
-          </ResponsiveContainer>
-          {returnAccountLegend}
-        </div>
-        <div className="return-subsection-title">Return Details</div>
-        <div className="returns-table-wrap">
-          <table className="returns-table">
-            <colgroup>
-              <col className="c-return-account" />
-              <col className="c-return-period" />
-              <col className="c-return-rate" />
-              <col className="c-return-rate" />
-              <col className="c-return-money" />
-              <col className="c-return-money" />
-            </colgroup>
-            <thead>
-              <tr>
-                <th>Account</th>
-                <th>Period</th>
-                <th className="num">Annual IRR</th>
-                <th className="num">Annual TWR</th>
-                <th className="num">Net flow</th>
-                <th className="num">Ending</th>
-              </tr>
-            </thead>
-            <tbody>
-              {returnRows.map((row) => (
-                <tr key={row.account_id}>
-                  <td>
-                    <div className="return-account">{row.account.institution}</div>
-                    <div className="return-account-name">{row.account.name}</div>
-                    <div className="return-meta">{row.account.type}</div>
-                  </td>
-                  <td>
-                    <div>{row.start_date} to {row.end_date}</div>
-                    <div className="return-meta">{row.years.toFixed(1)} years</div>
-                  </td>
-                  <td className="num return-rate">{fmtPct(row.irr)}</td>
-                  <td className="num return-rate">{fmtPct(row.annualized_time_weighted_return)}</td>
-                  <td className="num">{fmtUsd(row.net_cash_flow_cents / 100)}</td>
-                  <td className="num">{fmtUsd(row.ending_balance_cents / 100)}</td>
+        <section className="returns-section performance-page">
+          <div className="return-subsection-title">Investment Returns</div>
+          <div className="chart-container returns-investment-chart">
+            <ResponsiveContainer width="100%" height={320} onResize={setChartWidth}>
+              <ComposedChart
+                data={investmentReturnData}
+                margin={{ top: 8, right: 24, bottom: 8, left: 8 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
+                <XAxis
+                  dataKey="time"
+                  type="number"
+                  scale="time"
+                  domain={['dataMin', 'dataMax']}
+                  stroke={chartTheme.axis}
+                  ticks={timeTicks.map((tick) => Number(tick.value))}
+                  interval={0}
+                  height={45}
+                  tickLine={false}
+                  tick={<CalendarAxisTick ticks={timeTicks} />}
+                />
+                <YAxis
+                  stroke={chartTheme.axis}
+                  tick={{ fontSize: 11 }}
+                  tickFormatter={fmtUsdAxis}
+                />
+                <Tooltip
+                  isAnimationActive={false}
+                  formatter={(value) => fmtUsd(Number(value))}
+                  labelFormatter={(value) => formatMonthTick(Number(value))}
+                  contentStyle={chartTheme.tooltipContent}
+                  labelStyle={chartTheme.tooltipLabel}
+                />
+                <ReferenceLine y={0} stroke={chartTheme.zero} />
+                <Area
+                  type="monotone"
+                  dataKey="positiveReturns"
+                  name="Investment returns"
+                  stroke={series.positive}
+                  fill={series.positive}
+                  fillOpacity={0.16}
+                  dot={false}
+                  connectNulls={false}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="negativeReturns"
+                  name="Investment losses"
+                  stroke={series.negative}
+                  fill={series.negative}
+                  fillOpacity={0.16}
+                  dot={false}
+                  connectNulls={false}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="return-subsection-header">
+            <div className="return-subsection-title">Period Returns</div>
+            {periodPicker}
+          </div>
+          <div className="chart-container returns-chart">
+            <ResponsiveContainer width="100%" height={340}>
+              <ComposedChart
+                data={periodReturnData}
+                margin={{ top: 8, right: 24, bottom: 8, left: 8 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke={chartTheme.grid} />
+                <XAxis
+                  dataKey="period"
+                  stroke={chartTheme.axis}
+                  ticks={returnTicks.map((tick) => tick.value)}
+                  interval={0}
+                  height={45}
+                  tickLine={false}
+                  tick={<CalendarAxisTick ticks={returnTicks} />}
+                />
+                <YAxis
+                  stroke={chartTheme.axis}
+                  tick={{ fontSize: 11 }}
+                  tickFormatter={(value) => fmtPct(Number(value))}
+                />
+                <Tooltip
+                  isAnimationActive={false}
+                  formatter={(value, name) => [fmtPct(Number(value)), name]}
+                  contentStyle={chartTheme.tooltipContent}
+                  labelStyle={chartTheme.tooltipLabel}
+                />
+                <ReferenceLine y={0} stroke={chartTheme.zero} />
+                {returnAccountBars.map((account) => (
+                  <Bar
+                    key={account.key}
+                    dataKey={account.key}
+                    name={account.label}
+                    fill={account.color}
+                  />
+                ))}
+              </ComposedChart>
+            </ResponsiveContainer>
+            {returnAccountLegend}
+          </div>
+          <div className="return-subsection-title">Return Details</div>
+          <div className="returns-table-wrap">
+            <table className="returns-table">
+              <colgroup>
+                <col className="c-return-account" />
+                <col className="c-return-period" />
+                <col className="c-return-rate" />
+                <col className="c-return-rate" />
+                <col className="c-return-money" />
+                <col className="c-return-money" />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th>Period</th>
+                  <th className="num">Annual IRR</th>
+                  <th className="num">Annual TWR</th>
+                  <th className="num">Net flow</th>
+                  <th className="num">Ending</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+              </thead>
+              <tbody>
+                {returnRows.map((row) => (
+                  <tr key={row.account_id}>
+                    <td>
+                      <div className="return-account">{row.account.institution}</div>
+                      <div className="return-account-name">{row.account.name}</div>
+                      <div className="return-meta">{row.account.type}</div>
+                    </td>
+                    <td>
+                      <div>
+                        {row.start_date} to {row.end_date}
+                      </div>
+                      <div className="return-meta">{row.years.toFixed(1)} years</div>
+                    </td>
+                    <td className="num return-rate">{fmtPct(row.irr)}</td>
+                    <td className="num return-rate">
+                      {fmtPct(row.annualized_time_weighted_return)}
+                    </td>
+                    <td className="num">{fmtUsd(row.net_cash_flow_cents / 100)}</td>
+                    <td className="num">{fmtUsd(row.ending_balance_cents / 100)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
       )}
-
     </div>
   );
 }

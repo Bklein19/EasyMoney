@@ -1,5 +1,15 @@
-import type { AppImportParseInput, AppImportParseResult, AppImportParser, ImportProfile, ParsedImportTransaction } from '../importTypes.ts';
-import { enhanceProfileWithHeaders, normalizeMappedCsvTransaction, type NormalizedCsvTransaction } from './csvMapping.ts';
+import type {
+  AppImportParseInput,
+  AppImportParseResult,
+  AppImportParser,
+  ImportProfile,
+  ParsedImportTransaction,
+} from '../importTypes.ts';
+import {
+  enhanceProfileWithHeaders,
+  normalizeMappedCsvTransaction,
+  type NormalizedCsvTransaction,
+} from './csvMapping.ts';
 import { robinhoodCreditCrossSourceIdentity } from './robinhoodCrossSourceIdentity.ts';
 
 type EasyMoneyCsvProfile = ImportProfile & {
@@ -26,7 +36,16 @@ const EASYMONEY_CSV_PROFILES = [
   },
   {
     name: 'Apple Card',
-    headerFingerprint: ['Transaction Date', 'Clearing Date', 'Description', 'Merchant', 'Category', 'Type', 'Amount (USD)', 'Purchased By'],
+    headerFingerprint: [
+      'Transaction Date',
+      'Clearing Date',
+      'Description',
+      'Merchant',
+      'Category',
+      'Type',
+      'Amount (USD)',
+      'Purchased By',
+    ],
     statementType: 'credit_card',
     dateColumns: ['Transaction Date'],
     dateFormats: ['MM/dd/yyyy'],
@@ -37,7 +56,15 @@ const EASYMONEY_CSV_PROFILES = [
   },
   {
     name: 'Capital One',
-    headerFingerprint: ['Transaction Date', 'Posted Date', 'Card No.', 'Description', 'Category', 'Debit', 'Credit'],
+    headerFingerprint: [
+      'Transaction Date',
+      'Posted Date',
+      'Card No.',
+      'Description',
+      'Category',
+      'Debit',
+      'Credit',
+    ],
     dateColumns: ['Transaction Date'],
     dateFormats: ['yyyy-MM-dd'],
     descriptionColumn: 'Description',
@@ -57,7 +84,18 @@ const EASYMONEY_CSV_PROFILES = [
   },
   {
     name: 'Robinhood Credit Card',
-    headerFingerprint: ['Date', 'Time', 'Cardholder', 'Amount', 'Points', 'Balance', 'Status', 'Type', 'Merchant', 'Description'],
+    headerFingerprint: [
+      'Date',
+      'Time',
+      'Cardholder',
+      'Amount',
+      'Points',
+      'Balance',
+      'Status',
+      'Type',
+      'Merchant',
+      'Description',
+    ],
     statementType: 'credit_card',
     dateColumns: ['Date'],
     dateFormats: ['yyyy-MM-dd'],
@@ -71,27 +109,29 @@ const EASYMONEY_CSV_PROFILES = [
 ] as EasyMoneyCsvProfile[];
 
 function parserId(profileName: string) {
-  return `${profileName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-csv`;
+  return `${profileName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')}-csv`;
 }
 
 function hasHeaderFingerprint(headers: string[], profile: EasyMoneyCsvProfile) {
-  const normalizedHeaders = new Set(headers.map(header => header.trim().toLowerCase()));
-  return profile.headerFingerprint.every(header =>
-    normalizedHeaders.has(header.toLowerCase())
-  );
+  const normalizedHeaders = new Set(headers.map((header) => header.trim().toLowerCase()));
+  return profile.headerFingerprint.every((header) => normalizedHeaders.has(header.toLowerCase()));
 }
 
 function hasRequiredFileName(fileName: string, profile: EasyMoneyCsvProfile) {
   const normalizedFileName = fileName.toLowerCase();
   const patterns = profile.fileNamePatterns || [];
-  const fileNameMatches = !patterns.length || patterns.some(pattern => normalizedFileName.includes(pattern));
+  const fileNameMatches =
+    !patterns.length || patterns.some((pattern) => normalizedFileName.includes(pattern));
   return !profile.requireFileNameMatch || fileNameMatches;
 }
 
 function toParsedTransaction(
   normalized: NormalizedCsvTransaction | null,
   profile: EasyMoneyCsvProfile,
-  sourceRowIndex: number
+  sourceRowIndex: number,
 ): ParsedImportTransaction | null {
   if (!normalized) return null;
 
@@ -120,7 +160,7 @@ function toParsedTransaction(
 function includesRow(row: Record<string, string>, profile: EasyMoneyCsvProfile): boolean {
   return Object.entries(profile.includedRowValues ?? {}).every(([column, included]) => {
     const value = row[column]?.trim().toLowerCase() ?? '';
-    return included.some(candidate => candidate.toLowerCase() === value);
+    return included.some((candidate) => candidate.toLowerCase() === value);
   });
 }
 
@@ -131,15 +171,20 @@ function createEasyMoneyCsvParser(profile: EasyMoneyCsvProfile): AppImportParser
     institution: profile.name,
     sourceType: 'activity-export',
     priority: 10,
-    matches: ({ fileName, headers }) => (
-      hasRequiredFileName(fileName, profile) && hasHeaderFingerprint(headers, profile)
-    ),
+    matches: ({ fileName, headers }) =>
+      hasRequiredFileName(fileName, profile) && hasHeaderFingerprint(headers, profile),
     parse(input: AppImportParseInput): AppImportParseResult {
       const resolvedProfile = enhanceProfileWithHeaders(profile, input.headers);
       return {
-        transactions: input.rows.map((row, index) => includesRow(row, profile)
-          ? toParsedTransaction(normalizeMappedCsvTransaction(row, resolvedProfile), profile, index)
-          : null),
+        transactions: input.rows.map((row, index) =>
+          includesRow(row, profile)
+            ? toParsedTransaction(
+                normalizeMappedCsvTransaction(row, resolvedProfile),
+                profile,
+                index,
+              )
+            : null,
+        ),
         balances: [],
       };
     },
@@ -149,5 +194,5 @@ function createEasyMoneyCsvParser(profile: EasyMoneyCsvProfile): AppImportParser
 export const easyMoneyCsvProfileParsers = EASYMONEY_CSV_PROFILES.map(createEasyMoneyCsvParser);
 
 export const robinhoodCreditCardCsvParser = easyMoneyCsvProfileParsers.find(
-  parser => parser.id === 'robinhood-credit-card-csv',
+  (parser) => parser.id === 'robinhood-credit-card-csv',
 )!;

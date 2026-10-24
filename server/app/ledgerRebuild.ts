@@ -74,10 +74,26 @@ export interface RebuiltLedger {
   accountIds?: number[];
   transactions: RebuiltTransaction[];
   balanceSnapshots: RebuiltBalanceSnapshot[];
-  provenance?: Array<{ ledgerTransactionId: string; sourceTransactionId: number; reason: string; selected: boolean }>;
-  ambiguities?: Array<{ sourceTransactionId: number; candidateSourceTransactionIds: number[]; reason: string }>;
+  provenance?: Array<{
+    ledgerTransactionId: string;
+    sourceTransactionId: number;
+    reason: string;
+    selected: boolean;
+  }>;
+  ambiguities?: Array<{
+    sourceTransactionId: number;
+    candidateSourceTransactionIds: number[];
+    reason: string;
+  }>;
   exclusions?: Array<{ sourceTransactionId: number; reason: string }>;
-  balanceConflicts?: Array<{ accountId: number; month: string; date: string; sourceBalanceIds: number[]; balanceCents: number[]; reason: string }>;
+  balanceConflicts?: Array<{
+    accountId: number;
+    month: string;
+    date: string;
+    sourceBalanceIds: number[];
+    balanceCents: number[];
+    reason: string;
+  }>;
 }
 
 function normalizeText(value = '') {
@@ -118,7 +134,10 @@ function getBalanceSourceRank(sourceType: string | null | undefined) {
   return sourceType === 'statement' ? 2 : 1;
 }
 
-function getTransactionSourceScore(transaction: { sourceType?: string | null; priority?: number | null }) {
+function getTransactionSourceScore(transaction: {
+  sourceType?: string | null;
+  priority?: number | null;
+}) {
   const sourceRank = transaction.sourceType === 'activity-export' ? 2 : 1;
   return sourceRank * 1_000_000 + (transaction.priority ?? 0);
 }
@@ -151,10 +170,7 @@ function getTransactionFingerprint(transaction: {
   merchant?: string | null;
 }) {
   const text = normalizeText(
-    transaction.originalDescription ||
-    transaction.description ||
-    transaction.merchant ||
-    ''
+    transaction.originalDescription || transaction.description || transaction.merchant || '',
   );
   return [
     transaction.accountId,
@@ -172,25 +188,38 @@ export function isStatementSummary(transaction: {
   sourceRole?: string | null;
   raw: Record<string, unknown>;
 }) {
-  return transaction.sourceRole === 'statement-summary' ||
+  return (
+    transaction.sourceRole === 'statement-summary' ||
     transaction.raw.type === 'statement-cash-flow-summary' ||
-    ['tiaa-statement-summary', '401k-statement-summary', 'fidelity-netbenefits-statement-summary'].includes(String(transaction.raw.source || '')) ||
-    (transaction.raw.source === 'fidelity-portfolio-statement' && transaction.raw.type === 'securities-transferred-out');
+    [
+      'tiaa-statement-summary',
+      '401k-statement-summary',
+      'fidelity-netbenefits-statement-summary',
+    ].includes(String(transaction.raw.source || '')) ||
+    (transaction.raw.source === 'fidelity-portfolio-statement' &&
+      transaction.raw.type === 'securities-transferred-out')
+  );
 }
 
 function normalizeRebuildAccounts(accountIds: readonly number[]) {
-  if (accountIds.some(id => !Number.isSafeInteger(id) || id === 0)) {
+  if (accountIds.some((id) => !Number.isSafeInteger(id) || id === 0)) {
     throw new Error('Ledger rebuild account IDs must be nonzero safe integers.');
   }
   return [...new Set(accountIds)].sort((a, b) => a - b);
 }
 
-export function buildLedgerFromSourceFacts(db = getDb(), accountIds?: readonly number[]): RebuiltLedger {
+export function buildLedgerFromSourceFacts(
+  db = getDb(),
+  accountIds?: readonly number[],
+): RebuiltLedger {
   const scope = accountIds === undefined ? undefined : normalizeRebuildAccounts(accountIds);
   const parameters = scope ?? [];
-  const accountFilter = scope === undefined ? '' : `AND sa.accountId IN (${scope.map(() => '?').join(',') || 'NULL'})`;
+  const accountFilter =
+    scope === undefined ? '' : `AND sa.accountId IN (${scope.map(() => '?').join(',') || 'NULL'})`;
   const decisions = new Map<number, { representative: number; reason: string }>();
-  const sourceTransactions = db.prepare(`
+  const sourceTransactions = db
+    .prepare(
+      `
     SELECT
       st.id,
       st.sourceFileId,
@@ -217,25 +246,28 @@ export function buildLedgerFromSourceFacts(db = getDb(), accountIds?: readonly n
       AND sa.accountId IS NOT NULL
       ${accountFilter}
     ORDER BY st.sourceFileId ASC, st.id ASC
-  `).all(...parameters) as SourceTransactionRow[];
+  `,
+    )
+    .all(...parameters) as SourceTransactionRow[];
 
-  const transactionInputs = sourceTransactions.map(row => {
+  const transactionInputs = sourceTransactions.map((row) => {
     const raw = parseRaw(row.rawJson);
     const securityTrade = readSecurityTrade(raw.securityTrade);
     const date = securityTrade?.tradeDate ?? row.date;
     const amount = dollarsFromCents(row.amountCents);
     const description = row.description || '';
     const merchant = typeof raw.merchant === 'string' ? raw.merchant : description;
-    const originalDescription = typeof raw.originalDescription === 'string' ? raw.originalDescription : description;
-    const originalCategory = typeof raw.originalCategory === 'string' && raw.originalCategory.trim()
-      ? raw.originalCategory
-      : typeof raw.category === 'string' && raw.category.trim()
-        ? raw.category
-        : null;
+    const originalDescription =
+      typeof raw.originalDescription === 'string' ? raw.originalDescription : description;
+    const originalCategory =
+      typeof raw.originalCategory === 'string' && raw.originalCategory.trim()
+        ? raw.originalCategory
+        : typeof raw.category === 'string' && raw.category.trim()
+          ? raw.category
+          : null;
     const rawKind = typeof raw.transactionKind === 'string' ? raw.transactionKind : null;
-    const transactionKind = isCreditAccount(row.accountType) && amount > 0
-      ? 'card_payment'
-      : rawKind;
+    const transactionKind =
+      isCreditAccount(row.accountType) && amount > 0 ? 'card_payment' : rawKind;
     const fingerprint = getTransactionFingerprint({
       accountId: row.accountId,
       date,
@@ -270,23 +302,32 @@ export function buildLedgerFromSourceFacts(db = getDb(), accountIds?: readonly n
     sourceType: string | null;
     raw: Record<string, unknown>;
     stableSourceId: string;
-  }) => `${transaction.accountId}\0${transaction.sourceType}\0${typeof transaction.raw.moneyId === 'string'
-    ? `money:${transaction.raw.moneyId}`
-    : `source:${transaction.stableSourceId}`}`;
-  const exclusions: NonNullable<RebuiltLedger['exclusions']> = transactionInputs.filter(isStatementSummary).map(row => ({
-    sourceTransactionId: row.id,
-    reason: 'Statement aggregate summary excluded: a monthly total is not an individual transaction. The source fact is preserved.',
-  }));
+  }) =>
+    `${transaction.accountId}\0${transaction.sourceType}\0${
+      typeof transaction.raw.moneyId === 'string'
+        ? `money:${transaction.raw.moneyId}`
+        : `source:${transaction.stableSourceId}`
+    }`;
+  const exclusions: NonNullable<RebuiltLedger['exclusions']> = transactionInputs
+    .filter(isStatementSummary)
+    .map((row) => ({
+      sourceTransactionId: row.id,
+      reason:
+        'Statement aggregate summary excluded: a monthly total is not an individual transaction. The source fact is preserved.',
+    }));
   // Count occurrences in ORIGINAL documents before reconciling parser IDs.
   // Otherwise shared IDs can redistribute rows across files and shrink maxima.
-  const dedupedTransactionInputs = transactionInputs.filter(row => !isStatementSummary(row));
+  const dedupedTransactionInputs = transactionInputs.filter((row) => !isStatementSummary(row));
 
   const activityExportGroups = new Map<string, typeof dedupedTransactionInputs>();
   const retainedTransactionInputs = new Set(dedupedTransactionInputs);
-  const economicKey = (row: typeof dedupedTransactionInputs[number]) => JSON.stringify([
-    row.accountId, normalizeDate(row.date), row.amountCents,
-    row.securityTrade ? securityTradeKey(row.securityTrade) : null,
-  ]);
+  const economicKey = (row: (typeof dedupedTransactionInputs)[number]) =>
+    JSON.stringify([
+      row.accountId,
+      normalizeDate(row.date),
+      row.amountCents,
+      row.securityTrade ? securityTradeKey(row.securityTrade) : null,
+    ]);
   const reconciledEconomicKeys = new Set<string>();
   reconcileEconomicDocuments();
   for (const transaction of retainedTransactionInputs) {
@@ -313,21 +354,29 @@ export function buildLedgerFromSourceFacts(db = getDb(), accountIds?: readonly n
     }
     if (bySourceFile.size <= 1) continue;
 
-    const representative = [...bySourceFile.entries()]
-      .sort(([sourceFileIdA, rowsA], [sourceFileIdB, rowsB]) =>
-        rowsB.length - rowsA.length ||
-        sourceFileIdA - sourceFileIdB
+    const representative =
+      [...bySourceFile.entries()].sort(
+        ([sourceFileIdA, rowsA], [sourceFileIdB, rowsB]) =>
+          rowsB.length - rowsA.length || sourceFileIdA - sourceFileIdB,
       )[0]?.[1] ?? [];
     const selected = new Set(
-      representative
-        .sort((a, b) => getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b)))
+      representative.sort((a, b) =>
+        getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b)),
+      ),
     );
 
     for (const transaction of group) {
       if (!selected.has(transaction)) {
-        const siblings = [...(bySourceFile.get(transaction.sourceFileId) ?? [])].sort((a, b) => getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b)));
+        const siblings = [...(bySourceFile.get(transaction.sourceFileId) ?? [])].sort((a, b) =>
+          getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b)),
+        );
         const representativeRow = [...selected][siblings.indexOf(transaction)];
-        if (representativeRow) decisions.set(transaction.id, { representative: representativeRow.id, reason: 'Overlapping documents of the same source type; identical transactions matched by occurrence within the file. The largest file occurrence count is retained.' });
+        if (representativeRow)
+          decisions.set(transaction.id, {
+            representative: representativeRow.id,
+            reason:
+              'Overlapping documents of the same source type; identical transactions matched by occurrence within the file. The largest file occurrence count is retained.',
+          });
         retainedTransactionInputs.delete(transaction);
       }
     }
@@ -339,8 +388,12 @@ export function buildLedgerFromSourceFacts(db = getDb(), accountIds?: readonly n
   // Document activity already has occurrence-aware matching above. Exclude it
   // before sorting so normal imports do not pay for unused occurrence keys.
   const sourceIdentityInputs = [...retainedTransactionInputs]
-    .filter(transaction => !['activity-export', 'statement'].includes(transaction.sourceType || ''))
-    .sort((a, b) => getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b)));
+    .filter(
+      (transaction) => !['activity-export', 'statement'].includes(transaction.sourceType || ''),
+    )
+    .sort((a, b) =>
+      getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b)),
+    );
   for (const transaction of sourceIdentityInputs) {
     const identity = sourceIdentityKey(transaction);
     const files = sourceIdentityGroups.get(identity) ?? new Map<number, typeof transactionInputs>();
@@ -350,12 +403,20 @@ export function buildLedgerFromSourceFacts(db = getDb(), accountIds?: readonly n
     rows.push(transaction);
   }
   for (const files of sourceIdentityGroups.values()) {
-    const ordered = [...files.values()].sort((a, b) =>
-      b.length - a.length || (b[0]!.priority ?? 0) - (a[0]!.priority ?? 0) || a[0]!.sourceFileId - b[0]!.sourceFileId);
+    const ordered = [...files.values()].sort(
+      (a, b) =>
+        b.length - a.length ||
+        (b[0]!.priority ?? 0) - (a[0]!.priority ?? 0) ||
+        a[0]!.sourceFileId - b[0]!.sourceFileId,
+    );
     const representative = ordered[0]!;
     for (const rows of ordered.slice(1)) {
       rows.forEach((row, index) => {
-        decisions.set(row.id, { representative: representative[index]!.id, reason: 'Same parser source identity matched by file occurrence; largest occurrence count retained.' });
+        decisions.set(row.id, {
+          representative: representative[index]!.id,
+          reason:
+            'Same parser source identity matched by file occurrence; largest occurrence count retained.',
+        });
         retainedTransactionInputs.delete(row);
       });
     }
@@ -367,33 +428,53 @@ export function buildLedgerFromSourceFacts(db = getDb(), accountIds?: readonly n
   function reconcileEconomicDocuments() {
     const economicGroups = new Map<string, typeof dedupedTransactionInputs>();
     for (const row of retainedTransactionInputs) {
-      if (row.sourceRole !== 'activity' || !['activity-export', 'statement'].includes(row.sourceType || '')) continue;
+      if (
+        row.sourceRole !== 'activity' ||
+        !['activity-export', 'statement'].includes(row.sourceType || '')
+      )
+        continue;
       const key = economicKey(row);
       const group = economicGroups.get(key) ?? [];
-      group.push(row); economicGroups.set(key, group);
+      group.push(row);
+      economicGroups.set(key, group);
     }
     for (const group of economicGroups.values()) {
-      if (new Set(group.map(row => row.sourceType)).size < 2) continue;
+      if (new Set(group.map((row) => row.sourceType)).size < 2) continue;
       reconciledEconomicKeys.add(economicKey(group[0]!));
       const files = new Map<number, typeof group>();
       for (const row of group) {
         const rows = files.get(row.sourceFileId) ?? [];
-        rows.push(row); files.set(row.sourceFileId, rows);
+        rows.push(row);
+        files.set(row.sourceFileId, rows);
       }
-      const ordered = [...files.values()].sort((a, b) =>
-        Math.max(...b.map(getTransactionSourceScore)) - Math.max(...a.map(getTransactionSourceScore)) ||
-        b.length - a.length || a[0]!.sourceFileId - b[0]!.sourceFileId);
+      const ordered = [...files.values()].sort(
+        (a, b) =>
+          Math.max(...b.map(getTransactionSourceScore)) -
+            Math.max(...a.map(getTransactionSourceScore)) ||
+          b.length - a.length ||
+          a[0]!.sourceFileId - b[0]!.sourceFileId,
+      );
       const canonical: typeof group = [];
       for (const rows of ordered) {
         const used = new Set<number>();
-        for (const row of [...rows].sort((a,b) => getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b)))) {
-          const available = canonical.filter(candidate => !used.has(candidate.id));
-          const match = available.find(candidate => normalizeText(candidate.originalDescription || candidate.description) === normalizeText(row.originalDescription || row.description)) ?? available[0];
+        for (const row of [...rows].sort((a, b) =>
+          getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b)),
+        )) {
+          const available = canonical.filter((candidate) => !used.has(candidate.id));
+          const match =
+            available.find(
+              (candidate) =>
+                normalizeText(candidate.originalDescription || candidate.description) ===
+                normalizeText(row.originalDescription || row.description),
+            ) ?? available[0];
           if (match) {
             used.add(match.id);
-          decisions.set(row.id, { representative: match.id, reason: row.securityTrade
-            ? 'Same account, amount, security, quantity, action, trade date and settlement date; matched one-to-one by document occurrence.'
-            : 'Same account, date and amount across statement/export documents; matched one-to-one by document occurrence, with higher-priority source wording retained.' });
+            decisions.set(row.id, {
+              representative: match.id,
+              reason: row.securityTrade
+                ? 'Same account, amount, security, quantity, action, trade date and settlement date; matched one-to-one by document occurrence.'
+                : 'Same account, date and amount across statement/export documents; matched one-to-one by document occurrence, with higher-priority source wording retained.',
+            });
             retainedTransactionInputs.delete(row);
           } else {
             canonical.push(row);
@@ -409,16 +490,18 @@ export function buildLedgerFromSourceFacts(db = getDb(), accountIds?: readonly n
     if (
       transaction.sourceRole !== 'activity' ||
       !['activity-export', 'statement'].includes(transaction.sourceType || '')
-    ) continue;
+    )
+      continue;
     // These rows already used their same-day document occurrence budget.
     // A second fuzzy-date pass must not consume an excess real occurrence.
     if (reconciledEconomicKeys.has(economicKey(transaction))) continue;
     // Explicit trade evidence must not fall back to generic description/date
     // matching and accidentally reconcile a different security or quantity.
     if (transaction.securityTrade) continue;
-    const crossSourceIdentity = typeof transaction.raw.crossSourceIdentity === 'string'
-      ? transaction.raw.crossSourceIdentity.trim()
-      : '';
+    const crossSourceIdentity =
+      typeof transaction.raw.crossSourceIdentity === 'string'
+        ? transaction.raw.crossSourceIdentity.trim()
+        : '';
     const descriptionIdentity = normalizeText(
       transaction.originalDescription || transaction.description || transaction.merchant,
     );
@@ -448,39 +531,56 @@ export function buildLedgerFromSourceFacts(db = getDb(), accountIds?: readonly n
     }
     if (bySourceFile.size <= 1) continue;
 
-    const orderedSourceGroups = [...bySourceFile.entries()].sort(([sourceFileIdA, rowsA], [sourceFileIdB, rowsB]) =>
-      Math.max(...rowsB.map(getTransactionSourceScore)) - Math.max(...rowsA.map(getTransactionSourceScore)) ||
-      rowsB.length - rowsA.length ||
-      sourceFileIdA - sourceFileIdB
+    const orderedSourceGroups = [...bySourceFile.entries()].sort(
+      ([sourceFileIdA, rowsA], [sourceFileIdB, rowsB]) =>
+        Math.max(...rowsB.map(getTransactionSourceScore)) -
+          Math.max(...rowsA.map(getTransactionSourceScore)) ||
+        rowsB.length - rowsA.length ||
+        sourceFileIdA - sourceFileIdB,
     );
     const canonical: typeof group = [];
 
     for (const [, rows] of orderedSourceGroups) {
       const matchedCanonical = new Set<number>();
-      for (const transaction of [...rows].sort((a, b) =>
-        normalizeDate(a.date).localeCompare(normalizeDate(b.date)) ||
-        getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b))
+      for (const transaction of [...rows].sort(
+        (a, b) =>
+          normalizeDate(a.date).localeCompare(normalizeDate(b.date)) ||
+          getTransactionOccurrenceSortKey(a).localeCompare(getTransactionOccurrenceSortKey(b)),
       )) {
         const matches = canonical
-          .map((candidate, index) => ({ candidate, index, distance: dateDistanceInDays(candidate.date, transaction.date) }))
-          .filter(({ candidate, index, distance }) =>
-            candidate.sourceType !== transaction.sourceType &&
-            !matchedCanonical.has(index) &&
-            distance > 0 &&
-            distance <= 3
+          .map((candidate, index) => ({
+            candidate,
+            index,
+            distance: dateDistanceInDays(candidate.date, transaction.date),
+          }))
+          .filter(
+            ({ candidate, index, distance }) =>
+              candidate.sourceType !== transaction.sourceType &&
+              !matchedCanonical.has(index) &&
+              distance > 0 &&
+              distance <= 3,
           )
-          .sort((a, b) =>
-            a.distance - b.distance ||
-            getTransactionOccurrenceSortKey(a.candidate).localeCompare(getTransactionOccurrenceSortKey(b.candidate))
+          .sort(
+            (a, b) =>
+              a.distance - b.distance ||
+              getTransactionOccurrenceSortKey(a.candidate).localeCompare(
+                getTransactionOccurrenceSortKey(b.candidate),
+              ),
           );
         // Repeated occurrences on one date are interchangeable, but rows on
         // different dates are not. Do not guess which posting date is intended.
-        const nearest = matches.filter(item => item.distance === matches[0]?.distance);
-        const match = new Set(nearest.map(item => normalizeDate(item.candidate.date))).size === 1
-          ? nearest[0] : undefined;
+        const nearest = matches.filter((item) => item.distance === matches[0]?.distance);
+        const match =
+          new Set(nearest.map((item) => normalizeDate(item.candidate.date))).size === 1
+            ? nearest[0]
+            : undefined;
 
         if (match) {
-          decisions.set(transaction.id, { representative: match.candidate.id, reason: 'Activity and statement occurrence matched by account, amount, description or parser identity, within three posting days.' });
+          decisions.set(transaction.id, {
+            representative: match.candidate.id,
+            reason:
+              'Activity and statement occurrence matched by account, amount, description or parser identity, within three posting days.',
+          });
           matchedCanonical.add(match.index);
           retainedTransactionInputs.delete(transaction);
         } else {
@@ -493,7 +593,11 @@ export function buildLedgerFromSourceFacts(db = getDb(), accountIds?: readonly n
   const ambiguities: NonNullable<RebuiltLedger['ambiguities']> = [];
   const amountGroups = new Map<string, typeof transactionInputs>();
   for (const row of retainedTransactionInputs) {
-    if (row.sourceRole !== 'activity' || !['activity-export', 'statement'].includes(row.sourceType || '')) continue;
+    if (
+      row.sourceRole !== 'activity' ||
+      !['activity-export', 'statement'].includes(row.sourceType || '')
+    )
+      continue;
     const key = `${row.accountId}\0${row.amountCents}`;
     const group = amountGroups.get(key) ?? [];
     group.push(row);
@@ -501,24 +605,48 @@ export function buildLedgerFromSourceFacts(db = getDb(), accountIds?: readonly n
   }
   for (const group of amountGroups.values()) {
     for (const row of group) {
-      const candidates = group.filter(candidate => {
-        if (candidate.sourceType === row.sourceType || dateDistanceInDays(candidate.date, row.date) > 3) return false;
-        if (row.securityTrade && candidate.securityTrade && securityTradeKey(row.securityTrade) !== securityTradeKey(candidate.securityTrade)) return false;
+      const candidates = group.filter((candidate) => {
+        if (
+          candidate.sourceType === row.sourceType ||
+          dateDistanceInDays(candidate.date, row.date) > 3
+        )
+          return false;
+        if (
+          row.securityTrade &&
+          candidate.securityTrade &&
+          securityTradeKey(row.securityTrade) !== securityTradeKey(candidate.securityTrade)
+        )
+          return false;
         // Same-day leftovers are excess real occurrences under the document
         // policy above, not additional unresolved pairs.
-        const warning = normalizeDate(row.date) !== normalizeDate(candidate.date) || Boolean(row.securityTrade) !== Boolean(candidate.securityTrade);
-        return warning && !reviewedDistinctOverlap(db,overlapOccurrenceKey(db,row.id),overlapOccurrenceKey(db,candidate.id));
+        const warning =
+          normalizeDate(row.date) !== normalizeDate(candidate.date) ||
+          Boolean(row.securityTrade) !== Boolean(candidate.securityTrade);
+        return (
+          warning &&
+          !reviewedDistinctOverlap(
+            db,
+            overlapOccurrenceKey(db, row.id),
+            overlapOccurrenceKey(db, candidate.id),
+          )
+        );
       });
-      if (candidates.length) ambiguities.push({
-        sourceTransactionId: row.id,
-        candidateSourceTransactionIds: candidates.map(candidate => candidate.id).sort((a, b) => a - b),
-        reason: 'Possible cross-source overlap by account, amount and posting date; identity or occurrence evidence is insufficient. Both rows retained.',
-      });
+      if (candidates.length)
+        ambiguities.push({
+          sourceTransactionId: row.id,
+          candidateSourceTransactionIds: candidates
+            .map((candidate) => candidate.id)
+            .sort((a, b) => a - b),
+          reason:
+            'Possible cross-source overlap by account, amount and posting date; identity or occurrence evidence is insufficient. Both rows retained.',
+        });
     }
   }
 
   const assigned = assignLedgerTransactionIdentities([...retainedTransactionInputs]);
-  const ledgerIdsBySource = new Map(assigned.map(item => [item.transaction.id, item.ledgerTransactionId]));
+  const ledgerIdsBySource = new Map(
+    assigned.map((item) => [item.transaction.id, item.ledgerTransactionId]),
+  );
   const provenance: NonNullable<RebuiltLedger['provenance']> = [];
   for (const row of sourceTransactions) {
     let representative = row.id;
@@ -531,29 +659,38 @@ export function buildLedgerFromSourceFacts(db = getDb(), accountIds?: readonly n
       representative = decision.representative;
     }
     const ledgerTransactionId = ledgerIdsBySource.get(representative);
-    if (ledgerTransactionId) provenance.push({ ledgerTransactionId, sourceTransactionId: row.id, selected: row.id === representative,
-      reason: reasons.join(' ') || 'Source occurrence retained in the ledger.' });
+    if (ledgerTransactionId)
+      provenance.push({
+        ledgerTransactionId,
+        sourceTransactionId: row.id,
+        selected: row.id === representative,
+        reason: reasons.join(' ') || 'Source occurrence retained in the ledger.',
+      });
   }
-  const transactions = assigned.map((item) => ({
-    ledgerTransactionId: item.ledgerTransactionId,
-    occurrenceIndex: item.occurrenceIndex,
-    accountId: item.transaction.accountId,
-    date: normalizeDate(item.transaction.date),
-    amount: item.transaction.amount,
-    importBatchId: item.transaction.importBatchId,
-    description: item.transaction.description,
-    merchant: item.transaction.merchant,
-    originalDescription: item.transaction.originalDescription,
-    originalCategory: item.transaction.originalCategory,
-    type: item.transaction.type,
-    transactionKind: item.transaction.transactionKind,
-    status: item.transaction.status,
-    sourceRole: item.transaction.sourceRole,
-    fingerprint: item.transaction.fingerprint,
-    importRowId: item.transaction.importRowId,
-  })).sort((a, b) => a.ledgerTransactionId.localeCompare(b.ledgerTransactionId));
+  const transactions = assigned
+    .map((item) => ({
+      ledgerTransactionId: item.ledgerTransactionId,
+      occurrenceIndex: item.occurrenceIndex,
+      accountId: item.transaction.accountId,
+      date: normalizeDate(item.transaction.date),
+      amount: item.transaction.amount,
+      importBatchId: item.transaction.importBatchId,
+      description: item.transaction.description,
+      merchant: item.transaction.merchant,
+      originalDescription: item.transaction.originalDescription,
+      originalCategory: item.transaction.originalCategory,
+      type: item.transaction.type,
+      transactionKind: item.transaction.transactionKind,
+      status: item.transaction.status,
+      sourceRole: item.transaction.sourceRole,
+      fingerprint: item.transaction.fingerprint,
+      importRowId: item.transaction.importRowId,
+    }))
+    .sort((a, b) => a.ledgerTransactionId.localeCompare(b.ledgerTransactionId));
 
-  const sourceBalances = db.prepare(`
+  const sourceBalances = db
+    .prepare(
+      `
     SELECT
       sb.id,
       sb.sourceFileId,
@@ -572,7 +709,9 @@ export function buildLedgerFromSourceFacts(db = getDb(), accountIds?: readonly n
       AND sa.accountId IS NOT NULL
       ${accountFilter}
     ORDER BY sb.date ASC, sb.id ASC
-  `).all(...parameters) as SourceBalanceRow[];
+  `,
+    )
+    .all(...parameters) as SourceBalanceRow[];
   const balancesByAccountMonth = new Map<string, RebuiltBalanceSnapshot>();
   const sourceBalanceByAccountMonth = new Map<string, SourceBalanceRow[]>();
   const balanceConflicts: NonNullable<RebuiltLedger['balanceConflicts']> = [];
@@ -587,12 +726,15 @@ export function buildLedgerFromSourceFacts(db = getDb(), accountIds?: readonly n
   for (const [key, candidates] of sourceBalanceByAccountMonth) {
     const balance = [...candidates].sort((a, b) => a.id - b.id)[0]!;
     const month = normalizeDate(balance.date).slice(0, 7);
-    if (new Set(candidates.map(row => row.balanceCents)).size > 1) {
+    if (new Set(candidates.map((row) => row.balanceCents)).size > 1) {
       balanceConflicts.push({
-        accountId: balance.accountId, month, date: normalizeDate(balance.date),
-        sourceBalanceIds: candidates.map(row => row.id).sort((a, b) => a - b),
-        balanceCents: [...new Set(candidates.map(row => row.balanceCents))].sort((a, b) => a - b),
-        reason: 'Equally authoritative balances on the same date disagree. No monthly balance is selected until resolved.',
+        accountId: balance.accountId,
+        month,
+        date: normalizeDate(balance.date),
+        sourceBalanceIds: candidates.map((row) => row.id).sort((a, b) => a - b),
+        balanceCents: [...new Set(candidates.map((row) => row.balanceCents))].sort((a, b) => a - b),
+        reason:
+          'Equally authoritative balances on the same date disagree. No monthly balance is selected until resolved.',
       });
       continue;
     }
@@ -608,17 +750,24 @@ export function buildLedgerFromSourceFacts(db = getDb(), accountIds?: readonly n
   // A confirmed closure is a dated balance assertion, never a transaction.
   // Newer imported balances remain authoritative (and disagreements are surfaced
   // by the account read model). Earlier months and all source facts stay intact.
-  const closures = db.prepare(`SELECT id, reportingClosedOn FROM accounts WHERE reportingClosedOn IS NOT NULL
+  const closures = db
+    .prepare(
+      `SELECT id, reportingClosedOn FROM accounts WHERE reportingClosedOn IS NOT NULL
     ${scope === undefined ? '' : `AND id IN (${scope.map(() => '?').join(',') || 'NULL'})`}
-  `).all(...parameters) as Array<{ id: number; reportingClosedOn: string }>;
+  `,
+    )
+    .all(...parameters) as Array<{ id: number; reportingClosedOn: string }>;
   for (const closure of closures) {
     const month = closure.reportingClosedOn.slice(0, 7);
     const key = `${closure.id}|${month}`;
     const existing = balancesByAccountMonth.get(key);
     if (!existing || existing.capturedAt.slice(0, 10) < closure.reportingClosedOn) {
       balancesByAccountMonth.set(key, {
-        accountId: closure.id, month, balance: 0,
-        capturedAt: `${closure.reportingClosedOn}T00:00:00.000Z`, sourceBalanceId: null,
+        accountId: closure.id,
+        month,
+        balance: 0,
+        capturedAt: `${closure.reportingClosedOn}T00:00:00.000Z`,
+        sourceBalanceId: null,
       });
     }
   }
@@ -629,18 +778,22 @@ export function buildLedgerFromSourceFacts(db = getDb(), accountIds?: readonly n
     provenance,
     ambiguities,
     exclusions,
-    balanceConflicts: balanceConflicts.sort((a, b) => a.accountId - b.accountId || a.month.localeCompare(b.month)),
+    balanceConflicts: balanceConflicts.sort(
+      (a, b) => a.accountId - b.accountId || a.month.localeCompare(b.month),
+    ),
     balanceSnapshots: [...balancesByAccountMonth.values()].sort((a, b) =>
-      `${a.accountId}|${a.month}`.localeCompare(`${b.accountId}|${b.month}`)
+      `${a.accountId}|${a.month}`.localeCompare(`${b.accountId}|${b.month}`),
     ),
   };
 }
 
 export function ledgerFingerprint(ledger: RebuiltLedger) {
-  return hashContent(JSON.stringify({
-    transactions: ledger.transactions,
-    balanceSnapshots: ledger.balanceSnapshots,
-  }));
+  return hashContent(
+    JSON.stringify({
+      transactions: ledger.transactions,
+      balanceSnapshots: ledger.balanceSnapshots,
+    }),
+  );
 }
 
 export function materializeLedger(db = getDb(), ledger = buildLedgerFromSourceFacts(db)) {
@@ -653,34 +806,52 @@ export function rebuildLedgerForAccounts(accountIds: readonly number[], db = get
 }
 
 function materializeLedgerInTransaction(db: ReturnType<typeof getDb>, ledger: RebuiltLedger) {
-  let scope = ledger.accountIds === undefined ? undefined : normalizeRebuildAccounts(ledger.accountIds);
+  let scope =
+    ledger.accountIds === undefined ? undefined : normalizeRebuildAccounts(ledger.accountIds);
   if (scope !== undefined) {
     const accounts = new Set(scope);
-    const transactionIds = new Set(ledger.transactions.map(row => row.ledgerTransactionId));
-    if (ledger.transactions.some(row => !accounts.has(row.accountId)) ||
-      ledger.balanceSnapshots.some(row => !accounts.has(row.accountId)) ||
-      ledger.provenance?.some(row => !transactionIds.has(row.ledgerTransactionId))) {
+    const transactionIds = new Set(ledger.transactions.map((row) => row.ledgerTransactionId));
+    if (
+      ledger.transactions.some((row) => !accounts.has(row.accountId)) ||
+      ledger.balanceSnapshots.some((row) => !accounts.has(row.accountId)) ||
+      ledger.provenance?.some((row) => !transactionIds.has(row.ledgerTransactionId))
+    ) {
       throw new Error('Scoped ledger contains rows outside its rebuild accounts.');
     }
     if (scope.length === 0) return { transactionCount: 0, balanceSnapshotCount: 0 };
     // A new installation or changed matching policy needs one complete rebuild.
     // Never leave other accounts materialized under a different policy.
-    if (db.prepare('SELECT policyVersion FROM ledgerRebuildState WHERE id = 1').get()?.policyVersion !== LEDGER_REBUILD_POLICY_VERSION) {
+    if (
+      db.prepare('SELECT policyVersion FROM ledgerRebuildState WHERE id = 1').get()
+        ?.policyVersion !== LEDGER_REBUILD_POLICY_VERSION
+    ) {
       ledger = buildLedgerFromSourceFacts(db);
       scope = undefined;
     }
   }
   if (ledger.balanceConflicts?.length) {
-    throw new Error('Ledger contains conflicting same-date balances; resolve conflicts before materializing.');
+    throw new Error(
+      'Ledger contains conflicting same-date balances; resolve conflicts before materializing.',
+    );
   }
   db.transaction(() => {
     const parameters = scope ?? [];
-    const filter = scope === undefined ? '' : `WHERE accountId IN (${scope.map(() => '?').join(',')})`;
-    db.prepare(`DELETE FROM ledgerProvenance ${scope === undefined ? '' : `WHERE ledgerTransactionId IN (SELECT ledgerTransactionId FROM ledgerTransactions ${filter})`}`).run(...parameters);
+    const filter =
+      scope === undefined ? '' : `WHERE accountId IN (${scope.map(() => '?').join(',')})`;
+    db.prepare(
+      `DELETE FROM ledgerProvenance ${scope === undefined ? '' : `WHERE ledgerTransactionId IN (SELECT ledgerTransactionId FROM ledgerTransactions ${filter})`}`,
+    ).run(...parameters);
     // Clear pointers to replaced legacy rows, including occurrences no longer
     // selected after an unimport or remapping. Leave other accounts untouched.
-    db.prepare(`UPDATE importRows SET transactionId = NULL WHERE transactionId IN (SELECT id FROM transactions ${filter})`).run(...parameters);
-    for (const table of ['ledgerTransactions', 'ledgerBalances', 'transactions', 'balanceSnapshots']) {
+    db.prepare(
+      `UPDATE importRows SET transactionId = NULL WHERE transactionId IN (SELECT id FROM transactions ${filter})`,
+    ).run(...parameters);
+    for (const table of [
+      'ledgerTransactions',
+      'ledgerBalances',
+      'transactions',
+      'balanceSnapshots',
+    ]) {
       db.prepare(`DELETE FROM ${table} ${filter}`).run(...parameters);
     }
 
@@ -807,10 +978,18 @@ function materializeLedgerInTransaction(db: ReturnType<typeof getDb>, ledger: Re
       });
     }
     for (const source of ledger.provenance ?? []) {
-      db.prepare('INSERT INTO ledgerProvenance (ledgerTransactionId, sourceTransactionId, reason, selected) VALUES (?, ?, ?, ?)')
-        .run(source.ledgerTransactionId, source.sourceTransactionId, source.reason, source.selected ? 1 : 0);
-      if (source.selected) db.prepare('UPDATE ledgerTransactions SET sourceTransactionId = ? WHERE ledgerTransactionId = ?')
-        .run(source.sourceTransactionId, source.ledgerTransactionId);
+      db.prepare(
+        'INSERT INTO ledgerProvenance (ledgerTransactionId, sourceTransactionId, reason, selected) VALUES (?, ?, ?, ?)',
+      ).run(
+        source.ledgerTransactionId,
+        source.sourceTransactionId,
+        source.reason,
+        source.selected ? 1 : 0,
+      );
+      if (source.selected)
+        db.prepare(
+          'UPDATE ledgerTransactions SET sourceTransactionId = ? WHERE ledgerTransactionId = ?',
+        ).run(source.sourceTransactionId, source.ledgerTransactionId);
     }
 
     const insertBalance = db.prepare(`
@@ -846,8 +1025,9 @@ function materializeLedgerInTransaction(db: ReturnType<typeof getDb>, ledger: Re
       });
     }
     if (scope === undefined) {
-      db.prepare('INSERT INTO ledgerRebuildState (id, policyVersion) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET policyVersion = excluded.policyVersion')
-        .run(LEDGER_REBUILD_POLICY_VERSION);
+      db.prepare(
+        'INSERT INTO ledgerRebuildState (id, policyVersion) VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET policyVersion = excluded.policyVersion',
+      ).run(LEDGER_REBUILD_POLICY_VERSION);
     }
   })();
 

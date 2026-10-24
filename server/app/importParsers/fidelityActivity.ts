@@ -1,4 +1,9 @@
-import type { AppImportParseInput, AppImportParseResult, AppImportParser, ParsedImportTransaction } from '../importTypes.ts';
+import type {
+  AppImportParseInput,
+  AppImportParseResult,
+  AppImportParser,
+  ParsedImportTransaction,
+} from '../importTypes.ts';
 import { parseAmount, parseDate } from './csvMapping.ts';
 import { fidelityRemoteAccountId } from './fidelityAccountIdentity.ts';
 import { normalizedHeader, parseCsvRows, rowRecord } from './csvRows.ts';
@@ -7,9 +12,9 @@ const INVESTMENT_HEADERS = ['run date', 'action', 'symbol', 'description', 'type
 const RETIREMENT_HEADERS = ['date', 'investment', 'transaction type', 'shares unit', 'amount'];
 
 function findHeader(rows: string[][], expected: string[]) {
-  return rows.findIndex(row => {
-    const headers = new Set(row.map(value => normalizedHeader(value)));
-    return expected.every(header => headers.has(header));
+  return rows.findIndex((row) => {
+    const headers = new Set(row.map((value) => normalizedHeader(value)));
+    return expected.every((header) => headers.has(header));
   });
 }
 
@@ -22,7 +27,10 @@ function hasFidelityActivityHeader(sample: string): boolean {
   }
 }
 
-function investmentTransaction(row: Record<string, string>, sourceRowIndex: number): ParsedImportTransaction | null {
+function investmentTransaction(
+  row: Record<string, string>,
+  sourceRowIndex: number,
+): ParsedImportTransaction | null {
   const date = parseDate(row['Run Date']?.trim(), ['MM/dd/yyyy', 'M/d/yyyy']);
   const amount = parseAmount(row['Amount ($)']);
   const action = row.Action?.replace(/\s+/g, ' ').trim();
@@ -50,7 +58,10 @@ function investmentTransaction(row: Record<string, string>, sourceRowIndex: numb
   };
 }
 
-function retirementTransaction(row: Record<string, string>, sourceRowIndex: number): ParsedImportTransaction | null {
+function retirementTransaction(
+  row: Record<string, string>,
+  sourceRowIndex: number,
+): ParsedImportTransaction | null {
   const date = parseDate(row.Date?.trim(), ['MM/dd/yyyy', 'M/d/yyyy']);
   const amount = parseAmount(row['Amount ($)']);
   const transactionType = row['Transaction Type']?.replace(/\s+/g, ' ').trim();
@@ -78,9 +89,15 @@ function qualifiedInvestmentTransactions(
   headers: string[],
   rows: string[][],
 ): Array<ParsedImportTransaction | null> {
-  const transactions = rows.map((row, index) => investmentTransaction(rowRecord(headers, row), index));
-  if (headers.some(header => normalizedHeader(header) === 'account number')
-      && transactions.some(transaction => transaction && (!transaction.remoteAccountId || !transaction.account))) {
+  const transactions = rows.map((row, index) =>
+    investmentTransaction(rowRecord(headers, row), index),
+  );
+  if (
+    headers.some((header) => normalizedHeader(header) === 'account number') &&
+    transactions.some(
+      (transaction) => transaction && (!transaction.remoteAccountId || !transaction.account),
+    )
+  ) {
     throw new Error('Fidelity activity parser fact is missing a stable account identity');
   }
   return transactions;
@@ -101,7 +118,9 @@ export function parseFidelityActivity(input: AppImportParseInput): AppImportPars
   if (retirementHeader >= 0) {
     const headers = rows[retirementHeader]!;
     return {
-      transactions: rows.slice(retirementHeader + 1).map((row, index) => retirementTransaction(rowRecord(headers, row), index)),
+      transactions: rows
+        .slice(retirementHeader + 1)
+        .map((row, index) => retirementTransaction(rowRecord(headers, row), index)),
       balances: [],
     };
   }
@@ -115,8 +134,6 @@ export const fidelityActivityParser: AppImportParser = {
   institution: 'Fidelity',
   sourceType: 'activity-export',
   priority: 100,
-  matches: ({ fileName, sample }) => (
-    /\.csv$/i.test(fileName) && hasFidelityActivityHeader(sample)
-  ),
+  matches: ({ fileName, sample }) => /\.csv$/i.test(fileName) && hasFidelityActivityHeader(sample),
   parse: parseFidelityActivity,
 };

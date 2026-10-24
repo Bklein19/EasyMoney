@@ -5,10 +5,7 @@ import {
   type ImportHistoryItem,
 } from './importHistoryTree.ts';
 
-function historyItem(
-  id: number,
-  overrides: Partial<ImportHistoryItem> = {},
-): ImportHistoryItem {
+function historyItem(id: number, overrides: Partial<ImportHistoryItem> = {}): ImportHistoryItem {
   return {
     id,
     fileName: `import-${id}.csv`,
@@ -51,13 +48,15 @@ test('groups imports by account holder, account, and source kind with useful tot
       importedCount: 1,
       unimportedCount: 1,
     },
-    accounts: [{
-      label: 'Checking',
-      sources: [
-        { label: 'Statements', imports: [{ id: 2 }] },
-        { label: 'Activity', imports: [{ id: 1 }] },
-      ],
-    }],
+    accounts: [
+      {
+        label: 'Checking',
+        sources: [
+          { label: 'Statements', imports: [{ id: 2 }] },
+          { label: 'Activity', imports: [{ id: 1 }] },
+        ],
+      },
+    ],
   });
 });
 
@@ -76,14 +75,17 @@ test('places consolidated files in one multiple-accounts branch without duplicat
   });
 
   const groups = groupImportHistory([consolidated, crossHolder]);
-  expect(groups.map(group => group.label)).toEqual(['Example Owner', 'Multiple account holders']);
+  expect(groups.map((group) => group.label)).toEqual(['Example Owner', 'Multiple account holders']);
   expect(groups[0]?.accounts[0]?.label).toBe('Multiple accounts');
   expect(groups[1]?.accounts[0]?.label).toBe('Multiple accounts');
-  expect(groups.flatMap(group => group.accounts)
-    .flatMap(account => account.sources)
-    .flatMap(source => source.imports)
-    .map(item => item.id)
-    .sort()).toEqual([3, 4]);
+  expect(
+    groups
+      .flatMap((group) => group.accounts)
+      .flatMap((account) => account.sources)
+      .flatMap((source) => source.imports)
+      .map((item) => item.id)
+      .sort(),
+  ).toEqual([3, 4]);
 });
 
 test('labels missing metadata explicitly and includes account metadata in search', () => {
@@ -96,11 +98,13 @@ test('labels missing metadata explicitly and includes account metadata in search
   const groups = groupImportHistory([unknown]);
   expect(groups[0]).toMatchObject({
     label: 'Unknown account holder',
-    accounts: [{
-      label: 'Unknown account',
-      sources: [{ label: 'Other files', imports: [{ id: 5 }] }],
-    }],
+    accounts: [
+      {
+        label: 'Unknown account',
+        sources: [{ label: 'Other files', imports: [{ id: 5 }] }],
+      },
+    ],
   });
-  expect(filterImportHistory([unknown, known], 'known owner').map(item => item.id)).toEqual([6]);
-  expect(filterImportHistory([unknown, known], 'brokerage').map(item => item.id)).toEqual([6]);
+  expect(filterImportHistory([unknown, known], 'known owner').map((item) => item.id)).toEqual([6]);
+  expect(filterImportHistory([unknown, known], 'brokerage').map((item) => item.id)).toEqual([6]);
 });

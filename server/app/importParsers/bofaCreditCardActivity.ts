@@ -1,4 +1,9 @@
-import type { AppImportParseInput, AppImportParseResult, AppImportParser, ParsedImportTransaction } from '../importTypes.ts';
+import type {
+  AppImportParseInput,
+  AppImportParseResult,
+  AppImportParser,
+  ParsedImportTransaction,
+} from '../importTypes.ts';
 import { parseAmount } from './csvMapping.ts';
 import { calendarDate } from './calendarDate.ts';
 import { normalizedHeader } from './csvRows.ts';

@@ -62,7 +62,7 @@ function requiredString(value: unknown, message: string): string {
 
 function registration(value: unknown): string[] {
   if (value === undefined || value === null) return [];
-  if (!Array.isArray(value) || value.some(item => typeof item !== 'string')) {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) {
     throw new Error('Sequoia Fund portfolio registration is invalid');
   }
   return [...value];
@@ -96,19 +96,13 @@ function parsePortfolioAccount(value: unknown): SequoiaFundPortfolioAccount {
 
 export function parseSequoiaFundPortfolio(value: unknown): SequoiaFundPortfolio {
   const root = record(value, 'Sequoia Fund portfolio response was not an object');
-  const groups = collection(
-    root.portfolioGroupList,
-    'Sequoia Fund portfolio groups are invalid',
-  );
+  const groups = collection(root.portfolioGroupList, 'Sequoia Fund portfolio groups are invalid');
   if (groups.length !== 1) {
     throw new Error('Sequoia Fund login must expose exactly one portfolio group');
   }
 
   const group = record(groups[0], 'Sequoia Fund portfolio group is invalid');
-  const accounts = collection(
-    group.accountList,
-    'Sequoia Fund portfolio accounts are invalid',
-  );
+  const accounts = collection(group.accountList, 'Sequoia Fund portfolio accounts are invalid');
   if (accounts.length === 0) throw new Error('Sequoia Fund portfolio group has no accounts');
 
   return {
@@ -125,28 +119,30 @@ function isoDate(value: string, label: string): Date {
   const month = Number(match[2]);
   const day = Number(match[3]);
   const date = new Date(Date.UTC(year, month - 1, day));
-  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
     throw new Error(`${label} must be a valid date`);
   }
   return date;
 }
 
 function subtractCalendarMonths(date: Date, months: number): Date {
-  const targetMonthStart = new Date(Date.UTC(
-    date.getUTCFullYear(),
-    date.getUTCMonth() - months,
-    1,
-  ));
-  const lastTargetDay = new Date(Date.UTC(
-    targetMonthStart.getUTCFullYear(),
-    targetMonthStart.getUTCMonth() + 1,
-    0,
-  )).getUTCDate();
-  return new Date(Date.UTC(
-    targetMonthStart.getUTCFullYear(),
-    targetMonthStart.getUTCMonth(),
-    Math.min(date.getUTCDate(), lastTargetDay),
-  ));
+  const targetMonthStart = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - months, 1),
+  );
+  const lastTargetDay = new Date(
+    Date.UTC(targetMonthStart.getUTCFullYear(), targetMonthStart.getUTCMonth() + 1, 0),
+  ).getUTCDate();
+  return new Date(
+    Date.UTC(
+      targetMonthStart.getUTCFullYear(),
+      targetMonthStart.getUTCMonth(),
+      Math.min(date.getUTCDate(), lastTargetDay),
+    ),
+  );
 }
 
 function compactDate(value: string): string {

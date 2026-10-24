@@ -1,14 +1,14 @@
-import type { ParseResult, ParserMeta } from "./types.ts";
-import { makeTx } from "./_helpers";
-import { getDocumentProxy, extractText } from "unpdf";
+import type { ParseResult, ParserMeta } from './types.ts';
+import { makeTx } from './_helpers';
+import { getDocumentProxy, extractText } from 'unpdf';
 import { readSecurityTrade } from '../../securityTrade';
 import { validateRecognizedRows } from '../statementValidation';
 import { checkVanguardEmptyActivity } from '../printedStatementChecks';
 
 export const meta: ParserMeta = {
-  id: "vanguard-statement-pdf",
-  institution: "Vanguard",
-  kind: "statement",
+  id: 'vanguard-statement-pdf',
+  institution: 'Vanguard',
+  kind: 'statement',
   priority: 50,
   matches: ({ filename, sample }) =>
     /^\d{4}-\d{2}-\d{2}-(Brokerage|Roth-IRA|Trad-IRA)(?:-\d{4})?---.+\.pdf$/.test(filename) ||
@@ -19,36 +19,51 @@ export const meta: ParserMeta = {
 
 function parseStatementDate(text: string): string {
   const d = text.match(
-    /([A-Z][a-z]+)\s+(\d{1,2}),\s+(\d{4}),\s+(?:monthly transaction|quarter-to-date|year-to-date)\s+statement/
+    /([A-Z][a-z]+)\s+(\d{1,2}),\s+(\d{4}),\s+(?:monthly transaction|quarter-to-date|year-to-date)\s+statement/,
   );
-  if (!d) throw new Error("Could not find statement date");
+  if (!d) throw new Error('Could not find statement date');
   const months: Record<string, string> = {
-    January: "01", February: "02", March: "03", April: "04", May: "05", June: "06",
-    July: "07", August: "08", September: "09", October: "10", November: "11", December: "12",
+    January: '01',
+    February: '02',
+    March: '03',
+    April: '04',
+    May: '05',
+    June: '06',
+    July: '07',
+    August: '08',
+    September: '09',
+    October: '10',
+    November: '11',
+    December: '12',
   };
-  return `${d[3]}-${months[d[1]!]}-${String(Number(d[2])).padStart(2, "0")}`;
+  return `${d[3]}-${months[d[1]!]}-${String(Number(d[2])).padStart(2, '0')}`;
 }
 
 function parseMd(value: string, year: number): string {
-  const [m, d] = value.split("/").map(Number);
-  return `${year}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  const [m, d] = value.split('/').map(Number);
+  return `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
 }
 
 function parseAmountToCents(value: string): number {
-  const cleaned = value.replace(/[$,\s]/g, "");
-  const negative = cleaned.startsWith("-");
-  const c = Math.round(parseFloat(cleaned.replace(/^-/, "")) * 100);
+  const cleaned = value.replace(/[$,\s]/g, '');
+  const negative = cleaned.startsWith('-');
+  const c = Math.round(parseFloat(cleaned.replace(/^-/, '')) * 100);
   return negative ? -c : c;
 }
 
 export function parseVanguardAccountHolder(text: string): string | null {
-  const lines = text.split("\n").map(line => line.trim()).filter(Boolean);
-  const accountIndex = lines.findIndex(line =>
-    /(Individual brokerage account|Roth IRA brokerage account|Traditional IRA brokerage account)[—-](?:X{4}\d{4}|\d{4,})/i.test(line)
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const accountIndex = lines.findIndex((line) =>
+    /(Individual brokerage account|Roth IRA brokerage account|Traditional IRA brokerage account)[—-](?:X{4}\d{4}|\d{4,})/i.test(
+      line,
+    ),
   );
   if (accountIndex <= 0) return null;
-  const candidate = lines[accountIndex - 1]!.replace(/\s+/g, " ").trim();
-  const words = candidate.split(" ");
+  const candidate = lines[accountIndex - 1]!.replace(/\s+/g, ' ').trim();
+  const words = candidate.split(' ');
   if (words.length < 2 || words.length > 8 || candidate.length > 100) return null;
   if (!/^[\p{L}][\p{L} .,'’-]+$/u.test(candidate)) return null;
   if (/vanguard|statement|account|portfolio|services/i.test(candidate)) return null;
@@ -58,7 +73,7 @@ export function parseVanguardAccountHolder(text: string): string | null {
 export default async function parse(filePath: string): Promise<ParseResult> {
   const pdf = await getDocumentProxy(new Uint8Array(await Bun.file(filePath).arrayBuffer()));
   const { text: pageTexts } = await extractText(pdf);
-  return parseVanguardStatementText(pageTexts.join("\n"));
+  return parseVanguardStatementText(pageTexts.join('\n'));
 }
 
 export function parseVanguardStatementText(allText: string): ParseResult {
@@ -67,24 +82,22 @@ export function parseVanguardStatementText(allText: string): ParseResult {
 
   const accountTypeMatch =
     allText.match(
-      /(Individual brokerage account|Roth IRA brokerage account|Traditional IRA brokerage account)[—-](X{4}\d{4}|\d{4,})/
+      /(Individual brokerage account|Roth IRA brokerage account|Traditional IRA brokerage account)[—-](X{4}\d{4}|\d{4,})/,
     ) ??
     allText.match(
-      /(Individual brokerage account|Roth IRA brokerage account|Traditional IRA brokerage account)[\s\S]{0,120}?Vanguard Brokerage Account[—-](X{4}\d{4}|\d{4,})/
+      /(Individual brokerage account|Roth IRA brokerage account|Traditional IRA brokerage account)[\s\S]{0,120}?Vanguard Brokerage Account[—-](X{4}\d{4}|\d{4,})/,
     );
-  const accountType = accountTypeMatch ? accountTypeMatch[1]! : "Individual brokerage account";
-  const accountSuffix = accountTypeMatch
-    ? `XXXX${accountTypeMatch[2]!.slice(-4)}`
-    : null;
+  const accountType = accountTypeMatch ? accountTypeMatch[1]! : 'Individual brokerage account';
+  const accountSuffix = accountTypeMatch ? `XXXX${accountTypeMatch[2]!.slice(-4)}` : null;
   const account = accountSuffix ? `${accountType}-${accountSuffix}` : accountType;
   const accountHolder = parseVanguardAccountHolder(allText);
-  const institution = "Vanguard";
+  const institution = 'Vanguard';
 
-  const balances: ParseResult["balances"] = [];
-  const escapedType = accountType.replace(/[.*+?^()|[\]{}]/g, "\\$&");
+  const balances: ParseResult['balances'] = [];
+  const escapedType = accountType.replace(/[.*+?^()|[\]{}]/g, '\\$&');
   const balanceMatch =
     allText.match(
-      new RegExp(escapedType + "\\s+\\$[\\d,]+\\.\\d{2}\\s+\\$(\\d[\\d,]*\\.\\d{2})")
+      new RegExp(escapedType + '\\s+\\$[\\d,]+\\.\\d{2}\\s+\\$(\\d[\\d,]*\\.\\d{2})'),
     ) ??
     allText.match(/\$(\d[\d,]*\.\d{2})\s+Total account value as of [A-Z][a-z]+ \d{1,2}, \d{4}/);
   if (balanceMatch) {
@@ -97,12 +110,15 @@ export function parseVanguardStatementText(allText: string): ParseResult {
     });
   }
 
-  const transactions: ParseResult["transactions"] = [];
+  const transactions: ParseResult['transactions'] = [];
   const txSectionMatch = allText.match(
-    /Completed transactions([\s\S]*?)(?:If you had an adjustment|Electronic delivery and mail preferences|$)/
+    /Completed transactions([\s\S]*?)(?:If you had an adjustment|Electronic delivery and mail preferences|$)/,
   );
   if (txSectionMatch) {
-    const lines = txSectionMatch[1]!.split("\n").map((l) => l.trim()).filter(Boolean);
+    const lines = txSectionMatch[1]!
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]!;
       if (!/^\d{2}\/\d{2}\s+\d{2}\/\d{2}\s+/.test(line)) continue;
@@ -110,9 +126,14 @@ export function parseVanguardStatementText(allText: string): ParseResult {
       while (i + 1 < lines.length && !/^\d{2}\/\d{2}\s+\d{2}\/\d{2}\s+/.test(lines[i + 1]!)) {
         // A page boundary ends description continuation, not transaction scanning.
         // Preserve wrapped fund names and conversion details before that boundary.
-        if (/^(?:[A-Z][a-z]+ \d{1,2}, \d{4}, .*statement|Page \d+ of \d+|Vanguard Personal Investor|Account activity for Vanguard|Completed transactions|Settlement date\b|Individual brokerage account|Roth IRA brokerage account|Traditional IRA brokerage account)/.test(lines[i + 1]!)) break;
+        if (
+          /^(?:[A-Z][a-z]+ \d{1,2}, \d{4}, .*statement|Page \d+ of \d+|Vanguard Personal Investor|Account activity for Vanguard|Completed transactions|Settlement date\b|Individual brokerage account|Roth IRA brokerage account|Traditional IRA brokerage account)/.test(
+            lines[i + 1]!,
+          )
+        )
+          break;
         i++;
-        row += " " + lines[i];
+        row += ' ' + lines[i];
       }
       let m = row.match(/^(\d{2}\/\d{2})\s+(\d{2}\/\d{2})\s+(.+?)\s+(-?\$?[\d,]+\.\d{2})$/);
       let description: string;
@@ -123,17 +144,30 @@ export function parseVanguardStatementText(allText: string): ParseResult {
         // sits at the end of the first line rather than the whole row.
         m = line.match(/^(\d{2}\/\d{2})\s+(\d{2}\/\d{2})\s+(.+?)\s+(-?\$?[\d,]+\.\d{2})$/);
         if (!m) continue;
-        description = (m[3]!.trim() + " " + row.slice(line.length).trim()).trim();
+        description = (m[3]!.trim() + ' ' + row.slice(line.length).trim()).trim();
       }
       // A December trade can settle in January; use the explicit dates, not a
       // fixed settlement-day offset (weekends and holidays vary).
-      const settlementDate = parseMd(m[1]!, Number(m[1]!.slice(0, 2)) > Number(statementDate.slice(5, 7)) ? year - 1 : year);
-      const tradeYear = Number(settlementDate.slice(0, 4)) - (Number(m[2]!.slice(0, 2)) > Number(m[1]!.slice(0, 2)) ? 1 : 0);
+      const settlementDate = parseMd(
+        m[1]!,
+        Number(m[1]!.slice(0, 2)) > Number(statementDate.slice(5, 7)) ? year - 1 : year,
+      );
+      const tradeYear =
+        Number(settlementDate.slice(0, 4)) -
+        (Number(m[2]!.slice(0, 2)) > Number(m[1]!.slice(0, 2)) ? 1 : 0);
       const tradeDate = parseMd(m[2]!, tradeYear);
-      const tradeFields = description.match(/^([A-Z0-9.-]+)\s+.*?\b(Buy|Sell)\s+(?:Cash|Margin)\s+(-?[\d,]+(?:\.\d+)?)/i);
-      const securityTrade = tradeFields ? readSecurityTrade({
-        tradeDate, settlementDate, symbol: tradeFields[1], action: tradeFields[2]!.toLowerCase(), quantity: tradeFields[3]!.replace(/^-/, ''),
-      }) : null;
+      const tradeFields = description.match(
+        /^([A-Z0-9.-]+)\s+.*?\b(Buy|Sell)\s+(?:Cash|Margin)\s+(-?[\d,]+(?:\.\d+)?)/i,
+      );
+      const securityTrade = tradeFields
+        ? readSecurityTrade({
+            tradeDate,
+            settlementDate,
+            symbol: tradeFields[1],
+            action: tradeFields[2]!.toLowerCase(),
+            quantity: tradeFields[3]!.replace(/^-/, ''),
+          })
+        : null;
       transactions.push(
         makeTx({
           date: securityTrade ? tradeDate : settlementDate,
@@ -143,15 +177,21 @@ export function parseVanguardStatementText(allText: string): ParseResult {
           institution,
           ...(accountHolder ? { account_holder: accountHolder } : {}),
           raw: { settlement: m[1], trade: m[2], row, ...(securityTrade ? { securityTrade } : {}) },
-        })
+        }),
       );
     }
   }
 
-  const covered_from = transactions.length ? transactions.map((t) => t.date).sort()[0]! : statementDate;
+  const covered_from = transactions.length
+    ? transactions.map((t) => t.date).sort()[0]!
+    : statementDate;
   const covered_to = statementDate;
-  const expectedRows = [...(txSectionMatch?.[1] ?? '').matchAll(/^\s*\d{2}\/\d{2}\s+\d{2}\/\d{2}\s+/gm)].length;
-  const validation = expectedRows ? validateRecognizedRows(expectedRows, transactions.length) : checkVanguardEmptyActivity(allText, transactions.length);
+  const expectedRows = [
+    ...(txSectionMatch?.[1] ?? '').matchAll(/^\s*\d{2}\/\d{2}\s+\d{2}\/\d{2}\s+/gm),
+  ].length;
+  const validation = expectedRows
+    ? validateRecognizedRows(expectedRows, transactions.length)
+    : checkVanguardEmptyActivity(allText, transactions.length);
   for (const balance of balances) balance.raw = { statementValidation: validation };
   return { transactions, balances, covered_from, covered_to };
 }

@@ -15,7 +15,15 @@ interface ModalProps {
   className?: string;
 }
 
-const Modal = ({ isOpen, onClose, title, children, footer, maxWidth = '520px', className = '' }: ModalProps) => {
+const Modal = ({
+  isOpen,
+  onClose,
+  title,
+  children,
+  footer,
+  maxWidth = '520px',
+  className = '',
+}: ModalProps) => {
   const modalRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -46,11 +54,7 @@ const Modal = ({ isOpen, onClose, title, children, footer, maxWidth = '520px', c
 
   const content = (
     <div className="modal-overlay" onClick={handleOverlayClick} aria-modal="true" role="dialog">
-      <div 
-        className={`modal-container ${className}`}
-        ref={modalRef}
-        style={{ maxWidth }}
-      >
+      <div className={`modal-container ${className}`} ref={modalRef} style={{ maxWidth }}>
         {title && (
           <div className="modal-header">
             <h2 className="modal-title">{title}</h2>
@@ -59,14 +63,8 @@ const Modal = ({ isOpen, onClose, title, children, footer, maxWidth = '520px', c
             </Button>
           </div>
         )}
-        <div className="modal-body">
-          {children}
-        </div>
-        {footer && (
-          <div className="modal-footer">
-            {footer}
-          </div>
-        )}
+        <div className="modal-body">{children}</div>
+        {footer && <div className="modal-footer">{footer}</div>}
       </div>
     </div>
   );

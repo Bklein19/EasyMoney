@@ -7,7 +7,15 @@ test('debug pages stay hidden even if pinned until explicitly enabled', () => {
   expect(visibleNavigationPath('/accounts', false)).toBe(true);
 });
 test('Command D and Control D toggle once without capturing other chords', () => {
-  const event = { key: 'd', metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, repeat: false, isComposing: false };
+  const event = {
+    key: 'd',
+    metaKey: false,
+    ctrlKey: false,
+    altKey: false,
+    shiftKey: false,
+    repeat: false,
+    isComposing: false,
+  };
   expect(debugShortcut(event)).toBe(false);
   expect(debugShortcut({ ...event, metaKey: true })).toBe(true);
   expect(debugShortcut({ ...event, ctrlKey: true })).toBe(true);

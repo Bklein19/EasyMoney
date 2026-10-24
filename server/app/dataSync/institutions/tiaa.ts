@@ -28,7 +28,8 @@ const TIAA_ACTIVITY_DOWNLOAD_PATH = '/secure/participantdata/api/quickendownload
 const TIAA_STATEMENTS_URL = 'https://my.tiaa.org/secure/account-statements/all';
 const TIAA_STATEMENT_METADATA_PATH = '/secure/account-statements/api/type';
 const TIAA_STATEMENT_REPORT_PATH = '/private/ahstatementsui/getreport';
-const TIAA_AUTHENTICATED_PATH = '^/(?:private/participant|secure/(?:participantdata|account-statements))(?:/|$)';
+const TIAA_AUTHENTICATED_PATH =
+  '^/(?:private/participant|secure/(?:participantdata|account-statements))(?:/|$)';
 const TIAA_STATEMENT_ACCOUNT_NAME = 'Retirement Annuity';
 const AUTHENTICATION_FIELDS = [
   'input[type="password"]',
@@ -200,9 +201,13 @@ function validateConfig(config: TiaaSyncConfig): void {
   if (!isIsoDate(config.from) || !isIsoDate(config.through)) {
     throw new Error('TIAA sync dates must use valid YYYY-MM-DD values');
   }
-  if (config.from > config.through) throw new Error('TIAA sync start date must not follow its end date');
+  if (config.from > config.through)
+    throw new Error('TIAA sync start date must not follow its end date');
   const artifactTypes = config.artifactTypes ?? ['activity', 'statement'];
-  if (artifactTypes.length === 0 || artifactTypes.some(value => value !== 'activity' && value !== 'statement')) {
+  if (
+    artifactTypes.length === 0 ||
+    artifactTypes.some((value) => value !== 'activity' && value !== 'statement')
+  ) {
     throw new Error('TIAA sync requires at least one supported artifact type');
   }
 }
@@ -225,7 +230,11 @@ export function tiaaActivityPeriod(
 ): TiaaActivityPeriod | null {
   const normalized = label.replace(/\s+/g, ' ').trim();
   const explicitYear = normalized.match(/\b(20\d{2})\b/)?.[1];
-  const year = /^Current year$/i.test(normalized) ? currentYear : explicitYear ? Number(explicitYear) : null;
+  const year = /^Current year$/i.test(normalized)
+    ? currentYear
+    : explicitYear
+      ? Number(explicitYear)
+      : null;
   if (!year) return null;
   return {
     label: normalized,
@@ -305,26 +314,35 @@ export function tiaaResponseRequiresAuthentication(status: number, finalUrl: str
   } catch {
     return false;
   }
-  return /^auth\.tiaa\.org$/i.test(url.hostname) ||
-    /\/(?:public\/authentication|login|signin|authorization|oauth)(?:\/|$)/i.test(url.pathname);
+  return (
+    /^auth\.tiaa\.org$/i.test(url.hostname) ||
+    /\/(?:public\/authentication|login|signin|authorization|oauth)(?:\/|$)/i.test(url.pathname)
+  );
 }
 
 export function tiaaResponseBodyRequiresAuthentication(contentType: string, body: Buffer): boolean {
   if (!/text\/html|application\/xhtml\+xml/i.test(contentType)) return false;
   const sample = body.toString('utf8', 0, 64 * 1_024);
-  return /<input\b[^>]*(?:type=["']?password|autocomplete=["']?(?:username|current-password))/i.test(sample) ||
-    /auth\.tiaa\.org|\/public\/authentication\/securelogin/i.test(sample);
+  return (
+    /<input\b[^>]*(?:type=["']?password|autocomplete=["']?(?:username|current-password))/i.test(
+      sample,
+    ) || /auth\.tiaa\.org|\/public\/authentication\/securelogin/i.test(sample)
+  );
 }
 
-export function tiaaAuthenticationEntry(artifactTypes: readonly TiaaArtifactType[]): TiaaAuthenticationEntry {
+export function tiaaAuthenticationEntry(
+  artifactTypes: readonly TiaaArtifactType[],
+): TiaaAuthenticationEntry {
   return artifactTypes.length === 1 && artifactTypes[0] === 'statement'
     ? { url: TIAA_STATEMENTS_URL, ready: 'statement' }
     : { url: TIAA_ACTIVITY_URL, ready: 'activity' };
 }
 
 function isTiaaAuthenticationRequired(error: unknown): boolean {
-  return error instanceof TiaaAuthenticationRequiredError ||
-    (error instanceof Error && error.name === 'TiaaAuthenticationRequiredError');
+  return (
+    error instanceof TiaaAuthenticationRequiredError ||
+    (error instanceof Error && error.name === 'TiaaAuthenticationRequiredError')
+  );
 }
 
 function validatedTiaaUrl(value: string, expectedPath: RegExp): string {
@@ -351,7 +369,8 @@ function asRecord(value: unknown, description: string): Record<string, unknown> 
 }
 
 function requiredString(value: unknown, description: string): string {
-  if (typeof value !== 'string' || !value.trim()) throw new Error(`TIAA ${description} is unavailable`);
+  if (typeof value !== 'string' || !value.trim())
+    throw new Error(`TIAA ${description} is unavailable`);
   return value.trim();
 }
 
@@ -361,7 +380,11 @@ function requestRoot(request: Request): Request {
   return root;
 }
 
-function belongsToBrowserFetch(request: Request, destination: string, method: 'GET' | 'POST'): boolean {
+function belongsToBrowserFetch(
+  request: Request,
+  destination: string,
+  method: 'GET' | 'POST',
+): boolean {
   const root = requestRoot(request);
   return root.url() === destination && root.method() === method;
 }
@@ -375,12 +398,18 @@ export async function browserFetch(
   const method = options.method ?? 'GET';
   let authenticationEvidence = false;
   const observeRequest = (request: Request) => {
-    if (belongsToBrowserFetch(request, destination, method) &&
-      tiaaResponseRequiresAuthentication(200, request.url())) authenticationEvidence = true;
+    if (
+      belongsToBrowserFetch(request, destination, method) &&
+      tiaaResponseRequiresAuthentication(200, request.url())
+    )
+      authenticationEvidence = true;
   };
   const observeResponse = (response: Response) => {
-    if (belongsToBrowserFetch(response.request(), destination, method) &&
-      tiaaResponseRequiresAuthentication(response.status(), response.url())) authenticationEvidence = true;
+    if (
+      belongsToBrowserFetch(response.request(), destination, method) &&
+      tiaaResponseRequiresAuthentication(response.status(), response.url())
+    )
+      authenticationEvidence = true;
   };
   page.on('request', observeRequest);
   page.on('response', observeResponse);
@@ -390,13 +419,16 @@ export async function browserFetch(
       url: destination,
       method,
       headers: options.headers ?? {},
-      ...(options.body === undefined ? {} : {
-        bodyBase64: Buffer.from(options.body, 'utf8').toString('base64'),
-      }),
+      ...(options.body === undefined
+        ? {}
+        : {
+            bodyBase64: Buffer.from(options.body, 'utf8').toString('base64'),
+          }),
       timeoutMs: 30_000,
     });
   } catch (error) {
-    if (authenticationEvidence) throw new TiaaAuthenticationRequiredError('TIAA authentication is required');
+    if (authenticationEvidence)
+      throw new TiaaAuthenticationRequiredError('TIAA authentication is required');
     throw error;
   } finally {
     page.off('request', observeRequest);
@@ -408,12 +440,17 @@ export async function browserFetch(
     finalUrl: response.url,
     body: browserNativeResponseBody(response),
   };
-  if (authenticationEvidence || tiaaResponseRequiresAuthentication(decoded.status, decoded.finalUrl) ||
-    tiaaResponseBodyRequiresAuthentication(decoded.contentType, decoded.body)) {
+  if (
+    authenticationEvidence ||
+    tiaaResponseRequiresAuthentication(decoded.status, decoded.finalUrl) ||
+    tiaaResponseBodyRequiresAuthentication(decoded.contentType, decoded.body)
+  ) {
     throw new TiaaAuthenticationRequiredError('TIAA authentication is required');
   }
   if (response.redirected || response.status === 0) {
-    throw new Error('TIAA browser request returned an opaque redirect without authentication evidence');
+    throw new Error(
+      'TIAA browser request returned an opaque redirect without authentication evidence',
+    );
   }
   return decoded;
 }
@@ -428,7 +465,11 @@ async function browserFetchJson(
     headers: { accept: 'application/json', 'content-type': 'application/json' },
     ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
   });
-  if (response.status < 200 || response.status >= 300 || !/application\/json/i.test(response.contentType)) {
+  if (
+    response.status < 200 ||
+    response.status >= 300 ||
+    !/application\/json/i.test(response.contentType)
+  ) {
     throw new Error(`TIAA JSON request failed with status ${response.status}`);
   }
   try {
@@ -439,28 +480,45 @@ async function browserFetchJson(
 }
 
 export async function isTiaaAuthenticatedPage(page: Page): Promise<boolean> {
-  if (await page.locator(VISIBLE_AUTHENTICATION_FIELDS).count() > 0) return false;
+  if ((await page.locator(VISIBLE_AUTHENTICATION_FIELDS).count()) > 0) return false;
   const url = new URL(page.url());
   return isTiaaHost(url.hostname) && new RegExp(TIAA_AUTHENTICATED_PATH, 'i').test(url.pathname);
 }
 
 export async function waitUntilTiaaAuthenticated(page: Page, timeoutMs: number): Promise<void> {
   await page.waitForFunction(
-    ({ pathPattern, authenticationFields }: { pathPattern: string; authenticationFields: string }) => {
-      const visibleAuthenticationField = Array.from(document.querySelectorAll(authenticationFields)).some(element => {
+    ({
+      pathPattern,
+      authenticationFields,
+    }: {
+      pathPattern: string;
+      authenticationFields: string;
+    }) => {
+      const visibleAuthenticationField = Array.from(
+        document.querySelectorAll(authenticationFields),
+      ).some((element) => {
         const style = getComputedStyle(element);
-        return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
+        return (
+          style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          element.getClientRects().length > 0
+        );
       });
-      return !visibleAuthenticationField
-        && /(?:^|\.)tiaa\.org$/i.test(location.hostname)
-        && new RegExp(pathPattern, 'i').test(location.pathname);
+      return (
+        !visibleAuthenticationField &&
+        /(?:^|\.)tiaa\.org$/i.test(location.hostname) &&
+        new RegExp(pathPattern, 'i').test(location.pathname)
+      );
     },
     { pathPattern: TIAA_AUTHENTICATED_PATH, authenticationFields: AUTHENTICATION_FIELDS },
     { timeout: timeoutMs },
   );
 }
 
-async function openTiaaForAuthentication(page: Page, entry: TiaaAuthenticationEntry): Promise<void> {
+async function openTiaaForAuthentication(
+  page: Page,
+  entry: TiaaAuthenticationEntry,
+): Promise<void> {
   let current: URL | null = null;
   try {
     current = new URL(page.url());
@@ -470,31 +528,50 @@ async function openTiaaForAuthentication(page: Page, entry: TiaaAuthenticationEn
     try {
       await page.goto(entry.url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     } catch (error) {
-      if (!/net::ERR_ABORTED|navigation.*interrupted/i.test(String(error instanceof Error ? error.message : error))) {
+      if (
+        !/net::ERR_ABORTED|navigation.*interrupted/i.test(
+          String(error instanceof Error ? error.message : error),
+        )
+      ) {
         throw error;
       }
     }
   }
-  const ready = entry.ready === 'activity'
-    ? page.getByRole('button', { name: /^Download$/i })
-    : page.getByRole('combobox');
+  const ready =
+    entry.ready === 'activity'
+      ? page.getByRole('button', { name: /^Download$/i })
+      : page.getByRole('combobox');
   await Promise.race([
     ready.first().waitFor({ state: 'visible', timeout: 30_000 }),
-    page.locator(VISIBLE_AUTHENTICATION_FIELDS).first().waitFor({ state: 'visible', timeout: 30_000 }),
-    page.waitForURL(url => /login|signin|authenticate|authorization|oauth|sso|auth\./i.test(url.toString()), {
-      timeout: 30_000,
-    }),
+    page
+      .locator(VISIBLE_AUTHENTICATION_FIELDS)
+      .first()
+      .waitFor({ state: 'visible', timeout: 30_000 }),
+    page.waitForURL(
+      (url) => /login|signin|authenticate|authorization|oauth|sso|auth\./i.test(url.toString()),
+      {
+        timeout: 30_000,
+      },
+    ),
   ]);
 }
 
-async function navigateToSpa(page: Page, url: string, ready: () => ReturnType<Page['locator']>): Promise<void> {
+async function navigateToSpa(
+  page: Page,
+  url: string,
+  ready: () => ReturnType<Page['locator']>,
+): Promise<void> {
   const target = new URL(url);
   const current = new URL(page.url());
   if (current.hostname !== target.hostname || current.pathname !== target.pathname) {
     try {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     } catch (error) {
-      if (!/net::ERR_ABORTED|navigation.*interrupted/i.test(String(error instanceof Error ? error.message : error))) {
+      if (
+        !/net::ERR_ABORTED|navigation.*interrupted/i.test(
+          String(error instanceof Error ? error.message : error),
+        )
+      ) {
         throw error;
       }
     }
@@ -507,10 +584,12 @@ async function comboboxOptions(page: Page): Promise<Array<{ label: string; value
   await combobox.click();
   const options = page.getByRole('option');
   await options.first().waitFor({ state: 'visible', timeout: 30_000 });
-  const values = await options.evaluateAll(elements => elements.map(element => ({
-    label: (element.textContent ?? '').replace(/\s+/g, ' ').trim(),
-    value: element.getAttribute('data-value') ?? element.getAttribute('value') ?? '',
-  })));
+  const values = await options.evaluateAll((elements) =>
+    elements.map((element) => ({
+      label: (element.textContent ?? '').replace(/\s+/g, ' ').trim(),
+      value: element.getAttribute('data-value') ?? element.getAttribute('value') ?? '',
+    })),
+  );
   await page.keyboard.press('Escape');
   return values;
 }
@@ -525,7 +604,8 @@ async function selectComboboxLabel(page: Page, label: string): Promise<void> {
 
 export function tiaaActivityAccountTypes(value: unknown): ActivityAccountType[] {
   const response = asRecord(value, 'activity options');
-  if (!Array.isArray(response.availableAccountTypes)) throw new Error('TIAA activity account options are unavailable');
+  if (!Array.isArray(response.availableAccountTypes))
+    throw new Error('TIAA activity account options are unavailable');
   const accountTypes = response.availableAccountTypes.map((itemValue, index) => {
     const item = asRecord(itemValue, `activity account option ${index + 1}`);
     const id = requiredString(item.id, 'activity account option id');
@@ -537,7 +617,8 @@ export function tiaaActivityAccountTypes(value: unknown): ActivityAccountType[] 
       routingKey: routingKey(`activity-type\u0000${id}\u0000${description}`),
     };
   });
-  if (accountTypes.length === 0) throw new Error('TIAA activity download exposed no account selections');
+  if (accountTypes.length === 0)
+    throw new Error('TIAA activity download exposed no account selections');
   if (accountTypes.length !== 1 || !/\bretirement\b/i.test(accountTypes[0]!.description)) {
     throw new Error('TIAA activity download exposed unsupported account selections');
   }
@@ -548,11 +629,13 @@ async function discoverActivityMetadata(
   page: Page,
   config: Pick<TiaaSyncConfig, 'from' | 'through'>,
 ): Promise<ActivityPageMetadata> {
-  await navigateToSpa(page, TIAA_ACTIVITY_URL, () => page.getByRole('button', { name: /^Download$/i }));
+  await navigateToSpa(page, TIAA_ACTIVITY_URL, () =>
+    page.getByRole('button', { name: /^Download$/i }),
+  );
   const accountTypes = tiaaActivityAccountTypes(
     await browserFetchJson(page, TIAA_ACTIVITY_OPTIONS_PATH, { method: 'POST' }),
   );
-  if (new Set(accountTypes.map(account => account.routingKey)).size !== accountTypes.length) {
+  if (new Set(accountTypes.map((account) => account.routingKey)).size !== accountTypes.length) {
     throw new Error('TIAA activity account selections are ambiguous');
   }
 
@@ -560,11 +643,16 @@ async function discoverActivityMetadata(
   const periodsByYear = new Map<number, TiaaActivityPeriod>();
   for (const option of await comboboxOptions(page)) {
     const period = tiaaActivityPeriod(option.label, option.value, currentYear);
-    if (!period || !dateIntersection(period.coveredFrom, period.coveredThrough, config.from, config.through)) continue;
+    if (
+      !period ||
+      !dateIntersection(period.coveredFrom, period.coveredThrough, config.from, config.through)
+    )
+      continue;
     periodsByYear.set(period.year, period);
   }
   const periods = [...periodsByYear.values()].sort((left, right) => right.year - left.year);
-  if (periods.length === 0) throw new Error('TIAA offers no activity period for the requested range');
+  if (periods.length === 0)
+    throw new Error('TIAA offers no activity period for the requested range');
   return { accountTypes, periods };
 }
 
@@ -574,7 +662,10 @@ export function validateTiaaActivityRequestBody(
   account: Pick<ActivityAccountType, 'id' | 'description'>,
 ): Record<string, unknown> {
   const record = asRecord(value, 'activity download request');
-  if (typeof record.selectedTimePeriod !== 'string' || !Array.isArray(record.selectedAccountTypes)) {
+  if (
+    typeof record.selectedTimePeriod !== 'string' ||
+    !Array.isArray(record.selectedAccountTypes)
+  ) {
     throw new Error('TIAA activity download request had an unexpected shape');
   }
   if (record.downloadCSV !== true || record.noAccountSelected !== false) {
@@ -584,10 +675,16 @@ export function validateTiaaActivityRequestBody(
     throw new Error('TIAA activity download request did not match the selected period');
   }
   if (record.selectedAccountTypes.length !== 1) {
-    throw new Error('TIAA activity download request did not isolate the supported account selection');
+    throw new Error(
+      'TIAA activity download request did not isolate the supported account selection',
+    );
   }
   const selected = asRecord(record.selectedAccountTypes[0], 'selected activity account');
-  if (selected.id !== account.id || selected.description !== account.description || selected.selected !== true) {
+  if (
+    selected.id !== account.id ||
+    selected.description !== account.description ||
+    selected.selected !== true
+  ) {
     throw new Error('TIAA activity download request did not match the supported account selection');
   }
   return record;
@@ -601,13 +698,20 @@ async function captureActivityRequestBody(
   await selectComboboxLabel(page, period.label);
   const csv = page.getByRole('checkbox', { name: /CSV/i }).first();
   await csv.waitFor({ state: 'visible', timeout: 30_000 });
-  if (!await csv.isChecked()) await csv.check();
-  const requestPromise = page.waitForRequest(request => {
-    const url = new URL(request.url());
-    return request.method() === 'POST' && url.hostname === 'my.tiaa.org' && url.pathname === TIAA_ACTIVITY_DOWNLOAD_PATH;
-  }, { timeout: 30_000 });
+  if (!(await csv.isChecked())) await csv.check();
+  const requestPromise = page.waitForRequest(
+    (request) => {
+      const url = new URL(request.url());
+      return (
+        request.method() === 'POST' &&
+        url.hostname === 'my.tiaa.org' &&
+        url.pathname === TIAA_ACTIVITY_DOWNLOAD_PATH
+      );
+    },
+    { timeout: 30_000 },
+  );
   const routePattern = `**${TIAA_ACTIVITY_DOWNLOAD_PATH}`;
-  await page.route(routePattern, route => route.abort());
+  await page.route(routePattern, (route) => route.abort());
   try {
     await page.getByRole('button', { name: /^Download$/i }).click();
     const request = await requestPromise;
@@ -622,12 +726,18 @@ async function responseBody(response: BrowserFetchResult, kind: TiaaArtifactKind
     throw new Error(`TIAA ${kind.toUpperCase()} request failed with status ${response.status}`);
   }
   const minimumSize = kind === 'pdf' ? 10_000 : 50;
-  if (response.body.length < minimumSize) throw new Error(`TIAA ${kind.toUpperCase()} response was empty or too small`);
-  const signatureMatches = kind === 'pdf'
-    ? response.body.subarray(0, 5).toString('ascii') === '%PDF-'
-    : !response.body.includes(0) && response.body.toString('utf8', 0, 1_024).replace(/^\uFEFF/, '')
-      .startsWith('Date,AccountId,Action,Security,Price,Quantity,Amount,Text,Memo,Commission');
-  if (!signatureMatches) throw new Error(`TIAA ${kind.toUpperCase()} response had an unexpected signature`);
+  if (response.body.length < minimumSize)
+    throw new Error(`TIAA ${kind.toUpperCase()} response was empty or too small`);
+  const signatureMatches =
+    kind === 'pdf'
+      ? response.body.subarray(0, 5).toString('ascii') === '%PDF-'
+      : !response.body.includes(0) &&
+        response.body
+          .toString('utf8', 0, 1_024)
+          .replace(/^\uFEFF/, '')
+          .startsWith('Date,AccountId,Action,Security,Price,Quantity,Amount,Text,Memo,Commission');
+  if (!signatureMatches)
+    throw new Error(`TIAA ${kind.toUpperCase()} response had an unexpected signature`);
   if (/text\/html|application\/(?:json|xhtml\+xml)/.test(response.contentType)) {
     throw new Error(`TIAA ${kind.toUpperCase()} response had an unexpected content type`);
   }
@@ -636,15 +746,22 @@ async function responseBody(response: BrowserFetchResult, kind: TiaaArtifactKind
 
 export function tiaaActivityAccountIds(text: string): string[] {
   const rows = parseCsvRows(text);
-  const headerIndex = rows.findIndex(row => row[0]?.trim() === 'Date' && row.includes('AccountId'));
+  const headerIndex = rows.findIndex(
+    (row) => row[0]?.trim() === 'Date' && row.includes('AccountId'),
+  );
   if (headerIndex < 0) throw new Error('TIAA CSV header is missing');
-  const accountIndex = rows[headerIndex]!.findIndex(value => value.trim() === 'AccountId');
-  const ids = rows.slice(headerIndex + 1).map(row => row[accountIndex]?.trim() ?? '').filter(Boolean);
+  const accountIndex = rows[headerIndex]!.findIndex((value) => value.trim() === 'AccountId');
+  const ids = rows
+    .slice(headerIndex + 1)
+    .map((row) => row[accountIndex]?.trim() ?? '')
+    .filter(Boolean);
   return [...new Set(ids)];
 }
 
 async function fileExists(path: string): Promise<boolean> {
-  return stat(path).then(info => info.isFile()).catch(() => false);
+  return stat(path)
+    .then((info) => info.isFile())
+    .catch(() => false);
 }
 
 function safeArtifactPath(outputDir: string, fileName: string): string {
@@ -652,7 +769,8 @@ function safeArtifactPath(outputDir: string, fileName: string): string {
     throw new Error('TIAA artifact filename is invalid');
   }
   const path = resolve(outputDir, fileName);
-  if (dirname(path) !== resolve(outputDir)) throw new Error('TIAA artifact path escaped its output directory');
+  if (dirname(path) !== resolve(outputDir))
+    throw new Error('TIAA artifact path escaped its output directory');
   return path;
 }
 
@@ -671,11 +789,15 @@ export async function validateTiaaActivityArtifact(
     throw new Error('EasyMoney did not recognize the TIAA CSV artifact');
   }
   const parsed = await parseTiaaActivity(path);
-  if (parsed.transactions.length === 0) throw new Error('TIAA CSV artifact contains no parser-visible activity');
+  if (parsed.transactions.length === 0)
+    throw new Error('TIAA CSV artifact contains no parser-visible activity');
   const remoteAccountIds = tiaaActivityAccountIds(text);
-  if (remoteAccountIds.length === 0) throw new Error('TIAA activity artifact exposes no remote account identities');
+  if (remoteAccountIds.length === 0)
+    throw new Error('TIAA activity artifact exposes no remote account identities');
   const expectedAccountNames = remoteAccountIds.map(tiaaActivitySourceAccountName).sort();
-  const parsedAccountNames = [...new Set(parsed.transactions.map(transaction => transaction.account).filter(Boolean))].sort();
+  const parsedAccountNames = [
+    ...new Set(parsed.transactions.map((transaction) => transaction.account).filter(Boolean)),
+  ].sort();
   if (expectedAccountNames.join('\u0000') !== parsedAccountNames.join('\u0000')) {
     throw new Error('TIAA parser account claims do not match the CSV remote identities');
   }
@@ -696,23 +818,28 @@ export async function validateTiaaStatementArtifact(
   expectedCoverage?: { coveredFrom: string; coveredThrough: string },
 ): Promise<StatementValidation> {
   const info = await stat(path);
-  if (!info.isFile() || info.size < 10_000) throw new Error('TIAA PDF artifact is empty or too small');
+  if (!info.isFile() || info.size < 10_000)
+    throw new Error('TIAA PDF artifact is empty or too small');
   const bytes = await readFile(path);
-  if (bytes.subarray(0, 5).toString('ascii') !== '%PDF-') throw new Error('TIAA PDF artifact has an unexpected signature');
+  if (bytes.subarray(0, 5).toString('ascii') !== '%PDF-')
+    throw new Error('TIAA PDF artifact has an unexpected signature');
   if (!tiaaStatementMeta.matches({ filename: logicalFileName, sample: '' })) {
     throw new Error('EasyMoney did not recognize the TIAA PDF artifact');
   }
   const parsed = await parser(path);
   if (parsed.balances.length === 0) throw new Error('TIAA PDF parser found no balance');
   const parsedAccounts = new Set([
-    ...parsed.transactions.map(transaction => transaction.account),
-    ...parsed.balances.map(balance => balance.account),
+    ...parsed.transactions.map((transaction) => transaction.account),
+    ...parsed.balances.map((balance) => balance.account),
   ]);
   if (parsedAccounts.size !== 1 || !parsedAccounts.has(TIAA_STATEMENT_ACCOUNT_NAME)) {
     throw new Error('TIAA PDF parser produced an unexpected account identity');
   }
-  if (expectedCoverage &&
-    (parsed.covered_from !== expectedCoverage.coveredFrom || parsed.covered_to !== expectedCoverage.coveredThrough)) {
+  if (
+    expectedCoverage &&
+    (parsed.covered_from !== expectedCoverage.coveredFrom ||
+      parsed.covered_to !== expectedCoverage.coveredThrough)
+  ) {
     throw new Error('TIAA PDF parser coverage did not match the requested statement period');
   }
   return {
@@ -750,7 +877,7 @@ async function existingValidatedArtifact<T>(options: {
   validate: (path: string, logicalFileName: string) => Promise<T>;
 }): Promise<{ path: string; source: 'existing'; validation: T } | null> {
   const path = safeArtifactPath(options.outputDir, options.fileName);
-  if (!await fileExists(path)) return null;
+  if (!(await fileExists(path))) return null;
   return { path, source: 'existing', validation: await options.validate(path, options.fileName) };
 }
 
@@ -762,7 +889,10 @@ export function validateTiaaActivityCoverage(
   coverage: Pick<ActivityValidation, 'coveredFrom' | 'coveredThrough'>,
   period: Pick<TiaaActivityPeriod, 'coveredFrom' | 'coveredThrough'>,
 ): void {
-  if (coverage.coveredFrom < period.coveredFrom || coverage.coveredThrough > period.coveredThrough) {
+  if (
+    coverage.coveredFrom < period.coveredFrom ||
+    coverage.coveredThrough > period.coveredThrough
+  ) {
     throw new Error('TIAA activity artifact falls outside the selected period');
   }
 }
@@ -775,20 +905,30 @@ async function downloadActivityArtifact(
   requestTemplate: Record<string, unknown>,
 ): Promise<TiaaDownloadedArtifact> {
   const fileName = activityFileName(account, period);
-  const existing = await existingValidatedArtifact({ outputDir, fileName, validate: validateTiaaActivityArtifact });
-  const saved = existing ?? await (async () => {
-    const response = await browserFetch(page, new URL(TIAA_ACTIVITY_DOWNLOAD_PATH, TIAA_HOME_URL).toString(), {
-      method: 'POST',
-      headers: { accept: 'text/csv', 'content-type': 'application/json' },
-      body: JSON.stringify(requestTemplate),
-    });
-    return writeValidatedArtifact({
-      outputDir,
-      fileName,
-      body: await responseBody(response, 'csv'),
-      validate: validateTiaaActivityArtifact,
-    });
-  })();
+  const existing = await existingValidatedArtifact({
+    outputDir,
+    fileName,
+    validate: validateTiaaActivityArtifact,
+  });
+  const saved =
+    existing ??
+    (await (async () => {
+      const response = await browserFetch(
+        page,
+        new URL(TIAA_ACTIVITY_DOWNLOAD_PATH, TIAA_HOME_URL).toString(),
+        {
+          method: 'POST',
+          headers: { accept: 'text/csv', 'content-type': 'application/json' },
+          body: JSON.stringify(requestTemplate),
+        },
+      );
+      return writeValidatedArtifact({
+        outputDir,
+        fileName,
+        body: await responseBody(response, 'csv'),
+        validate: validateTiaaActivityArtifact,
+      });
+    })());
   validateTiaaActivityCoverage(saved.validation, period);
   return {
     fileName,
@@ -814,8 +954,9 @@ function nestedObjects(value: unknown): Array<Record<string, unknown>> {
 }
 
 export function tiaaStatementDocuments(value: unknown): StatementDocument[] {
-  const documents = nestedObjects(value).flatMap(item => {
-    const additionalDescription = typeof item.additionalDescription === 'string' ? item.additionalDescription : '';
+  const documents = nestedObjects(value).flatMap((item) => {
+    const additionalDescription =
+      typeof item.additionalDescription === 'string' ? item.additionalDescription : '';
     const description = typeof item.description === 'string' ? item.description : '';
     const period = tiaaStatementPeriod(`${additionalDescription} ${description}`);
     if (!period) return [];
@@ -824,39 +965,53 @@ export function tiaaStatementDocuments(value: unknown): StatementDocument[] {
     const docTypeId = typeof item.docTypeID === 'string' ? item.docTypeID.trim() : '';
     const categoryId = typeof item.categoryID === 'string' ? item.categoryID.trim() : '';
     const productType = typeof item.productType === 'string' ? item.productType.trim() : '';
-    const destinationName = typeof item.destinationName === 'string' ? item.destinationName.trim() : '';
+    const destinationName =
+      typeof item.destinationName === 'string' ? item.destinationName.trim() : '';
     if (!docId || !docLocation || !docTypeId || !categoryId || !productType || !destinationName) {
       throw new Error('TIAA quarterly statement metadata is missing a stable account identity');
     }
-    return [{
-      ...period,
-      docId,
-      docLocation,
-      docTypeId,
-      categoryId,
-      productType,
-      destinationName,
-      routingKey: routingKey(`statement\u0000${productType}\u0000${categoryId}\u0000${destinationName}`),
-    }];
+    return [
+      {
+        ...period,
+        docId,
+        docLocation,
+        docTypeId,
+        categoryId,
+        productType,
+        destinationName,
+        routingKey: routingKey(
+          `statement\u0000${productType}\u0000${categoryId}\u0000${destinationName}`,
+        ),
+      },
+    ];
   });
   const unique = new Map<string, StatementDocument>();
-  for (const document of documents) unique.set(`${document.docId}\u0000${document.docLocation}`, document);
-  return [...unique.values()].sort((left, right) => right.coveredThrough.localeCompare(left.coveredThrough));
+  for (const document of documents)
+    unique.set(`${document.docId}\u0000${document.docLocation}`, document);
+  return [...unique.values()].sort((left, right) =>
+    right.coveredThrough.localeCompare(left.coveredThrough),
+  );
 }
 
-export function validateTiaaStatementDocumentIdentities(documents: readonly StatementDocument[]): void {
+export function validateTiaaStatementDocumentIdentities(
+  documents: readonly StatementDocument[],
+): void {
   if (documents.length === 0) return;
-  const statementRoutingKeys = new Set(documents.map(document => document.routingKey));
-  const statementPeriods = new Set(documents.map(document => document.coveredThrough));
+  const statementRoutingKeys = new Set(documents.map((document) => document.routingKey));
+  const statementPeriods = new Set(documents.map((document) => document.coveredThrough));
   if (statementRoutingKeys.size !== 1 || statementPeriods.size !== documents.length) {
-    throw new Error('TIAA statement metadata identifies multiple accounts that the parser cannot distinguish');
+    throw new Error(
+      'TIAA statement metadata identifies multiple accounts that the parser cannot distinguish',
+    );
   }
 }
 
-export function tiaaStatementRequestUrl(document: Pick<
-  StatementDocument,
-  'docId' | 'label' | 'categoryId' | 'docTypeId' | 'docLocation' | 'productType'
->): string {
+export function tiaaStatementRequestUrl(
+  document: Pick<
+    StatementDocument,
+    'docId' | 'label' | 'categoryId' | 'docTypeId' | 'docLocation' | 'productType'
+  >,
+): string {
   const url = new URL(TIAA_STATEMENT_REPORT_PATH, TIAA_HOME_URL);
   url.searchParams.set('doc', document.docId);
   url.searchParams.set('linkName', document.label);
@@ -880,29 +1035,33 @@ async function downloadStatementArtifact(
   const validate = (path: string, logicalFileName: string) =>
     validateTiaaStatementArtifact(path, logicalFileName, parseTiaaStatement, document);
   const existing = await existingValidatedArtifact({ outputDir, fileName, validate });
-  const saved = existing ?? await (async () => {
-    const direct = await runAuthenticatedHttpRequest(page, {
-      url: tiaaStatementRequestUrl(document),
-      headers: { accept: 'application/pdf' },
-      timeoutMs: 30_000,
-    });
-    const response = {
-      status: direct.status,
-      contentType: direct.headers['content-type'] ?? '',
-      finalUrl: direct.finalUrl,
-      body: direct.body,
-    };
-    if (tiaaResponseRequiresAuthentication(response.status, response.finalUrl) ||
-      tiaaResponseBodyRequiresAuthentication(response.contentType, response.body)) {
-      throw new TiaaAuthenticationRequiredError('TIAA statement authentication is required');
-    }
-    return writeValidatedArtifact({
-      outputDir,
-      fileName,
-      body: await responseBody(response, 'pdf'),
-      validate,
-    });
-  })();
+  const saved =
+    existing ??
+    (await (async () => {
+      const direct = await runAuthenticatedHttpRequest(page, {
+        url: tiaaStatementRequestUrl(document),
+        headers: { accept: 'application/pdf' },
+        timeoutMs: 30_000,
+      });
+      const response = {
+        status: direct.status,
+        contentType: direct.headers['content-type'] ?? '',
+        finalUrl: direct.finalUrl,
+        body: direct.body,
+      };
+      if (
+        tiaaResponseRequiresAuthentication(response.status, response.finalUrl) ||
+        tiaaResponseBodyRequiresAuthentication(response.contentType, response.body)
+      ) {
+        throw new TiaaAuthenticationRequiredError('TIAA statement authentication is required');
+      }
+      return writeValidatedArtifact({
+        outputDir,
+        fileName,
+        body: await responseBody(response, 'pdf'),
+        validate,
+      });
+    })());
   return {
     fileName,
     path: saved.path,
@@ -925,8 +1084,8 @@ async function discoverStatementDocuments(
 ): Promise<StatementDocument[]> {
   await navigateToSpa(page, TIAA_STATEMENTS_URL, () => page.getByRole('combobox'));
   const metadata = await browserFetchJson(page, TIAA_STATEMENT_METADATA_PATH);
-  return tiaaStatementDocuments(metadata).filter(document =>
-    dateIntersection(document.coveredFrom, document.coveredThrough, config.from, config.through)
+  return tiaaStatementDocuments(metadata).filter((document) =>
+    dateIntersection(document.coveredFrom, document.coveredThrough, config.from, config.through),
   );
 }
 
@@ -962,7 +1121,8 @@ function createProgressTracker(onProgress: (event: TiaaProgressEvent) => void) {
     },
     complete(phase: TiaaProgressPhase, message: string, data?: TiaaProgressEvent['data']) {
       const now = performance.now();
-      timingsMs[phase] = (timingsMs[phase] ?? 0) + Math.round(now - (phaseStarts.get(phase) ?? now));
+      timingsMs[phase] =
+        (timingsMs[phase] ?? 0) + Math.round(now - (phaseStarts.get(phase) ?? now));
       emit(phase, 'completed', message, data);
     },
   };
@@ -1014,7 +1174,10 @@ export async function runAuthenticatedTiaa(
       const account = activityMetadata.accountTypes[0]!;
       const requestTemplate = await operations.captureActivityRequestBody(page, period, account);
       index += 1;
-      progress.progress('activity-downloads', 'Downloading a TIAA activity artifact', { index, total });
+      progress.progress('activity-downloads', 'Downloading a TIAA activity artifact', {
+        index,
+        total,
+      });
       progress.start('validation', 'Validating a TIAA activity artifact', { index, total });
       try {
         const artifact = await operations.downloadActivityArtifact(
@@ -1025,41 +1188,57 @@ export async function runAuthenticatedTiaa(
           requestTemplate,
         );
         artifacts.push(artifact);
-        progress.complete('validation', 'TIAA activity passed signature, account-claim, and parser validation', {
-          index,
-          total,
-          sourceAccounts: artifact.account.remoteAccounts.length,
-          transactions: artifact.transactionCount,
-        });
+        progress.complete(
+          'validation',
+          'TIAA activity passed signature, account-claim, and parser validation',
+          {
+            index,
+            total,
+            sourceAccounts: artifact.account.remoteAccounts.length,
+            transactions: artifact.transactionCount,
+          },
+        );
       } catch (error) {
-        if (/no parser-visible activity/.test(String(error instanceof Error ? error.message : error))) {
+        if (
+          /no parser-visible activity/.test(String(error instanceof Error ? error.message : error))
+        ) {
           emptyActivityExports += 1;
-          progress.complete('validation', 'TIAA activity period contained no importable rows', { index, total });
+          progress.complete('validation', 'TIAA activity period contained no importable rows', {
+            index,
+            total,
+          });
           continue;
         }
         throw error;
       }
     }
     progress.complete('activity-downloads', 'TIAA activity downloads are complete', {
-      artifacts: artifacts.filter(artifact => artifact.artifactType === 'activity').length,
+      artifacts: artifacts.filter((artifact) => artifact.artifactType === 'activity').length,
       empty: emptyActivityExports,
     });
   }
 
   let statementsDiscovered = 0;
   if (requestedTypes.has('statement')) {
-    progress.start('statement-discovery', 'Discovering TIAA statements from authenticated metadata');
+    progress.start(
+      'statement-discovery',
+      'Discovering TIAA statements from authenticated metadata',
+    );
     const documents = await operations.discoverStatementDocuments(page, config);
     validateTiaaStatementDocumentIdentities(documents);
-    const statementRoutingKeys = new Set(documents.map(document => document.routingKey));
+    const statementRoutingKeys = new Set(documents.map((document) => document.routingKey));
     statementsDiscovered = documents.length;
     progress.complete('statement-discovery', 'TIAA statement discovery is complete', {
       statements: documents.length,
       accountIdentities: statementRoutingKeys.size,
     });
-    progress.start('statement-downloads', 'Downloading TIAA statements from authenticated requests', {
-      total: documents.length,
-    });
+    progress.start(
+      'statement-downloads',
+      'Downloading TIAA statements from authenticated requests',
+      {
+        total: documents.length,
+      },
+    );
     for (let index = 0; index < documents.length; index += 1) {
       const document = documents[index]!;
       progress.progress('statement-downloads', 'Downloading a TIAA statement artifact', {
@@ -1084,7 +1263,11 @@ export async function runAuthenticatedTiaa(
     });
   }
 
-  const sourceClaims = new Set(artifacts.flatMap(artifact => artifact.account.remoteAccounts.map(account => account.claimKey)));
+  const sourceClaims = new Set(
+    artifacts.flatMap((artifact) =>
+      artifact.account.remoteAccounts.map((account) => account.claimKey),
+    ),
+  );
   return {
     artifacts,
     accountsDiscovered: sourceClaims.size,
@@ -1149,11 +1332,16 @@ export async function runTiaaSync(
       completionDescription: 'TIAA downloads are complete and ready for review.',
       isAuthenticated: isTiaaAuthenticatedPage,
       waitUntilAuthenticated: waitUntilTiaaAuthenticated,
-      onProgress: message => {
-        if (/^Authentication browser delivered: headed=(?:true|false) nativeWindow=(?:true|false) windowState=(?:normal|minimized|maximized|fullscreen) onScreen=(?:true|false) activation=(?:macos-requested|not-required)$/.test(message)) {
+      onProgress: (message) => {
+        if (
+          /^Authentication browser delivered: headed=(?:true|false) nativeWindow=(?:true|false) windowState=(?:normal|minimized|maximized|fullscreen) onScreen=(?:true|false) activation=(?:macos-requested|not-required)$/.test(
+            message,
+          )
+        ) {
           progress.progress('authentication', message);
         }
-        if (/Authentication complete/i.test(message)) progress.progress('authentication', 'TIAA login and MFA completed');
+        if (/Authentication complete/i.test(message))
+          progress.progress('authentication', 'TIAA login and MFA completed');
       },
       programBindings: {
         isAuthenticated: isTiaaAuthenticatedPage,
@@ -1164,11 +1352,14 @@ export async function runTiaaSync(
       },
     },
   );
-  if (result.status === 'login-required') throw new Error(result.action ?? 'TIAA login is required');
+  if (result.status === 'login-required')
+    throw new Error(result.action ?? 'TIAA login is required');
   if (result.status !== 'complete') throw new Error(result.message ?? 'TIAA sync did not complete');
 
   progress.start('complete', 'Finalizing TIAA artifact results');
-  progress.complete('complete', 'TIAA artifacts are ready for preview', { artifacts: result.artifacts.length });
+  progress.complete('complete', 'TIAA artifacts are ready for preview', {
+    artifacts: result.artifacts.length,
+  });
   return {
     artifacts: result.artifacts,
     accountsDiscovered: result.accountsDiscovered,

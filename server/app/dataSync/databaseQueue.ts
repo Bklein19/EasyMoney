@@ -3,7 +3,10 @@ export class SerialSyncDatabaseQueue {
 
   run<T>(operation: () => T | Promise<T>): Promise<T> {
     const result = this.tail.then(operation, operation);
-    this.tail = result.then(() => {}, () => {});
+    this.tail = result.then(
+      () => {},
+      () => {},
+    );
     return result;
   }
 }

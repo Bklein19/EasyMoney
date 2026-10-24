@@ -8,10 +8,10 @@ test('sorts analytics chart periods from oldest to newest without mutating repor
     { key: '2026-05', label: 'May 2026' },
   ];
 
-  expect(sortAnalyticsPeriodsChronologically(rows).map(row => row.key)).toEqual([
+  expect(sortAnalyticsPeriodsChronologically(rows).map((row) => row.key)).toEqual([
     '2026-01',
     '2026-05',
     '2026-09',
   ]);
-  expect(rows.map(row => row.key)).toEqual(['2026-09', '2026-01', '2026-05']);
+  expect(rows.map((row) => row.key)).toEqual(['2026-09', '2026-01', '2026-05']);
 });
