@@ -3,9 +3,9 @@ import { packagedBunVersion } from '../../scripts/packaged-bun-version';
 import packageJson from '../../package.json';
 
 test('packaged runtime comes from Electrobun metadata, not the development Bun version', () => {
-  expect(packageJson.packageManager).toBe('bun@1.4.3');
+  expect(packageJson.packageManager).toBe('bun@1.4.4');
   expect(packagedBunVersion({ bun: '1.4.0' })).toBe('1.4.0');
-  expect(packagedBunVersion({ bun: '1.4.3' })).toBe('1.4.3');
+  expect(packagedBunVersion({ bun: '1.4.4' })).toBe('1.4.4');
 });
 
 test('runtime audit rejects missing, invalid, and additional runtimes', () => {

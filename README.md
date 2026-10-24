@@ -98,7 +98,7 @@ The `data/` directory is ignored by Git. Do not commit personal financial export
 
 EasyMoney uses Bun as its single runtime and package runner. Use `bun`/`bunx` for development, checks, scripts, and server execution. Do not add Python helper scripts, npm/yarn/pnpm workflows, or standalone Node commands for project tasks; `node:` imports are used only as runtime APIs inside code executed by Bun.
 
-Development and CI use Bun `1.4.3` for its built-in `bun check` TypeScript checker. Electrobun `2.0.4` independently pins the packaged application's Bun runtime to `1.4.0`; upgrading development tools does not replace the bundled runtime.
+Development and CI use Bun `1.4.4` for its built-in `bun check` TypeScript checker. Electrobun `2.0.4` independently pins the packaged application's Bun runtime to `1.4.0`; upgrading development tools does not replace the bundled runtime.
 
 Install dependencies:
 
