@@ -4,11 +4,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { commonAccountLast4 } from './app/accountLast4.ts';
 import { hashContent } from './hash.ts';
+import { maintainBackupDirectory } from './backupRetention';
 import {
   selectedDatabasePath,
   writeSnapshot,
   validateSnapshot,
   flushSnapshotFile,
+  withSnapshotFile,
 } from './databaseSnapshots.ts';
 
 type DatabaseValue = string | number | bigint | boolean | null | Uint8Array | Date;
@@ -136,18 +138,28 @@ export function databaseBackupStatus() {
 }
 
 export function createDatabaseBackup(reason = 'manual') {
-  return writeSnapshot(sqlite, backupDirectory, reason);
+  const backup = writeSnapshot(sqlite, backupDirectory, reason);
+  try {
+    maintainBackupDirectory(backupDirectory);
+  } catch (error) {
+    // A valid new safety copy must not become a failed financial operation because pruning failed.
+    console.warn('Backup retention skipped; existing checkpoints retained.', error);
+  }
+  return backup;
 }
 
 export function stageDatabaseRestore(snapshotPath: string) {
   if (restorePending) throw new Error('A restore is already scheduled. Restart EasyMoney.');
   const summary = validateSnapshot(snapshotPath);
-  const beforeRestore = createDatabaseBackup('before-restore');
   const fileName = `restored-${crypto.randomUUID()}.sqlite`;
   const destination = path.join(path.dirname(baseDbPath), fileName);
-  fs.copyFileSync(snapshotPath, destination, fs.constants.COPYFILE_EXCL);
+  withSnapshotFile(snapshotPath, (source) =>
+    fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL),
+  );
   validateSnapshot(destination);
   flushSnapshotFile(destination);
+  // Stage the selection before retention runs: it may be an older automatic backup due for pruning.
+  const beforeRestore = createDatabaseBackup('before-restore');
   const pointer = `${baseDbPath}.restore.json`;
   const temporary = `${pointer}.${crypto.randomUUID()}.tmp`;
   fs.writeFileSync(temporary, JSON.stringify({ fileName }), { mode: 0o600, flag: 'wx' });

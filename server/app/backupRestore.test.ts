@@ -3,34 +3,37 @@ import { Database } from 'bun:sqlite';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { withSnapshotFile } from '../databaseSnapshots';
 
-test('restore switches databases after restart, preserves annotations and plans, and retains the previous database', () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'easymoney-restore-cycle-'));
-  const databasePath = path.join(directory, 'live.sqlite');
-  const imports = `
+test.each(['gzip', 'legacy'] as const)(
+  'restore from %s switches after restart, preserves annotations and retains the previous database',
+  (format) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'easymoney-restore-cycle-'));
+    const databasePath = path.join(directory, 'live.sqlite');
+    const imports = `
     const dbModule = await import(${JSON.stringify(new URL('../database.ts', import.meta.url).href)});
     const { initDatabase, getDb, insertRow, closeDatabase, databaseBackupStatus } = dbModule;
     const { appRouter } = await import(${JSON.stringify(new URL('./router.ts', import.meta.url).href)});
     const caller = appRouter.createCaller({});
     initDatabase();
   `;
-  const run = (code: string) => {
-    const child = Bun.spawnSync([process.execPath, '--eval', imports + code], {
-      env: {
-        ...process.env,
-        EASYMONEY_DB_PATH: databasePath,
-        EASYMONEY_ENV_PATH: path.join(directory, '.env.local'),
-        NODE_ENV: 'test',
-      },
-      stdout: 'pipe',
-      stderr: 'pipe',
-      timeout: 15000,
-    });
-    if (child.exitCode !== 0) throw new Error(child.stderr.toString());
-    return JSON.parse(child.stdout.toString());
-  };
-  try {
-    const stage = run(`
+    const run = (code: string) => {
+      const child = Bun.spawnSync([process.execPath, '--eval', imports + code], {
+        env: {
+          ...process.env,
+          EASYMONEY_DB_PATH: databasePath,
+          EASYMONEY_ENV_PATH: path.join(directory, '.env.local'),
+          NODE_ENV: 'test',
+        },
+        stdout: 'pipe',
+        stderr: 'pipe',
+        timeout: 15000,
+      });
+      if (child.exitCode !== 0) throw new Error(child.stderr.toString());
+      return JSON.parse(child.stdout.toString());
+    };
+    try {
+      const stage = run(`
       const accountId = insertRow('accounts', { name: 'Before backup', type: 'checking' });
       const sourceFileId = insertRow('sourceFiles', { fileName: 'source.csv', contentHash: 'source', status: 'committed' });
       insertRow('sourceAccounts', { sourceFileId, accountId, sourceAccountKey: 'checking' });
@@ -38,32 +41,51 @@ test('restore switches databases after restart, preserves annotations and plans,
       await caller.accounts.markClosed({ id: accountId, closedOn: '2026-01-31' });
       await caller.budgets.migratePlans({ globalBudgets: { 'year:2026': 1200 }, dreamBudget: { globalBudget: 100, categoryPercents: {} }, savedBudgets: [] });
       const backup = await caller.backups.create();
+      const listed = await caller.backups.list();
+      if (!listed.backups.some(item => item.id === backup.id)) throw new Error('Compressed backup missing from list');
+      let restoreId = backup.id;
+      if (${JSON.stringify(format)} === 'legacy') {
+        const fs = await import('node:fs');
+        const { gunzipSync } = await import('node:zlib');
+        const bytes = gunzipSync(fs.readFileSync(backup.path));
+        // Choose a checkpoint that will be pruned by the pre-restore backup's retention pass.
+        for (const day of ['01', '02', '03', '04', '05', '06']) {
+          const id = '2020-01-' + day + 'T00-00-00-000Z-before-migration-00000000-0000-0000-0000-000000000000.sqlite';
+          fs.writeFileSync(databaseBackupStatus().backupDirectory + '/' + id, bytes);
+          if (day === '02') restoreId = id;
+        }
+      }
       getDb().prepare('UPDATE accounts SET name = ? WHERE id = ?').run('After backup', accountId);
       getDb().prepare("UPDATE transferRecords SET status='revoked'").run();
-      const restored = await caller.backups.restore({ id: backup.id });
+      const restored = await caller.backups.restore({ id: restoreId });
       let blocked = false;
       try { await caller.accounts.updateMetadata({ id: accountId, changes: { name: 'Should be blocked' } }); } catch { blocked = true; }
       console.log(JSON.stringify({ blocked, pending: databaseBackupStatus().restorePending, restored }));
       closeDatabase();
     `);
-    expect(stage.blocked).toBe(true);
-    expect(stage.pending).toBe(true);
-    expect(fs.existsSync(stage.restored.beforeRestore.path)).toBe(true);
-    expect(fs.existsSync(`${stage.restored.beforeRestore.path}-wal`)).toBe(false);
-    expect(fs.existsSync(`${stage.restored.beforeRestore.path}-shm`)).toBe(false);
-    const portableBackup = new Database(stage.restored.beforeRestore.path, { readonly: true });
-    try {
-      expect(portableBackup.query('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'delete' });
-    } finally {
-      portableBackup.close();
-    }
-    const original = new Database(databasePath, { readonly: true });
-    try {
-      expect(original.query('SELECT name FROM accounts').get()).toEqual({ name: 'After backup' });
-    } finally {
-      original.close();
-    }
-    const reopened = run(`
+      expect(stage.blocked).toBe(true);
+      expect(stage.pending).toBe(true);
+      expect(fs.existsSync(stage.restored.beforeRestore.path)).toBe(true);
+      expect(fs.existsSync(`${stage.restored.beforeRestore.path}-wal`)).toBe(false);
+      expect(fs.existsSync(`${stage.restored.beforeRestore.path}-shm`)).toBe(false);
+      expect(stage.restored.beforeRestore.path.endsWith('.sqlite.gz')).toBe(true);
+      withSnapshotFile(stage.restored.beforeRestore.path, (file) => {
+        const portableBackup = new Database(file, { readonly: true });
+        try {
+          expect(portableBackup.query('PRAGMA journal_mode').get()).toEqual({
+            journal_mode: 'delete',
+          });
+        } finally {
+          portableBackup.close();
+        }
+      });
+      const original = new Database(databasePath, { readonly: true });
+      try {
+        expect(original.query('SELECT name FROM accounts').get()).toEqual({ name: 'After backup' });
+      } finally {
+        original.close();
+      }
+      const reopened = run(`
       console.log(JSON.stringify({ status: databaseBackupStatus(), plans: await caller.budgets.plans(),
         account: getDb().prepare('SELECT name FROM accounts').get(),
         transfer: getDb().prepare('SELECT id,status,effectiveDate FROM transferRecords').get(),
@@ -71,18 +93,20 @@ test('restore switches databases after restart, preserves annotations and plans,
         mapping: getDb().prepare('SELECT accountId FROM sourceAccounts').get() }));
       closeDatabase();
     `);
-    expect(reopened.status.restorePending).toBe(false);
-    expect(reopened.status.databasePath).not.toBe(databasePath);
-    expect(reopened.account.name).toBe('Before backup');
-    expect(reopened.transfer).toEqual({
-      id: 'closure:1',
-      status: 'confirmed',
-      effectiveDate: '2026-01-31',
-    });
-    expect(reopened.note.notes).toBe('Keep this note');
-    expect(reopened.mapping.accountId).toBe(1);
-    expect(reopened.plans.plans.globalBudgets['year:2026']).toBe(1200);
-  } finally {
-    fs.rmSync(directory, { recursive: true, force: true });
-  }
-}, 30000);
+      expect(reopened.status.restorePending).toBe(false);
+      expect(reopened.status.databasePath).not.toBe(databasePath);
+      expect(reopened.account.name).toBe('Before backup');
+      expect(reopened.transfer).toEqual({
+        id: 'closure:1',
+        status: 'confirmed',
+        effectiveDate: '2026-01-31',
+      });
+      expect(reopened.note.notes).toBe('Keep this note');
+      expect(reopened.mapping.accountId).toBe(1);
+      expect(reopened.plans.plans.globalBudgets['year:2026']).toBe(1200);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  },
+  30000,
+);

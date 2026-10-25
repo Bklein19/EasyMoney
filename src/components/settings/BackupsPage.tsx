@@ -90,6 +90,11 @@ export default function BackupsPage() {
           <details className="recovery-storage">
             <summary>Storage & off-device protection</summary>
             <p>
+              Backups are compressed. Automatic backups keep the newest three, up to four older
+              weekly checkpoints, and the oldest checkpoint. Manual and pre-restore backups are
+              always kept.
+            </p>
+            <p>
               These backups are on this Mac. Copy them to another drive to protect against computer
               failure.
             </p>

@@ -4,7 +4,7 @@ import { Database } from 'bun:sqlite';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { writeSnapshot } from '../databaseSnapshots';
+import { writeSnapshot, withSnapshotFile } from '../databaseSnapshots';
 
 import type { SyncInstitutionId, SyncRunReview } from './dataSync/types.ts';
 
@@ -6138,14 +6138,19 @@ test('institution catch-up stages reviewable claims before explicit confirmation
     const snapshotSource = new Database(databaseBackupStatus().databasePath, { readonly: true });
     const backupDirectory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'retention-backup-'));
     const snapshot = writeSnapshot(snapshotSource, backupDirectory, 'retention-test');
-    const restored = new Database(snapshot.path, { readonly: true });
     try {
-      const restoredOriginal = restored
-        .query('SELECT bytes FROM importOriginals WHERE importFileId=?')
-        .get(artifact.importFileId) as { bytes: Uint8Array };
-      expect(Buffer.from(restoredOriginal.bytes)).toEqual(downloadedBytes);
+      withSnapshotFile(snapshot.path, (file) => {
+        const restored = new Database(file, { readonly: true });
+        try {
+          const restoredOriginal = restored
+            .query('SELECT bytes FROM importOriginals WHERE importFileId=?')
+            .get(artifact.importFileId) as { bytes: Uint8Array };
+          expect(Buffer.from(restoredOriginal.bytes)).toEqual(downloadedBytes);
+        } finally {
+          restored.close();
+        }
+      });
     } finally {
-      restored.close();
       snapshotSource.close();
       await fs.promises.rm(backupDirectory, { recursive: true, force: true });
     }
