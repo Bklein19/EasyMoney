@@ -6,6 +6,7 @@ import { seedDatabase } from './seed.ts';
 import { loadLocalEnv } from './app/localEnv.ts';
 import { appRouter } from './app/router.ts';
 import { startAutomaticCategorizationWorker } from './app/automaticCategorization.ts';
+import { startMerchantRecommendationWorker } from './app/merchantReview.ts';
 import index from '../index.html';
 
 type RouteParams = Record<string, string>;
@@ -20,6 +21,7 @@ fs.mkdirSync(path.resolve(import.meta.dir, '..', 'data'), { recursive: true });
 loadLocalEnv();
 initDatabase();
 seedDatabase();
+startMerchantRecommendationWorker();
 void (await import('./app/parserRefresh'))
   .refreshChangedParsers()
   .finally(startAutomaticCategorizationWorker);

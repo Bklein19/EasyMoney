@@ -267,7 +267,9 @@
 }
 .merchant-categorize__selector select {
   width: 100%;
+  min-width: 0;
   height: 100%;
+  padding: 0;
   opacity: 0;
   cursor: pointer;
 }
@@ -302,6 +304,15 @@
   color: var(--text-secondary);
   font-size: 0.75rem;
   margin-top: 5px;
+}
+.merchant-review__retry {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--color-accent);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
 }
 .merchant-review__history-link {
   border: 0;

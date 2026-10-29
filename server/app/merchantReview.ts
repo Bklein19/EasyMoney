@@ -2,11 +2,24 @@ import { getDb } from '../database';
 import { hashContent } from '../hash';
 import { listCategories } from './categories';
 import { previewConservativeCategoryCleanup } from './categoryCleanup';
+import { getOpenAiModel, previewMerchantRecommendations } from './aiCategorization';
 import { applyReviewedCategoryChanges, listTransactions } from './transactions';
 import { buildReviewGroups, reviewedTransaction } from './transactionReview';
 import type { TransactionListItem } from './types';
 
 export type MerchantScope = 'current' | 'history' | 'all';
+type RecommendationStatus =
+  'idle' | 'unavailable' | 'queued' | 'running' | 'ready' | 'review' | 'failed' | 'not_needed';
+type CachedRecommendation = {
+  groupId: string;
+  fingerprint: string;
+  status: RecommendationStatus;
+  categoryId: number | null;
+  reason: string | null;
+};
+let recommendationsEnabled = false;
+let recommendationsRunning = false;
+let recommendationTimer: ReturnType<typeof setTimeout> | undefined;
 const unknown = (row: TransactionListItem) =>
   !row.category || row.category.name.toLowerCase() === 'uncategorized';
 const evidence = (row: TransactionListItem) =>
@@ -113,6 +126,182 @@ function summary(group: ReturnType<typeof groups>[number]) {
   };
 }
 
+function recommendationContext() {
+  const categories = listCategories().categories;
+  return { categories, taxonomy: hashContent(JSON.stringify([1, getOpenAiModel(), categories])) };
+}
+
+function recommendationFingerprint(group: ReturnType<typeof groups>[number], taxonomy: string) {
+  // Include every fact supplied to the model and the complete review/history scope.
+  // Notes are private and are neither sent nor used to invalidate advice.
+  return hashContent(
+    JSON.stringify([
+      taxonomy,
+      group.fingerprint,
+      (group.current.length ? group.current : group.unreviewed).map(
+        (row) => row.ledgerTransactionId,
+      ),
+      group.transactions.map((row) => [
+        row.ledgerTransactionId,
+        row.account,
+        row.originalDescription,
+        row.originalCategory,
+        row.sourceRole,
+      ]),
+    ]),
+  );
+}
+
+function cachedRecommendations() {
+  return new Map(
+    (getDb().prepare('SELECT * FROM merchantRecommendations').all() as CachedRecommendation[]).map(
+      (row) => [row.groupId, row],
+    ),
+  );
+}
+
+/** Enqueue visible unresolved merchants once per evidence/taxonomy revision. Reads never call AI. */
+export function queueMerchantRecommendations(input: { groupIds: string[]; retry?: boolean }) {
+  const ids = new Set(input.groupIds.slice(0, 25));
+  if (!process.env.OPENAI_API_KEY?.trim()) return { queued: 0 };
+  const { taxonomy } = recommendationContext();
+  const cached = cachedRecommendations();
+  let queued = 0;
+  for (const group of groups().filter((group) => ids.has(group.id) && !group.kept)) {
+    const fingerprint = recommendationFingerprint(group, taxonomy);
+    const previous = cached.get(group.id);
+    if (previous?.fingerprint === fingerprint && !(input.retry && previous.status === 'failed'))
+      continue;
+    getDb()
+      .prepare(
+        `INSERT INTO merchantRecommendations (groupId,fingerprint,status,categoryId,reason,updatedAt)
+      VALUES (?,?,'queued',NULL,NULL,?) ON CONFLICT(groupId) DO UPDATE SET
+      fingerprint=excluded.fingerprint,status='queued',categoryId=NULL,reason=NULL,updatedAt=excluded.updatedAt`,
+      )
+      .run(group.id, fingerprint, new Date().toISOString());
+    queued++;
+  }
+  scheduleMerchantRecommendations();
+  return { queued };
+}
+
+/** Provider injection keeps tests isolated. Results are advice only, never category edits. */
+export async function processMerchantRecommendationBatch(preview = previewMerchantRecommendations) {
+  const tasks = getDb()
+    .prepare(
+      "SELECT * FROM merchantRecommendations WHERE status='queued' ORDER BY updatedAt,groupId LIMIT 25",
+    )
+    .all() as CachedRecommendation[];
+  if (!tasks.length) return false;
+  const { taxonomy } = recommendationContext();
+  const all = new Map(groups().map((group) => [group.id, group]));
+  const eligible = tasks.flatMap((task) => {
+    const group = all.get(task.groupId);
+    if (!group || group.kept || task.fingerprint !== recommendationFingerprint(group, taxonomy)) {
+      getDb()
+        .prepare('DELETE FROM merchantRecommendations WHERE groupId=? AND fingerprint=?')
+        .run(task.groupId, task.fingerprint);
+      return [];
+    }
+    return [{ task, group }];
+  });
+  const update = getDb()
+    .prepare(`UPDATE merchantRecommendations SET status=?,categoryId=?,reason=?,updatedAt=?
+    WHERE groupId=? AND fingerprint=? AND status='running'`);
+  for (const { task } of eligible)
+    getDb()
+      .prepare(
+        "UPDATE merchantRecommendations SET status='running' WHERE groupId=? AND fingerprint=?",
+      )
+      .run(task.groupId, task.fingerprint);
+  if (!eligible.length) return true;
+  try {
+    const results = await preview(
+      eligible.map(({ group }) => ({
+        id: group.id,
+        name: group.name,
+        transactions: group.current.length ? group.current : group.unreviewed,
+      })),
+    );
+    const latestContext = recommendationContext();
+    const latest = new Map(groups().map((group) => [group.id, group]));
+    for (const { task } of eligible) {
+      const group = latest.get(task.groupId);
+      if (
+        !group ||
+        group.kept ||
+        task.fingerprint !== recommendationFingerprint(group, latestContext.taxonomy)
+      ) {
+        getDb()
+          .prepare('DELETE FROM merchantRecommendations WHERE groupId=? AND fingerprint=?')
+          .run(task.groupId, task.fingerprint);
+        continue;
+      }
+      const matches = results.filter((result) => result.groupId === task.groupId);
+      const advice = matches.length === 1 ? matches[0] : undefined;
+      const categoryId = latestContext.categories.some(
+        (category) => category.id === advice?.categoryId,
+      )
+        ? advice!.categoryId
+        : null;
+      update.run(
+        categoryId ? 'ready' : 'review',
+        categoryId,
+        advice?.reason ?? 'No supported category recommendation. Choose a category.',
+        new Date().toISOString(),
+        task.groupId,
+        task.fingerprint,
+      );
+    }
+  } catch {
+    for (const { task } of eligible)
+      update.run(
+        'failed',
+        null,
+        'AI recommendation failed. You can retry or choose a category.',
+        new Date().toISOString(),
+        task.groupId,
+        task.fingerprint,
+      );
+  }
+  return true;
+}
+
+function scheduleMerchantRecommendations() {
+  if (!recommendationsEnabled || recommendationsRunning || recommendationTimer) return;
+  recommendationTimer = setTimeout(() => {
+    recommendationTimer = undefined;
+    recommendationsRunning = true;
+    void (async () => {
+      try {
+        while (await processMerchantRecommendationBatch())
+          await new Promise((resolve) => setTimeout(resolve, 0));
+      } finally {
+        recommendationsRunning = false;
+      }
+    })().catch(() => {
+      /* failed jobs retain an explicit retry state */
+    });
+  }, 0);
+}
+
+export function startMerchantRecommendationWorker() {
+  if (recommendationsEnabled) return;
+  recommendationsEnabled = true;
+  getDb()
+    .prepare("UPDATE merchantRecommendations SET status='queued' WHERE status='running'")
+    .run();
+  if (process.env.OPENAI_API_KEY?.trim()) scheduleMerchantRecommendations();
+}
+
+export function hasPendingMerchantRecommendations() {
+  return Boolean(
+    getDb()
+      .prepare("SELECT 1 FROM merchantRecommendations WHERE status IN ('queued','running') LIMIT 1")
+      .get(),
+  );
+}
+
 /** Compact merchant-level overview; no model requests and no transaction arrays. */
 export function merchantReviewQueue(
   input: { search?: string; status?: 'open' | 'kept'; offset?: number } = {},
@@ -134,15 +323,24 @@ export function merchantReviewQueue(
       candidate,
     ]),
   );
-  const categories = listCategories().categories;
+  const { categories, taxonomy } = recommendationContext();
+  const cached = cachedRecommendations();
   return {
     groups: matching.slice(offset, offset + 25).map((group) => {
       const guesses = group.current.map((row) => candidates.get(row.ledgerTransactionId));
       const first = guesses[0];
-      const suggestion =
+      const conservative =
         first && guesses.every((guess) => guess?.categoryId === first.categoryId)
-          ? { categoryId: first.categoryId, reason: first.reason }
+          ? { categoryId: first.categoryId, reason: first.reason, source: 'history' as const }
           : null;
+      const stored = cached.get(group.id);
+      const advice =
+        stored?.fingerprint === recommendationFingerprint(group, taxonomy) ? stored : undefined;
+      const suggestion =
+        conservative ??
+        (advice?.status === 'ready' && advice.categoryId
+          ? { categoryId: advice.categoryId, reason: advice.reason ?? '', source: 'ai' as const }
+          : null);
       const currentIds = new Set(group.current.map((row) => row.ledgerTransactionId));
       const history = group.known.filter(
         (row) => !currentIds.has(row.ledgerTransactionId) && !group.acknowledged(row),
@@ -150,6 +348,15 @@ export function merchantReviewQueue(
       return {
         ...summary(group),
         suggestion,
+        recommendation: {
+          status: (conservative || group.kept
+            ? 'not_needed'
+            : (advice?.status ??
+              (process.env.OPENAI_API_KEY?.trim()
+                ? 'idle'
+                : 'unavailable'))) as RecommendationStatus,
+          reason: advice?.reason ?? null,
+        },
         reviewedCount: group.known.filter(group.acknowledged).length,
         historyTargets: categories.map((category) => ({
           categoryId: category.id,

@@ -66,7 +66,8 @@ test('merchant review offers one split recommendation button and keeps all-histo
     uncategorizedCount: 1,
     conflict: true,
     movement: false,
-    suggestion: { categoryId: 1, reason: 'Saved source evidence' },
+    suggestion: { categoryId: 1, reason: 'Software subscription', source: 'ai' as const },
+    recommendation: { status: 'ready' as const, reason: 'Software subscription' },
     reviewedCount: 0,
     historyTargets: [{ categoryId: 1, count: 3, matchingCount: 10 }],
   };
@@ -98,6 +99,7 @@ test('merchant review offers one split recommendation button and keeps all-histo
   expect(html).toContain('Merchant category reviews');
   expect(html).toContain('Choose category for OpenAI');
   expect(html).toContain('Categorize as Software');
+  expect(html).toContain('AI suggestion');
   expect(html).toContain('Categorize 1 review transactions as Software');
   expect(html).not.toContain('Categorize all 14');
   expect(html.match(/aria-label="Choose category for /g)).toHaveLength(1);
@@ -132,6 +134,7 @@ test('categorized conflicts defer transaction details and intentional decisions 
             conflict: true,
             movement: false,
             suggestion: null,
+            recommendation: { status: 'review', reason: 'Needs personal context' },
             reviewedCount: 0,
             historyTargets: [],
           },
@@ -148,6 +151,9 @@ test('categorized conflicts defer transaction details and intentional decisions 
   expect(html).not.toContain('Categorize as…');
   expect(html).not.toContain('Categorize as undefined');
   expect(html).not.toContain('Categorize all 2');
+  expect(html).toContain('Needs your context');
+  expect(html).not.toContain('>AI suggestion</small>');
+  expect(html).not.toContain('earlier transactions differ');
   expect(html).not.toContain('Save 0');
   expect(html).not.toContain('type="checkbox"');
 });
@@ -174,6 +180,7 @@ test('single-transaction review has one editor, date and nearby activity without
             conflict: false,
             movement: true,
             suggestion: null,
+            recommendation: { status: 'unavailable', reason: null },
             reviewedCount: 0,
             historyTargets: [],
             singleTransaction: { id: 'one', date: '2020-05-26', amount: -10606 },

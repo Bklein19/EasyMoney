@@ -1,7 +1,7 @@
-import { useDeferredValue, useState } from 'react';
+import { useDeferredValue, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
-import { useQuery } from '@tanstack/react-query';
-import { trpc } from '../../api/trpc';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { trpc, trpcClient, queryClient } from '../../api/trpc';
 import { formatCurrency } from '../../utils/formatters';
 import { categoryWorkspaceView } from './workspaceNavigation';
 import CategoriesPage from './CategoriesPage';
@@ -63,8 +63,34 @@ function ReviewWorkspace({
   const [status, setStatus] = useState<'open' | 'kept'>('open');
   const [offset, setOffset] = useState(0);
   const queue = useQuery(
-    trpc.categories.merchantQueue.queryOptions({ search: deferredSearch, status, offset }),
+    trpc.categories.merchantQueue.queryOptions(
+      { search: deferredSearch, status, offset },
+      {
+        refetchInterval: (query) =>
+          query.state.data?.groups.some((group) =>
+            ['queued', 'running'].includes(group.recommendation?.status),
+          )
+            ? 2000
+            : false,
+      },
+    ),
   );
+  const recommendations = useMutation({
+    mutationFn: (groupIds: string[]) =>
+      trpcClient.categories.recommendMerchants.mutate({ groupIds }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: trpc.categories.merchantQueue.queryKey() }),
+  });
+  const recommendationIds = JSON.stringify(
+    queue.data?.groups
+      .filter((group) => group.recommendation?.status === 'idle')
+      .map((group) => group.id) ?? [],
+  );
+  const { mutate: recommend } = recommendations;
+  useEffect(() => {
+    const ids: string[] = JSON.parse(recommendationIds);
+    if (ids.length) recommend(ids);
+  }, [recommendationIds, recommend]);
   const categories = useQuery(trpc.categories.list.queryOptions());
   return (
     <>
@@ -109,6 +135,17 @@ function ReviewWorkspace({
       </div>
       {(queue.error || categories.error) && (
         <p role="alert">{queue.error?.message || categories.error?.message}</p>
+      )}
+      {recommendations.error && (
+        <p role="alert">
+          Could not request recommendations.{' '}
+          <button
+            className="btn btn--ghost btn--sm"
+            onClick={() => recommend(JSON.parse(recommendationIds))}
+          >
+            Retry
+          </button>
+        </p>
       )}
       {queue.isPending && <p role="status">Loading merchant reviews…</p>}
       <section className="merchant-review-list" aria-label="Merchant category reviews">

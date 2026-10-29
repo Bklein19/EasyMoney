@@ -23,9 +23,10 @@ export default function MerchantReviewRow({
   changes: Changes;
   onInspect: (id: string) => void;
 }) {
-  const [categoryId, setCategoryId] = useState(
-    group.suggestion ? String(group.suggestion.categoryId) : '',
-  );
+  // Advice may arrive after mount. An explicit choice always wins over background updates.
+  const [chosenCategory, setChosenCategory] = useState<string | null>(null);
+  const categoryId =
+    chosenCategory ?? (group.suggestion ? String(group.suggestion.categoryId) : '');
   const [panel, setPanel] = useState<'current' | 'history' | 'all' | null>(null);
   const [offset, setOffset] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -83,6 +84,7 @@ export default function MerchantReviewRow({
               : detail.data!.fingerprint,
       });
       changes.remember(result.undoOperation);
+      setChosenCategory(categoryId);
       if (scope === 'current') setPrimarySaved(true);
       setPanel(null);
       setContextId(null);
@@ -163,7 +165,11 @@ export default function MerchantReviewRow({
                       : `Categorize as ${categoryName}`}
                 </button>
               ) : (
-                <span className="merchant-categorize__placeholder">Choose category</span>
+                <span className="merchant-categorize__placeholder">
+                  {['idle', 'queued', 'running'].includes(group.recommendation?.status)
+                    ? 'Finding category…'
+                    : 'Choose category'}
+                </span>
               )}
               <div className="merchant-categorize__selector">
                 <ChevronDown size={16} aria-hidden="true" />
@@ -174,13 +180,42 @@ export default function MerchantReviewRow({
                   disabled={blocked}
                   aria-label={`Choose category for ${group.name}`}
                   onChange={(value) => {
-                    setCategoryId(value);
+                    setChosenCategory(value);
                     setPrimarySaved(false);
                     setOffset(0);
                   }}
                 />
               </div>
             </div>
+            {!primarySaved && chosenCategory === null && (
+              <small title={group.suggestion?.reason || group.recommendation?.reason || undefined}>
+                {group.suggestion?.source === 'ai'
+                  ? 'AI suggestion'
+                  : group.recommendation?.status === 'review'
+                    ? 'Needs your context'
+                    : group.recommendation?.status === 'unavailable'
+                      ? 'AI unavailable'
+                      : group.recommendation?.status === 'failed'
+                        ? 'AI unavailable · '
+                        : ''}
+                {group.recommendation?.status === 'failed' && (
+                  <button
+                    className="merchant-review__retry"
+                    disabled={blocked}
+                    onClick={() =>
+                      void run(() =>
+                        trpcClient.categories.recommendMerchants.mutate({
+                          groupIds: [group.id],
+                          retry: true,
+                        }),
+                      )
+                    }
+                  >
+                    Retry
+                  </button>
+                )}
+              </small>
+            )}
           </div>
         )}
         {group.kept && (
@@ -200,14 +235,16 @@ export default function MerchantReviewRow({
           </button>
         )}
       </div>
-      {Boolean(target?.count) && !group.kept && (
+      {Boolean(target?.count) && !group.kept && (group.currentCount > 0 || primarySaved) && (
         <button
           className="merchant-review__history-link"
           disabled={blocked}
           aria-expanded={panel === 'history'}
           onClick={() => open('history')}
         >
-          {target!.count} earlier transactions differ · {panel === 'history' ? 'Close' : 'Review'}
+          {target!.count} earlier{' '}
+          {target!.count === 1 ? 'transaction differs' : 'transactions differ'} ·{' '}
+          {panel === 'history' ? 'Close' : 'Review'}
         </button>
       )}
       {error && <p role="alert">{error}</p>}

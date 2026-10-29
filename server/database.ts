@@ -1152,6 +1152,13 @@ export function initDatabase() {
       baselineCategoryId INTEGER, updatedAt TEXT NOT NULL, PRIMARY KEY (groupId, ledgerTransactionId)
     )`);
   });
+  runSchemaMigration('2026-10-29-merchant-recommendations', () => {
+    db.exec(`CREATE TABLE merchantRecommendations (
+      groupId TEXT PRIMARY KEY, fingerprint TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('queued','running','ready','review','failed')),
+      categoryId INTEGER, reason TEXT, updatedAt TEXT NOT NULL
+    )`);
+  });
 
   runSchemaMigration('2026-09-12-parser-derivations', () => {
     db.exec(`

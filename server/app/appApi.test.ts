@@ -35,8 +35,168 @@ const {
   shouldReviewInvestmentAccountTransferDecision,
   categorizeModelDecisions,
   financialCategoryConcern,
+  previewMerchantRecommendations,
 } = await import('./aiCategorization.ts');
+const { processMerchantRecommendationBatch } = await import('./merchantReview.ts');
 const caller = appRouter.createCaller({});
+
+test('merchant AI advice reaches the queue, caches across reads, and never edits annotations', async () => {
+  const savedKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = 'synthetic-provider-injected';
+  try {
+    const { categoryId, ids } = automaticFixture(60);
+    const group = (await caller.categories.merchantQueue()).groups[0]!;
+    const before = getDb().prepare('SELECT * FROM transactionAnnotations').all();
+    const facts = getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all();
+    expect(group.recommendation.status).toBe('idle');
+    expect((await caller.categories.recommendMerchants({ groupIds: [group.id] })).queued).toBe(1);
+    expect((await caller.categories.recommendMerchants({ groupIds: [group.id] })).queued).toBe(0);
+    let calls = 0;
+    await processMerchantRecommendationBatch(async (requests) => {
+      calls++;
+      expect(requests[0]!.transactions).toHaveLength(60);
+      return [{ groupId: group.id, categoryId, reason: 'Ice cream is dining.' }];
+    });
+    const updated = (await caller.categories.merchantQueue()).groups[0]!;
+    expect(updated.suggestion).toEqual({
+      categoryId,
+      reason: 'Ice cream is dining.',
+      source: 'ai',
+    });
+    expect(updated.recommendation.status).toBe('ready');
+    expect(updated.reviewCount).toBe(ids.length);
+    expect(JSON.stringify(updated)).not.toContain('sampleTransactions');
+    expect((await caller.categories.recommendMerchants({ groupIds: [group.id] })).queued).toBe(0);
+    expect(await processMerchantRecommendationBatch()).toBe(false);
+    expect(calls).toBe(1);
+    expect(getDb().prepare('SELECT * FROM transactionAnnotations').all()).toEqual(before);
+    expect(getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all()).toEqual(facts);
+    // A read after a taxonomy edit must not offer the old category.
+    getDb()
+      .prepare("UPDATE categories SET description='User-specific guidance' WHERE id=?")
+      .run(categoryId);
+    expect((await caller.categories.merchantQueue()).groups[0]!.suggestion).toBeNull();
+    expect((await caller.categories.recommendMerchants({ groupIds: [group.id] })).queued).toBe(1);
+  } finally {
+    if (savedKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = savedKey;
+  }
+});
+
+test('merchant advice covers categorized conflicts, preserves personal-context guards and discards in-flight stale results', async () => {
+  const savedKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = 'synthetic-provider-injected';
+  try {
+    const { categoryId, ids } = automaticFixture();
+    const education = Number(
+      insertRow('categories', { name: 'Education conflict', type: 'expense' }),
+    );
+    upsertTransactionAnnotation(ids[0]!, { categoryId, notes: 'Private note' });
+    upsertTransactionAnnotation(ids[1]!, { categoryId: education });
+    let group = (await caller.categories.merchantQueue()).groups[0]!;
+    expect(group.currentCount).toBe(0);
+    await caller.categories.recommendMerchants({ groupIds: [group.id] });
+    await processMerchantRecommendationBatch(async (requests) => {
+      const advice = await previewMerchantRecommendations(requests, async (input) => {
+        expect(input.groups[0]!.transactions).toHaveLength(2);
+        expect(JSON.stringify(input.groups)).not.toContain('Private note');
+        return {
+          decisions: [
+            {
+              groupId: group.id,
+              kind: 'category',
+              categoryName: 'Food & Dining',
+              reason: 'Dining merchant',
+            },
+          ],
+        };
+      });
+      return advice;
+    });
+    expect((await caller.categories.merchantQueue()).groups[0]!.suggestion?.categoryId).toBe(
+      categoryId,
+    );
+    // Metadata and original source descriptions are also recommendation evidence.
+    getDb()
+      .prepare(
+        "UPDATE ledgerTransactions SET originalDescription='New source detail' WHERE ledgerTransactionId=?",
+      )
+      .run(ids[0]!);
+    group = (await caller.categories.merchantQueue()).groups[0]!;
+    expect(group.suggestion).toBeNull();
+    await caller.categories.recommendMerchants({ groupIds: [group.id] });
+    await processMerchantRecommendationBatch(async () => {
+      upsertTransactionAnnotation(ids[0]!, {
+        categoryId: education,
+        notes: 'User changed while waiting',
+      });
+      return [{ groupId: group.id, categoryId, reason: 'Outdated guess' }];
+    });
+    expect(
+      getDb().prepare('SELECT * FROM merchantRecommendations WHERE groupId=?').get(group.id),
+    ).toBeNull();
+    expect(
+      getDb()
+        .prepare('SELECT categoryId FROM transactionAnnotations WHERE ledgerTransactionId=?')
+        .get(ids[0]!),
+    ).toEqual({ categoryId: education });
+    // Personal payment purpose cannot be inferred from a model guess.
+    getDb()
+      .prepare(
+        "UPDATE ledgerTransactions SET merchant='Venmo',description='Venmo' WHERE ledgerTransactionId=?",
+      )
+      .run(ids[0]!);
+    const rows = (await caller.transactions.list()).transactions.filter(
+      (row) => row.ledgerTransactionId === ids[0],
+    );
+    const advice = await previewMerchantRecommendations(
+      [{ id: 'personal', name: 'Venmo', transactions: rows }],
+      async () => ({
+        decisions: [
+          { groupId: 'personal', kind: 'category', categoryName: 'Food & Dining', reason: 'Guess' },
+        ],
+      }),
+    );
+    expect(advice[0]!.categoryId).toBeNull();
+    expect(advice[0]!.reason).toContain('personal context');
+  } finally {
+    if (savedKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = savedKey;
+  }
+});
+
+test('merchant recommendation failures persist until explicit retry and missing keys do not queue work', async () => {
+  const savedKey = process.env.OPENAI_API_KEY;
+  process.env.OPENAI_API_KEY = 'synthetic-provider-injected';
+  try {
+    automaticFixture();
+    const group = (await caller.categories.merchantQueue()).groups[0]!;
+    await caller.categories.recommendMerchants({ groupIds: [group.id] });
+    await processMerchantRecommendationBatch(async () => {
+      throw new Error('Sensitive provider response');
+    });
+    const failed = (await caller.categories.merchantQueue()).groups[0]!;
+    expect(failed.recommendation.status).toBe('failed');
+    expect(failed.recommendation.reason).not.toContain('Sensitive');
+    expect((await caller.categories.recommendMerchants({ groupIds: [group.id] })).queued).toBe(0);
+    expect(
+      (await caller.categories.recommendMerchants({ groupIds: [group.id], retry: true })).queued,
+    ).toBe(1);
+    await processMerchantRecommendationBatch(async () => [
+      { groupId: group.id, categoryId: null, reason: 'Needs your context' },
+    ]);
+    expect((await caller.categories.merchantQueue()).groups[0]!.recommendation.status).toBe(
+      'review',
+    );
+    delete process.env.OPENAI_API_KEY;
+    expect(
+      (await caller.categories.recommendMerchants({ groupIds: [group.id], retry: true })).queued,
+    ).toBe(0);
+  } finally {
+    if (savedKey === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = savedKey;
+  }
+});
 
 test('merchant saves separate current unknowns from differing history and preserve exact occurrences and Undo', async () => {
   const accountId = Number(insertRow('accounts', { name: 'Merchant card', type: 'credit_card' }));
@@ -1321,6 +1481,7 @@ function resetAppTables() {
   db.transaction(() => {
     for (const table of [
       'categoryReviewDecisions',
+      'merchantRecommendations',
       'categoryReviewAcknowledgements',
       'ledgerRebuildState',
       'ledgerProvenance',

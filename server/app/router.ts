@@ -18,6 +18,8 @@ import {
 import { getAnalyticsReport, getSpendingExplorerTransactions } from './analytics.ts';
 import {
   merchantReviewQueue,
+  queueMerchantRecommendations,
+  hasPendingMerchantRecommendations,
   merchantReviewScope,
   saveMerchantCategories,
   keepMerchantDifferences,
@@ -231,6 +233,7 @@ export const appRouter = t.router({
         activeMutations > 1 ||
         hasActiveSyncJobs() ||
         hasActiveCategorizationJobs() ||
+        hasPendingMerchantRecommendations() ||
         automaticCategorizationStatus().pending > 0
       ) {
         throw new Error('Wait for imports, sync, and categorization to finish before restoring.');
@@ -273,6 +276,11 @@ export const appRouter = t.router({
   }),
 
   categories: t.router({
+    recommendMerchants: t.procedure
+      .input(
+        z.object({ groupIds: z.array(z.string().min(1)).max(25), retry: z.boolean().optional() }),
+      )
+      .mutation(({ input }) => queueMerchantRecommendations(input)),
     merchantQueue: t.procedure
       .input(
         z

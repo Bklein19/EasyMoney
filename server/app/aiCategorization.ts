@@ -2,7 +2,7 @@ import { Agent, OpenAIProvider, Runner } from '@openai/agents';
 import { z } from 'zod';
 import { getDb } from '../database.ts';
 import { upsertTransactionAnnotation } from './transactionAnnotations.ts';
-import type { CategorySummary } from './types.ts';
+import type { CategorySummary, TransactionListItem } from './types.ts';
 
 const DEFAULT_MODEL = 'gpt-5.6-luna';
 const MAX_GROUPS = 500;
@@ -174,7 +174,7 @@ function getOpenAiKey() {
   return process.env.OPENAI_API_KEY?.trim() || '';
 }
 
-function getOpenAiModel() {
+export function getOpenAiModel() {
   return process.env.OPENAI_CATEGORIZATION_MODEL?.trim() || DEFAULT_MODEL;
 }
 
@@ -1009,6 +1009,78 @@ export function categorizeModelDecisions(input: {
   }
 
   return { suggestions, questions, ignoredCount };
+}
+
+/** Review-only advice, including categorized conflicts. Never inherit the labels under review. */
+export async function previewMerchantRecommendations(
+  requests: Array<{ id: string; name: string; transactions: TransactionListItem[] }>,
+  categorize = categorizeBatchWithOpenAi,
+) {
+  const apiKey = getOpenAiKey();
+  if (!apiKey) throw new Error('AI recommendations are not configured.');
+  const categories = listCategorizationCategories();
+  const groups: MerchantCategorizationGroup[] = requests.map((request) => {
+    const transactions = request.transactions.map((row) => ({
+      id: row.id,
+      ledgerTransactionId: row.ledgerTransactionId!,
+      accountId: row.account!.id,
+      accountName: row.account!.name,
+      accountInstitution: row.account!.institution,
+      accountType: row.account!.type,
+      date: row.date,
+      amountCents: Math.round(row.amount * 100),
+      description: row.description,
+      merchant: row.merchant,
+      originalDescription: row.originalDescription,
+      originalCategory: row.originalCategory,
+      transactionKind: row.transactionKind,
+      sourceRole: row.sourceRole,
+    }));
+    return {
+      id: request.id,
+      merchantName: request.name,
+      normalizedMerchant: request.name,
+      sourceMerchantKey: request.id,
+      groupingRuleId: null,
+      aliases: [...new Set(transactions.map((row) => row.description ?? request.name))],
+      transactions,
+      transactionIds: transactions.map((row) => row.ledgerTransactionId),
+      transactionCount: transactions.length,
+      totalAmount: transactions.reduce((sum, row) => sum + row.amountCents / 100, 0),
+      absoluteAmount: transactions.reduce((sum, row) => sum + Math.abs(row.amountCents) / 100, 0),
+    };
+  });
+  const advice = [];
+  for (const batch of chunk(groups, BATCH_SIZE)) {
+    const result = await categorize({
+      apiKey,
+      model: getOpenAiModel(),
+      categories,
+      groups: batch,
+    });
+    const validated = categorizeModelDecisions({
+      decisions: result.decisions,
+      groups: batch,
+      categories,
+    });
+    for (const group of batch) {
+      const suggestion = validated.suggestions.find((item) => item.groupId === group.id);
+      const category = categories.find((item) => item.id === suggestion?.categoryId);
+      const concern =
+        category &&
+        group.transactions.map((row) => financialCategoryConcern(row, category)).find(Boolean);
+      advice.push({
+        groupId: group.id,
+        categoryId: suggestion && !concern ? suggestion.categoryId : null,
+        reason:
+          concern ||
+          suggestion?.reason ||
+          validated.questions.find((item) => item.groupId === group.id)?.reason ||
+          'No supported category recommendation. Choose a category after reviewing the activity.',
+      });
+    }
+  }
+  return advice;
 }
 
 export async function previewAiCategorization(

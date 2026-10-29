@@ -51,6 +51,8 @@ const [databaseModule, seedModule, envModule, routerModule] = await Promise.all(
 envModule.loadLocalEnv();
 databaseModule.initDatabase();
 seedModule.seedDatabase();
+const { startMerchantRecommendationWorker } = await import('../server/app/merchantReview.ts');
+startMerchantRecommendationWorker();
 const { startAutomaticCategorizationWorker } =
   await import('../server/app/automaticCategorization.ts');
 void (await import('../server/app/parserRefresh'))
