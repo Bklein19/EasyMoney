@@ -521,6 +521,53 @@ export function listTransactions(options: ListTransactionsOptions = {}): Transac
   };
 }
 
+/** A bounded ledger timeline, independent of category/search filters in the calling report. */
+export function getTransactionContext(input: {
+  ledgerTransactionId: string;
+  beforeLimit?: number;
+  afterLimit?: number;
+}) {
+  const beforeLimit = Math.max(1, Math.min(50, Math.trunc(input.beforeLimit ?? 4)));
+  const afterLimit = Math.max(1, Math.min(50, Math.trunc(input.afterLimit ?? 4)));
+  if (!Number.isFinite(beforeLimit) || !Number.isFinite(afterLimit))
+    throw new Error('Invalid context limit.');
+  const db = getDb();
+  const anchor = db
+    .prepare(`${transactionSelect} WHERE t.ledgerTransactionId = ?`)
+    .get(input.ledgerTransactionId) as LedgerTransactionRow | undefined;
+  if (!anchor?.ledgerTransactionId || !anchor.accountName)
+    throw new Error('Transaction no longer exists in the active ledger. Refresh the list.');
+  const nearby = (direction: 'before' | 'after', limit: number) => {
+    const comparison = direction === 'before' ? '<' : '>';
+    const sort = direction === 'before' ? 'DESC' : 'ASC';
+    return db
+      .prepare(
+        `${transactionSelect}
+      WHERE t.accountId = $accountId AND t.ledgerTransactionId IS NOT NULL
+        AND (t.date ${comparison} $date OR (t.date = $date AND t.ledgerTransactionId ${comparison} $id))
+      ORDER BY t.date ${sort}, t.ledgerTransactionId ${sort} LIMIT $limit`,
+      )
+      .all({
+        accountId: anchor.accountId,
+        date: anchor.date,
+        id: anchor.ledgerTransactionId!,
+        limit: limit + 1,
+      }) as LedgerTransactionRow[];
+  };
+  const before = nearby('before', beforeLimit);
+  const after = nearby('after', afterLimit);
+  return {
+    anchor: toTransactionListItem(anchor),
+    transactions: [
+      ...before.slice(0, beforeLimit).reverse(),
+      anchor,
+      ...after.slice(0, afterLimit),
+    ].map(toTransactionListItem),
+    hasEarlier: before.length > beforeLimit,
+    hasLater: after.length > afterLimit,
+  };
+}
+
 export function getTransactionCategorizationCoverage() {
   const row = getDb()
     .prepare(

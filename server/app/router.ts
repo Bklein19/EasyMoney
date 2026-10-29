@@ -76,6 +76,7 @@ import {
   getTransactionCategorizationCoverage,
   getLatestTransactionCategoryUndoOperation,
   listTransactions,
+  getTransactionContext,
   restoreTransactionCategories,
 } from './transactions.ts';
 
@@ -523,6 +524,15 @@ export const appRouter = t.router({
     details: t.procedure
       .input(z.object({ ledgerTransactionId: z.string().min(1) }))
       .query(({ input }) => getTransactionDetails(input.ledgerTransactionId)),
+    context: t.procedure
+      .input(
+        z.object({
+          ledgerTransactionId: z.string().min(1),
+          beforeLimit: z.number().int().min(1).max(50).optional(),
+          afterLimit: z.number().int().min(1).max(50).optional(),
+        }),
+      )
+      .query(({ input }) => getTransactionContext(input)),
     list: t.procedure
       .input(
         z

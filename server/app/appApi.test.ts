@@ -38,6 +38,85 @@ const {
 } = await import('./aiCategorization.ts');
 const caller = appRouter.createCaller({});
 
+test('transaction context is bounded, occurrence-preserving, account-scoped and independent of review categories', async () => {
+  const accountId = Number(
+    insertRow('accounts', { name: 'Fidelity context', type: 'investment', status: 'archived' }),
+  );
+  const otherAccount = Number(
+    insertRow('accounts', { name: 'Different Fidelity', type: 'investment' }),
+  );
+  const categoryId = Number(insertRow('categories', { name: 'Tax context', type: 'expense' }));
+  const put = (ledgerTransactionId: string, changes: Record<string, unknown> = {}) =>
+    insertRow('ledgerTransactions', {
+      ledgerTransactionId,
+      accountId,
+      date: '2026-10-02',
+      amountCents: 514560,
+      description: 'RSU vest',
+      merchant: 'HubSpot',
+      transactionKind: 'activity',
+      ...changes,
+    });
+  for (let index = 0; index < 120; index++) {
+    put(
+      `timeline-${String(index).padStart(3, '0')}`,
+      index === 61
+        ? {
+            description: 'RSU tax withholding',
+            merchant: 'Tax journal',
+            transactionKind: 'internal_transfer',
+            amountCents: -200000,
+          }
+        : {},
+    );
+  }
+  upsertTransactionAnnotation('timeline-061', { categoryId, notes: 'Keep withholding note' });
+  put('other-account-context', { accountId: otherAccount });
+  put('earliest-context', { date: '2026-09-01' });
+  put('latest-context', { date: '2026-11-01' });
+  const beforeChanges = getDb().prepare('SELECT total_changes() n').get()?.n;
+  const context = await caller.transactions.context({ ledgerTransactionId: 'timeline-060' });
+  expect(context.anchor.account?.id).toBe(accountId);
+  expect(context.anchor.ledgerTransactionId).toBe('timeline-060');
+  expect(context.transactions.map((row) => row.ledgerTransactionId)).toEqual(
+    Array.from({ length: 9 }, (_, index) => `timeline-${String(index + 56).padStart(3, '0')}`),
+  );
+  expect(context.hasEarlier).toBe(true);
+  expect(context.hasLater).toBe(true);
+  expect(
+    context.transactions.find((row) => row.ledgerTransactionId === 'timeline-061'),
+  ).toMatchObject({
+    amount: -2000,
+    description: 'RSU tax withholding',
+    category: { id: categoryId },
+    notes: 'Keep withholding note',
+  });
+  const expanded = await caller.transactions.context({
+    ledgerTransactionId: 'timeline-060',
+    beforeLimit: 50,
+    afterLimit: 50,
+  });
+  expect(expanded.transactions).toHaveLength(101);
+  expect(new Set(expanded.transactions.map((row) => row.ledgerTransactionId)).size).toBe(101);
+  expect(expanded.transactions.every((row) => row.account?.id === accountId)).toBe(true);
+  const first = await caller.transactions.context({ ledgerTransactionId: 'earliest-context' });
+  expect(first.hasEarlier).toBe(false);
+  expect(first.transactions[0]?.ledgerTransactionId).toBe('earliest-context');
+  const last = await caller.transactions.context({ ledgerTransactionId: 'latest-context' });
+  expect(last.hasLater).toBe(false);
+  expect(last.transactions.at(-1)?.ledgerTransactionId).toBe('latest-context');
+  await expect(
+    caller.transactions.context({ ledgerTransactionId: 'missing-context' }),
+  ).rejects.toThrow('no longer exists');
+  await expect(
+    caller.transactions.context({ ledgerTransactionId: 'timeline-060', beforeLimit: 51 }),
+  ).rejects.toThrow();
+  await expect(
+    caller.transactions.context({ ledgerTransactionId: 'timeline-060', afterLimit: 0 }),
+  ).rejects.toThrow();
+  expect(getDb().prepare('SELECT total_changes() n').get()?.n).toBe(beforeChanges);
+});
+
 test('spending detail resolves exact backend scope, paginates occurrences, searches and never widens missing nodes', async () => {
   const accountId = Number(insertRow('accounts', { name: 'Scoped card', type: 'credit_card' }));
   const otherAccount = Number(insertRow('accounts', { name: 'Other card', type: 'credit_card' }));

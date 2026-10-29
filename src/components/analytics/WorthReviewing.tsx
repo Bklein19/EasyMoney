@@ -55,26 +55,29 @@ export default function WorthReviewing({
         isOpen={Boolean(selected) && !inspectedId}
         onClose={() => setSelected(null)}
         title="Review categories"
-        maxWidth="800px"
+        maxWidth="1100px"
       >
         {selected && (
-          <>
-            <h3>{selected.name}</h3>
-            <p>{selected.accountName}</p>
-            {selected.reasons.map((reason) => (
-              <p key={reason}>{reason}</p>
-            ))}
-            <p className="transaction-detail__hint">
-              Choose only the transactions that belong together. Nothing is selected or changed
-              automatically.
-            </p>
-            <ReviewedTransactions
-              key={selected.id}
-              transactions={selectedRows}
-              label="Worth reviewing categories"
-              onInspect={setInspectedId}
-            />
-          </>
+          <ReviewedTransactions
+            key={selected.id}
+            transactions={selectedRows}
+            label="Worth reviewing categories"
+            onInspect={setInspectedId}
+            showContext
+            introduction={
+              <>
+                <h3>{selected.name}</h3>
+                <p>{selected.accountName}</p>
+                {selected.reasons.map((reason) => (
+                  <p key={reason}>{reason}</p>
+                ))}
+                <p className="transaction-detail__hint">
+                  Choose only the transactions that belong together. Nothing is selected or changed
+                  automatically.
+                </p>
+              </>
+            }
+          />
         )}
       </Modal>
       {inspectedId && (

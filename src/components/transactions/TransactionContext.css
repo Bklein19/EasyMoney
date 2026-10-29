@@ -1,0 +1,108 @@
+.category-review-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.category-review-introduction {
+  margin-bottom: 16px;
+}
+.category-review-introduction h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+.category-review-introduction p {
+  margin: 6px 0;
+  font-size: 0.85rem;
+}
+.category-review-layout > * {
+  min-width: 0;
+}
+.category-review-context-button {
+  align-self: center;
+}
+.category-review-context-button[aria-pressed='true'] {
+  color: var(--color-accent);
+  background: var(--bg-elevated);
+}
+.transaction-context {
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  padding: 16px;
+}
+.transaction-context h4 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+.transaction-context header p,
+.transaction-context__note {
+  margin: 6px 0 12px;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+.transaction-context__rows {
+  position: relative;
+  max-height: min(360px, 40vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.transaction-context__rows li {
+  padding: 10px 8px;
+  border-top: 1px solid var(--glass-border);
+}
+.transaction-context__row--focused {
+  background: var(--bg-base);
+  box-shadow: inset 3px 0 var(--color-accent);
+  border-radius: var(--radius-sm);
+}
+.transaction-context__row-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 8px;
+  font-size: 0.75rem;
+}
+.transaction-context time {
+  color: var(--text-secondary);
+}
+.transaction-context__amount {
+  margin-left: auto;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  font-size: 0.85rem;
+}
+.transaction-context__badge {
+  color: var(--color-accent);
+  font-size: 0.7rem;
+}
+.transaction-context__rows p {
+  margin: 5px 0;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+.transaction-context__rows p.transaction-context__description,
+.transaction-context__category {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+.category-review-layout .related-transactions__name strong {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.category-review-layout .related-transactions li {
+  flex-wrap: wrap;
+}
+.category-review-layout .related-transactions__name {
+  flex-basis: 55%;
+}
+@media (max-width: 900px) {
+  .category-review-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
