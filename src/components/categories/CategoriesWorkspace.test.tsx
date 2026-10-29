@@ -49,7 +49,7 @@ test('category workspace defaults to review while legacy group links browse and 
   expect(html).not.toContain('New category');
 });
 
-test('merchant review provides these and all scopes with one category picker and no individual editors', () => {
+test('merchant review offers one split recommendation button and keeps all-history actions behind disclosure', () => {
   const group = {
     id: 'merchant',
     name: 'OpenAI',
@@ -71,6 +71,20 @@ test('merchant review provides these and all scopes with one category picker and
     historyTargets: [{ categoryId: 1, count: 3, matchingCount: 10 }],
   };
   const html = render('/categories', (client) => {
+    client.setQueryData(trpc.categories.list.queryKey(), {
+      categories: [
+        {
+          id: 1,
+          name: 'Software',
+          type: 'expense',
+          color: null,
+          icon: null,
+          description: null,
+          parentId: null,
+          categoryGroup: null,
+        },
+      ],
+    });
     client.setQueryData(
       trpc.categories.merchantQueue.queryKey({ search: '', status: 'open', offset: 0 }),
       {
@@ -82,10 +96,12 @@ test('merchant review provides these and all scopes with one category picker and
     );
   });
   expect(html).toContain('Merchant category reviews');
-  expect(html).toContain('Category for OpenAI');
-  expect(html).toContain('Categorize these 1');
-  expect(html).toContain('Categorize all 14');
-  expect(html.match(/aria-label="Category for /g)).toHaveLength(1);
+  expect(html).toContain('Choose category for OpenAI');
+  expect(html).toContain('Categorize as Software');
+  expect(html).toContain('Categorize 1 review transactions as Software');
+  expect(html).not.toContain('Categorize all 14');
+  expect(html.match(/aria-label="Choose category for /g)).toHaveLength(1);
+  expect(html).toContain('aria-expanded="false"');
   expect(html).toContain('3 earlier transactions differ');
   expect(html).not.toContain('type="checkbox"');
   expect(html).not.toContain('Apply to');
@@ -93,7 +109,7 @@ test('merchant review provides these and all scopes with one category picker and
   expect(html).not.toContain('One check at a time');
 });
 
-test('categorized conflicts can be marked intentional without changing categories', () => {
+test('categorized conflicts defer transaction details and intentional decisions until expanded', () => {
   const html = render('/categories', (client) => {
     client.setQueryData(
       trpc.categories.merchantQueue.queryKey({ search: '', status: 'open', offset: 0 }),
@@ -126,9 +142,10 @@ test('categorized conflicts can be marked intentional without changing categorie
       },
     );
   });
-  expect(html).toContain('These differences are intentional');
-  expect(html).toContain('Review 2');
-  expect(html).toContain('Categorize these 2');
+  expect(html).not.toContain('These differences are intentional');
+  expect(html).not.toContain('Review 2');
+  expect(html).toContain('Categorize as…');
+  expect(html).not.toContain('Categorize as undefined');
   expect(html).not.toContain('Categorize all 2');
   expect(html).not.toContain('Save 0');
   expect(html).not.toContain('type="checkbox"');
@@ -167,10 +184,10 @@ test('single-transaction review has one editor, date and nearby activity without
       },
     );
   });
-  expect(html.match(/aria-label="Category for /g)).toHaveLength(1);
+  expect(html.match(/aria-label="Choose category for /g)).toHaveLength(1);
   expect(html).toContain('May 26, 2020');
-  expect(html).toContain('Nearby activity');
-  expect(html).toContain('Keep current category');
+  expect(html).toContain('aria-expanded="false"');
+  expect(html).not.toContain('Keep current category');
   expect(html).not.toContain('These differences are intentional');
   expect(html).not.toContain('Review 1');
   expect(html).not.toContain('Transactions in this review');
