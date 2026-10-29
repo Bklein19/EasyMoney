@@ -30,7 +30,15 @@ interface SpendingTrendChartRow extends SpendingTrendRow, AnalyticsPeriodRow {
 interface SpendingTrendsProps {
   rows?: SpendingTrendRow[];
   showTotalSpend?: boolean;
+  comparedCategory?: string;
   onSelectPeriod?: (period: AnalyticsPeriodRow) => void;
+}
+
+export function spendingTrendCategories(rows: SpendingTrendRow[], comparedCategory?: string) {
+  return comparedCategory &&
+    rows.some((row) => Object.hasOwn(row.categoryAmounts ?? {}, comparedCategory))
+    ? [comparedCategory]
+    : [];
 }
 
 interface TooltipPayloadEntry {
@@ -102,11 +110,10 @@ const CustomTooltip = ({ active, payload, showTotalSpend }: TooltipProps) => {
 export default function SpendingTrends({
   rows = [],
   showTotalSpend = true,
+  comparedCategory,
   onSelectPeriod,
 }: SpendingTrendsProps) {
-  const activeCategories = Array.from(
-    new Set(rows.flatMap((row) => Object.keys(row.categoryAmounts ?? {}))),
-  );
+  const activeCategories = spendingTrendCategories(rows, comparedCategory);
   const data = rows.map((row) => {
     const item: SpendingTrendChartRow = {
       ...row,

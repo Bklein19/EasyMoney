@@ -16,6 +16,13 @@ import {
   updateAccountMetadata,
 } from './accounts.ts';
 import { getAnalyticsReport, getSpendingExplorerTransactions } from './analytics.ts';
+import {
+  merchantReviewQueue,
+  merchantReviewScope,
+  saveMerchantCategories,
+  keepMerchantDifferences,
+  reopenMerchantReview,
+} from './merchantReview';
 import { getBudgetingReport } from './budgetingReport.ts';
 import {
   autoApplyAiCategorization,
@@ -266,6 +273,53 @@ export const appRouter = t.router({
   }),
 
   categories: t.router({
+    merchantQueue: t.procedure
+      .input(
+        z
+          .object({
+            search: z.string().optional(),
+            status: z.enum(['open', 'kept']).optional(),
+            offset: z.number().int().min(0).optional(),
+          })
+          .optional(),
+      )
+      .query(({ input }) => merchantReviewQueue(input)),
+    merchantScope: t.procedure
+      .input(
+        z.object({
+          groupId: z.string().min(1),
+          scope: z.enum(['current', 'history', 'all']),
+          categoryId: z.number().int().positive().optional(),
+          offset: z.number().int().min(0).optional(),
+        }),
+      )
+      .query(({ input }) => merchantReviewScope(input)),
+    saveMerchant: t.procedure
+      .input(
+        z.object({
+          groupId: z.string().min(1),
+          scope: z.enum(['current', 'history']),
+          categoryId: z.number().int().positive(),
+          fingerprint: z.string().min(1),
+        }),
+      )
+      .mutation(({ input }) => {
+        createBackup();
+        return saveMerchantCategories(input);
+      }),
+    keepMerchant: t.procedure
+      .input(
+        z.object({
+          groupId: z.string().min(1),
+          scope: z.enum(['current', 'history']),
+          categoryId: z.number().int().positive().optional(),
+          fingerprint: z.string().min(1),
+        }),
+      )
+      .mutation(({ input }) => keepMerchantDifferences(input)),
+    reopenMerchant: t.procedure
+      .input(z.object({ groupId: z.string().min(1), fingerprint: z.string().min(1) }))
+      .mutation(({ input }) => reopenMerchantReview(input)),
     reviewQueue: t.procedure
       .input(
         z
@@ -738,6 +792,9 @@ export const appRouter = t.router({
   }),
 
   analytics: t.router({
+    spendingExplorer: t.procedure
+      .input(analyticsInput.optional())
+      .query(({ input }) => getAnalyticsReport(input ?? {}).spendingExplorer),
     spendingTransactions: t.procedure
       .input(
         z.object({

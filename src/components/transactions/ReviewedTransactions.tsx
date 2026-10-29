@@ -45,7 +45,7 @@ export function useReviewedCategories() {
       setPending(false);
     }
   };
-  return { pending, error, undo, apply, restore };
+  return { pending, error, undo, apply, restore, remember: setUndo };
 }
 
 export function CategoryChangeFeedback({

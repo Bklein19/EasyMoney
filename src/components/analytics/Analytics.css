@@ -1078,6 +1078,8 @@
 /* Detailed breakdowns stay available without competing with the main reporting flow. */
 .analytics-secondary-details {
   grid-column: 1 / -1;
+  min-height: 0;
+  display: block;
 }
 .analytics-secondary-details > summary {
   cursor: pointer;
@@ -1090,6 +1092,119 @@
 .analytics-secondary-details > p {
   font-size: 0.8rem;
   color: var(--text-secondary);
+}
+.analytics-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.analytics-summary__item {
+  display: grid;
+  gap: 6px;
+  padding: 18px;
+  min-width: 0;
+}
+.analytics-summary__item > span {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+.analytics-summary__item > strong {
+  color: var(--text-primary);
+  font-size: 1.5rem;
+  font-variant-numeric: tabular-nums;
+}
+.analytics-summary__item > small {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+.analytics-category-menu {
+  order: 2;
+  position: relative;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  padding: 10px 12px;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+.analytics-category-menu > summary {
+  cursor: pointer;
+}
+.analytics-category-menu__content {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  top: calc(100% + 6px);
+  width: 380px;
+  max-width: calc(100vw - 60px);
+  padding: 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-md);
+}
+.analytics-category-menu__content > .analytics-control__label {
+  display: none;
+}
+.analytics-category-menu__content .category-filter-control__row {
+  flex-wrap: wrap;
+}
+.analytics-category-menu__content .category-filter-control__row select {
+  width: 100%;
+  flex: 1 1 100%;
+}
+.analytics-category-menu__content .category-filter-chips {
+  margin-top: 10px;
+  padding: 0;
+}
+.analytics-control--range {
+  order: 0;
+}
+.analytics-control--dates {
+  order: 1;
+}
+.analytics-control--group {
+  order: 3;
+}
+.analytics-control--custom {
+  order: 4;
+}
+.analytics-control__label {
+  font-weight: 500;
+  text-transform: none;
+  font-size: 0.8rem;
+}
+.analytics-trend-select {
+  max-width: 230px;
+  width: auto;
+}
+.analytics-card--income {
+  min-height: 0;
+}
+.analytics-income-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 0;
+  border: 0;
+  border-bottom: 1px solid var(--glass-border);
+  background: none;
+  color: var(--text-primary);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.analytics-income-row > strong {
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 700px) {
+  .analytics-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .analytics-trend-select {
+    max-width: 170px;
+  }
 }
 .analytics-category-review-link {
   display: flex;

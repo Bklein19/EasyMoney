@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
-import type { ChangeEvent, FormEvent, UIEvent } from 'react';
+import type { ChangeEvent, FormEvent, ReactNode, UIEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
 import {
@@ -16,16 +16,7 @@ import {
   subMonths,
   subWeeks,
 } from 'date-fns';
-import {
-  Calendar,
-  ChevronLeft,
-  ChevronRight,
-  HelpCircle,
-  Maximize2,
-  RotateCcw,
-  Search,
-  X,
-} from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, Maximize2, RotateCcw, Search, X } from 'lucide-react';
 import { SidebarAccountList } from '../layout/SidebarContext';
 import { useCategories } from '../../hooks/useCategories';
 import { useAccounts } from '../../hooks/useAccounts';
@@ -46,7 +37,6 @@ import TopMerchants from './TopMerchants';
 import IncomeStreams from './IncomeStreams';
 import InvestmentTrends from './InvestmentTrends';
 import { sortAnalyticsPeriodsChronologically } from './periodOrder';
-import Tooltip from '../shared/Tooltip';
 import Modal from '../shared/Modal';
 import GroupedCategorySelect, { isUncategorized } from '../shared/GroupedCategorySelect';
 import type {
@@ -130,6 +120,7 @@ interface AnalyticsReport {
   spendingExplorer: SpendingNode;
   topMerchants: MerchantAnalyticsRow[];
   incomeStreams: MerchantAnalyticsRow[];
+  incomeByCategory: Array<{ id: string; name: string; amount: number; transactionIds: number[] }>;
   investments: InvestmentPeriodRow[];
   transactions: AnalyticsTransaction[];
   analysisTransactionIds: number[];
@@ -171,6 +162,19 @@ function isDateRange(value: string): value is DateRange {
   return Object.values(DATE_RANGES).includes(value as DateRange);
 }
 
+function SecondaryReport({ title, children }: { title: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <details
+      className="analytics-secondary-details analytics-card glass-card"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>{title}</summary>
+      {open && children}
+    </details>
+  );
+}
+
 export default function AnalyticsPage() {
   const explorerChanges = useReviewedCategories();
   const [inspectedId, setInspectedId] = useState<string | null>(null);
@@ -197,7 +201,7 @@ export default function AnalyticsPage() {
   );
   const [drilldownVisibleCount, setDrilldownVisibleCount] = useState(DRILLDOWN_PAGE_SIZE);
   const [expandedChart, setExpandedChart] = useState<ExpandedChart>(null);
-  const [showTotalSpendTrend, setShowTotalSpendTrend] = useState(false);
+  const [trendCategory, setTrendCategory] = useState('');
   const drilldownRef = useRef<HTMLDivElement | null>(null);
 
   const { startDate, endDate } = useMemo(() => {
@@ -280,6 +284,7 @@ export default function AnalyticsPage() {
   const deferredSpendingExplorer = useDeferredValue(analyticsReport?.spendingExplorer);
   const deferredTopMerchants = useDeferredValue(analyticsReport?.topMerchants ?? []);
   const deferredIncomeStreams = useDeferredValue(analyticsReport?.incomeStreams ?? []);
+  const incomeByCategory = analyticsReport?.incomeByCategory ?? [];
   const deferredInvestments = useDeferredValue(analyticsReport?.investments ?? []);
   const deferredCategoryFilterIds = useDeferredValue(categoryFilterIds);
   const deferredCategoryFilterMode = useDeferredValue(categoryFilterMode);
@@ -313,11 +318,35 @@ export default function AnalyticsPage() {
   const totalIncome = reportSummary.income;
   const totalExpense = reportSummary.expenses;
   const filteredInternalMovement = reportSummary.internalMovement;
-  const filteredInvestments = reportSummary.investments;
   const cashFlowRows = useMemo(
     () => sortAnalyticsPeriodsChronologically(deferredCashFlow),
     [deferredCashFlow],
   );
+  const trendCategories = [
+    ...new Set(cashFlowRows.flatMap((row) => Object.keys(row.categoryAmounts))),
+  ].sort();
+  const comparedTrendCategory = trendCategories.includes(trendCategory) ? trendCategory : '';
+  const renderTrendCategory = () => (
+    <select
+      className="input input--sm analytics-trend-select"
+      aria-label="Compare spending category"
+      value={comparedTrendCategory}
+      onChange={(event) => setTrendCategory(event.target.value)}
+    >
+      <option value="">Total spending only</option>
+      {trendCategories.map((name) => (
+        <option key={name} value={name}>
+          Compare: {name}
+        </option>
+      ))}
+    </select>
+  );
+  const summaryMoney = (amount: number) =>
+    new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: 0,
+    }).format(amount);
 
   const drilldownTransactions = useMemo(() => {
     if (!drilldown) return [];
@@ -601,68 +630,80 @@ export default function AnalyticsPage() {
 
   const renderAnalyticsFilters = (variant = 'page') => (
     <div className={`analytics-controls analytics-controls--${variant}`}>
-      <div className="analytics-control analytics-control--categories">
-        <span className="analytics-control__label">Categories</span>
-        <div className="category-filter-control__row">
-          <select
-            className="input input--sm"
-            value={categoryFilterMode}
-            onChange={(event) => {
-              if (isCategoryFilterMode(event.target.value))
-                handleCategoryFilterModeChange(event.target.value);
-            }}
-            aria-label="Category filter mode"
-          >
-            <option value={CATEGORY_FILTER_MODES.INCLUDE}>Include categories</option>
-            <option value={CATEGORY_FILTER_MODES.EXCLUDE}>Exclude categories</option>
-          </select>
-          <select
-            className="input input--sm"
-            value={pendingCategoryFilterId}
-            onChange={(event) => addCategoryFilter(event.target.value)}
-            aria-label="Add category filter"
-          >
-            <option value="">
-              {categoryFilterIds.length === 0 ? 'All Categories' : 'Add Category'}
-            </option>
-            <option value="uncategorized" disabled={categoryFilterIds.includes('uncategorized')}>
-              Uncategorized
-            </option>
-            {categories
-              .filter((category) => category.name.toLowerCase() !== 'uncategorized')
-              .map((category) => {
-                const id = String(category.id);
-                return (
-                  <option key={category.id} value={id} disabled={categoryFilterIds.includes(id)}>
-                    {category.name}
-                  </option>
-                );
-              })}
-          </select>
-        </div>
-        {categoryFilterIds.length > 0 && (
-          <div className="category-filter-chips" aria-label="Active category filters">
-            {categoryFilterIds.map((categoryId) => (
-              <button
-                key={categoryId}
-                className="category-filter-chip"
-                type="button"
-                onClick={() => removeCategoryFilter(categoryId)}
-                aria-label={`Remove ${getCategoryFilterLabel(categoryId)} category filter`}
-              >
-                <span>
-                  {categoryFilterMode === CATEGORY_FILTER_MODES.EXCLUDE ? 'Excluding ' : ''}
-                  {getCategoryFilterLabel(categoryId)}
-                </span>
-                <X size={13} />
-              </button>
-            ))}
-            <button className="category-filter-clear" type="button" onClick={clearCategoryFilters}>
-              Clear
-            </button>
+      <details className="analytics-category-menu">
+        <summary>
+          Categories
+          {categoryFilterIds.length
+            ? ` · ${categoryFilterIds.length} ${categoryFilterMode === 'exclude' ? 'excluded' : 'included'}`
+            : ' · All'}
+        </summary>
+        <div className="analytics-category-menu__content">
+          <span className="analytics-control__label">Categories</span>
+          <div className="category-filter-control__row">
+            <select
+              className="input input--sm"
+              value={categoryFilterMode}
+              onChange={(event) => {
+                if (isCategoryFilterMode(event.target.value))
+                  handleCategoryFilterModeChange(event.target.value);
+              }}
+              aria-label="Category filter mode"
+            >
+              <option value={CATEGORY_FILTER_MODES.INCLUDE}>Include categories</option>
+              <option value={CATEGORY_FILTER_MODES.EXCLUDE}>Exclude categories</option>
+            </select>
+            <select
+              className="input input--sm"
+              value={pendingCategoryFilterId}
+              onChange={(event) => addCategoryFilter(event.target.value)}
+              aria-label="Add category filter"
+            >
+              <option value="">
+                {categoryFilterIds.length === 0 ? 'All Categories' : 'Add Category'}
+              </option>
+              <option value="uncategorized" disabled={categoryFilterIds.includes('uncategorized')}>
+                Uncategorized
+              </option>
+              {categories
+                .filter((category) => category.name.toLowerCase() !== 'uncategorized')
+                .map((category) => {
+                  const id = String(category.id);
+                  return (
+                    <option key={category.id} value={id} disabled={categoryFilterIds.includes(id)}>
+                      {category.name}
+                    </option>
+                  );
+                })}
+            </select>
           </div>
-        )}
-      </div>
+          {categoryFilterIds.length > 0 && (
+            <div className="category-filter-chips" aria-label="Active category filters">
+              {categoryFilterIds.map((categoryId) => (
+                <button
+                  key={categoryId}
+                  className="category-filter-chip"
+                  type="button"
+                  onClick={() => removeCategoryFilter(categoryId)}
+                  aria-label={`Remove ${getCategoryFilterLabel(categoryId)} category filter`}
+                >
+                  <span>
+                    {categoryFilterMode === CATEGORY_FILTER_MODES.EXCLUDE ? 'Excluding ' : ''}
+                    {getCategoryFilterLabel(categoryId)}
+                  </span>
+                  <X size={13} />
+                </button>
+              ))}
+              <button
+                className="category-filter-clear"
+                type="button"
+                onClick={clearCategoryFilters}
+              >
+                Clear
+              </button>
+            </div>
+          )}
+        </div>
+      </details>
 
       <label className="analytics-control analytics-control--range">
         <span className="analytics-control__label">Range</span>
@@ -682,44 +723,45 @@ export default function AnalyticsPage() {
         </select>
       </label>
 
-      <div
-        className="analytics-control analytics-control--dates date-navigator"
-        aria-label="Date range navigation"
-      >
-        <span className="analytics-control__label">Dates</span>
-        <button
-          className="btn btn--ghost btn--icon"
-          type="button"
-          disabled={!startDate || !endDate}
-          onClick={() => handleShiftMonthWindow(-1)}
-          aria-label="Previous month range"
-          title="Previous month range"
+      {startDate && endDate && (
+        <div
+          className="analytics-control analytics-control--dates date-navigator"
+          aria-label="Date range navigation"
         >
-          <ChevronLeft size={16} />
-        </button>
-        <div className="date-navigator__label" title={activeDateLabel}>
-          {activeDateLabel}
+          <button
+            className="btn btn--ghost btn--icon"
+            type="button"
+            disabled={!startDate || !endDate}
+            onClick={() => handleShiftMonthWindow(-1)}
+            aria-label="Previous month range"
+            title="Previous month range"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <div className="date-navigator__label" title={activeDateLabel}>
+            {activeDateLabel}
+          </div>
+          <button
+            className="btn btn--ghost btn--icon"
+            type="button"
+            disabled={!startDate || !endDate}
+            onClick={() => handleShiftMonthWindow(1)}
+            aria-label="Next month range"
+            title="Next month range"
+          >
+            <ChevronRight size={16} />
+          </button>
+          <button
+            className="btn btn--ghost btn--icon"
+            type="button"
+            onClick={handleResetToCurrentMonth}
+            aria-label="Reset to this month"
+            title="Reset to this month"
+          >
+            <RotateCcw size={15} />
+          </button>
         </div>
-        <button
-          className="btn btn--ghost btn--icon"
-          type="button"
-          disabled={!startDate || !endDate}
-          onClick={() => handleShiftMonthWindow(1)}
-          aria-label="Next month range"
-          title="Next month range"
-        >
-          <ChevronRight size={16} />
-        </button>
-        <button
-          className="btn btn--ghost btn--icon"
-          type="button"
-          onClick={handleResetToCurrentMonth}
-          aria-label="Reset to this month"
-          title="Reset to this month"
-        >
-          <RotateCcw size={15} />
-        </button>
-      </div>
+      )}
 
       {dateRange === DATE_RANGES.CUSTOM && (
         <div className="analytics-control analytics-control--custom date-range-selector--custom">
@@ -808,42 +850,21 @@ export default function AnalyticsPage() {
         </div>
       )}
 
-      <div className="analytics-summary grid-4">
-        <div className="glass-card kpi-card">
-          <div className="kpi-card__label">Total Income</div>
-          <div className="kpi-card__value amount amount--positive">
-            {formatCurrency(totalIncome)}
-          </div>
+      <div className="analytics-summary">
+        <div className="glass-card analytics-summary__item">
+          <span>Income received</span>
+          <strong>{summaryMoney(totalIncome)}</strong>
+          <small>{activeDateLabel}</small>
         </div>
-        <div className="glass-card kpi-card">
-          <div className="kpi-card__label">Total Expense</div>
-          <div className="kpi-card__value amount amount--negative">
-            {formatCurrency(totalExpense)}
-          </div>
+        <div className="glass-card analytics-summary__item">
+          <span>Spending</span>
+          <strong>{summaryMoney(totalExpense)}</strong>
+          <small>{activeDateLabel}</small>
         </div>
-        <div className="glass-card kpi-card">
-          <div className="kpi-card__label analytics-kpi-label">
-            <span>Total Investments</span>
-            <Tooltip
-              text="Investment transactions are tracked separately and do not subtract from net flow."
-              position="top"
-            >
-              <span className="analytics-help-icon" tabIndex={0} aria-label="Investment total help">
-                <HelpCircle size={14} />
-              </span>
-            </Tooltip>
-          </div>
-          <div className="kpi-card__value amount amount--investment">
-            {formatCurrency(filteredInvestments)}
-          </div>
-        </div>
-        <div className="glass-card kpi-card">
-          <div className="kpi-card__label">Net Flow</div>
-          <div
-            className={`kpi-card__value amount ${totalIncome - totalExpense >= 0 ? 'amount--positive' : 'amount--negative'}`}
-          >
-            {formatCurrency(totalIncome - totalExpense)}
-          </div>
+        <div className="glass-card analytics-summary__item">
+          <span>Income minus spending</span>
+          <strong>{summaryMoney(reportSummary.net)}</strong>
+          <small>Not net worth · before investment movements</small>
         </div>
       </div>
 
@@ -871,14 +892,7 @@ export default function AnalyticsPage() {
           <div className="analytics-chart-header">
             <h3 className="analytics-card__title">Spending Trends</h3>
             <div className="analytics-chart-actions">
-              <label className="analytics-chart-toggle">
-                <input
-                  type="checkbox"
-                  checked={showTotalSpendTrend}
-                  onChange={(event) => setShowTotalSpendTrend(event.target.checked)}
-                />
-                <span>Total Spend</span>
-              </label>
+              {renderTrendCategory()}
               <button
                 className="btn btn--ghost btn--icon btn--sm"
                 type="button"
@@ -891,7 +905,7 @@ export default function AnalyticsPage() {
           </div>
           <SpendingTrends
             rows={cashFlowRows}
-            showTotalSpend={showTotalSpendTrend}
+            comparedCategory={comparedTrendCategory}
             onSelectPeriod={handlePeriodSelect}
           />
         </div>
@@ -917,44 +931,69 @@ export default function AnalyticsPage() {
           />
           <CategoryChangeFeedback state={explorerChanges} />
         </div>
-        <details className="analytics-secondary-details analytics-card glass-card">
-          <summary>Merchants &amp; income sources</summary>
-          <div className="analytics-grid">
-            <div className="analytics-card glass-card">
-              <h3 className="analytics-card__title">Top Merchants</h3>
-              <TopMerchants
-                rows={deferredTopMerchants}
-                onSelectMerchant={(merchant) =>
-                  openDrilldown({
-                    type: 'merchant',
-                    id: merchant.normalized,
-                    ids: new Set(merchant.transactionIds),
-                    title: `${merchant.name} Transactions`,
-                    aliases: merchant.aliases,
-                  })
-                }
-              />
-            </div>
-
-            <div className="analytics-card glass-card">
-              <h3 className="analytics-card__title">Income Streams</h3>
-              <IncomeStreams
-                rows={deferredIncomeStreams}
-                onSelectStream={(stream) =>
-                  openDrilldown({
-                    type: 'incomeStream',
-                    id: stream.normalized,
-                    ids: new Set(stream.transactionIds),
-                    title: `${stream.name} Income`,
-                    aliases: stream.aliases,
-                  })
-                }
-              />
-            </div>
+        <section className="analytics-card glass-card analytics-card--income">
+          <div className="analytics-card__heading">
+            <h3 className="analytics-card__title">Income sources</h3>
+            <p>
+              Cash received by category · {activeDateLabel}. Payroll is deposited pay, not gross W-2
+              income.
+            </p>
           </div>
-        </details>
-        <details className="analytics-secondary-details analytics-card glass-card">
-          <summary>Investment activity</summary>
+          {incomeByCategory.map((row) => (
+            <button
+              className="analytics-income-row"
+              key={row.id}
+              onClick={() =>
+                openDrilldown({
+                  type: 'category',
+                  id: row.id,
+                  title: `${row.name} income`,
+                  ids: new Set(row.transactionIds),
+                })
+              }
+            >
+              <span>{row.name}</span>
+              <strong>{summaryMoney(row.amount)}</strong>
+            </button>
+          ))}
+          {!incomeByCategory.length && (
+            <p className="category-workspace__hint">No income in this period.</p>
+          )}
+          <details>
+            <summary>By payer / source</summary>
+            <IncomeStreams
+              rows={deferredIncomeStreams}
+              onSelectStream={(stream) =>
+                openDrilldown({
+                  type: 'incomeStream',
+                  id: stream.normalized,
+                  ids: new Set(stream.transactionIds),
+                  title: `${stream.name} Income`,
+                  aliases: stream.aliases,
+                })
+              }
+            />
+          </details>
+          <p className="analytics-scope-note">
+            Own-account transfers are excluded. Market gains are in{' '}
+            <Link to="/net-worth">Net Worth</Link> / <Link to="/performance">Performance</Link>.
+          </p>
+        </section>
+        <SecondaryReport title="Top merchants">
+          <TopMerchants
+            rows={deferredTopMerchants}
+            onSelectMerchant={(merchant) =>
+              openDrilldown({
+                type: 'merchant',
+                id: merchant.normalized,
+                ids: new Set(merchant.transactionIds),
+                title: `${merchant.name} Transactions`,
+                aliases: merchant.aliases,
+              })
+            }
+          />
+        </SecondaryReport>
+        <SecondaryReport title="Investment activity">
           <p>
             Investment movements are separate from cash flow. See{' '}
             <Link to="/net-worth">Net Worth</Link> and <Link to="/performance">Performance</Link>{' '}
@@ -964,7 +1003,7 @@ export default function AnalyticsPage() {
             rows={deferredInvestments}
             onSelectPeriod={handleInvestmentPeriodSelect}
           />
-        </details>
+        </SecondaryReport>
       </div>
 
       <details className="analytics-secondary-details analytics-card glass-card analytics-card--table">
@@ -1207,20 +1246,11 @@ export default function AnalyticsPage() {
       >
         {renderAnalyticsFilters('modal')}
         {renderAnalyticsWorking()}
-        <div className="analytics-modal-toolbar">
-          <label className="analytics-chart-toggle">
-            <input
-              type="checkbox"
-              checked={showTotalSpendTrend}
-              onChange={(event) => setShowTotalSpendTrend(event.target.checked)}
-            />
-            <span>Show Total Spend</span>
-          </label>
-        </div>
+        <div className="analytics-modal-toolbar">{renderTrendCategory()}</div>
         <div className="analytics-expanded-chart">
           <SpendingTrends
             rows={cashFlowRows}
-            showTotalSpend={showTotalSpendTrend}
+            comparedCategory={comparedTrendCategory}
             onSelectPeriod={(period) => {
               setExpandedChart(null);
               handlePeriodSelect(period);

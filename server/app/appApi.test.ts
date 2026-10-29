@@ -38,6 +38,242 @@ const {
 } = await import('./aiCategorization.ts');
 const caller = appRouter.createCaller({});
 
+test('merchant saves separate current unknowns from differing history and preserve exact occurrences and Undo', async () => {
+  const accountId = Number(insertRow('accounts', { name: 'Merchant card', type: 'credit_card' }));
+  const software = Number(insertRow('categories', { name: 'Software review', type: 'expense' }));
+  const education = Number(insertRow('categories', { name: 'Education review', type: 'expense' }));
+  for (let i = 0; i < 14; i++) {
+    const id = `merchant-${i}`;
+    insertRow('ledgerTransactions', {
+      ledgerTransactionId: id,
+      accountId,
+      date: '2026-10-01',
+      merchant: 'Exact merchant',
+      description: 'Identical purchase',
+      amountCents: -2000,
+      transactionKind: 'activity',
+    });
+    if (i < 13)
+      upsertTransactionAnnotation(id, {
+        categoryId: i < 10 ? software : education,
+        notes: `Keep ${i}`,
+      });
+  }
+  const before = getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all();
+  const group = (await caller.categories.merchantQueue()).groups[0]!;
+  expect(group.currentCount).toBe(1);
+  expect(group.historyTargets.find((target) => target.categoryId === software)?.count).toBe(3);
+  const current = await caller.categories.merchantScope({ groupId: group.id, scope: 'current' });
+  expect(current.transactions.map((row) => row.ledgerTransactionId)).toEqual(['merchant-13']);
+  const saved = await caller.categories.saveMerchant({
+    groupId: group.id,
+    scope: 'current',
+    categoryId: software,
+    fingerprint: current.fingerprint,
+  });
+  expect(saved.count).toBe(1);
+  const updated = (await caller.categories.merchantQueue()).groups[0]!;
+  expect(updated.currentCount).toBe(0);
+  expect(updated.historyTargets.find((target) => target.categoryId === software)?.count).toBe(3);
+  const history = await caller.categories.merchantScope({
+    groupId: group.id,
+    scope: 'history',
+    categoryId: software,
+  });
+  expect(history.count).toBe(3);
+  expect(history.matchingHistoryCount).toBe(11);
+  const moved = await caller.categories.saveMerchant({
+    groupId: group.id,
+    scope: 'history',
+    categoryId: software,
+    fingerprint: history.fingerprint,
+  });
+  expect(moved.count).toBe(3);
+  expect((await caller.categories.merchantQueue()).totalCount).toBe(0);
+  await caller.transactions.restoreCategories({ undoOperationId: moved.undoOperation!.id });
+  expect(
+    (
+      await caller.categories.merchantScope({
+        groupId: group.id,
+        scope: 'history',
+        categoryId: software,
+      })
+    ).count,
+  ).toBe(3);
+  expect(
+    (await caller.transactions.list()).transactions.find(
+      (row) => row.ledgerTransactionId === 'merchant-13',
+    )?.category?.id,
+  ).toBe(software);
+  expect(
+    (await caller.transactions.list()).transactions.find(
+      (row) => row.ledgerTransactionId === 'merchant-10',
+    )?.notes,
+  ).toBe('Keep 10');
+  expect(getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all()).toEqual(before);
+  await expect(
+    caller.categories.saveMerchant({
+      groupId: group.id,
+      scope: 'current',
+      categoryId: software,
+      fingerprint: current.fingerprint,
+    }),
+  ).rejects.toThrow();
+});
+
+test('intentional category differences remain acknowledged when new matching activity arrives but changed evidence reopens them', async () => {
+  const accountId = Number(
+    insertRow('accounts', { name: 'Intentional brokerage', type: 'investment' }),
+  );
+  const income = Number(insertRow('categories', { name: 'Income intentional', type: 'income' }));
+  const investment = Number(
+    insertRow('categories', { name: 'Investment intentional', type: 'investment' }),
+  );
+  const expense = Number(insertRow('categories', { name: 'Unexpected expense', type: 'expense' }));
+  const put = (id: string, categoryId?: number) => {
+    insertRow('ledgerTransactions', {
+      ledgerTransactionId: id,
+      accountId,
+      date: '2026-10-02',
+      merchant: 'RSU review',
+      description: 'RSU vest',
+      amountCents: 10000,
+      transactionKind: 'activity',
+    });
+    if (categoryId) upsertTransactionAnnotation(id, { categoryId, notes: 'Unchanged note' });
+  };
+  put('intentional-a', income);
+  put('intentional-b', investment);
+  const original = getDb()
+    .prepare('SELECT * FROM transactionAnnotations ORDER BY ledgerTransactionId')
+    .all();
+  const group = (await caller.categories.merchantQueue()).groups[0]!;
+  await caller.categories.keepMerchant({
+    groupId: group.id,
+    scope: 'current',
+    fingerprint: group.primaryFingerprint,
+  });
+  expect(
+    getDb().prepare('SELECT * FROM transactionAnnotations ORDER BY ledgerTransactionId').all(),
+  ).toEqual(original);
+  expect((await caller.categories.merchantQueue()).totalCount).toBe(0);
+  put('intentional-c', income);
+  expect((await caller.categories.merchantQueue()).totalCount).toBe(0);
+  put('intentional-new');
+  const pending = (await caller.categories.merchantQueue()).groups[0]!;
+  expect(pending.currentCount).toBe(1);
+  expect(pending.historyTargets.find((target) => target.categoryId === income)?.count).toBe(0);
+  await expect(
+    caller.categories.keepMerchant({
+      groupId: group.id,
+      scope: 'current',
+      fingerprint: pending.primaryFingerprint,
+    }),
+  ).rejects.toThrow();
+  await caller.categories.saveMerchant({
+    groupId: group.id,
+    scope: 'current',
+    categoryId: income,
+    fingerprint: pending.primaryFingerprint,
+  });
+  expect((await caller.categories.merchantQueue()).totalCount).toBe(0);
+  upsertTransactionAnnotation('intentional-a', { categoryId: expense });
+  expect((await caller.categories.merchantQueue()).totalCount).toBe(1);
+});
+
+test('keeping earlier category differences acknowledges their comparison category without changing history or future transactions', async () => {
+  const accountId = Number(insertRow('accounts', { name: 'History card', type: 'credit_card' }));
+  const software = Number(insertRow('categories', { name: 'Software history', type: 'expense' }));
+  const education = Number(insertRow('categories', { name: 'Education history', type: 'expense' }));
+  for (let i = 0; i < 4; i++) {
+    const id = `history-keep-${i}`;
+    insertRow('ledgerTransactions', {
+      ledgerTransactionId: id,
+      accountId,
+      date: '2026-10-01',
+      merchant: 'History merchant',
+      amountCents: -1000,
+      transactionKind: 'activity',
+    });
+    if (i < 3) upsertTransactionAnnotation(id, { categoryId: i === 0 ? education : software });
+  }
+  const group = (await caller.categories.merchantQueue()).groups[0]!;
+  const history = await caller.categories.merchantScope({
+    groupId: group.id,
+    scope: 'history',
+    categoryId: software,
+  });
+  await caller.categories.keepMerchant({
+    groupId: group.id,
+    scope: 'history',
+    categoryId: software,
+    fingerprint: history.fingerprint,
+  });
+  const current = (await caller.categories.merchantQueue()).groups[0]!;
+  expect(current.currentCount).toBe(1);
+  expect(current.historyTargets.find((target) => target.categoryId === software)?.count).toBe(0);
+  await caller.categories.saveMerchant({
+    groupId: group.id,
+    scope: 'current',
+    categoryId: software,
+    fingerprint: current.primaryFingerprint,
+  });
+  expect((await caller.categories.merchantQueue()).totalCount).toBe(0);
+  const kept = (await caller.categories.merchantQueue({ status: 'kept' })).groups[0]!;
+  await caller.categories.reopenMerchant({ groupId: group.id, fingerprint: kept.fingerprint });
+  expect((await caller.categories.merchantQueue()).totalCount).toBe(1);
+  expect(
+    (await caller.transactions.list()).transactions.find(
+      (row) => row.ledgerTransactionId === 'history-keep-0',
+    )?.category?.id,
+  ).toBe(education);
+});
+
+test('merchant Save covers the complete displayed count beyond a sample page and rejects stale source evidence atomically', async () => {
+  const accountId = Number(
+    insertRow('accounts', { name: 'Many occurrences', type: 'credit_card' }),
+  );
+  const categoryId = Number(
+    insertRow('categories', { name: 'Dining occurrences', type: 'expense' }),
+  );
+  for (let i = 0; i < 60; i++)
+    insertRow('ledgerTransactions', {
+      ledgerTransactionId: `many-merchant-${i}`,
+      accountId,
+      date: '2026-10-01',
+      merchant: 'Same cafe',
+      description: 'Same purchase',
+      amountCents: -500,
+      transactionKind: 'activity',
+    });
+  const group = (await caller.categories.merchantQueue()).groups[0]!;
+  const scope = await caller.categories.merchantScope({ groupId: group.id, scope: 'current' });
+  expect(scope.count).toBe(60);
+  expect(scope.transactions).toHaveLength(50);
+  expect(scope.hasMore).toBe(true);
+  getDb()
+    .prepare('UPDATE ledgerTransactions SET amountCents=-501 WHERE ledgerTransactionId=?')
+    .run('many-merchant-0');
+  await expect(
+    caller.categories.saveMerchant({
+      groupId: group.id,
+      scope: 'current',
+      categoryId,
+      fingerprint: scope.fingerprint,
+    }),
+  ).rejects.toThrow('review changed');
+  expect(getDb().prepare('SELECT * FROM transactionAnnotations').all()).toHaveLength(0);
+  const fresh = await caller.categories.merchantScope({ groupId: group.id, scope: 'current' });
+  const saved = await caller.categories.saveMerchant({
+    groupId: group.id,
+    scope: 'current',
+    categoryId,
+    fingerprint: fresh.fingerprint,
+  });
+  expect(saved.count).toBe(60);
+  expect((await caller.transactions.list()).transactions).toHaveLength(60);
+});
+
 test('category workspace queues all flagged groups with compact pages and preserves exact keep-as-is decisions', async () => {
   const accountId = Number(insertRow('accounts', { name: 'Review brokerage', type: 'investment' }));
   const incomeId = Number(insertRow('categories', { name: 'Review income', type: 'income' }));
@@ -992,6 +1228,7 @@ function resetAppTables() {
   db.transaction(() => {
     for (const table of [
       'categoryReviewDecisions',
+      'categoryReviewAcknowledgements',
       'ledgerRebuildState',
       'ledgerProvenance',
       'reviewedDistinctOverlaps',
@@ -2761,6 +2998,12 @@ test('trpc analytics report aggregates backend-owned cashflow semantics', async 
   expect(report.incomeStreams).toEqual([
     expect.objectContaining({ name: 'ACME Payroll', amount: 1000, count: 1 }),
   ]);
+  expect(report.incomeByCategory).toEqual([
+    { id: String(incomeId), name: 'Income', amount: 1000, transactionIds: [Number(payrollId)] },
+  ]);
+  expect(
+    await caller.analytics.spendingExplorer({ startDate: '2026-06-01', endDate: '2026-06-30' }),
+  ).toEqual(report.spendingExplorer);
   expect(report.investments).toEqual([expect.objectContaining({ key: '2026-06', amount: 400 })]);
 
   const diningOnly = await caller.analytics.report({
@@ -2768,6 +3011,7 @@ test('trpc analytics report aggregates backend-owned cashflow semantics', async 
     categoryFilterMode: 'include',
   });
   expect(diningOnly.summary).toMatchObject({ income: 0, expenses: 25, net: -25 });
+  expect(diningOnly.incomeByCategory).toEqual([]);
   expect(diningOnly.spendingExplorer.amountCents).toBe(2500);
   expect(
     (

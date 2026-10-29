@@ -131,131 +131,6 @@
 .category-workspace__browse-checks .category-workspace__queue {
   max-height: 260px;
 }
-.category-focus {
-  border: 1px solid var(--glass-border);
-  border-radius: var(--radius-lg);
-  background: var(--bg-elevated);
-  padding: 28px;
-  overflow-wrap: anywhere;
-}
-.category-focus__eyebrow {
-  display: block;
-  color: var(--text-primary);
-  font-size: 0.75rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  margin-bottom: 12px;
-}
-.category-focus__header h2 {
-  margin: 0 0 10px;
-  font-size: 1.35rem;
-  line-height: 1.4;
-}
-.category-focus__header p {
-  color: var(--text-secondary);
-  font-size: 0.85rem;
-  margin: 4px 0;
-}
-.category-focus__header .category-focus__dates {
-  font-size: 0.75rem;
-}
-.category-focus__assessment {
-  margin: 24px 0 18px;
-  padding-left: 16px;
-  border-left: 3px solid var(--color-accent);
-}
-.category-focus__current {
-  display: grid;
-  gap: 5px;
-}
-.category-focus__current > span {
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-}
-.category-focus__current strong {
-  font-size: 1.15rem;
-}
-.category-focus__assessment p {
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-  line-height: 1.5;
-  margin: 10px 0 0;
-}
-.category-focus__transactions {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-.category-focus__transactions li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border-bottom: 1px solid var(--glass-border);
-}
-.category-focus__transaction {
-  flex: 1;
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 110px minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-  text-align: left;
-  border: 0;
-  background: none;
-  color: var(--text-primary);
-  padding: 14px 0;
-  font: inherit;
-  font-size: 0.8rem;
-  cursor: pointer;
-}
-.category-focus__transaction > span:first-child {
-  color: var(--text-secondary);
-}
-.category-focus__transaction > span:last-child {
-  text-align: right;
-  white-space: nowrap;
-}
-.category-focus__actions,
-.category-focus__edit-controls {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-  margin-top: 24px;
-}
-.category-focus__edit {
-  padding-top: 24px;
-}
-.category-focus__edit > label {
-  font-weight: 600;
-  font-size: 0.9rem;
-}
-.category-focus__edit-controls {
-  margin-top: 12px;
-}
-.category-focus__edit-controls .grouped-category-select-control {
-  flex: 1 1 220px;
-  min-width: 0;
-}
-.category-focus__edit p {
-  color: var(--text-secondary);
-  font-size: 0.75rem;
-  line-height: 1.5;
-  margin: 12px 0 0;
-}
-.category-focus__individual {
-  margin-top: 16px;
-}
-.category-focus__individual > .btn {
-  padding-left: 0;
-}
-.category-focus__individual .category-review-layout {
-  display: block;
-}
-.category-focus .transaction-context {
-  margin-top: 16px;
-}
 .category-workspace__pagination {
   display: flex;
   gap: 10px;
@@ -284,6 +159,137 @@
 }
 .category-workspace .category-review-controls {
   align-items: center;
+}
+.merchant-review-filters {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.merchant-review-filters input {
+  flex: 1;
+  min-width: 180px;
+}
+.merchant-review-filters select {
+  width: auto;
+}
+.merchant-review {
+  padding: 20px 0;
+  border-bottom: 1px solid var(--glass-border);
+}
+.merchant-review__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px auto;
+  align-items: start;
+  gap: 18px;
+}
+.merchant-review__name {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+.merchant-review__meta {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  margin: 6px 0 0;
+}
+.merchant-review__category small {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  margin-top: 5px;
+}
+.merchant-review__history-link {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--color-accent);
+  font: inherit;
+  font-size: 0.8rem;
+  margin-top: 12px;
+  cursor: pointer;
+}
+.merchant-review__secondary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 12px;
+  align-items: center;
+}
+.merchant-review__details {
+  margin-top: 16px;
+  padding: 18px;
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  border: 1px solid var(--glass-border);
+}
+.merchant-review__details header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.merchant-review__details h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+.merchant-review__transactions {
+  padding: 0;
+  margin: 10px 0;
+  list-style: none;
+}
+.merchant-review__transactions li {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--glass-border);
+}
+.merchant-review__description {
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.8rem;
+  border: 0;
+  background: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.merchant-review__individual {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 0.8rem;
+}
+.merchant-review__individual > span {
+  margin-right: auto;
+  color: var(--text-secondary);
+}
+.merchant-review__individual .grouped-category-select-control {
+  width: 240px;
+  max-width: 100%;
+}
+.category-workspace__explorer {
+  min-width: 0;
+}
+@media (max-width: 1100px) {
+  .merchant-review__row {
+    grid-template-columns: minmax(0, 1fr) 210px auto;
+    gap: 12px;
+  }
+}
+@media (max-width: 750px) {
+  .merchant-review__row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .merchant-review__row > div:first-child {
+    grid-column: 1 / -1;
+  }
 }
 .analytics-category-review-link {
   display: flex;
@@ -319,17 +325,5 @@
   }
   .analytics-category-review-link {
     flex-wrap: wrap;
-  }
-}
-@media (max-width: 650px) {
-  .category-focus {
-    padding: 18px;
-  }
-  .category-focus__transaction {
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 5px 10px;
-  }
-  .category-focus__transaction > span:first-child {
-    grid-column: 1 / -1;
   }
 }

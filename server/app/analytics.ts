@@ -296,6 +296,10 @@ export function getAnalyticsReport(input: AnalyticsReportInput = {}) {
       transactionIds: number[];
     }
   >();
+  const incomeByCategory = new Map<
+    string,
+    { id: string; name: string; amount: number; transactionIds: number[] }
+  >();
 
   for (const transaction of categoryScopedTransactions) {
     const period = periodFor(transaction.date, keyFormat, labelFormat);
@@ -349,6 +353,16 @@ export function getAnalyticsReport(input: AnalyticsReportInput = {}) {
     }
 
     if (isIncome(transaction, accountMap, categoryMap)) {
+      const categoryId = categoryKey(transaction);
+      const categoryIncome = incomeByCategory.get(categoryId) ?? {
+        id: categoryId,
+        name: categoryName(transaction),
+        amount: 0,
+        transactionIds: [],
+      };
+      categoryIncome.amount += transaction.amount;
+      categoryIncome.transactionIds.push(transaction.id);
+      incomeByCategory.set(categoryId, categoryIncome);
       const normalized = normalizeMerchant(merchantName(transaction));
       const incomeRow = incomeStreams.get(normalized) ?? {
         normalized,
@@ -390,6 +404,7 @@ export function getAnalyticsReport(input: AnalyticsReportInput = {}) {
     ),
     topMerchants: [...merchants.values()].sort((a, b) => b.amount - a.amount).slice(0, 10),
     incomeStreams: [...incomeStreams.values()].sort((a, b) => b.amount - a.amount),
+    incomeByCategory: [...incomeByCategory.values()].sort((a, b) => b.amount - a.amount),
     investments: [...investmentsByPeriod.values()].sort((a, b) => a.key.localeCompare(b.key)),
     transactions: categoryScopedTransactions.map(analyticsTransaction),
     // Preserve backend flow decisions without sending the same rows a second time.

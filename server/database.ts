@@ -1146,6 +1146,12 @@ export function initDatabase() {
       PRIMARY KEY (groupId, fingerprint)
     )`);
   });
+  runSchemaMigration('2026-10-29-category-review-acknowledgements', () => {
+    db.exec(`CREATE TABLE categoryReviewAcknowledgements (
+      groupId TEXT NOT NULL, ledgerTransactionId TEXT NOT NULL, fingerprint TEXT NOT NULL,
+      baselineCategoryId INTEGER, updatedAt TEXT NOT NULL, PRIMARY KEY (groupId, ledgerTransactionId)
+    )`);
+  });
 
   runSchemaMigration('2026-09-12-parser-derivations', () => {
     db.exec(`

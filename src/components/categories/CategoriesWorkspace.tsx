@@ -1,10 +1,9 @@
 import { useDeferredValue, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { queryClient, trpc, trpcClient } from '../../api/trpc';
+import { trpc } from '../../api/trpc';
 import { formatCurrency } from '../../utils/formatters';
 import { categoryWorkspaceView } from './workspaceNavigation';
-import type { ReviewFilter } from '../../../server/app/categoryWorkspace';
 import CategoriesPage from './CategoriesPage';
 import TransactionReviewPage from '../transactions/TransactionReviewPage';
 import ReviewedTransactions, {
@@ -12,7 +11,9 @@ import ReviewedTransactions, {
   CategoryChangeFeedback,
 } from '../transactions/ReviewedTransactions';
 import TransactionDetails from '../transactions/TransactionDetails';
-import CategoryReviewCard from './CategoryReviewCard';
+import MerchantReviewRow from './MerchantReviewRow';
+import SpendingExplorer from '../analytics/SpendingExplorer';
+import SpendingTransactions from '../analytics/SpendingTransactions';
 import './CategoriesWorkspace.css';
 
 type Changes = ReturnType<typeof useReviewedCategories>;
@@ -59,265 +60,129 @@ function ReviewWorkspace({
   const [params, setParams] = useSearchParams();
   const [search, setSearch] = useState('');
   const deferredSearch = useDeferredValue(search);
-  const [filter, setFilter] = useState<ReviewFilter>('all');
   const [status, setStatus] = useState<'open' | 'kept'>('open');
   const [offset, setOffset] = useState(0);
-  const [chosenId, setChosenId] = useState<string | null>(params.get('item'));
-  const [detailPage, setDetailPage] = useState({ id: '', offset: 0 });
-  const [deciding, setDeciding] = useState(false);
-  const [error, setError] = useState('');
-  const [browsing, setBrowsing] = useState(false);
-  const [later, setLater] = useState<Set<string>>(new Set());
-  const [notice, setNotice] = useState('');
   const queue = useQuery(
-    trpc.categories.reviewQueue.queryOptions({ search: deferredSearch, filter, status, offset }),
+    trpc.categories.merchantQueue.queryOptions({ search: deferredSearch, status, offset }),
   );
-  const selectedId = chosenId ?? queue.data?.groups.find((item) => !later.has(item.id))?.id ?? '';
-  const detailOffset = detailPage.id === selectedId ? detailPage.offset : 0;
-  const detail = useQuery(
-    trpc.categories.reviewDetail.queryOptions(
-      { groupId: selectedId, offset: detailOffset },
-      { enabled: Boolean(selectedId) },
-    ),
-  );
-  const group = detail.data;
-  const choose = (id: string | null) => {
-    setChosenId(id);
-    setDetailPage({ id: '', offset: 0 });
-  };
-  const decide = async () => {
-    if (!group) return;
-    setDeciding(true);
-    setError('');
-    try {
-      await trpcClient.categories.decideReview.mutate({
-        groupId: group.id,
-        fingerprint: group.fingerprint,
-        decision: group.kept ? 'reopen' : 'keep',
-      });
-      await queryClient.invalidateQueries();
-      choose(null);
-      setNotice(group.kept ? 'Review reopened.' : 'Kept without changing categories.');
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setDeciding(false);
-    }
-  };
+  const categories = useQuery(trpc.categories.list.queryOptions());
   return (
     <>
       <div className="category-workspace__review-toolbar">
-        <div>
-          <h2>One check at a time</h2>
-        </div>
-        <div className="category-workspace__review-tools">
-          <button
-            className="btn btn--ghost btn--sm"
-            aria-expanded={browsing}
-            onClick={() => setBrowsing(!browsing)}
-          >
-            {browsing ? 'Close list' : 'Browse checks'}
-            {queue.data ? ` (${queue.data.totalCount.toLocaleString()})` : ''}
-          </button>
-          <button
-            type="button"
-            className="btn btn--secondary btn--sm"
-            title="AI suggestions for uncategorized activity"
-            onClick={() => {
-              const next = new URLSearchParams(params);
-              next.set('mode', 'ai');
-              setParams(next);
-            }}
-          >
-            AI suggestions
-          </button>
-        </div>
+        <strong>
+          {queue.data?.totalCount ?? '…'} merchants {status === 'kept' ? 'reviewed' : 'to review'}
+        </strong>
+        <button
+          className="btn btn--ghost btn--sm"
+          onClick={() => {
+            const next = new URLSearchParams(params);
+            next.set('mode', 'ai');
+            setParams(next);
+          }}
+        >
+          AI suggestions
+        </button>
       </div>
-      {notice && (
-        <p className="category-workspace__hint" role="status">
-          {notice}
-        </p>
+      <div className="merchant-review-filters">
+        <input
+          className="input input--sm"
+          aria-label="Find a merchant or account"
+          placeholder="Find a merchant or account…"
+          value={search}
+          onChange={(event) => {
+            setSearch(event.target.value);
+            setOffset(0);
+          }}
+        />
+        <select
+          className="input input--sm"
+          aria-label="Review status"
+          value={status}
+          onChange={(event) => {
+            setStatus(event.target.value as 'open' | 'kept');
+            setOffset(0);
+          }}
+        >
+          <option value="open">Needs review</option>
+          <option value="kept">Intentional / reviewed</option>
+        </select>
+      </div>
+      {(queue.error || categories.error) && (
+        <p role="alert">{queue.error?.message || categories.error?.message}</p>
       )}
-      {browsing && (
-        <div className="category-workspace__browse-checks">
-          <div className="category-workspace__filters">
-            <input
-              className="input input--sm"
-              aria-label="Search category reviews"
-              placeholder="Find a merchant or account…"
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                setOffset(0);
-                choose(null);
-              }}
-            />
-            <select
-              className="input input--sm"
-              aria-label="Review type"
-              value={filter}
-              onChange={(event) => {
-                setFilter(event.target.value as ReviewFilter);
-                setOffset(0);
-                choose(null);
-              }}
-            >
-              <option value="all">All checks</option>
-              <option value="conflicts">Conflicting categories</option>
-              <option value="uncategorized">Uncategorized</option>
-              <option value="movement">Possible money movement</option>
-            </select>
-            <select
-              className="input input--sm"
-              aria-label="Review status"
-              value={status}
-              onChange={(event) => {
-                setStatus(event.target.value as 'open' | 'kept');
-                setOffset(0);
-                choose(null);
-              }}
-            >
-              <option value="open">Needs review</option>
-              <option value="kept">Kept as-is ({queue.data?.keptCount ?? 0})</option>
-            </select>
-          </div>
-          <aside className="category-workspace__queue" aria-label="Category review queue">
-            {queue.isPending && <p role="status">Loading review queue…</p>}
-            {queue.data?.groups.map((item) => (
-              <button
-                type="button"
-                key={item.id}
-                className="category-workspace__queue-item"
-                aria-pressed={item.id === selectedId}
-                onClick={() => {
-                  choose(item.id);
-                  setBrowsing(false);
-                  setNotice('');
-                }}
-              >
-                <strong>{item.name}</strong>
-                <span>
-                  {item.accountName} · {item.transactionCount.toLocaleString()} transactions
-                </span>
-                <span className="category-workspace__reason">
-                  {item.conflict
-                    ? 'Categories differ'
-                    : item.movement
-                      ? 'Check money movement'
-                      : 'Uncategorized'}
-                </span>
-                <span>{formatCurrency(item.amountCents / 100)} in activity</span>
-              </button>
-            ))}
-            {queue.data?.groups.length === 0 && (
-              <p>
-                {status === 'kept'
-                  ? 'No kept groups match.'
-                  : 'No outstanding checks match. This is not a guarantee that every category is correct.'}
-              </p>
-            )}
-            {queue.data && (offset > 0 || queue.data.hasMore) && (
-              <PageControls
-                offset={offset}
-                hasMore={queue.data.hasMore}
-                onOffset={(value) => {
-                  setOffset(value);
-                  choose(null);
-                }}
-              />
-            )}
-          </aside>
-        </div>
-      )}
-      {(error || queue.error || detail.error) && (
-        <p role="alert">{error || queue.error?.message || detail.error?.message}</p>
-      )}
-      <section className="category-workspace__guided" aria-label="Selected category review">
-        {queue.isPending && <p role="status">Finding category checks…</p>}
-        {selectedId && detail.isPending && <p role="status">Loading transactions…</p>}
-        {!selectedId && !queue.isPending && (
-          <div className="category-workspace__empty">
-            <h3>{queue.data?.groups.length ? 'That’s this page for now' : 'No matching checks'}</h3>
-            <p>
-              {queue.data?.groups.length
-                ? 'The checks you left for later are still open. Nothing was changed.'
-                : 'No outstanding flags match this view. This does not guarantee that every category is correct.'}
-            </p>
-            {queue.data?.hasMore && (
-              <button
-                className="btn btn--primary"
-                onClick={() => {
-                  setOffset(offset + 50);
-                  choose(null);
-                }}
-              >
-                Continue to more checks
-              </button>
-            )}
-            {later.size > 0 && (
-              <button
-                className="btn btn--ghost"
-                onClick={() => {
-                  setLater(new Set());
-                  setOffset(0);
-                  choose(null);
-                  setNotice('');
-                }}
-              >
-                Return to skipped checks
-              </button>
-            )}
-            {(offset > 0 || status === 'kept' || filter !== 'all' || search) && (
-              <button
-                className="btn btn--ghost"
-                onClick={() => {
-                  setOffset(0);
-                  setStatus('open');
-                  setFilter('all');
-                  setSearch('');
-                  choose(null);
-                }}
-              >
-                Back to all open checks
-              </button>
-            )}
-          </div>
-        )}
-        {selectedId && detail.data === null && (
-          <div className="category-workspace__empty">
-            <h3>No outstanding flags for this group</h3>
-            <p>This group no longer needs a category check.</p>
-            <button className="btn btn--secondary" onClick={() => choose(null)}>
-              Next review
-            </button>
-          </div>
-        )}
-        {group && (
-          <CategoryReviewCard
-            key={`${group.id}:${group.fingerprint}:${detailOffset}`}
+      {queue.isPending && <p role="status">Loading merchant reviews…</p>}
+      <section className="merchant-review-list" aria-label="Merchant category reviews">
+        {queue.data?.groups.map((group) => (
+          <MerchantReviewRow
+            key={`${group.id}:${group.kept}`}
             group={group}
+            categories={(categories.data?.categories ?? []).filter(
+              (category) => category.name.toLowerCase() !== 'uncategorized',
+            )}
             changes={changes}
-            deciding={deciding}
-            onDecide={() => void decide()}
-            onLater={() => {
-              setLater(new Set(later).add(group.id));
-              choose(null);
-              setNotice('Left open for later.');
-            }}
             onInspect={onInspect}
-            pagination={
-              detailOffset > 0 || group.hasMore ? (
-                <PageControls
-                  offset={detailOffset}
-                  hasMore={group.hasMore}
-                  onOffset={(value) => setDetailPage({ id: group.id, offset: value })}
-                />
-              ) : undefined
-            }
           />
+        ))}
+        {queue.data?.totalCount === 0 && (
+          <p className="category-workspace__empty">No matching category reviews.</p>
         )}
       </section>
+      {queue.data && (offset > 0 || queue.data.hasMore) && (
+        <div className="category-workspace__pagination">
+          <button
+            className="btn btn--ghost btn--sm"
+            disabled={offset === 0}
+            onClick={() => setOffset(Math.max(0, offset - 25))}
+          >
+            Previous
+          </button>
+          <span>Page {Math.floor(offset / 25) + 1}</span>
+          <button
+            className="btn btn--ghost btn--sm"
+            disabled={!queue.data.hasMore}
+            onClick={() => setOffset(offset + 25)}
+          >
+            Next
+          </button>
+        </div>
+      )}
     </>
+  );
+}
+
+function CategoryExplorer({
+  changes,
+  onInspect,
+}: {
+  changes: Changes;
+  onInspect: (id: string) => void;
+}) {
+  const query = useQuery(trpc.analytics.spendingExplorer.queryOptions({}));
+  return (
+    <section className="category-workspace__explorer" aria-label="Explore categories">
+      <p className="category-workspace__hint">
+        Spending across all active accounts and dates. Drill into a category or merchant to correct
+        its transactions.
+      </p>
+      {query.error && <p role="alert">{query.error.message}</p>}
+      {query.isPending ? (
+        <p role="status">Loading categories…</p>
+      ) : (
+        <SpendingExplorer
+          root={query.data}
+          saving={changes.pending}
+          renderTransactions={(node) => (
+            <SpendingTransactions
+              key={node.id}
+              nodeId={node.id}
+              scope={{}}
+              changes={changes}
+              onInspect={onInspect}
+            />
+          )}
+        />
+      )}
+    </section>
   );
 }
 
@@ -479,7 +344,7 @@ export default function CategoriesWorkspace() {
           aria-current={view === 'browse' ? 'page' : undefined}
           onClick={() => navigate('browse')}
         >
-          Browse categories
+          Explore categories
         </button>
       </nav>
       <CategoryChangeFeedback state={changes} />
@@ -493,7 +358,11 @@ export default function CategoriesWorkspace() {
           <TransactionReviewPage embedded />
         </>
       ) : view === 'browse' ? (
-        <CategoryBrowser changes={changes} onInspect={setInspectedId} />
+        params.has('group') ? (
+          <CategoryBrowser changes={changes} onInspect={setInspectedId} />
+        ) : (
+          <CategoryExplorer changes={changes} onInspect={setInspectedId} />
+        )
       ) : (
         <ReviewWorkspace changes={changes} onInspect={setInspectedId} />
       )}
