@@ -33,7 +33,7 @@
   font-weight: 600;
 }
 .category-workspace__review-toolbar,
-.category-workspace__decision {
+.category-workspace__review-tools {
   display: flex;
   gap: 12px;
   justify-content: space-between;
@@ -120,10 +120,141 @@
 .category-workspace__detail > h3 {
   margin-top: 0;
 }
-.category-workspace__decision {
-  margin-bottom: 16px;
+.category-workspace__guided {
+  width: min(100%, 800px);
+  margin: 8px auto 0;
+}
+.category-workspace__browse-checks {
+  display: grid;
+  gap: 12px;
+}
+.category-workspace__browse-checks .category-workspace__queue {
+  max-height: 260px;
+}
+.category-focus {
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  padding: 28px;
+  overflow-wrap: anywhere;
+}
+.category-focus__eyebrow {
+  display: block;
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.category-focus__header h2 {
+  margin: 0 0 10px;
+  font-size: 1.35rem;
+  line-height: 1.4;
+}
+.category-focus__header p {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin: 4px 0;
+}
+.category-focus__header .category-focus__dates {
+  font-size: 0.75rem;
+}
+.category-focus__assessment {
+  margin: 24px 0 18px;
+  padding-left: 16px;
+  border-left: 3px solid var(--color-accent);
+}
+.category-focus__current {
+  display: grid;
+  gap: 5px;
+}
+.category-focus__current > span {
   font-size: 0.8rem;
   color: var(--text-secondary);
+}
+.category-focus__current strong {
+  font-size: 1.15rem;
+}
+.category-focus__assessment p {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 10px 0 0;
+}
+.category-focus__transactions {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.category-focus__transactions li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--glass-border);
+}
+.category-focus__transaction {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  text-align: left;
+  border: 0;
+  background: none;
+  color: var(--text-primary);
+  padding: 14px 0;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.category-focus__transaction > span:first-child {
+  color: var(--text-secondary);
+}
+.category-focus__transaction > span:last-child {
+  text-align: right;
+  white-space: nowrap;
+}
+.category-focus__actions,
+.category-focus__edit-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 24px;
+}
+.category-focus__edit {
+  padding-top: 24px;
+}
+.category-focus__edit > label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.category-focus__edit-controls {
+  margin-top: 12px;
+}
+.category-focus__edit-controls .grouped-category-select-control {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.category-focus__edit p {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  margin: 12px 0 0;
+}
+.category-focus__individual {
+  margin-top: 16px;
+}
+.category-focus__individual > .btn {
+  padding-left: 0;
+}
+.category-focus__individual .category-review-layout {
+  display: block;
+}
+.category-focus .transaction-context {
+  margin-top: 16px;
 }
 .category-workspace__pagination {
   display: flex;
@@ -173,20 +304,6 @@
     gap: 16px;
   }
 }
-@media (min-width: 901px) and (max-width: 1400px) {
-  .category-workspace__layout--review {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .category-workspace__layout--review .category-workspace__queue {
-    display: flex;
-    gap: 8px;
-    max-height: 170px;
-    overflow-x: auto;
-  }
-  .category-workspace__layout--review .category-workspace__queue-item {
-    flex: 0 0 235px;
-  }
-}
 @media (max-width: 900px) {
   .category-workspace__layout {
     grid-template-columns: minmax(0, 1fr);
@@ -202,5 +319,17 @@
   }
   .analytics-category-review-link {
     flex-wrap: wrap;
+  }
+}
+@media (max-width: 650px) {
+  .category-focus {
+    padding: 18px;
+  }
+  .category-focus__transaction {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 5px 10px;
+  }
+  .category-focus__transaction > span:first-child {
+    grid-column: 1 / -1;
   }
 }

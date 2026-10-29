@@ -3,6 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { categoryWorkspaceView } from './workspaceNavigation';
+import type { inferRouterOutputs } from '@trpc/server';
+import type { AppRouter } from '../../../server/app/router';
 
 mock.module('electrobun/view', () => ({ Electroview: class {} }));
 const { default: CategoriesWorkspace } = await import('./CategoriesWorkspace');
@@ -39,12 +41,89 @@ test('category workspace defaults to review while legacy group links browse and 
   }
   const html = render('/categories');
   expect(html).toContain('Categories views');
-  expect(html).toContain('Category review queue');
+  expect(html).toContain('One check at a time');
+  expect(html).toContain('Browse checks');
+  expect(html).not.toContain('Category review queue');
+  expect(html).not.toContain('Search category reviews');
   expect(html).toContain('Selected category review');
   expect(html).toContain('Manage categories');
   expect(html).not.toContain('Starting review');
   expect(html).not.toContain('OPENAI_API_KEY');
   expect(html).not.toContain('New category');
+});
+
+test('focused review exposes categories and decisions without selection controls or nearby activity', () => {
+  const transactions = [
+    {
+      ledgerTransactionId: 'vest-a',
+      merchant: 'RSU vest',
+      date: '2024-10-02',
+      amount: 5145.6,
+      category: { id: 1, name: 'Income' },
+    },
+    {
+      ledgerTransactionId: 'vest-b',
+      merchant: 'RSU vest',
+      date: '2024-10-02',
+      amount: 5145.6,
+      category: { id: 2, name: 'Investment' },
+    },
+  ] as TransactionListItem[];
+  const group = {
+    id: 'vest',
+    fingerprint: 'snapshot',
+    kept: false,
+    name: 'RSU vest',
+    accountName: 'Fidelity',
+    amountCents: 1029120,
+    reasons: ['Categories differ: Income, Investment. This may be intentional.'],
+    transactionCount: 2,
+    categories: ['Income', 'Investment'],
+    uncategorizedCount: 0,
+    firstDate: '2024-10-02',
+    lastDate: '2024-10-02',
+    conflict: true,
+    movement: false,
+  };
+  const html = render('/categories', (client) => {
+    client.setQueryData(
+      trpc.categories.reviewQueue.queryKey({
+        search: '',
+        filter: 'all',
+        status: 'open',
+        offset: 0,
+      }),
+      {
+        groups: [group],
+        totalCount: 1,
+        openCount: 1,
+        keptCount: 0,
+        hasMore: false,
+        nextOffset: null,
+      },
+    );
+    const detail: NonNullable<inferRouterOutputs<AppRouter>['categories']['reviewDetail']> = {
+      ...group,
+      transactions,
+      hasMore: false,
+      nextOffset: null,
+    };
+    client.setQueryData(
+      trpc.categories.reviewDetail.queryKey({ groupId: 'vest', offset: 0 }),
+      detail,
+    );
+  });
+  expect(html).toContain('Current category check');
+  expect(html).toContain('Currently categorized as');
+  expect(html).toContain('Income · Investment');
+  expect(html).toContain('Change category…');
+  expect(html).toContain('Keep current categories');
+  expect(html).toContain('Later');
+  expect(html).toContain('Change only some transactions…');
+  expect(html).not.toContain('type="checkbox"');
+  expect(html).not.toContain('Choose category…');
+  expect(html).not.toContain('Apply to 0');
+  expect(html).not.toContain('Surrounding account transactions');
 });
 
 test('workspace AI review is explicit and does not suggest it reviewed already-categorized entries', () => {

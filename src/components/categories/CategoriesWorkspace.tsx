@@ -2,7 +2,7 @@ import { useDeferredValue, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { queryClient, trpc, trpcClient } from '../../api/trpc';
-import { formatCurrency, formatDate } from '../../utils/formatters';
+import { formatCurrency } from '../../utils/formatters';
 import { categoryWorkspaceView } from './workspaceNavigation';
 import type { ReviewFilter } from '../../../server/app/categoryWorkspace';
 import CategoriesPage from './CategoriesPage';
@@ -12,6 +12,7 @@ import ReviewedTransactions, {
   CategoryChangeFeedback,
 } from '../transactions/ReviewedTransactions';
 import TransactionDetails from '../transactions/TransactionDetails';
+import CategoryReviewCard from './CategoryReviewCard';
 import './CategoriesWorkspace.css';
 
 type Changes = ReturnType<typeof useReviewedCategories>;
@@ -62,13 +63,17 @@ function ReviewWorkspace({
   const [status, setStatus] = useState<'open' | 'kept'>('open');
   const [offset, setOffset] = useState(0);
   const [chosenId, setChosenId] = useState<string | null>(params.get('item'));
-  const [detailOffset, setDetailOffset] = useState(0);
+  const [detailPage, setDetailPage] = useState({ id: '', offset: 0 });
   const [deciding, setDeciding] = useState(false);
   const [error, setError] = useState('');
+  const [browsing, setBrowsing] = useState(false);
+  const [later, setLater] = useState<Set<string>>(new Set());
+  const [notice, setNotice] = useState('');
   const queue = useQuery(
     trpc.categories.reviewQueue.queryOptions({ search: deferredSearch, filter, status, offset }),
   );
-  const selectedId = chosenId ?? queue.data?.groups[0]?.id ?? '';
+  const selectedId = chosenId ?? queue.data?.groups.find((item) => !later.has(item.id))?.id ?? '';
+  const detailOffset = detailPage.id === selectedId ? detailPage.offset : 0;
   const detail = useQuery(
     trpc.categories.reviewDetail.queryOptions(
       { groupId: selectedId, offset: detailOffset },
@@ -78,7 +83,7 @@ function ReviewWorkspace({
   const group = detail.data;
   const choose = (id: string | null) => {
     setChosenId(id);
-    setDetailOffset(0);
+    setDetailPage({ id: '', offset: 0 });
   };
   const decide = async () => {
     if (!group) return;
@@ -92,6 +97,7 @@ function ReviewWorkspace({
       });
       await queryClient.invalidateQueries();
       choose(null);
+      setNotice(group.kept ? 'Review reopened.' : 'Kept without changing categories.');
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -102,182 +108,215 @@ function ReviewWorkspace({
     <>
       <div className="category-workspace__review-toolbar">
         <div>
-          <p>
-            {queue.data
-              ? `${queue.data.openCount.toLocaleString()} groups need a look`
-              : 'Finding category checks…'}{' '}
-            · All active accounts and dates.
-          </p>
+          <h2>One check at a time</h2>
         </div>
-        <button
-          type="button"
-          className="btn btn--secondary btn--sm"
-          title="AI suggestions for uncategorized activity"
-          onClick={() => {
-            const next = new URLSearchParams(params);
-            next.set('mode', 'ai');
-            setParams(next);
-          }}
-        >
-          AI suggestions
-        </button>
+        <div className="category-workspace__review-tools">
+          <button
+            className="btn btn--ghost btn--sm"
+            aria-expanded={browsing}
+            onClick={() => setBrowsing(!browsing)}
+          >
+            {browsing ? 'Close list' : 'Browse checks'}
+            {queue.data ? ` (${queue.data.totalCount.toLocaleString()})` : ''}
+          </button>
+          <button
+            type="button"
+            className="btn btn--secondary btn--sm"
+            title="AI suggestions for uncategorized activity"
+            onClick={() => {
+              const next = new URLSearchParams(params);
+              next.set('mode', 'ai');
+              setParams(next);
+            }}
+          >
+            AI suggestions
+          </button>
+        </div>
       </div>
-      <div className="category-workspace__filters">
-        <input
-          className="input input--sm"
-          aria-label="Search category reviews"
-          placeholder="Find a merchant or account…"
-          value={search}
-          onChange={(event) => {
-            setSearch(event.target.value);
-            setOffset(0);
-            choose(null);
-          }}
-        />
-        <select
-          className="input input--sm"
-          aria-label="Review type"
-          value={filter}
-          onChange={(event) => {
-            setFilter(event.target.value as ReviewFilter);
-            setOffset(0);
-            choose(null);
-          }}
-        >
-          <option value="all">All checks</option>
-          <option value="conflicts">Conflicting categories</option>
-          <option value="uncategorized">Uncategorized</option>
-          <option value="movement">Possible money movement</option>
-        </select>
-        <select
-          className="input input--sm"
-          aria-label="Review status"
-          value={status}
-          onChange={(event) => {
-            setStatus(event.target.value as 'open' | 'kept');
-            setOffset(0);
-            choose(null);
-          }}
-        >
-          <option value="open">Needs review</option>
-          <option value="kept">Kept as-is ({queue.data?.keptCount ?? 0})</option>
-        </select>
-      </div>
-      {(error || queue.error || detail.error) && (
-        <p role="alert">{error || queue.error?.message || detail.error?.message}</p>
+      {notice && (
+        <p className="category-workspace__hint" role="status">
+          {notice}
+        </p>
       )}
-      <div className="category-workspace__layout category-workspace__layout--review">
-        <aside className="category-workspace__queue" aria-label="Category review queue">
-          {queue.isPending && <p role="status">Loading review queue…</p>}
-          {queue.data?.groups.map((item) => (
-            <button
-              type="button"
-              key={item.id}
-              className="category-workspace__queue-item"
-              aria-pressed={item.id === selectedId}
-              onClick={() => choose(item.id)}
-            >
-              <strong>{item.name}</strong>
-              <span>
-                {item.accountName} · {item.transactionCount.toLocaleString()} transactions
-              </span>
-              <span className="category-workspace__reason">
-                {item.conflict
-                  ? 'Categories differ'
-                  : item.movement
-                    ? 'Check money movement'
-                    : 'Uncategorized'}
-              </span>
-              <span>{formatCurrency(item.amountCents / 100)} in activity</span>
-            </button>
-          ))}
-          {queue.data?.groups.length === 0 && (
-            <p>
-              {status === 'kept'
-                ? 'No kept groups match.'
-                : 'No outstanding checks match. This is not a guarantee that every category is correct.'}
-            </p>
-          )}
-          {queue.data && (offset > 0 || queue.data.hasMore) && (
-            <PageControls
-              offset={offset}
-              hasMore={queue.data.hasMore}
-              onOffset={(value) => {
-                setOffset(value);
+      {browsing && (
+        <div className="category-workspace__browse-checks">
+          <div className="category-workspace__filters">
+            <input
+              className="input input--sm"
+              aria-label="Search category reviews"
+              placeholder="Find a merchant or account…"
+              value={search}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setOffset(0);
                 choose(null);
               }}
             />
-          )}
-        </aside>
-        <section className="category-workspace__detail" aria-label="Selected category review">
-          {selectedId && detail.isPending && <p role="status">Loading transactions…</p>}
-          {!selectedId && (
-            <div className="category-workspace__empty">
-              <h3>A review queue, not a transaction checklist</h3>
-              <p>
-                Choose a group to compare its categories and surrounding activity. Nothing is
-                selected or recategorized automatically.
-              </p>
-            </div>
-          )}
-          {selectedId && detail.data === null && (
-            <div className="category-workspace__empty">
-              <h3>No outstanding flags for this group</h3>
-              <p>Your changes are saved. Undo is still available above.</p>
-              <button className="btn btn--secondary" onClick={() => choose(null)}>
-                Next review
-              </button>
-            </div>
-          )}
-          {group && (
-            <>
-              <div className="category-workspace__decision">
+            <select
+              className="input input--sm"
+              aria-label="Review type"
+              value={filter}
+              onChange={(event) => {
+                setFilter(event.target.value as ReviewFilter);
+                setOffset(0);
+                choose(null);
+              }}
+            >
+              <option value="all">All checks</option>
+              <option value="conflicts">Conflicting categories</option>
+              <option value="uncategorized">Uncategorized</option>
+              <option value="movement">Possible money movement</option>
+            </select>
+            <select
+              className="input input--sm"
+              aria-label="Review status"
+              value={status}
+              onChange={(event) => {
+                setStatus(event.target.value as 'open' | 'kept');
+                setOffset(0);
+                choose(null);
+              }}
+            >
+              <option value="open">Needs review</option>
+              <option value="kept">Kept as-is ({queue.data?.keptCount ?? 0})</option>
+            </select>
+          </div>
+          <aside className="category-workspace__queue" aria-label="Category review queue">
+            {queue.isPending && <p role="status">Loading review queue…</p>}
+            {queue.data?.groups.map((item) => (
+              <button
+                type="button"
+                key={item.id}
+                className="category-workspace__queue-item"
+                aria-pressed={item.id === selectedId}
+                onClick={() => {
+                  choose(item.id);
+                  setBrowsing(false);
+                  setNotice('');
+                }}
+              >
+                <strong>{item.name}</strong>
                 <span>
-                  {group.transactionCount.toLocaleString()} transactions ·{' '}
-                  {formatCurrency(group.amountCents / 100)} in activity
+                  {item.accountName} · {item.transactionCount.toLocaleString()} transactions
                 </span>
-                <button
-                  className="btn btn--secondary btn--sm"
-                  disabled={deciding || changes.pending}
-                  onClick={() => void decide()}
-                >
-                  {group.kept ? 'Reopen review' : 'Keep group as-is'}
-                </button>
-              </div>
-              <ReviewedTransactions
-                key={`${group.id}:${detailOffset}`}
-                changes={changes}
-                showContext
-                transactions={group.transactions}
-                selectVisibleOnly
-                label="Categories workspace review"
-                onInspect={onInspect}
-                introduction={
-                  <>
-                    <h3>{group.name}</h3>
-                    <p>
-                      {group.accountName} · {formatDate(group.firstDate, 'medium')} –{' '}
-                      {formatDate(group.lastDate, 'medium')}
-                    </p>
-                    {group.reasons.map((reason) => (
-                      <p key={reason}>{reason}</p>
-                    ))}
-                    <p className="transaction-detail__hint">
-                      Change only the entries that are wrong. Keep as-is acknowledges the entire
-                      group without editing categories; new or changed activity can bring it back.
-                    </p>
-                  </>
-                }
-              />
+                <span className="category-workspace__reason">
+                  {item.conflict
+                    ? 'Categories differ'
+                    : item.movement
+                      ? 'Check money movement'
+                      : 'Uncategorized'}
+                </span>
+                <span>{formatCurrency(item.amountCents / 100)} in activity</span>
+              </button>
+            ))}
+            {queue.data?.groups.length === 0 && (
+              <p>
+                {status === 'kept'
+                  ? 'No kept groups match.'
+                  : 'No outstanding checks match. This is not a guarantee that every category is correct.'}
+              </p>
+            )}
+            {queue.data && (offset > 0 || queue.data.hasMore) && (
               <PageControls
-                offset={detailOffset}
-                hasMore={group.hasMore}
-                onOffset={setDetailOffset}
+                offset={offset}
+                hasMore={queue.data.hasMore}
+                onOffset={(value) => {
+                  setOffset(value);
+                  choose(null);
+                }}
               />
-            </>
-          )}
-        </section>
-      </div>
+            )}
+          </aside>
+        </div>
+      )}
+      {(error || queue.error || detail.error) && (
+        <p role="alert">{error || queue.error?.message || detail.error?.message}</p>
+      )}
+      <section className="category-workspace__guided" aria-label="Selected category review">
+        {queue.isPending && <p role="status">Finding category checks…</p>}
+        {selectedId && detail.isPending && <p role="status">Loading transactions…</p>}
+        {!selectedId && !queue.isPending && (
+          <div className="category-workspace__empty">
+            <h3>{queue.data?.groups.length ? 'That’s this page for now' : 'No matching checks'}</h3>
+            <p>
+              {queue.data?.groups.length
+                ? 'The checks you left for later are still open. Nothing was changed.'
+                : 'No outstanding flags match this view. This does not guarantee that every category is correct.'}
+            </p>
+            {queue.data?.hasMore && (
+              <button
+                className="btn btn--primary"
+                onClick={() => {
+                  setOffset(offset + 50);
+                  choose(null);
+                }}
+              >
+                Continue to more checks
+              </button>
+            )}
+            {later.size > 0 && (
+              <button
+                className="btn btn--ghost"
+                onClick={() => {
+                  setLater(new Set());
+                  setOffset(0);
+                  choose(null);
+                  setNotice('');
+                }}
+              >
+                Return to skipped checks
+              </button>
+            )}
+            {(offset > 0 || status === 'kept' || filter !== 'all' || search) && (
+              <button
+                className="btn btn--ghost"
+                onClick={() => {
+                  setOffset(0);
+                  setStatus('open');
+                  setFilter('all');
+                  setSearch('');
+                  choose(null);
+                }}
+              >
+                Back to all open checks
+              </button>
+            )}
+          </div>
+        )}
+        {selectedId && detail.data === null && (
+          <div className="category-workspace__empty">
+            <h3>No outstanding flags for this group</h3>
+            <p>This group no longer needs a category check.</p>
+            <button className="btn btn--secondary" onClick={() => choose(null)}>
+              Next review
+            </button>
+          </div>
+        )}
+        {group && (
+          <CategoryReviewCard
+            key={`${group.id}:${group.fingerprint}:${detailOffset}`}
+            group={group}
+            changes={changes}
+            deciding={deciding}
+            onDecide={() => void decide()}
+            onLater={() => {
+              setLater(new Set(later).add(group.id));
+              choose(null);
+              setNotice('Left open for later.');
+            }}
+            onInspect={onInspect}
+            pagination={
+              detailOffset > 0 || group.hasMore ? (
+                <PageControls
+                  offset={detailOffset}
+                  hasMore={group.hasMore}
+                  onOffset={(value) => setDetailPage({ id: group.id, offset: value })}
+                />
+              ) : undefined
+            }
+          />
+        )}
+      </section>
     </>
   );
 }
@@ -421,9 +460,6 @@ export default function CategoriesWorkspace() {
       <header className="page__header">
         <div>
           <h1 className="page__title">Categories</h1>
-          <p className="page__subtitle">
-            Understand your categories. Fix the exceptions, not every transaction.
-          </p>
         </div>
         <button
           className="btn btn--ghost btn--sm"
