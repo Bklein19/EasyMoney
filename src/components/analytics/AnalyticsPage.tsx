@@ -1,6 +1,7 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, FormEvent, UIEvent } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router';
 import {
   addMonths,
   endOfDay,
@@ -37,9 +38,7 @@ import {
   CategoryChangeFeedback,
   useReviewedCategories,
 } from '../transactions/ReviewedTransactions';
-import WorthReviewing from './WorthReviewing';
 import TransactionDetails from '../transactions/TransactionDetails';
-import type { ReviewGroup } from '../../../server/app/transactionReview';
 import type { SpendingNode } from '../../../server/app/spendingExplorer';
 import SpendingTrends from './SpendingTrends';
 import IncomeVsExpense from './IncomeVsExpense';
@@ -126,7 +125,6 @@ interface InvestmentPeriodRow extends AnalyticsPeriodRow {
 }
 
 interface AnalyticsReport {
-  worthReviewing: { groups: ReviewGroup[]; totalGroups: number };
   summary: AnalyticsSummary;
   cashFlow: CashFlowRow[];
   spendingExplorer: SpendingNode;
@@ -791,7 +789,9 @@ export default function AnalyticsPage() {
       <div className="page__header analytics-page__header">
         <div>
           <h1 className="page__title">Analytics</h1>
-          <p className="page__subtitle">Insights into your financial habits</p>
+          <p className="page__subtitle">
+            Cash flow and spending. Follow the trends, then explore what’s behind them.
+          </p>
         </div>
 
         {renderAnalyticsFilters()}
@@ -847,6 +847,10 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
+      <div className="analytics-category-review-link">
+        <span>Something look miscategorized?</span>
+        <Link to="/categories">Review categories →</Link>
+      </div>
       <div className="analytics-grid">
         <div className="analytics-card glass-card">
           <div className="analytics-chart-header">
@@ -913,55 +917,58 @@ export default function AnalyticsPage() {
           />
           <CategoryChangeFeedback state={explorerChanges} />
         </div>
-        <div className="analytics-card glass-card analytics-card--explorer">
-          <WorthReviewing
-            report={analyticsReport?.worthReviewing ?? { groups: [], totalGroups: 0 }}
-          />
-        </div>
+        <details className="analytics-secondary-details analytics-card glass-card">
+          <summary>Merchants &amp; income sources</summary>
+          <div className="analytics-grid">
+            <div className="analytics-card glass-card">
+              <h3 className="analytics-card__title">Top Merchants</h3>
+              <TopMerchants
+                rows={deferredTopMerchants}
+                onSelectMerchant={(merchant) =>
+                  openDrilldown({
+                    type: 'merchant',
+                    id: merchant.normalized,
+                    ids: new Set(merchant.transactionIds),
+                    title: `${merchant.name} Transactions`,
+                    aliases: merchant.aliases,
+                  })
+                }
+              />
+            </div>
 
-        <div className="analytics-card glass-card">
-          <h3 className="analytics-card__title">Top Merchants</h3>
-          <TopMerchants
-            rows={deferredTopMerchants}
-            onSelectMerchant={(merchant) =>
-              openDrilldown({
-                type: 'merchant',
-                id: merchant.normalized,
-                ids: new Set(merchant.transactionIds),
-                title: `${merchant.name} Transactions`,
-                aliases: merchant.aliases,
-              })
-            }
-          />
-        </div>
-
-        <div className="analytics-card glass-card">
-          <h3 className="analytics-card__title">Income Streams</h3>
-          <IncomeStreams
-            rows={deferredIncomeStreams}
-            onSelectStream={(stream) =>
-              openDrilldown({
-                type: 'incomeStream',
-                id: stream.normalized,
-                ids: new Set(stream.transactionIds),
-                title: `${stream.name} Income`,
-                aliases: stream.aliases,
-              })
-            }
-          />
-        </div>
-
-        <div className="analytics-card glass-card">
-          <h3 className="analytics-card__title">Investments Over Time</h3>
+            <div className="analytics-card glass-card">
+              <h3 className="analytics-card__title">Income Streams</h3>
+              <IncomeStreams
+                rows={deferredIncomeStreams}
+                onSelectStream={(stream) =>
+                  openDrilldown({
+                    type: 'incomeStream',
+                    id: stream.normalized,
+                    ids: new Set(stream.transactionIds),
+                    title: `${stream.name} Income`,
+                    aliases: stream.aliases,
+                  })
+                }
+              />
+            </div>
+          </div>
+        </details>
+        <details className="analytics-secondary-details analytics-card glass-card">
+          <summary>Investment activity</summary>
+          <p>
+            Investment movements are separate from cash flow. See{' '}
+            <Link to="/net-worth">Net Worth</Link> and <Link to="/performance">Performance</Link>{' '}
+            for balances and gains.
+          </p>
           <InvestmentTrends
             rows={deferredInvestments}
             onSelectPeriod={handleInvestmentPeriodSelect}
           />
-        </div>
+        </details>
       </div>
 
-      <div className="analytics-card glass-card analytics-card--table">
-        <h3 className="analytics-card__title">Cash Flow Summary</h3>
+      <details className="analytics-secondary-details analytics-card glass-card analytics-card--table">
+        <summary>Cash flow by period</summary>
         <div className="cash-flow-table">
           {cashFlowRows.length > 0 ? (
             cashFlowRows.map((row) => (
@@ -990,7 +997,7 @@ export default function AnalyticsPage() {
             <div className="empty-state-simple">No cash flow data for this period.</div>
           )}
         </div>
-      </div>
+      </details>
 
       {drilldown && (
         <div className="analytics-card glass-card analytics-drilldown" ref={drilldownRef}>

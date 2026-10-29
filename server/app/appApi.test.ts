@@ -38,6 +38,158 @@ const {
 } = await import('./aiCategorization.ts');
 const caller = appRouter.createCaller({});
 
+test('category workspace queues all flagged groups with compact pages and preserves exact keep-as-is decisions', async () => {
+  const accountId = Number(insertRow('accounts', { name: 'Review brokerage', type: 'investment' }));
+  const incomeId = Number(insertRow('categories', { name: 'Review income', type: 'income' }));
+  const investmentId = Number(
+    insertRow('categories', { name: 'Review investment', type: 'investment' }),
+  );
+  for (let i = 0; i < 60; i++)
+    insertRow('ledgerTransactions', {
+      ledgerTransactionId: `queue-${i}`,
+      accountId,
+      date: '2026-10-01',
+      merchant: `Unknown merchant ${i}`,
+      amountCents: -1000,
+      transactionKind: 'activity',
+    });
+  for (const id of ['vest-a', 'vest-b'])
+    insertRow('ledgerTransactions', {
+      ledgerTransactionId: id,
+      accountId,
+      date: '2026-10-02',
+      description: 'RSU vest',
+      merchant: 'HubSpot RSU',
+      amountCents: 514560,
+      transactionKind: 'activity',
+    });
+  upsertTransactionAnnotation('vest-a', { categoryId: incomeId, notes: 'User choice' });
+  upsertTransactionAnnotation('vest-b', { categoryId: investmentId, notes: 'Keep note' });
+  const page = await caller.categories.reviewQueue();
+  expect(page.totalCount).toBe(61);
+  expect(page.groups).toHaveLength(50);
+  expect(page.groups.every((group) => !('transactions' in group))).toBe(true);
+  expect((await caller.categories.reviewQueue({ offset: 50 })).groups).toHaveLength(11);
+  const conflict = (await caller.categories.reviewQueue({ filter: 'conflicts' })).groups[0]!;
+  expect(conflict.name).toBe('HubSpot RSU');
+  const detail = await caller.categories.reviewDetail({ groupId: conflict.id });
+  expect(detail?.transactions).toHaveLength(2);
+  const annotations = getDb()
+    .prepare('SELECT * FROM transactionAnnotations ORDER BY ledgerTransactionId')
+    .all();
+  const ledger = getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all();
+  await caller.categories.decideReview({
+    groupId: conflict.id,
+    fingerprint: conflict.fingerprint,
+    decision: 'keep',
+  });
+  expect((await caller.categories.reviewQueue({ filter: 'conflicts' })).totalCount).toBe(0);
+  expect((await caller.categories.reviewQueue({ status: 'kept' })).groups[0]?.id).toBe(conflict.id);
+  expect(
+    getDb().prepare('SELECT * FROM transactionAnnotations ORDER BY ledgerTransactionId').all(),
+  ).toEqual(annotations);
+  expect(getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all()).toEqual(ledger);
+  await caller.categories.decideReview({
+    groupId: conflict.id,
+    fingerprint: conflict.fingerprint,
+    decision: 'reopen',
+  });
+  expect((await caller.categories.reviewQueue({ filter: 'conflicts' })).totalCount).toBe(1);
+  await caller.categories.decideReview({
+    groupId: conflict.id,
+    fingerprint: conflict.fingerprint,
+    decision: 'keep',
+  });
+  insertRow('ledgerTransactions', {
+    ledgerTransactionId: 'vest-c',
+    accountId,
+    date: '2026-10-03',
+    description: 'RSU vest',
+    merchant: 'HubSpot RSU',
+    amountCents: 514560,
+    transactionKind: 'activity',
+  });
+  upsertTransactionAnnotation('vest-c', { categoryId: incomeId });
+  expect((await caller.categories.reviewQueue({ filter: 'conflicts' })).totalCount).toBe(1);
+  await expect(
+    caller.categories.decideReview({
+      groupId: conflict.id,
+      fingerprint: conflict.fingerprint,
+      decision: 'keep',
+    }),
+  ).rejects.toThrow('review changed');
+  expect(await caller.categories.reviewDetail({ groupId: 'missing' })).toBeNull();
+  expect((await caller.categories.reviewQueue({ search: 'no matching merchant' })).totalCount).toBe(
+    0,
+  );
+});
+
+test('category browse rolls up exact ledger occurrences across child categories and paginates without widening unknown selections', async () => {
+  const accountId = Number(insertRow('accounts', { name: 'Browse card', type: 'credit_card' }));
+  const parent = Number(insertRow('categories', { name: 'Food browse', type: 'expense' }));
+  const child = Number(
+    insertRow('categories', { name: 'Coffee browse', type: 'expense', parentId: parent }),
+  );
+  const explicitUnknown = Number(
+    insertRow('categories', { name: 'Uncategorized', type: 'expense' }),
+  );
+  for (let i = 0; i < 53; i++) {
+    const id = `browse-${i}`;
+    insertRow('ledgerTransactions', {
+      ledgerTransactionId: id,
+      accountId,
+      date: '2026-10-01',
+      merchant: 'Cafe',
+      description: 'Repeated real purchase',
+      amountCents: -1001,
+      transactionKind: 'activity',
+    });
+    upsertTransactionAnnotation(id, { categoryId: child, notes: i === 0 ? 'Find note' : '' });
+  }
+  for (const id of ['blank-category', 'explicit-unknown']) {
+    insertRow('ledgerTransactions', {
+      ledgerTransactionId: id,
+      accountId,
+      date: '2026-10-01',
+      merchant: 'Unknown',
+      amountCents: -2000,
+      transactionKind: 'activity',
+    });
+  }
+  upsertTransactionAnnotation('explicit-unknown', { categoryId: explicitUnknown });
+  const browse = await caller.categories.browse();
+  expect(browse.categories.find((category) => category.id === parent)).toMatchObject({
+    transactionCount: 53,
+    activityCents: 53053,
+    merchantCount: 1,
+  });
+  expect(browse.categories.find((category) => category.id === child)).toMatchObject({
+    transactionCount: 53,
+    activityCents: 53053,
+    depth: 1,
+  });
+  expect(browse.categories.find((category) => category.id === null)).toMatchObject({
+    transactionCount: 2,
+    activityCents: 4000,
+  });
+  const first = await caller.categories.browseTransactions({ categoryId: parent });
+  const next = await caller.categories.browseTransactions({ categoryId: parent, offset: 50 });
+  expect(first.transactions).toHaveLength(50);
+  expect(next.transactions).toHaveLength(3);
+  expect(
+    new Set([...first.transactions, ...next.transactions].map((row) => row.ledgerTransactionId))
+      .size,
+  ).toBe(53);
+  expect(
+    (await caller.categories.browseTransactions({ categoryId: parent, search: 'Find note' }))
+      .totalCount,
+  ).toBe(1);
+  expect((await caller.categories.browseTransactions({ categoryId: null })).totalCount).toBe(2);
+  await expect(caller.categories.browseTransactions({ categoryId: 99999999 })).rejects.toThrow(
+    'no longer exists',
+  );
+});
+
 test('transaction context is bounded, occurrence-preserving, account-scoped and independent of review categories', async () => {
   const accountId = Number(
     insertRow('accounts', { name: 'Fidelity context', type: 'investment', status: 'archived' }),
@@ -839,6 +991,7 @@ function resetAppTables() {
   initDatabase();
   db.transaction(() => {
     for (const table of [
+      'categoryReviewDecisions',
       'ledgerRebuildState',
       'ledgerProvenance',
       'reviewedDistinctOverlaps',
@@ -3980,12 +4133,12 @@ test('transaction detail and scoped review share active ledger rows; category ed
     startDate: '2026-10-01',
     endDate: '2026-10-02',
   });
-  expect(report.worthReviewing.groups).toHaveLength(1);
-  expect(report.worthReviewing.groups[0]?.transactions).toHaveLength(2);
-  expect((await caller.analytics.report({ accountIds: [] })).worthReviewing.groups).toEqual([]);
+  expect(report).not.toHaveProperty('worthReviewing');
+  const reviews = await caller.categories.reviewQueue({ filter: 'conflicts' });
+  expect(reviews.groups).toHaveLength(1);
   expect(
-    (await caller.analytics.report({ startDate: '2026-11-01' })).worthReviewing.groups,
-  ).toEqual([]);
+    (await caller.categories.reviewDetail({ groupId: reviews.groups[0]!.id }))?.transactions,
+  ).toHaveLength(2);
   const beforeLedger = getDb().prepare('SELECT * FROM ledgerTransactions ORDER BY id').all();
   const result = await caller.transactions.applyReviewedCategories({
     label: 'Reviewed coffee',

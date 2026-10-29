@@ -78,15 +78,20 @@ export default function ReviewedTransactions({
   label,
   showContext = false,
   introduction,
+  changes,
+  selectVisibleOnly = false,
 }: {
   transactions: TransactionListItem[];
   onInspect: (id: string) => void;
   label: string;
   showContext?: boolean;
   introduction?: ReactNode;
+  changes?: ReturnType<typeof useReviewedCategories>;
+  selectVisibleOnly?: boolean;
 }) {
   const { categories } = useCategories();
-  const state = useReviewedCategories();
+  const localChanges = useReviewedCategories();
+  const state = changes ?? localChanges;
   const [selected, setSelected] = useState<Map<string, TransactionListItem>>(new Map());
   const [categoryId, setCategoryId] = useState('');
   const [limit, setLimit] = useState(10);
@@ -114,10 +119,19 @@ export default function ReviewedTransactions({
             className="btn btn--ghost btn--sm"
             disabled={state.pending}
             onClick={() =>
-              setSelected(new Map(transactions.map((row) => [row.ledgerTransactionId!, row])))
+              setSelected(
+                new Map(
+                  (selectVisibleOnly ? visible : transactions).map((row) => [
+                    row.ledgerTransactionId!,
+                    row,
+                  ]),
+                ),
+              )
             }
           >
-            Select all {transactions.length}
+            {selectVisibleOnly
+              ? `Select shown ${visible.length}`
+              : `Select all ${transactions.length}`}
           </button>
           {selected.size > 0 && (
             <button
@@ -167,7 +181,7 @@ export default function ReviewedTransactions({
             will change. Notes and source data stay intact.
           </p>
         )}
-        <CategoryChangeFeedback state={state} />
+        {!changes && <CategoryChangeFeedback state={state} />}
         <ul className="related-transactions" aria-label="Transactions to review">
           {visible.map((row) => (
             <li key={row.ledgerTransactionId}>

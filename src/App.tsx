@@ -4,9 +4,8 @@ import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'r
 import { Menu } from 'lucide-react';
 import ImportPage from './components/import/ImportPage.jsx';
 import TransactionsPage from './components/transactions/TransactionsPage.jsx';
-import TransactionReviewPage from './components/transactions/TransactionReviewPage.jsx';
 import AccountsPage from './components/accounts/AccountsPage.jsx';
-import CategoriesPage from './components/categories/CategoriesPage';
+import CategoriesWorkspace from './components/categories/CategoriesWorkspace';
 import Sidebar from './components/layout/Sidebar';
 import { SidebarContextProvider } from './components/layout/SidebarContext';
 import { installNavigationActions } from './components/layout/navigationActions';
@@ -191,9 +190,12 @@ function AppRoutes({ reportSelectedIds }: AppRoutesProps) {
     <Routes>
       <Route path="/" element={<AnalyticsPage />} />
       <Route path="/transactions" element={<TransactionsPage />} />
-      <Route path="/transactions/review" element={<TransactionReviewPage />} />
+      <Route
+        path="/transactions/review"
+        element={<Navigate to="/categories?view=review&mode=ai" replace />}
+      />
       <Route path="/accounts" element={<AccountsPage />} />
-      <Route path="/categories" element={<CategoriesPage />} />
+      <Route path="/categories" element={<CategoriesWorkspace />} />
       <Route path="/budgeting" element={<BudgetingPage />} />
       <Route
         path="/net-worth"

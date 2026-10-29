@@ -28,8 +28,7 @@ export function useCategories() {
 
   async function deleteCategory(id: number | string) {
     const result = await trpcClient.categories.delete.mutate({ id });
-    await queryClient.invalidateQueries({ queryKey: trpc.categories.list.queryKey() });
-    await queryClient.invalidateQueries({ queryKey: trpc.categorizationRules.list.queryKey() });
+    await queryClient.invalidateQueries();
     return result;
   }
 

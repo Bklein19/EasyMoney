@@ -1075,3 +1075,32 @@
     width: 100%;
   }
 }
+/* Detailed breakdowns stay available without competing with the main reporting flow. */
+.analytics-secondary-details {
+  grid-column: 1 / -1;
+}
+.analytics-secondary-details > summary {
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+.analytics-secondary-details[open] > summary {
+  margin-bottom: 18px;
+}
+.analytics-secondary-details > p {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+.analytics-category-review-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+.analytics-category-review-link a {
+  color: var(--color-accent);
+  white-space: nowrap;
+}

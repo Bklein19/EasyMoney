@@ -1139,6 +1139,14 @@ export function initDatabase() {
     if (!tableColumnNames('sourceFiles').includes('coverageBasis'))
       db.exec('ALTER TABLE sourceFiles ADD COLUMN coverageBasis TEXT');
   });
+  runSchemaMigration('2026-10-29-category-review-decisions', () => {
+    db.exec(`CREATE TABLE categoryReviewDecisions (
+      groupId TEXT NOT NULL, fingerprint TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('kept', 'reopened')), updatedAt TEXT NOT NULL,
+      PRIMARY KEY (groupId, fingerprint)
+    )`);
+  });
+
   runSchemaMigration('2026-09-12-parser-derivations', () => {
     db.exec(`
       CREATE TABLE importOriginals (

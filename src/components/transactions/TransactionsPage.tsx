@@ -404,7 +404,7 @@ export default function TransactionsPage() {
                 <button
                   className="btn btn--secondary btn--sm"
                   type="button"
-                  onClick={() => navigate('/transactions/review')}
+                  onClick={() => navigate('/categories')}
                   title="Review uncategorized merchants with AI"
                 >
                   Review with AI

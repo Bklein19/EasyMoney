@@ -43,7 +43,7 @@ Imports are intentionally separate from categorization.
 - Parsers parse files into source transactions, source balances, and source account context.
 - Import preview lets you confirm account mappings and inspect duplicate or parser warnings.
 - Import commit saves confirmed source facts and materializes app read models.
-- Categorization happens later from the Transactions UI and is stored as user annotation data.
+- Categorization happens later from Categories or inline transaction controls and is stored as user annotation data.
 - Unimport marks an import inactive and rebuilds from the remaining active source facts.
 
 This model is meant to handle overlapping activity exports without dropping real same-day duplicate purchases.
@@ -139,6 +139,10 @@ PORT=80 bun run dev:web
 ```
 
 Optional AI categorization:
+
+The **Categories** workspace opens to a grouped review queue, including already-categorized conflicts as well as unknown activity. Review transactions alongside surrounding account activity, make explicit category changes with Undo, or keep an exact group as-is without changing its annotations. Kept decisions persist; new transactions or changed categories, facts, or notes can bring a group back. **Browse categories** shows all active accounts and dates with descendant-inclusive counts and absolute activity amounts, not spending or net income. **Manage categories** retains the category-definition editor.
+
+The existing AI suggestions screen lives inside Categories and starts only when **Get suggestions** is clicked. The old `/transactions/review` route redirects there. This does not change the standing background categorization policy described below or automatically reclassify existing categories. Analytics keeps inline corrections in the spending explorer, links to Categories for review, and folds secondary breakdowns into expandable sections.
 
 ```bash
 OPENAI_API_KEY=sk-... bun run dev

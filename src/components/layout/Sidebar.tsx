@@ -558,36 +558,41 @@ const Sidebar = ({
             </details>
           </nav>
           <div className="sidebar-context" aria-label="Page controls" key={location.pathname}>
-            {showCategoryGroups && location.pathname === '/categories' && (
-              <section>
-                <h2 className="sidebar-context-title">Category groups</h2>
-                <NavLink
-                  to="/categories"
-                  className={`sidebar-category-group ${!activeCategoryGroup ? 'active' : ''}`}
-                  onClick={onClose}
-                >
-                  All categories
-                </NavLink>
-                <div className="sidebar-category-groups" aria-label="Category groups">
-                  {CATEGORY_GROUPS.map((group) => {
-                    const count = categoryGroupCounts.get(group.key) ?? 0;
-                    if (count === 0) return null;
-                    const isActive = activeCategoryGroup === group.key;
-                    return (
-                      <NavLink
-                        key={group.key}
-                        to={`/categories?group=${group.key}`}
-                        className={`sidebar-category-group ${isActive ? 'active' : ''}`}
-                        onClick={onClose}
-                      >
-                        <span>{group.label}</span>
-                        <span>{count}</span>
-                      </NavLink>
-                    );
-                  })}
-                </div>
-              </section>
-            )}
+            {showCategoryGroups &&
+              location.pathname === '/categories' &&
+              (['browse', 'manage'].includes(
+                new URLSearchParams(location.search).get('view') ?? '',
+              ) ||
+                activeCategoryGroup) && (
+                <section>
+                  <h2 className="sidebar-context-title">Category groups</h2>
+                  <NavLink
+                    to="/categories?view=browse"
+                    className={`sidebar-category-group ${!activeCategoryGroup ? 'active' : ''}`}
+                    onClick={onClose}
+                  >
+                    All categories
+                  </NavLink>
+                  <div className="sidebar-category-groups" aria-label="Category groups">
+                    {CATEGORY_GROUPS.map((group) => {
+                      const count = categoryGroupCounts.get(group.key) ?? 0;
+                      if (count === 0) return null;
+                      const isActive = activeCategoryGroup === group.key;
+                      return (
+                        <NavLink
+                          key={group.key}
+                          to={`/categories?view=browse&group=${group.key}`}
+                          className={`sidebar-category-group ${isActive ? 'active' : ''}`}
+                          onClick={onClose}
+                        >
+                          <span>{group.label}</span>
+                          <span>{count}</span>
+                        </NavLink>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
 
             {showAccountPicker && (
               <section className="sidebar-account-picker" aria-label="Report accounts">

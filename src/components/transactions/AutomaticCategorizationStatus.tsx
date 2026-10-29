@@ -38,7 +38,7 @@ export default function AutomaticCategorizationStatus() {
             ? `${data.failed.toLocaleString()} transaction${data.failed === 1 ? '' : 's'} couldn’t be categorized automatically. Imports are saved.${data.configured ? '' : ' AI is not configured.'}`
             : 'Categories updated automatically. You can change any guess; ambiguous payments remain for review.'}
       </span>
-      <Link to="/transactions/review">Review categories</Link>
+      <Link to="/categories">Review categories</Link>
       {data.failed > 0 && (
         <button
           className="btn btn-secondary btn--sm"

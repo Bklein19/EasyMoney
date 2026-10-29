@@ -12,7 +12,7 @@ export const SIDEBAR_PATHS = [
   '/import',
   '/debug/palette',
 ];
-export const DEFAULT_PRIMARY_PATHS = ['/', '/transactions', '/net-worth', '/import'];
+export const DEFAULT_PRIMARY_PATHS = ['/', '/transactions', '/categories', '/net-worth', '/import'];
 export const SIDEBAR_PREFERENCES_KEY = 'easymoney:sidebar-navigation';
 export interface SidebarPreferences {
   order: string[];

@@ -70,6 +70,13 @@ import { saveLocalEnvValue } from './localEnv.ts';
 import { getNetWorthReport } from './netWorth.ts';
 import { getTransactionDetails } from './transactionDetails.ts';
 import {
+  categoryReviewQueue,
+  categoryReviewDetail,
+  decideCategoryReview,
+  browseCategoryActivity,
+  browseCategoryTransactions,
+} from './categoryWorkspace';
+import {
   categorizeTransactions,
   applyReviewedCategoryChanges,
   categorizeTransactionsByQuery,
@@ -259,6 +266,40 @@ export const appRouter = t.router({
   }),
 
   categories: t.router({
+    reviewQueue: t.procedure
+      .input(
+        z
+          .object({
+            search: z.string().optional(),
+            filter: z.enum(['all', 'conflicts', 'uncategorized', 'movement']).optional(),
+            status: z.enum(['open', 'kept']).optional(),
+            offset: z.number().int().min(0).optional(),
+          })
+          .optional(),
+      )
+      .query(({ input }) => categoryReviewQueue(input)),
+    reviewDetail: t.procedure
+      .input(z.object({ groupId: z.string().min(1), offset: z.number().int().min(0).optional() }))
+      .query(({ input }) => categoryReviewDetail(input)),
+    decideReview: t.procedure
+      .input(
+        z.object({
+          groupId: z.string().min(1),
+          fingerprint: z.string().min(1),
+          decision: z.enum(['keep', 'reopen']),
+        }),
+      )
+      .mutation(({ input }) => decideCategoryReview(input)),
+    browse: t.procedure.query(() => browseCategoryActivity()),
+    browseTransactions: t.procedure
+      .input(
+        z.object({
+          categoryId: z.number().int().positive().nullable(),
+          search: z.string().optional(),
+          offset: z.number().int().min(0).optional(),
+        }),
+      )
+      .query(({ input }) => browseCategoryTransactions(input)),
     list: t.procedure.query(() => listCategories()),
 
     create: t.procedure.input(categoryInput).mutation(({ input }) => createCategory(input)),

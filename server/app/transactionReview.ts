@@ -50,7 +50,7 @@ export interface ReviewGroup {
   transactions: TransactionListItem[];
 }
 
-export function buildWorthReviewing(transactions: TransactionListItem[]) {
+export function buildReviewGroups(transactions: TransactionListItem[]) {
   const byMerchant = new Map<string, TransactionListItem[]>();
   for (const transaction of transactions) {
     if (!transaction.ledgerTransactionId || !transaction.account || transaction.amount === 0)
@@ -116,5 +116,10 @@ export function buildWorthReviewing(transactions: TransactionListItem[]) {
       b.amountCents - a.amountCents ||
       a.id.localeCompare(b.id),
   );
+  return groups;
+}
+
+export function buildWorthReviewing(transactions: TransactionListItem[]) {
+  const groups = buildReviewGroups(transactions);
   return { groups: groups.slice(0, 5), totalGroups: groups.length };
 }

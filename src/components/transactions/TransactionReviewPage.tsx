@@ -144,7 +144,7 @@ function getInitialAiReviewSort(): AiReviewSort {
   }
 }
 
-export default function TransactionReviewPage() {
+export default function TransactionReviewPage({ embedded = false }: { embedded?: boolean } = {}) {
   const hasStartedReview = useRef(false);
   const [aiCategorization, setAiCategorization] = useState<AiCategorizationPreview | null>(null);
   const [aiCategorizationError, setAiCategorizationError] = useState('');
@@ -430,10 +430,11 @@ export default function TransactionReviewPage() {
   };
 
   useEffect(() => {
+    if (embedded) return;
     if (hasStartedReview.current) return;
     hasStartedReview.current = true;
     void handlePreviewAiCategorization();
-  }, [handlePreviewAiCategorization]);
+  }, [handlePreviewAiCategorization, embedded]);
 
   const setReviewCategory = (reviewKey: string, categoryId: string) => {
     setCategoryByReviewKey((previous) => ({
@@ -625,13 +626,15 @@ export default function TransactionReviewPage() {
   const aiSkippedCount = aiCategorization?.skippedCount ?? 0;
 
   return (
-    <div className="page transaction-review-page">
+    <div className={`${embedded ? 'category-ai-review' : 'page'} transaction-review-page`}>
       <div className="page__header transaction-review-page__header stagger-in">
         <div>
           <h1 className="page__title transaction-review-breadcrumbs">
-            <Link to="/transactions">Transactions</Link>
+            <Link to={embedded ? '/categories' : '/transactions'}>
+              {embedded ? 'Categories' : 'Transactions'}
+            </Link>
             <span aria-hidden="true">&gt;</span>
-            <span>Review</span>
+            <span>{embedded ? 'AI suggestions' : 'Review'}</span>
           </h1>
         </div>
         <div className="transaction-review-page__actions">
@@ -661,7 +664,7 @@ export default function TransactionReviewPage() {
               </button>
             )}
           </div>
-          {coverage && (
+          {coverage && !embedded && (
             <section className="transaction-review-coverage" aria-label="Categorization coverage">
               <div className="transaction-review-coverage__item">
                 <div className="transaction-review-coverage__label">
@@ -941,7 +944,23 @@ export default function TransactionReviewPage() {
           </>
         ) : (
           <div className="transaction-review-empty">
-            <h2>Starting review...</h2>
+            <h2>{embedded ? 'AI suggestions for uncategorized activity' : 'Starting review...'}</h2>
+            {embedded && (
+              <>
+                <p>
+                  Uses the existing AI review to suggest categories and explain uncertain groups.
+                  Already-categorized entries and your manual choices are not automatically
+                  overwritten.
+                </p>
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => void handlePreviewAiCategorization()}
+                >
+                  Get suggestions
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>

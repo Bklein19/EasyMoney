@@ -256,7 +256,7 @@ function CategoryDetails({
   );
 }
 
-export default function CategoriesPage() {
+export default function CategoriesPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { categories, addCategory, updateCategory, deleteCategory, isLoading } = useCategories();
   const [isCreating, setIsCreating] = useState(false);
   const [searchParams] = useSearchParams();
@@ -325,11 +325,12 @@ export default function CategoriesPage() {
   };
 
   return (
-    <div className="page categories-page">
+    <div className={`${embedded ? '' : 'page'} categories-page`}>
       <header className="page__header categories-page__header">
         <div>
           <h1 className="page__title">
-            Categories <span className="categories-page__count">{sortedCategories.length}</span>
+            {embedded ? 'Category definitions' : 'Categories'}{' '}
+            <span className="categories-page__count">{sortedCategories.length}</span>
           </h1>
           <p className="page__subtitle">
             {selectedGroupLabel
