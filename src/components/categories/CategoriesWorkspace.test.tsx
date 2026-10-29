@@ -49,7 +49,7 @@ test('category workspace defaults to review while legacy group links browse and 
   expect(html).not.toContain('New category');
 });
 
-test('merchant review provides row-level Save and optional history review without selection mode', () => {
+test('merchant review provides these and all scopes with one category picker and no individual editors', () => {
   const group = {
     id: 'merchant',
     name: 'OpenAI',
@@ -59,6 +59,7 @@ test('merchant review provides row-level Save and optional history review withou
     primaryFingerprint: 'unknown',
     kept: false,
     transactionCount: 14,
+    singleTransaction: null,
     currentCount: 1,
     reviewCount: 1,
     currentAmountCents: 2000,
@@ -82,7 +83,9 @@ test('merchant review provides row-level Save and optional history review withou
   });
   expect(html).toContain('Merchant category reviews');
   expect(html).toContain('Category for OpenAI');
-  expect(html).toContain('Save 1');
+  expect(html).toContain('Categorize these 1');
+  expect(html).toContain('Categorize all 14');
+  expect(html.match(/aria-label="Category for /g)).toHaveLength(1);
   expect(html).toContain('3 earlier transactions differ');
   expect(html).not.toContain('type="checkbox"');
   expect(html).not.toContain('Apply to');
@@ -105,6 +108,7 @@ test('categorized conflicts can be marked intentional without changing categorie
             primaryFingerprint: 'known',
             kept: false,
             transactionCount: 2,
+            singleTransaction: null,
             currentCount: 0,
             reviewCount: 2,
             currentAmountCents: 0,
@@ -124,8 +128,52 @@ test('categorized conflicts can be marked intentional without changing categorie
   });
   expect(html).toContain('These differences are intentional');
   expect(html).toContain('Review 2');
+  expect(html).toContain('Categorize these 2');
+  expect(html).not.toContain('Categorize all 2');
   expect(html).not.toContain('Save 0');
   expect(html).not.toContain('type="checkbox"');
+});
+
+test('single-transaction review has one editor, date and nearby activity without duplicated review details', () => {
+  const html = render('/categories', (client) => {
+    client.setQueryData(
+      trpc.categories.merchantQueue.queryKey({ search: '', status: 'open', offset: 0 }),
+      {
+        groups: [
+          {
+            id: 'single',
+            name: 'Transfer to savings',
+            accountName: 'Savings',
+            categories: ['Education'],
+            fingerprint: 'all',
+            primaryFingerprint: 'one',
+            kept: false,
+            transactionCount: 1,
+            currentCount: 1,
+            reviewCount: 1,
+            currentAmountCents: 1060600,
+            uncategorizedCount: 0,
+            conflict: false,
+            movement: true,
+            suggestion: null,
+            reviewedCount: 0,
+            historyTargets: [],
+            singleTransaction: { id: 'one', date: '2020-05-26', amount: -10606 },
+          },
+        ],
+        totalCount: 1,
+        hasMore: false,
+        nextOffset: null,
+      },
+    );
+  });
+  expect(html.match(/aria-label="Category for /g)).toHaveLength(1);
+  expect(html).toContain('May 26, 2020');
+  expect(html).toContain('Nearby activity');
+  expect(html).toContain('Keep current category');
+  expect(html).not.toContain('These differences are intentional');
+  expect(html).not.toContain('Review 1');
+  expect(html).not.toContain('Transactions in this review');
 });
 
 test('workspace AI review is explicit and does not suggest it reviewed already-categorized entries', () => {

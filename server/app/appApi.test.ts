@@ -121,6 +121,99 @@ test('merchant saves separate current unknowns from differing history and preser
   ).rejects.toThrow();
 });
 
+test('merchant these/all scopes handle categorized conflicts, include acknowledged history only on all, and reject stale all plans', async () => {
+  const accountId = Number(insertRow('accounts', { name: 'Scope account', type: 'credit_card' }));
+  const otherAccount = Number(
+    insertRow('accounts', { name: 'Other scope account', type: 'credit_card' }),
+  );
+  const first = Number(insertRow('categories', { name: 'Scope first', type: 'expense' }));
+  const second = Number(insertRow('categories', { name: 'Scope second', type: 'expense' }));
+  const target = Number(insertRow('categories', { name: 'Scope target', type: 'expense' }));
+  const add = (id: string, categoryId: number | null, account = accountId) => {
+    insertRow('ledgerTransactions', {
+      ledgerTransactionId: id,
+      accountId: account,
+      date: '2026-10-01',
+      merchant: 'Scope merchant',
+      description: 'Same purchase',
+      amountCents: -2000,
+      transactionKind: 'activity',
+    });
+    if (categoryId) upsertTransactionAnnotation(id, { categoryId, notes: `Note ${id}` });
+  };
+  add('scope-first', first);
+  add('scope-second', second);
+  add('scope-other', first, otherAccount);
+  const conflict = (await caller.categories.merchantQueue()).groups.find(
+    (g) => g.accountName === 'Scope account',
+  )!;
+  const saved = await caller.categories.saveMerchant({
+    groupId: conflict.id,
+    scope: 'current',
+    categoryId: target,
+    fingerprint: conflict.primaryFingerprint,
+  });
+  expect(saved.count).toBe(2);
+  await caller.transactions.restoreCategories({ undoOperationId: saved.undoOperation!.id });
+  const restored = (await caller.categories.merchantQueue()).groups.find(
+    (g) => g.id === conflict.id,
+  )!;
+  await caller.categories.keepMerchant({
+    groupId: restored.id,
+    scope: 'current',
+    fingerprint: restored.primaryFingerprint,
+  });
+  add('scope-new', null);
+  const pending = (await caller.categories.merchantQueue()).groups.find(
+    (g) => g.id === conflict.id,
+  )!;
+  expect(pending.reviewCount).toBe(1);
+  expect(pending.transactionCount).toBe(3);
+  const current = await caller.categories.saveMerchant({
+    groupId: pending.id,
+    scope: 'current',
+    categoryId: target,
+    fingerprint: pending.primaryFingerprint,
+  });
+  expect(current.count).toBe(1);
+  await caller.transactions.restoreCategories({ undoOperationId: current.undoOperation!.id });
+  // A new same-merchant occurrence invalidates a previously displayed all count.
+  add('scope-newer', null);
+  await expect(
+    caller.categories.saveMerchant({
+      groupId: pending.id,
+      scope: 'all',
+      categoryId: target,
+      fingerprint: pending.fingerprint,
+    }),
+  ).rejects.toThrow('This review changed');
+  expect(
+    (await caller.transactions.list()).transactions.find(
+      (r) => r.ledgerTransactionId === 'scope-first',
+    )?.category?.id,
+  ).toBe(first);
+  const fresh = (await caller.categories.merchantQueue()).groups.find((g) => g.id === conflict.id)!;
+  const all = await caller.categories.saveMerchant({
+    groupId: fresh.id,
+    scope: 'all',
+    categoryId: target,
+    fingerprint: fresh.fingerprint,
+  });
+  expect(all.count).toBe(4);
+  const rows = (await caller.transactions.list()).transactions;
+  expect(
+    rows.filter((r) => r.account?.id === accountId).every((r) => r.category?.id === target),
+  ).toBe(true);
+  expect(rows.find((r) => r.ledgerTransactionId === 'scope-other')?.category?.id).toBe(first);
+  expect(rows.find((r) => r.ledgerTransactionId === 'scope-first')?.notes).toBe('Note scope-first');
+  await caller.transactions.restoreCategories({ undoOperationId: all.undoOperation!.id });
+  const undone = (await caller.transactions.list()).transactions;
+  expect(undone.find((r) => r.ledgerTransactionId === 'scope-first')?.category?.id).toBe(first);
+  expect(undone.find((r) => r.ledgerTransactionId === 'scope-second')?.category?.id).toBe(second);
+  expect(undone.find((r) => r.ledgerTransactionId === 'scope-new')?.category).toBeNull();
+  expect(getDb().prepare('SELECT COUNT(*) AS n FROM ledgerTransactions').get()).toEqual({ n: 5 });
+});
+
 test('intentional category differences remain acknowledged when new matching activity arrives but changed evidence reopens them', async () => {
   const accountId = Number(
     insertRow('accounts', { name: 'Intentional brokerage', type: 'investment' }),

@@ -298,7 +298,7 @@ export const appRouter = t.router({
       .input(
         z.object({
           groupId: z.string().min(1),
-          scope: z.enum(['current', 'history']),
+          scope: z.enum(['current', 'history', 'all']),
           categoryId: z.number().int().positive(),
           fingerprint: z.string().min(1),
         }),

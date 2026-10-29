@@ -247,32 +247,26 @@
   padding: 12px 0;
   border-bottom: 1px solid var(--glass-border);
 }
-.merchant-review__description {
-  color: var(--text-primary);
-  font: inherit;
-  font-size: 0.8rem;
-  border: 0;
-  background: none;
-  padding: 0;
-  text-align: left;
-  cursor: pointer;
-  overflow-wrap: anywhere;
-}
-.merchant-review__individual {
+.merchant-review__context-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
-  margin-top: 8px;
   font-size: 0.8rem;
 }
-.merchant-review__individual > span {
-  margin-right: auto;
+.merchant-review__context-row > span {
   color: var(--text-secondary);
 }
-.merchant-review__individual .grouped-category-select-control {
-  width: 240px;
-  max-width: 100%;
+.merchant-review__context-row > strong {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+.merchant-review__actions {
+  display: grid;
+  gap: 8px;
+}
+.merchant-review__secondary:empty {
+  display: none;
 }
 .category-workspace__explorer {
   min-width: 0;

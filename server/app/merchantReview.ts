@@ -93,6 +93,14 @@ function summary(group: ReturnType<typeof groups>[number]) {
     primaryFingerprint: fingerprint(group.current.length ? group.current : group.unreviewed),
     kept: group.kept,
     transactionCount: group.transactions.length,
+    singleTransaction:
+      group.transactions.length === 1
+        ? {
+            id: group.transactions[0]!.ledgerTransactionId!,
+            date: group.transactions[0]!.date,
+            amount: group.transactions[0]!.amount,
+          }
+        : null,
     currentCount: group.current.length,
     reviewCount: group.current.length ? group.current.length : group.unreviewed.length,
     currentAmountCents: group.current.reduce(
@@ -201,14 +209,12 @@ export function merchantReviewScope(input: {
 /** Re-derive the complete displayed scope atomically, never just a loaded sample/page. */
 export function saveMerchantCategories(input: {
   groupId: string;
-  scope: 'current' | 'history';
+  scope: MerchantScope;
   categoryId: number;
   fingerprint: string;
 }) {
   return getDb().transaction(() => {
-    const { group, rows } = scoped(input);
-    if (input.scope === 'current' && !group.current.length)
-      throw new Error('Review the individual entries or choose earlier category differences.');
+    const { rows } = scoped(input);
     if (!rows.length || fingerprint(rows) !== input.fingerprint)
       throw new Error('This review changed. Refresh before saving.');
     return applyReviewedCategoryChanges({

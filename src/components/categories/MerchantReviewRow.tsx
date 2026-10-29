@@ -1,7 +1,7 @@
 import { useId, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import type { merchantReviewQueue } from '../../../server/app/merchantReview';
-import type { CategorySummary, TransactionListItem } from '../../../server/app/types';
+import type { merchantReviewQueue, MerchantScope } from '../../../server/app/merchantReview';
+import type { CategorySummary } from '../../../server/app/types';
 import { trpc, trpcClient, queryClient } from '../../api/trpc';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import GroupedCategorySelect from '../shared/GroupedCategorySelect';
@@ -10,40 +10,6 @@ import TransactionContext from '../transactions/TransactionContext';
 
 type Group = ReturnType<typeof merchantReviewQueue>['groups'][number];
 type Changes = ReturnType<typeof useReviewedCategories>;
-
-function IndividualCategory({
-  row,
-  categories,
-  changes,
-}: {
-  row: TransactionListItem;
-  categories: CategorySummary[];
-  changes: Changes;
-}) {
-  const [value, setValue] = useState(String(row.category?.id ?? ''));
-  return (
-    <div className="merchant-review__individual">
-      <span>
-        {formatDate(row.date, 'medium')} · {formatCurrency(row.amount, true)}
-      </span>
-      <GroupedCategorySelect
-        categories={categories}
-        value={value}
-        leadingOptions={[{ value: '', label: 'Choose category…' }]}
-        aria-label={`Category for ${row.merchant} on ${row.date} (${row.ledgerTransactionId})`}
-        onChange={setValue}
-        disabled={changes.pending}
-      />
-      <button
-        className="btn btn--secondary btn--sm"
-        disabled={changes.pending || !value || Number(value) === row.category?.id}
-        onClick={() => void changes.apply([row], Number(value), 'Individual merchant correction')}
-      >
-        Save
-      </button>
-    </div>
-  );
-}
 
 export default function MerchantReviewRow({
   group,
@@ -78,6 +44,9 @@ export default function MerchantReviewRow({
     ),
   );
   const blocked = busy || changes.pending;
+  const historyScope = panel === 'history';
+  const theseCount = historyScope ? (detail.data?.count ?? target?.count ?? 0) : group.reviewCount;
+  const single = group.singleTransaction;
   const open = (value: typeof panel) => {
     setPanel(panel === value ? null : value);
     setOffset(0);
@@ -95,17 +64,23 @@ export default function MerchantReviewRow({
       setBusy(false);
     }
   };
-  const save = async (scope: 'current' | 'history') => {
+  const save = async (scope: MerchantScope) => {
     if (!categoryId) return;
     await run(async () => {
       const result = await trpcClient.categories.saveMerchant.mutate({
         groupId: group.id,
         scope,
         categoryId: Number(categoryId),
-        fingerprint: scope === 'current' ? group.primaryFingerprint : detail.data!.fingerprint,
+        fingerprint:
+          scope === 'all'
+            ? group.fingerprint
+            : scope === 'current'
+              ? group.primaryFingerprint
+              : detail.data!.fingerprint,
       });
       changes.remember(result.undoOperation);
       setPanel(null);
+      setContextId(null);
     });
   };
   const keep = (scope: 'current' | 'history') =>
@@ -117,6 +92,7 @@ export default function MerchantReviewRow({
         fingerprint: scope === 'current' ? group.primaryFingerprint : detail.data!.fingerprint,
       });
       setPanel(null);
+      setContextId(null);
     });
   return (
     <article className="merchant-review" aria-label={`${group.name} category review`}>
@@ -125,21 +101,33 @@ export default function MerchantReviewRow({
           <button
             className="merchant-review__name"
             disabled={blocked}
-            aria-expanded={panel === 'current' || panel === 'all'}
-            onClick={() => open(group.kept ? 'all' : 'current')}
+            aria-expanded={
+              single ? contextId === single.id : panel === 'current' || panel === 'all'
+            }
+            onClick={() =>
+              single
+                ? setContextId(contextId ? null : single.id)
+                : open(group.kept ? 'all' : 'current')
+            }
           >
             {group.name}
           </button>
           <p className="merchant-review__meta">
             {group.accountName} ·{' '}
-            {group.kept
-              ? `${group.transactionCount} reviewed transactions`
-              : `${group.reviewCount} ${group.uncategorizedCount ? 'uncategorized' : 'to review'}`}
-            {group.currentCount > 0 &&
+            {single
+              ? `${formatDate(single.date, 'medium')} · ${formatCurrency(single.amount, true)}`
+              : group.kept
+                ? `${group.transactionCount} reviewed transactions`
+                : `${group.reviewCount} ${group.uncategorizedCount ? 'uncategorized' : 'to review'}`}
+            {!single &&
+              group.currentCount > 0 &&
               ` · ${formatCurrency(group.currentAmountCents / 100)} in activity`}
           </p>
           {group.categories.length > 0 && (
-            <p className="merchant-review__meta">Current: {group.categories.join(' · ')}</p>
+            <p className="merchant-review__meta">
+              {group.movement ? 'Check money movement · Current: ' : 'Current: '}
+              {group.categories.join(' · ')}
+            </p>
           )}
         </div>
         {!group.kept && (
@@ -152,7 +140,7 @@ export default function MerchantReviewRow({
               aria-label={`Category for ${group.name}`}
               onChange={(value) => {
                 setCategoryId(value);
-                setPanel(null);
+                setOffset(0);
               }}
             />
             {group.suggestion && categoryId === String(group.suggestion.categoryId) && (
@@ -160,14 +148,31 @@ export default function MerchantReviewRow({
             )}
           </div>
         )}
-        {!group.kept && group.currentCount > 0 && (
-          <button
-            className="btn btn--primary btn--sm"
-            disabled={blocked || !categoryId}
-            onClick={() => void save('current')}
-          >
-            {busy ? 'Saving…' : `Save ${group.currentCount}`}
-          </button>
+        {!group.kept && (
+          <div className="merchant-review__actions">
+            <button
+              className="btn btn--primary btn--sm"
+              disabled={
+                blocked ||
+                !categoryId ||
+                !theseCount ||
+                (historyScope && (!detail.data || detail.isFetching || Boolean(detail.error)))
+              }
+              onClick={() => void save(historyScope ? 'history' : 'current')}
+            >
+              {busy ? 'Saving…' : `Categorize these ${theseCount}`}
+            </button>
+            {group.transactionCount > theseCount && (
+              <button
+                className="btn btn--secondary btn--sm"
+                disabled={blocked || !categoryId}
+                title={`All transactions in this merchant group in ${group.accountName}, including already-categorized history`}
+                onClick={() => void save('all')}
+              >
+                Categorize all {group.transactionCount}
+              </button>
+            )}
+          </div>
         )}
         {group.kept && (
           <button
@@ -186,24 +191,37 @@ export default function MerchantReviewRow({
           </button>
         )}
       </div>
-      {!group.kept && group.uncategorizedCount === 0 && (
-        <div className="merchant-review__secondary">
+      <div className="merchant-review__secondary">
+        {single && (
           <button
             className="btn btn--ghost btn--sm"
-            disabled={blocked}
-            onClick={() => open('current')}
+            aria-expanded={Boolean(contextId)}
+            onClick={() => setContextId(contextId ? null : single.id)}
           >
-            Review {group.reviewCount}
+            Nearby activity
           </button>
-          <button
-            className="btn btn--ghost btn--sm"
-            disabled={blocked}
-            onClick={() => void keep('current')}
-          >
-            These differences are intentional
-          </button>
-        </div>
-      )}
+        )}
+        {!group.kept && group.uncategorizedCount === 0 && (
+          <>
+            {!single && (
+              <button
+                className="btn btn--ghost btn--sm"
+                disabled={blocked}
+                onClick={() => open('current')}
+              >
+                Review {group.reviewCount}
+              </button>
+            )}
+            <button
+              className="btn btn--ghost btn--sm"
+              disabled={blocked}
+              onClick={() => void keep('current')}
+            >
+              {group.conflict ? 'These differences are intentional' : 'Keep current category'}
+            </button>
+          </>
+        )}
+      </div>
       {Boolean(target?.count) && !group.kept && (
         <button
           className="merchant-review__history-link"
@@ -224,7 +242,13 @@ export default function MerchantReviewRow({
             <h3>
               {panel === 'history' ? 'Earlier category differences' : 'Transactions in this review'}
             </h3>
-            <button className="btn btn--ghost btn--sm" onClick={() => setPanel(null)}>
+            <button
+              className="btn btn--ghost btn--sm"
+              onClick={() => {
+                setPanel(null);
+                setContextId(null);
+              }}
+            >
               Close
             </button>
           </header>
@@ -244,29 +268,30 @@ export default function MerchantReviewRow({
                 <ul className="merchant-review__transactions">
                   {detail.data.transactions.map((row) => (
                     <li key={row.ledgerTransactionId}>
-                      <button
-                        className="merchant-review__description"
-                        onClick={() => onInspect(row.ledgerTransactionId!)}
-                      >
-                        {row.merchant || row.description}
-                      </button>
-                      <IndividualCategory
-                        key={`${row.ledgerTransactionId}:${row.category?.id}`}
-                        row={row}
-                        categories={categories}
-                        changes={changes}
-                      />
-                      <button
-                        className="btn btn--ghost btn--sm"
-                        onClick={() =>
-                          setContextId(
-                            contextId === row.ledgerTransactionId ? null : row.ledgerTransactionId,
-                          )
-                        }
-                        aria-expanded={contextId === row.ledgerTransactionId}
-                      >
-                        Nearby activity
-                      </button>
+                      <div className="merchant-review__context-row">
+                        <span>{formatDate(row.date, 'medium')}</span>
+                        <span>{row.category?.name ?? 'Uncategorized'}</span>
+                        <strong>{formatCurrency(row.amount, true)}</strong>
+                        <button
+                          className="btn btn--ghost btn--sm"
+                          onClick={() => onInspect(row.ledgerTransactionId!)}
+                        >
+                          Details
+                        </button>
+                        <button
+                          className="btn btn--ghost btn--sm"
+                          onClick={() =>
+                            setContextId(
+                              contextId === row.ledgerTransactionId
+                                ? null
+                                : row.ledgerTransactionId,
+                            )
+                          }
+                          aria-expanded={contextId === row.ledgerTransactionId}
+                        >
+                          Nearby activity
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -293,14 +318,6 @@ export default function MerchantReviewRow({
                 )}
                 {panel === 'history' && detail.data.count > 0 && (
                   <div className="merchant-review__secondary">
-                    <button
-                      className="btn btn--primary btn--sm"
-                      disabled={blocked || detail.isFetching}
-                      onClick={() => void save('history')}
-                    >
-                      Move {detail.data.count} to{' '}
-                      {categories.find((category) => category.id === Number(categoryId))?.name}
-                    </button>
                     <button
                       className="btn btn--ghost btn--sm"
                       disabled={blocked || detail.isFetching}
@@ -329,15 +346,15 @@ export default function MerchantReviewRow({
               </>
             )
           )}
-          {contextId && (
-            <TransactionContext
-              key={contextId}
-              ledgerTransactionId={contextId}
-              reviewIds={detail.data?.transactions.map((row) => row.ledgerTransactionId!) ?? []}
-              panelId={contextPanelId}
-            />
-          )}
         </section>
+      )}
+      {contextId && (
+        <TransactionContext
+          key={contextId}
+          ledgerTransactionId={contextId}
+          reviewIds={detail.data?.transactions.map((row) => row.ledgerTransactionId!) ?? []}
+          panelId={contextPanelId}
+        />
       )}
     </article>
   );
