@@ -211,8 +211,10 @@
 }
 .merchant-categorize {
   position: relative;
-  display: flex;
-  height: 44px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px;
+  width: max-content;
+  min-height: 44px;
   max-width: 100%;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
@@ -223,18 +225,21 @@
   outline: 3px solid var(--focus-ring);
   outline-offset: 2px;
 }
-.merchant-categorize__apply,
-.merchant-categorize__placeholder {
-  height: 100%;
+.merchant-categorize > .merchant-categorize__apply,
+.merchant-categorize > .merchant-categorize__placeholder {
+  min-height: 42px;
   min-width: 0;
   border: 0;
   border-radius: var(--radius-md) 0 0 var(--radius-md);
   padding: 0 14px;
   font-size: 0.85rem;
   line-height: 1.5;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.merchant-categorize > .merchant-categorize__apply {
+  padding-block: 8px;
 }
 .merchant-categorize__apply:hover:not(:disabled),
 .merchant-categorize__apply:active:not(:disabled) {
@@ -243,6 +248,7 @@
 .merchant-categorize__placeholder {
   display: flex;
   align-items: center;
+  white-space: nowrap;
 }
 .merchant-categorize--empty {
   background: var(--bg-elevated);
@@ -251,7 +257,6 @@
 }
 .merchant-categorize__selector {
   position: relative;
-  flex: 0 0 42px;
   display: grid;
   place-items: center;
   border-left: 1px solid color-mix(in srgb, currentColor 25%, transparent);

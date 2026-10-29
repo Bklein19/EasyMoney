@@ -163,7 +163,7 @@ export default function MerchantReviewRow({
                       : `Categorize as ${categoryName}`}
                 </button>
               ) : (
-                <span className="merchant-categorize__placeholder">Categorize as…</span>
+                <span className="merchant-categorize__placeholder">Choose category</span>
               )}
               <div className="merchant-categorize__selector">
                 <ChevronDown size={16} aria-hidden="true" />

@@ -144,7 +144,8 @@ test('categorized conflicts defer transaction details and intentional decisions 
   });
   expect(html).not.toContain('These differences are intentional');
   expect(html).not.toContain('Review 2');
-  expect(html).toContain('Categorize as…');
+  expect(html).toContain('merchant-categorize__placeholder">Choose category</span>');
+  expect(html).not.toContain('Categorize as…');
   expect(html).not.toContain('Categorize as undefined');
   expect(html).not.toContain('Categorize all 2');
   expect(html).not.toContain('Save 0');
