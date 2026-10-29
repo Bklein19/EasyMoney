@@ -11,6 +11,17 @@ test('sidebar defaults and corrupt saved settings remain usable', () => {
   expect(readSidebarPreferences(null).visible).toEqual(DEFAULT_PRIMARY_PATHS);
   expect(readSidebarPreferences('oops').order).toEqual(SIDEBAR_PATHS);
 });
+
+test('previous default navigation gains Categories without resetting customized navigation', () => {
+  const legacy = ['/', '/transactions', '/net-worth', '/import'];
+  expect(
+    readSidebarPreferences(JSON.stringify({ order: SIDEBAR_PATHS, visible: legacy })).visible,
+  ).toEqual(DEFAULT_PRIMARY_PATHS);
+  const customized = ['/', '/import'];
+  expect(
+    readSidebarPreferences(JSON.stringify({ order: SIDEBAR_PATHS, visible: customized })).visible,
+  ).toEqual(customized);
+});
 test('sidebar preserves custom order and all-overflow choice while recovering missing routes', () => {
   const result = readSidebarPreferences(
     JSON.stringify({ order: ['/import', '/import', '/missing'], visible: [] }),

@@ -24,6 +24,10 @@ export function readSidebarPreferences(raw: string | null): SidebarPreferences {
     const value = JSON.parse(raw || 'null');
     if (!Array.isArray(value?.order) || !Array.isArray(value?.visible))
       throw new Error('Invalid preferences');
+    const previousDefaults = ['/', '/transactions', '/net-worth', '/import'];
+    const usesPreviousDefaults =
+      value.visible.length === previousDefaults.length &&
+      previousDefaults.every((path, index) => value.visible[index] === path);
     return {
       order: [
         ...new Set<string>(
@@ -34,7 +38,7 @@ export function readSidebarPreferences(raw: string | null): SidebarPreferences {
       ],
       visible: [
         ...new Set<string>(
-          value.visible.filter(
+          (usesPreviousDefaults ? DEFAULT_PRIMARY_PATHS : value.visible).filter(
             (path: unknown) => typeof path === 'string' && SIDEBAR_PATHS.includes(path),
           ),
         ),
