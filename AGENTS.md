@@ -4,6 +4,7 @@
 
 - Stay on `main` unless the user asks for a branch.
 - Use simple kebab-case branch names when a branch is needed.
+- After completing changes, rebuild and relaunch the development app with `bun run dev` unless the user asks otherwise. Stop the exact previous development instance first, verify its launcher and Bun child have exited, and confirm only one new instance is running before handing off.
 - Commit early and often: commit each logical set of changes after running the relevant checks.
 - Collaboration is direct-to-main: multiple people may push to `main`. If `git push origin main` is rejected because remote has new work, run `git pull --rebase origin main`, resolve any conflicts without dropping other people's changes, rerun the relevant checks, then push again.
 - Prefer Bun commands for this repo:
