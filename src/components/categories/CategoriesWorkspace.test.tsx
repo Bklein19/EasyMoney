@@ -8,7 +8,26 @@ mock.module('electrobun/view', () => ({ Electroview: class {} }));
 const { default: CategoriesWorkspace } = await import('./CategoriesWorkspace');
 const { trpc } = await import('../../api/trpc');
 const { default: ReviewedTransactions } = await import('../transactions/ReviewedTransactions');
+const { CategoryChangeFeedback } = await import('../transactions/ReviewedTransactions');
 import type { TransactionListItem } from '../../../server/app/types';
+
+test('category feedback offers Undo without claiming a full backup was created', () => {
+  const html = renderToStaticMarkup(
+    <CategoryChangeFeedback
+      state={{
+        pending: false,
+        error: '',
+        undo: { id: 1, count: 2 },
+        apply: async () => true,
+        restore: async () => {},
+        remember: () => {},
+      }}
+    />,
+  );
+  expect(html).toContain('Updated 2 transactions.');
+  expect(html).toContain('Undo');
+  expect(html).not.toContain('Backup saved');
+});
 
 function render(url: string, prepare?: (client: QueryClient) => void) {
   const client = new QueryClient();

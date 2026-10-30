@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import type { ReactNode } from 'react';
-import { queryClient, trpcClient } from '../../api/trpc';
+import { trpcClient } from '../../api/trpc';
+import { refreshCategoryData } from '../../api/categoryQueries';
 import { useCategories } from '../../hooks/useCategories';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { reviewedTransaction } from '../../../server/app/transactionReview';
@@ -22,7 +23,7 @@ export function useReviewedCategories() {
         changes: rows.map((row) => ({ ...reviewedTransaction(row), categoryId })),
       });
       setUndo(result.undoOperation);
-      await queryClient.invalidateQueries();
+      await refreshCategoryData();
       return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -38,7 +39,7 @@ export function useReviewedCategories() {
     try {
       await trpcClient.transactions.restoreCategories.mutate({ undoOperationId: undo.id });
       setUndo(null);
-      await queryClient.invalidateQueries();
+      await refreshCategoryData();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -58,7 +59,7 @@ export function CategoryChangeFeedback({
       {state.error && <p role="alert">{state.error}</p>}
       {state.undo && (
         <p className="category-review-feedback" role="status">
-          Updated {state.undo.count} transaction{state.undo.count === 1 ? '' : 's'}. Backup saved.
+          Updated {state.undo.count} transaction{state.undo.count === 1 ? '' : 's'}.
           <button
             className="btn btn--ghost btn--sm"
             disabled={state.pending}

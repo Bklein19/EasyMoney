@@ -3,7 +3,8 @@ import { useQuery } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import type { merchantReviewQueue, MerchantScope } from '../../../server/app/merchantReview';
 import type { CategorySummary } from '../../../server/app/types';
-import { trpc, trpcClient, queryClient } from '../../api/trpc';
+import { trpc, trpcClient } from '../../api/trpc';
+import { refreshCategoryData } from '../../api/categoryQueries';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import GroupedCategorySelect from '../shared/GroupedCategorySelect';
 import type { useReviewedCategories } from '../transactions/ReviewedTransactions';
@@ -62,7 +63,7 @@ export default function MerchantReviewRow({
     setError('');
     try {
       await action();
-      await queryClient.invalidateQueries();
+      await refreshCategoryData();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {

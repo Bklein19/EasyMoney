@@ -80,6 +80,8 @@ Global period budgets, dream budgets, and saved budget templates live in SQLite.
 
 Open **Backups** to create a consistent database snapshot, review a backup's account and transaction counts, or restore it. Snapshots include retained original import bytes, parsed facts, account mappings, annotations, and budget plans; API keys and browser authentication are separate. New snapshots use verified gzip compression (`.sqlite.gz`); both compressed and legacy `.sqlite` snapshots can be inspected and restored. The page shows the backup directory so you can copy snapshots to another drive or place a previous snapshot there for restoration.
 
+Category changes use atomic annotation writes and persistent Undo, without creating a full database snapshot on each save. Manual backups and migration/restore safety snapshots remain available.
+
 After creating a verified backup, automatic retention keeps the newest three automatic snapshots, the newest snapshot from up to four older UTC calendar weeks, and the oldest checkpoint (at most eight automatic snapshots). Manual backups, pre-restore safety copies, and unrecognized filenames are never automatically pruned. A failed recovery-copy validation prevents pruning. Retention does not change the live database or its retained originals.
 
 To preview maintenance of existing backups, run `bun scripts/maintain-backups.ts /absolute/path/to/database.sqlite.backups`. Add `--apply` to validate all retained checkpoints, compress legacy copies with a verified byte-identical round trip, and then remove obsolete automatic snapshots. The script never opens or initializes the live database. Keep an off-device copy for protection against disk failure; local checkpoints are not an off-device backup.

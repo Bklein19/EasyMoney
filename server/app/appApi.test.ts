@@ -40,6 +40,93 @@ const {
 const { processMerchantRecommendationBatch } = await import('./merchantReview.ts');
 const caller = appRouter.createCaller({});
 
+test('category saves and Undo stay atomic without creating full-database backups', async () => {
+  const accountId = Number(
+    insertRow('accounts', { name: 'Category performance card', type: 'credit_card' }),
+  );
+  const original = Number(insertRow('categories', { name: 'Original', type: 'expense' }));
+  const target = Number(insertRow('categories', { name: 'Target', type: 'expense' }));
+  for (const id of ['category-fast-a', 'category-fast-b']) {
+    insertRow('ledgerTransactions', {
+      ledgerTransactionId: id,
+      accountId,
+      date: '2026-10-01',
+      description: 'Same merchant',
+      merchant: 'Same merchant',
+      amountCents: -2000,
+      transactionKind: 'activity',
+    });
+    upsertTransactionAnnotation(id, {
+      categoryId: id.endsWith('a') ? original : null,
+      notes: `Preserve ${id}`,
+    });
+  }
+  const db = getDb();
+  const facts = db.prepare('SELECT * FROM ledgerTransactions ORDER BY ledgerTransactionId').all();
+  const annotations = () =>
+    db
+      .prepare(
+        'SELECT ledgerTransactionId,categoryId,notes FROM transactionAnnotations ORDER BY ledgerTransactionId',
+      )
+      .all();
+  const before = annotations();
+  const directory = databaseBackupStatus().backupDirectory;
+  const backups = () => (fs.existsSync(directory) ? fs.readdirSync(directory).sort() : []);
+  const checkpoints = backups();
+  const group = (await caller.categories.merchantQueue()).groups[0]!;
+  const saved = await caller.categories.saveMerchant({
+    groupId: group.id,
+    scope: 'all',
+    categoryId: target,
+    fingerprint: group.fingerprint,
+  });
+  expect(saved.count).toBe(2);
+  expect(backups()).toEqual(checkpoints);
+  expect(
+    db
+      .prepare('SELECT id FROM transactionCategoryUndoOperations WHERE id=?')
+      .get(saved.undoOperation!.id),
+  ).toBeDefined();
+  await caller.transactions.restoreCategories({ undoOperationId: saved.undoOperation!.id });
+  expect(annotations()).toEqual(before);
+  const reviewed = (await caller.transactions.list()).transactions.map((row) => ({
+    transactionId: row.ledgerTransactionId!,
+    categoryId: target,
+    expected: {
+      categoryId: row.category?.id ?? null,
+      accountId,
+      date: row.date,
+      amountCents: Math.round(row.amount * 100),
+      description: row.description,
+    },
+  }));
+  await expect(
+    caller.transactions.applyReviewedCategories({
+      label: 'Stale review',
+      changes: [
+        reviewed[0]!,
+        { ...reviewed[1]!, expected: { ...reviewed[1]!.expected, amountCents: -1 } },
+      ],
+    }),
+  ).rejects.toThrow('changed');
+  expect(annotations()).toEqual(before);
+  const applied = await caller.transactions.applyReviewedCategories({
+    label: 'Fast review',
+    changes: reviewed,
+  });
+  expect(applied.count).toBe(2);
+  expect(backups()).toEqual(checkpoints);
+  await caller.transactions.restoreCategories({ undoOperationId: applied.undoOperation!.id });
+  expect(annotations()).toEqual(before);
+  expect(db.prepare('SELECT * FROM ledgerTransactions ORDER BY ledgerTransactionId').all()).toEqual(
+    facts,
+  );
+  expect(backups()).toEqual(checkpoints);
+  // Removing implicit per-click snapshots must not disable explicit recovery checkpoints.
+  await caller.backups.create();
+  expect(backups().length).toBe(checkpoints.length + 1);
+});
+
 test('review-only recommendations accept explicit brokerage cash transfers without weakening unattended decisions', () => {
   const categories = [
     {

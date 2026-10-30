@@ -311,10 +311,8 @@ export const appRouter = t.router({
           fingerprint: z.string().min(1),
         }),
       )
-      .mutation(({ input }) => {
-        createBackup();
-        return saveMerchantCategories(input);
-      }),
+      // Category annotations are atomic and have durable Undo; do not snapshot import originals per click.
+      .mutation(({ input }) => saveMerchantCategories(input)),
     keepMerchant: t.procedure
       .input(
         z.object({
@@ -620,10 +618,7 @@ export const appRouter = t.router({
             .max(5000),
         }),
       )
-      .mutation(({ input }) => {
-        createBackup();
-        return applyReviewedCategoryChanges(input);
-      }),
+      .mutation(({ input }) => applyReviewedCategoryChanges(input)),
     details: t.procedure
       .input(z.object({ ledgerTransactionId: z.string().min(1) }))
       .query(({ input }) => getTransactionDetails(input.ledgerTransactionId)),
