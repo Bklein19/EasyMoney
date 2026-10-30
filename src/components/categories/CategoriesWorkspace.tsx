@@ -372,16 +372,16 @@ export default function CategoriesWorkspace() {
       </header>
       <nav className="category-workspace__tabs" aria-label="Categories views">
         <button
-          aria-current={view === 'review' ? 'page' : undefined}
-          onClick={() => navigate('review')}
-        >
-          Review
-        </button>
-        <button
           aria-current={view === 'browse' ? 'page' : undefined}
           onClick={() => navigate('browse')}
         >
           Explore categories
+        </button>
+        <button
+          aria-current={view === 'review' ? 'page' : undefined}
+          onClick={() => navigate('review')}
+        >
+          Review
         </button>
       </nav>
       <CategoryChangeFeedback state={changes} />

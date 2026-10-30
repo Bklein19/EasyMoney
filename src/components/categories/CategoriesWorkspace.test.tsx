@@ -39,6 +39,8 @@ test('category workspace defaults to review while legacy group links browse and 
   }
   const html = render('/categories');
   expect(html).toContain('Categories views');
+  const tabs = html.slice(html.indexOf('<nav'), html.indexOf('</nav>'));
+  expect(tabs.indexOf('Explore categories')).toBeLessThan(tabs.indexOf('>Review</button>'));
   expect(html).toContain('Merchant category reviews');
   expect(html).not.toContain('One check at a time');
   expect(html).not.toContain('Category review queue');
