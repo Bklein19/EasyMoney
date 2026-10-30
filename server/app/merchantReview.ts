@@ -128,7 +128,7 @@ function summary(group: ReturnType<typeof groups>[number]) {
 
 function recommendationContext() {
   const categories = listCategories().categories;
-  return { categories, taxonomy: hashContent(JSON.stringify([1, getOpenAiModel(), categories])) };
+  return { categories, taxonomy: hashContent(JSON.stringify([2, getOpenAiModel(), categories])) };
 }
 
 function recommendationFingerprint(group: ReturnType<typeof groups>[number], taxonomy: string) {

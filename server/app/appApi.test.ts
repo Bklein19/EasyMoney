@@ -40,6 +40,187 @@ const {
 const { processMerchantRecommendationBatch } = await import('./merchantReview.ts');
 const caller = appRouter.createCaller({});
 
+test('review-only recommendations accept explicit brokerage cash transfers without weakening unattended decisions', () => {
+  const categories = [
+    {
+      id: 1,
+      name: 'Transfer',
+      type: 'transfer',
+      parentId: null,
+      categoryGroup: null,
+      description: null,
+      color: null,
+      icon: null,
+    },
+    {
+      id: 2,
+      name: 'Investment',
+      type: 'investment',
+      parentId: null,
+      categoryGroup: null,
+      description: null,
+      color: null,
+      icon: null,
+    },
+  ];
+  for (const description of [
+    'Funds Received: Funds received via Electronic Bank Transfer',
+    'Transfer (incoming): Incoming Transfer From Another Account',
+    'Electronic Funds Transfer Paid (Cash)',
+  ]) {
+    const groups = groupTransactionsForAiCategorization([
+      {
+        id: 1,
+        ledgerTransactionId: 'review-transfer',
+        accountName: 'Vanguard',
+        accountInstitution: 'Vanguard',
+        accountType: 'investment',
+        date: '2026-07-16',
+        amountCents: 10000000,
+        description,
+        merchant: description,
+        originalDescription: null,
+        originalCategory: null,
+        transactionKind: 'activity',
+      },
+    ]);
+    const decisions = [
+      {
+        groupId: groups[0]!.id,
+        kind: 'transfer' as const,
+        categoryName: '',
+        reason: 'Explicit electronic cash transfer',
+      },
+    ];
+    expect(categorizeModelDecisions({ groups, categories, decisions }).suggestions).toHaveLength(0);
+    expect(
+      categorizeModelDecisions({ groups, categories, decisions, reviewOnly: true }).suggestions[0]
+        ?.categoryId,
+    ).toBe(1);
+  }
+  const trade = groupTransactionsForAiCategorization([
+    {
+      id: 1,
+      ledgerTransactionId: 'review-trade',
+      accountName: 'Vanguard',
+      accountInstitution: 'Vanguard',
+      accountType: 'investment',
+      date: '2026-07-16',
+      amountCents: -100000,
+      description: 'You bought VTI',
+      merchant: 'Vanguard',
+      originalDescription: null,
+      originalCategory: null,
+      transactionKind: 'investment',
+    },
+  ]);
+  for (const kind of ['category', 'transfer'] as const)
+    expect(
+      categorizeModelDecisions({
+        groups: trade,
+        categories,
+        reviewOnly: true,
+        decisions: [
+          {
+            groupId: trade[0]!.id,
+            kind,
+            categoryName: kind === 'category' ? 'Transfer' : '',
+            reason: 'Unsupported guess',
+          },
+        ],
+      }).suggestions,
+    ).toHaveLength(0);
+});
+
+test('review-only suggestions can use named payment context and explicit user tax guidance but not invent gifts', () => {
+  const categories = [
+    {
+      id: 1,
+      name: 'Housing',
+      type: 'expense',
+      parentId: null,
+      categoryGroup: null,
+      description: 'Includes moving expenses.',
+      color: null,
+      icon: null,
+    },
+    {
+      id: 2,
+      name: 'Gifts Received',
+      type: 'income',
+      parentId: null,
+      categoryGroup: null,
+      description: null,
+      color: null,
+      icon: null,
+    },
+  ];
+  const groups = groupTransactionsForAiCategorization([
+    {
+      id: 1,
+      ledgerTransactionId: 'moving',
+      accountName: 'Checking',
+      accountInstitution: 'Bank',
+      accountType: 'checking',
+      date: '2026-08-03',
+      amountCents: -186500,
+      description: 'Zelle payment to 4S MOVING INC',
+      merchant: 'Zelle payment to 4S MOVING INC',
+      originalDescription: null,
+      originalCategory: null,
+      transactionKind: 'activity',
+    },
+  ]);
+  const decisions = [
+    {
+      groupId: groups[0]!.id,
+      kind: 'category' as const,
+      categoryName: 'Housing',
+      reason: 'Moving company payment',
+    },
+  ];
+  expect(categorizeModelDecisions({ groups, categories, decisions }).suggestions).toHaveLength(0);
+  expect(
+    categorizeModelDecisions({ groups, categories, decisions, reviewOnly: true }).suggestions[0]
+      ?.categoryId,
+  ).toBe(1);
+  expect(
+    categorizeModelDecisions({
+      groups,
+      categories,
+      reviewOnly: true,
+      decisions: [{ ...decisions[0]!, categoryName: 'Gifts Received' }],
+    }).suggestions,
+  ).toHaveLength(0);
+  const tax = {
+    merchant: 'Fidelity',
+    description: 'Tax journaled: RSU US FEDERAL',
+    originalDescription: null,
+    amountCents: -163265,
+  };
+  const category = {
+    name: 'Income',
+    type: 'income',
+    description: 'Includes any transactions with the IRS or state tax boards',
+  };
+  expect(financialCategoryConcern(tax, category)).toContain('withholding');
+  expect(financialCategoryConcern(tax, category, { reviewOnly: true })).toBeNull();
+  expect(
+    financialCategoryConcern(tax, { ...category, description: null }, { reviewOnly: true }),
+  ).toContain('outgoing');
+  expect(
+    financialCategoryConcern(
+      {
+        ...tax,
+        merchant: 'Vanguard Marketi PAYMENTS',
+        description: 'Vanguard Marketi PAYMENTS 260716',
+      },
+      { type: 'transfer', name: 'Transfer' },
+      { reviewOnly: true },
+    ),
+  ).toBeNull();
+});
+
 test('merchant AI advice reaches the queue, caches across reads, and never edits annotations', async () => {
   const savedKey = process.env.OPENAI_API_KEY;
   process.env.OPENAI_API_KEY = 'synthetic-provider-injected';
@@ -143,7 +324,7 @@ test('merchant advice covers categorized conflicts, preserves personal-context g
     // Personal payment purpose cannot be inferred from a model guess.
     getDb()
       .prepare(
-        "UPDATE ledgerTransactions SET merchant='Venmo',description='Venmo' WHERE ledgerTransactionId=?",
+        "UPDATE ledgerTransactions SET merchant='Venmo',description='Venmo',originalDescription=NULL WHERE ledgerTransactionId=?",
       )
       .run(ids[0]!);
     const rows = (await caller.transactions.list()).transactions.filter(

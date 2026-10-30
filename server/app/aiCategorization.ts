@@ -548,20 +548,52 @@ export function financialCategoryConcern(
     UncategorizedTransactionRow,
     'merchant' | 'description' | 'originalDescription' | 'amountCents'
   >,
-  category: Pick<CategorySummary, 'type' | 'name'>,
+  category: Pick<CategorySummary, 'type' | 'name'> & Partial<Pick<CategorySummary, 'description'>>,
+  options: { reviewOnly?: boolean } = {},
 ) {
   const text = `${row.merchant ?? ''} ${row.description ?? ''} ${row.originalDescription ?? ''}`;
-  if (/\b(?:tax|irs|medicare|withholding|social securi)|\bjournaled rsu\b/i.test(text))
-    return 'Tax and RSU withholding treatment needs review.';
-  if (category.type === 'income' && row.amountCents < 0)
+  const taxActivity = /\b(?:tax|irs|medicare|withholding|social securi)|\bjournaled rsu\b/i.test(
+    text,
+  );
+  if (taxActivity && !options.reviewOnly) return 'Tax and RSU withholding treatment needs review.';
+  const explicitTaxGuidance =
+    options.reviewOnly && taxActivity && /\btax|\birs\b/i.test(category.description ?? '');
+  if (category.type === 'income' && row.amountCents < 0 && !explicitTaxGuidance)
     return 'An outgoing payment should not be guessed as income.';
   if (
     (category.type === 'transfer' || category.name.toLowerCase() === 'transfer') &&
-    !/\b(?:payment|pmt|autopay|transfer|ach|moneyline|investment|vanguard buy)\b/i.test(text)
+    !(
+      /\b(?:payment|pmt|autopay|transfer|ach|moneyline|investment|vanguard buy)\b/i.test(text) ||
+      (options.reviewOnly && /\bpayments\b/i.test(text))
+    )
   ) {
     return 'A merchant credit may be a refund, not an account transfer. Check the source.';
   }
   return null;
+}
+
+/** Stronger evidence than merely being held in a brokerage account. Trades/sweeps stay investments. */
+function explicitBrokerageCashTransfer(group: MerchantCategorizationGroup) {
+  return group.transactions.every((row) => {
+    const text = `${row.merchant ?? ''} ${row.description ?? ''} ${row.originalDescription ?? ''}`;
+    return (
+      /\b(?:electronic (?:bank |funds )?transfer|bank transfer|funds transfer|incoming transfer|outgoing transfer|transfer (?:from|to|in|out)|ach|moneyline|moneylink)\b/i.test(
+        text,
+      ) && !/\b(?:sweep|reinvest|dividend|bought|sold|purchase|sale|withholding|tax)\b/i.test(text)
+    );
+  });
+}
+
+function lacksPersonalReviewContext(row: UncategorizedTransactionRow) {
+  if (!requiresPersonalCategoryReview(row)) return false;
+  const texts = [row.merchant, row.description, row.originalDescription].filter(
+    (text): text is string => Boolean(text?.trim()),
+  );
+  return texts.every((text) =>
+    /^(?:(?:venmo|zelle|paypal|cash\s?app)(?:\s+(?:payment|transfer|cashout|deposit))?|check(?:\s+#?\d+\*?)?|(?:atm|mobile|cash|check|cheque)\s+(?:deposit|withdrawal))$/i.test(
+      text.trim(),
+    ),
+  );
 }
 
 function historyKey(row: UncategorizedTransactionRow): string | null {
@@ -842,25 +874,36 @@ async function categorizeBatchWithOpenAi(input: {
   model: string;
   categories: CategorySummary[];
   groups: MerchantCategorizationGroup[];
+  reviewOnly?: boolean;
 }) {
   const agent = new Agent({
     name: 'Transaction categorization',
     model: input.model,
     instructions: [
       'You review personal finance merchant/payee groups and choose one decision for each group.',
+      input.reviewOnly
+        ? 'This is a user-confirmed recommendation, NOT automatic categorization. Make the best supported category suggestion from the available evidence; the user must click to apply it. Prefer a useful likely category over abstaining merely because certainty is not absolute. Explain any important assumption briefly. Reserve needs_review for genuinely missing purpose, incompatible activities, or no reasonable category.'
+        : 'These decisions may be applied unattended. Require unambiguous support before choosing a category.',
       'Return flat decision objects with groupId, kind, categoryName, and reason.',
       "kind must be exactly one of: 'category', 'transfer', or 'needs_review'.",
       "Use kind: 'category' for spending, income, or Investment activity. categoryName must exactly match the category list. Investment activity is not personal spending or income.",
       'Category descriptions are user-specific guidance. Prefer those descriptions over generic personal-finance assumptions when deciding between categories.',
-      'Recurring software and AI-service charges belong in a software/subscriptions category when available, not Entertainment merely because of older broad labels. Tax payments and RSU withholding require review unless an appropriate tax category and treatment are explicit. A merchant credit can be a refund; a parser payment flag alone does not prove an account transfer.',
+      'Recurring software and AI-service charges belong in a software/subscriptions category when available, not Entertainment merely because of older broad labels. A merchant credit can be a refund; a parser payment flag alone does not prove an account transfer.',
+      input.reviewOnly
+        ? 'Explicit tax/IRS/state/Medicare withholding, including RSU tax journals, can be suggested using the category descriptions. Honor user-specific tax guidance even when it intentionally uses a broad category such as Income for both refunds and payments. Do not infer tax liability or gross W-2 pay. RSU vesting is identifiable compensation/security activity, not inherently unclassifiable; choose the best supported category using source roles and category guidance.'
+        : 'Tax payments and RSU withholding require review unless an appropriate tax category and treatment are explicit.',
       'Categories with a parentName are subcategories. Prefer the most specific supported income subcategory over its broad Income parent: Payroll for employment pay, Bonuses only for identified bonuses, Gifts Received only for confirmed gifts, Interest for bank interest, and Other Income for known income without a more specific fit. Use the actual names supplied in the category list; do not invent a second reporting classification.',
       'Employment deposits need not contain the literal word payroll. Consider employer/payee context and source descriptions, but do not assume every direct deposit is salary. A family name, round amount, Venmo cashout or transfer label alone is not evidence of a gift. Loans and expense reimbursements are not income; unclear purpose needs review.',
       "For kind: 'transfer' or kind: 'needs_review', set categoryName to an empty string.",
-      "Use kind: 'transfer' only for explicit account-to-account movement visible from a cash, checking, savings, or credit-card account, including credit card payments, ACH transfers, cash sent to or from investments, and other account-to-account movement.",
+      input.reviewOnly
+        ? "Use kind: 'transfer' for explicit bank/electronic cash movement into or out of any account, including brokerage and retirement accounts: Funds received via Electronic Bank Transfer, Incoming Transfer From Another Account, Electronic Funds Transfer Paid (Cash), and Vanguard PAYMENTS are transfer evidence. A brokerage account label alone is not a reason to abstain. Transfer does not assert a matched owned-account pair, a gift, or new income."
+        : "Use kind: 'transfer' only for explicit account-to-account movement visible from a cash, checking, savings, or credit-card account, including credit card payments, ACH transfers, cash sent to or from investments, and other account-to-account movement.",
       'Internal Transfer is reserved for an inflow and outflow on different owned accounts that the application has explicitly matched. A matching amount, merchant name, or description alone is not evidence of a confirmed pair. This request does not supply confirmed transfer-pair evidence, so never select Internal Transfer.',
       'Do not use transfer for activity wholly inside a retirement, brokerage, 401(k), IRA, or investment account. Security purchases and sales, ESPP purchases, dividend reinvestment, and settlement-fund sweeps in either direction should be categorized as Investment when that category exists. Clearly identified internal purchase/sale journal entries are also Investment. Do not leave these for review merely because they are neither spending nor income.',
       '401(k) contributions and employer match should also be categorized as Investment. Sharing that category does not mean sweeps, trades, or reinvestment are new contributions; the application determines contribution accounting separately.',
-      "Use kind: 'needs_review' when the group is variable, personal-context-dependent, or ambiguous, such as Venmo, Zelle, PayPal, checks, cash app, or unclear bank text.",
+      input.reviewOnly
+        ? 'A payment processor is not a purpose. Use a named merchant or memo to infer a likely category: Zelle to a moving company can be Housing when its guidance includes moving, and a restaurant paid through PayPal can be Dining. Generic Venmo, an unexplained check number, and cash withdrawals without purpose still need review. Never infer gifts, loans, or reimbursements solely from a family name, round number, or processor label. If no exact category exists for an ordinary expense, suggest the nearest reasonable existing category and explain the fit rather than demanding a new category.'
+        : "Use kind: 'needs_review' when the group is variable, personal-context-dependent, or ambiguous, such as Venmo, Zelle, PayPal, checks, cash app, or unclear bank text.",
       'Investment account fees, management fees, advisory fees, account fees, and recurring service charges are real spending, not transfers or neutral account movement.',
       'For recurring account/service fees, prefer a recurring expense category such as Subscriptions when it exists and fits; do not use Investment for fees merely because they occur in an investment account.',
       'Treat the whole merchant/payee group as one decision.',
@@ -902,6 +945,7 @@ export function categorizeModelDecisions(input: {
   decisions: ModelGroupDecision[];
   groups: MerchantCategorizationGroup[];
   categories: CategorySummary[];
+  reviewOnly?: boolean;
 }): CategorizedGroupBatch {
   const categoryByName = new Map(input.categories.map((category) => [category.name, category]));
   const transferCategory = findTreatmentCategory(input.categories, 'transfer');
@@ -928,7 +972,9 @@ export function categorizeModelDecisions(input: {
       continue;
     }
     if (
-      group.transactions.some(requiresPersonalCategoryReview) ||
+      group.transactions.some(
+        input.reviewOnly ? lacksPersonalReviewContext : requiresPersonalCategoryReview,
+      ) ||
       categoryByName.get(item.categoryName)?.type === 'internal_transfer' ||
       item.categoryName.toLowerCase() === 'internal transfer' ||
       item.categoryName.toLowerCase() === 'gifts received'
@@ -946,6 +992,21 @@ export function categorizeModelDecisions(input: {
       const category = categoryByName.get(item.categoryName);
       if (!category) {
         ignoredCount += 1;
+        continue;
+      }
+      if (
+        input.reviewOnly &&
+        category.type === 'transfer' &&
+        shouldReviewInvestmentAccountTransferDecision({ group }) &&
+        !explicitBrokerageCashTransfer(group)
+      ) {
+        questions.push(
+          reviewQuestion({
+            group,
+            reason:
+              'Security trades and settlement sweeps are investment activity, not evidence of an external cash transfer.',
+          }),
+        );
         continue;
       }
       if (shouldTreatInvestmentCategoryAsTransfer({ group, category }) && transferCategory) {
@@ -971,7 +1032,10 @@ export function categorizeModelDecisions(input: {
     }
 
     if (item.kind === 'transfer') {
-      if (shouldReviewInvestmentAccountTransferDecision({ group })) {
+      if (
+        shouldReviewInvestmentAccountTransferDecision({ group }) &&
+        !(input.reviewOnly && explicitBrokerageCashTransfer(group))
+      ) {
         questions.push(
           reviewQuestion({
             group,
@@ -1057,18 +1121,22 @@ export async function previewMerchantRecommendations(
       model: getOpenAiModel(),
       categories,
       groups: batch,
+      reviewOnly: true,
     });
     const validated = categorizeModelDecisions({
       decisions: result.decisions,
       groups: batch,
       categories,
+      reviewOnly: true,
     });
     for (const group of batch) {
       const suggestion = validated.suggestions.find((item) => item.groupId === group.id);
       const category = categories.find((item) => item.id === suggestion?.categoryId);
       const concern =
         category &&
-        group.transactions.map((row) => financialCategoryConcern(row, category)).find(Boolean);
+        group.transactions
+          .map((row) => financialCategoryConcern(row, category, { reviewOnly: true }))
+          .find(Boolean);
       advice.push({
         groupId: group.id,
         categoryId: suggestion && !concern ? suggestion.categoryId : null,
