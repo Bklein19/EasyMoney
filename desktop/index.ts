@@ -144,6 +144,7 @@ ApplicationMenu.on('application-menu-clicked', (event) => {
   if (!event || typeof event !== 'object' || !('data' in event)) return;
   const data = event.data;
   if (!data || typeof data !== 'object' || !('action' in data)) return;
+  if (data.action === 'undo') rpc.send.undo({});
   if (data.action === 'navigate-back') rpc.send.navigateHistory({ delta: -1 });
   if (data.action === 'navigate-forward') rpc.send.navigateHistory({ delta: 1 });
   if (data.action === 'toggle-debug') rpc.send.toggleDebug({});

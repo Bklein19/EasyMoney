@@ -16,7 +16,8 @@ export const macApplicationMenu: ApplicationMenuItemConfig[] = [
   {
     label: 'Edit',
     submenu: [
-      { role: 'undo', accelerator: 'CommandOrControl+Z' },
+      // Application-menu accelerators are single keys; Electrobun adds Command on macOS.
+      { label: 'Undo', action: 'undo', accelerator: 'z' },
       { role: 'redo', accelerator: 'CommandOrControl+Shift+Z' },
       { type: 'divider' },
       { role: 'cut', accelerator: 'CommandOrControl+X' },

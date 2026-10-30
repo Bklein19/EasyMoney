@@ -28,7 +28,11 @@ describe('desktop application menu', () => {
     ]);
     expect(submenuNamed('Edit')).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ role: 'undo', accelerator: 'CommandOrControl+Z' }),
+        expect.objectContaining({
+          label: 'Undo',
+          action: 'undo',
+          accelerator: 'z',
+        }),
         expect.objectContaining({ role: 'cut', accelerator: 'CommandOrControl+X' }),
         expect.objectContaining({ role: 'copy', accelerator: 'CommandOrControl+C' }),
         expect.objectContaining({ role: 'paste', accelerator: 'CommandOrControl+V' }),

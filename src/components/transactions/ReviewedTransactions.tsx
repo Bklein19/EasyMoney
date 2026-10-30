@@ -1,7 +1,8 @@
-import { useId, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 import type { ReactNode } from 'react';
 import { trpcClient } from '../../api/trpc';
 import { refreshCategoryData } from '../../api/categoryQueries';
+import { registerCategoryUndo } from '../../categoryUndo';
 import { useCategories } from '../../hooks/useCategories';
 import { formatCurrency, formatDate } from '../../utils/formatters';
 import { reviewedTransaction } from '../../../server/app/transactionReview';
@@ -32,8 +33,8 @@ export function useReviewedCategories() {
       setPending(false);
     }
   };
-  const restore = async () => {
-    if (!undo) return;
+  const restore = useCallback(async () => {
+    if (!undo || pending) return;
     setPending(true);
     setError('');
     try {
@@ -45,7 +46,11 @@ export function useReviewedCategories() {
     } finally {
       setPending(false);
     }
-  };
+  }, [undo, pending]);
+  useEffect(() => {
+    if (!undo) return;
+    return registerCategoryUndo(window, { id: undo.id, pending, restore });
+  }, [undo, pending, restore]);
   return { pending, error, undo, apply, restore, remember: setUndo };
 }
 
@@ -63,6 +68,8 @@ export function CategoryChangeFeedback({
           <button
             className="btn btn--ghost btn--sm"
             disabled={state.pending}
+            aria-keyshortcuts="Meta+Z Control+Z"
+            title="Undo category change (⌘Z / Ctrl+Z)"
             onClick={() => void state.restore()}
           >
             Undo

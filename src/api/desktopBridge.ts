@@ -1,5 +1,6 @@
 import { Electroview } from 'electrobun/view';
 import type { EasyMoneyDesktopRpc } from '../../desktop/rpc';
+import { nativeUndo } from '../categoryUndo';
 
 function createDesktopBridge() {
   if (typeof window === 'undefined' || typeof window.__electrobunWebviewId !== 'number')
@@ -9,6 +10,7 @@ function createDesktopBridge() {
     handlers: {
       requests: {},
       messages: {
+        undo: () => nativeUndo(window),
         toggleDebug: () => window.dispatchEvent(new Event('easymoney:toggle-debug')),
         customizeSidebar: () => window.dispatchEvent(new Event('easymoney:customize-sidebar')),
         navigateHistory: ({ delta }) => {
