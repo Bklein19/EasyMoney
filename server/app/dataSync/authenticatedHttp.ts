@@ -1,6 +1,10 @@
 import type { APIResponse, Page } from 'playwright';
 
-import { safeBrowserRequestHeaders } from './browserRequest.ts';
+import {
+  safeBrowserRequestHeaders,
+  validatedRequestOrigins,
+  type BrowserNativeCrossOriginPolicy,
+} from './browserRequest.ts';
 
 export type AuthenticatedHttpRequest = {
   url: string;
@@ -10,6 +14,7 @@ export type AuthenticatedHttpRequest = {
   form?: Record<string, string | number | boolean>;
   timeoutMs?: number;
   maxRedirects?: number;
+  crossOriginPolicy?: BrowserNativeCrossOriginPolicy;
 };
 
 export type AuthenticatedHttpRedirect = {
@@ -100,6 +105,8 @@ export function authenticatedHttpSameOriginUrl(candidate: string, applicationUrl
     throw new Error('Authenticated HTTP request URL is invalid');
   }
   if (
+    target.username ||
+    target.password ||
     target.origin !== application.origin ||
     (target.protocol !== 'https:' &&
       !(target.protocol === 'http:' && isLoopbackHostname(target.hostname)))
@@ -161,7 +168,25 @@ export async function runAuthenticatedHttpRequest(
     throw new Error('Authenticated HTTP request has multiple request bodies');
   }
   const applicationUrl = page.url();
-  const requestUrl = authenticatedHttpSameOriginUrl(request.url, applicationUrl).toString();
+  const application = assertHttpApplicationUrl(applicationUrl);
+  let candidate: URL;
+  try {
+    candidate = new URL(request.url, application);
+  } catch {
+    throw new Error('Authenticated HTTP request URL is invalid');
+  }
+  let destinationOrigin = application.origin;
+  if (request.crossOriginPolicy) {
+    destinationOrigin = validatedRequestOrigins(
+      { url: candidate.toString(), method: request.method ?? 'GET' },
+      applicationUrl,
+      request.crossOriginPolicy,
+    ).destinationOrigin;
+  }
+  const requestUrl = authenticatedHttpSameOriginUrl(
+    candidate.toString(),
+    destinationOrigin,
+  ).toString();
   const timeout = requestTimeout(request.timeoutMs);
   const maxRedirects = requestRedirectLimit(request.maxRedirects);
   let currentUrl = requestUrl;
@@ -184,8 +209,8 @@ export async function runAuthenticatedHttpRequest(
         maxRedirects: 0,
         timeout,
       });
-      authenticatedHttpSameOriginUrl(response.url(), applicationUrl);
-      const nextUrl = redirectTarget(response, applicationUrl);
+      authenticatedHttpSameOriginUrl(response.url(), destinationOrigin);
+      const nextUrl = redirectTarget(response, destinationOrigin);
       if (nextUrl) {
         if (redirects.length >= maxRedirects) {
           throw new Error('Authenticated HTTP request exceeded its redirect limit');

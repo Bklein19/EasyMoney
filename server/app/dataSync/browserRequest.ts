@@ -93,7 +93,7 @@ export function browserNativeHttpOnlyCookieHeader(cookies: readonly BrowserNativ
   return header;
 }
 
-function validatedRequestOrigins(
+export function validatedRequestOrigins(
   request: BrowserNativeRequest,
   pageUrl: string,
   crossOriginPolicy?: BrowserNativeCrossOriginPolicy,

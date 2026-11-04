@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { chromium, type APIRequestContext } from 'playwright';
+import { chromium, request as playwrightRequest, type APIRequestContext } from 'playwright';
 
 import {
   assertAuthenticatedHttpBody,
@@ -84,6 +84,90 @@ describe('authenticated HTTP transport', () => {
     expect(() => assertAuthenticatedHttpBody(csv, { validate: () => false })).toThrow(
       'body was not accepted',
     );
+  });
+
+  test('allows an explicitly approved institution API and pins all redirects to that origin', async () => {
+    let escapedRequests = 0;
+    const outside = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch() {
+        escapedRequests++;
+        return new Response('outside');
+      },
+    });
+    const observed: Array<{ path: string; authorization: string | null; origin: string | null }> =
+      [];
+    const api = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch(request) {
+        const path = new URL(request.url).pathname;
+        observed.push({
+          path,
+          authorization: request.headers.get('authorization'),
+          origin: request.headers.get('origin'),
+        });
+        if (path === '/escape')
+          return new Response(null, {
+            status: 307,
+            headers: { location: `http://127.0.0.1:${outside.port}/stolen` },
+          });
+        if (path === '/start')
+          return new Response(null, { status: 307, headers: { location: '/data' } });
+        return Response.json({ success: true });
+      },
+    });
+    const context = await playwrightRequest.newContext();
+    const applicationOrigin = 'http://127.0.0.1:1';
+    const destinationOrigin = `http://127.0.0.1:${api.port}`;
+    const page = { request: context, url: () => `${applicationOrigin}/banking` };
+    const crossOriginPolicy = {
+      applicationOrigin,
+      destinationOrigin,
+      institutionHostname: '127.0.0.1',
+    };
+    try {
+      const response = await runAuthenticatedHttpRequest(page, {
+        url: `${destinationOrigin}/start`,
+        method: 'POST',
+        headers: { authorization: 'Bearer synthetic-test', 'content-type': 'application/json' },
+        body: '{}',
+        crossOriginPolicy,
+      });
+      expect(response.status).toBe(200);
+      expect(observed).toEqual([
+        { path: '/start', authorization: 'Bearer synthetic-test', origin: applicationOrigin },
+        { path: '/data', authorization: 'Bearer synthetic-test', origin: applicationOrigin },
+      ]);
+      await expect(
+        runAuthenticatedHttpRequest(page, {
+          url: `${destinationOrigin}/escape`,
+          headers: { authorization: 'Bearer synthetic-test' },
+          crossOriginPolicy,
+        }),
+      ).rejects.toThrow('stay on the open application origin');
+      expect(escapedRequests).toBe(0);
+      await expect(
+        runAuthenticatedHttpRequest(page, { url: `${destinationOrigin}/data` }),
+      ).rejects.toThrow('stay on the open application origin');
+      await expect(
+        runAuthenticatedHttpRequest(page, {
+          url: `${destinationOrigin}/data`,
+          crossOriginPolicy: { ...crossOriginPolicy, institutionHostname: 'unrelated.test' },
+        }),
+      ).rejects.toThrow('does not approve');
+      await expect(
+        runAuthenticatedHttpRequest(page, {
+          url: `${destinationOrigin}/data`,
+          crossOriginPolicy: { ...crossOriginPolicy, applicationOrigin: destinationOrigin },
+        }),
+      ).rejects.toThrow('does not approve');
+    } finally {
+      await context.dispose();
+      await api.stop(true);
+      await outside.stop(true);
+    }
   });
 
   test('recognizes authentication status and any login URL in the redirect chain', () => {
