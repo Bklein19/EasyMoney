@@ -1637,12 +1637,15 @@ type InstitutionBrowserProgramDependencies = {
 };
 
 let developmentPageInspector: ((page: Page) => Promise<void>) | undefined;
+let developmentInspectorHeadless = false;
 
 /** Installed only by the explicit connector development runner. */
 export function setDevelopmentPageInspector(
   inspector: ((page: Page) => Promise<void>) | undefined,
+  options: { headless?: boolean } = {},
 ): void {
   developmentPageInspector = inspector;
+  developmentInspectorHeadless = Boolean(inspector && options.headless);
 }
 
 export async function runInstitutionBrowserProgram<T extends Record<string, unknown>>(
@@ -1681,7 +1684,9 @@ export async function runInstitutionBrowserProgram<T extends Record<string, unkn
   const launchStrategy = institutionBrowserLaunchStrategy({
     hasSavedAuthentication,
     persistAuthentication: session.persistAuthentication,
-    requestedHeadless: developmentPageInspector ? false : session.contextOptions?.headless,
+    requestedHeadless: developmentPageInspector
+      ? developmentInspectorHeadless
+      : session.contextOptions?.headless,
   });
   const runAttempt = async (
     headless: boolean,

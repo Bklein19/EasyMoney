@@ -81,6 +81,37 @@ describe('development browser inspection', () => {
     );
     expect(inspections).toBe(authenticated ? 1 : 0);
   });
+
+  test('explicit headless inspection never opens an interactive login window on expired authentication', async () => {
+    let attempts = 0;
+    let inspections = 0;
+    setDevelopmentPageInspector(
+      async () => {
+        inspections++;
+      },
+      { headless: true },
+    );
+    const result = await runInstitutionBrowserProgram(
+      {
+        name: 'headless-inspection-test',
+        startUrl: 'https://example.test',
+        persistAuthentication: false,
+      },
+      'async () => ({ status: "login-required" })',
+      { completionDescription: 'Done', isAuthenticated: async () => false },
+      {
+        withPlaywrightPage: async (options, operation) => {
+          attempts++;
+          expect(options.contextOptions?.headless).toBe(true);
+          return operation({} as Page, {} as BrowserContext);
+        },
+        withTransientBrowserProfile: async (operation) => operation('/private/tmp/inspection-test'),
+      },
+    );
+    expect(result.status).toBe('login-required');
+    expect(attempts).toBe(1);
+    expect(inspections).toBe(0);
+  });
 });
 
 describe('Playwright session helper', () => {

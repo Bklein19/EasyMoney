@@ -67,7 +67,9 @@ async function main(): Promise<void> {
     const inspector = await import(resolve(process.env.EASYMONEY_DEVELOPMENT_INSPECTOR));
     if (typeof inspector.inspect !== 'function')
       throw new Error('Development inspector must export inspect');
-    setDevelopmentPageInspector(inspector.inspect);
+    setDevelopmentPageInspector(inspector.inspect, {
+      headless: process.env.EASYMONEY_DEVELOPMENT_HEADLESS === '1',
+    });
   }
   const options = parseArguments(Bun.argv.slice(2));
   if (!isSyncInstitutionId(options.institutionId)) {
