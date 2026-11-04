@@ -20,6 +20,7 @@
   "morgan-stanley-pdf": "2672db18a15834b22fee03b2494c3444d0ed30d52d0819f7369caf0dcaa5ae20",
   "robinhood-banking-csv": "7b92ee1d8682e20617432219f0db188ddfff494a13f30b6c447c38234c0d8d33",
   "robinhood-banking-statement-pdf": "49be513d5a899d9ed305eacc9975fe160268e19976b5e0d970325eb805d680ad",
+  "robinhood-credit-card-api-json": "8c7269188c0aee5126059c3c938d6752432c48588e9c240caa3548fb0235026d",
   "robinhood-credit-card-csv": "28834b726e5f187ea4c175daa9a1baf2dfbcd8d6b0c9b300a6c1d0e44e0d9b45",
   "robinhood-credit-card-statement-pdf": "0ded9a530b4f1ee367ae1808da2b48f85f3bafc350feef0cc77e9da6afcaeba9",
   "robinhood-statement-pdf": "f0e3de986ba76b0a3821702a8aedc4bd9e7677ffed73cbcc2a024ebd4e492654",

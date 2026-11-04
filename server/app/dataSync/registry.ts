@@ -3,6 +3,7 @@ import { bankOfAmericaConnector } from './institutions/bankOfAmericaConnector.ts
 import { fidelityConnector } from './institutions/fidelityConnector.ts';
 import { marcusConnector } from './institutions/marcusConnector.ts';
 import { robinhoodBankingConnector } from './institutions/robinhoodBankingConnector.ts';
+import { robinhoodCreditConnector } from './institutions/robinhoodCreditConnector.ts';
 import { sequoiaFundConnector } from './institutions/sequoiaFundConnector.ts';
 import { tiaaConnector } from './institutions/tiaaConnector.ts';
 import { vanguardConnector } from './institutions/vanguardConnector.ts';
@@ -17,6 +18,7 @@ export const syncConnectors = [
   tiaaConnector,
   marcusConnector,
   robinhoodBankingConnector,
+  robinhoodCreditConnector,
 ] as const satisfies readonly SyncConnector[];
 
 export type SyncInstitutionId = (typeof syncConnectors)[number]['id'];

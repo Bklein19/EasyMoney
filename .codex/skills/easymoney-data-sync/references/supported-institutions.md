@@ -216,6 +216,7 @@ Supported:
 - Brokerage statement PDF.
 - Banking activity CSV and monthly statement PDF.
 - Robinhood Gold Card activity CSV and monthly statement PDF.
+- Online Gold Card activity and current balance through the `robinhood-credit` connector.
 
 Useful parser filenames:
 - `robinhood-1234-2026-06-30-statement.pdf`
@@ -238,8 +239,10 @@ Credit-card CSV expected headers:
 
 Notes:
 - Statement parser recognizes individual investing and consolidated IRA statements by content.
-- Robinhood Banking and Gold Card are mobile-export workflows. The dedicated connector scans the folder in `EASYMONEY_ROBINHOOD_EXPORT_DIR`, or the current user's Downloads folder when it is unset.
-- Export the activity CSV for transaction detail and the monthly statement PDF for its closing balance. Both are useful; the connector selects the newest activity export and statements whose balance dates are missing.
+- Online Gold Card sync uses first-party browser login/MFA followed by authenticated HTTP. Its first connection discovers the account before a local account exists; account mapping and import confirmation remain explicit.
+- The current online connector supports one discovered card account. Historical PDF downloading is not verified; manual statement imports remain supported. The live harness passed with original-response JSON, but the user app-button/import gate is still pending.
+- Robinhood Banking remains a mobile-export workflow. Its connector scans `EASYMONEY_ROBINHOOD_EXPORT_DIR`, or the current user's Downloads folder when unset. Credit-card exports remain available through ordinary file import.
+- For manual exports, use activity CSV for transaction detail and monthly statement PDF for its closing balance. The local Banking connector selects the newest banking activity export and statements whose balance dates are missing.
 - Gold Card activity imports only rows whose status is `Posted`; pending and declined rows are ignored.
 - Banking and credit-card CSVs do not carry account numbers, so each account type must map to one unambiguous local Robinhood account. Statement account suffixes are used when available.
 

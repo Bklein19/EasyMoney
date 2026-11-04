@@ -18,6 +18,7 @@ const {
 const { upsertTransactionAnnotation } = await import('./transactionAnnotations.ts');
 const { getTransactionDetails } = await import('./transactionDetails.ts');
 const { overlapOccurrenceKey, recordDistinctOverlap } = await import('./reviewedOverlap');
+const { parseRobinhoodCreditApi } = await import('./importParsers/robinhoodCreditApi.ts');
 
 function resetAppTables() {
   const db = getDb();
@@ -597,6 +598,122 @@ test('source rebuild prefers statement balances over activity running balances i
       sourceBalanceId: 1,
     },
   ]);
+});
+
+test('Robinhood API overlaps reconcile with statements while preserving identical purchases and annotations', () => {
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Synthetic Gold Card',
+      institution: 'Robinhood',
+      type: 'credit',
+      currentBalance: 0,
+    }),
+  );
+  const rows = (count: number) =>
+    parseRobinhoodCreditApi({
+      fileName: 'synthetic.json',
+      headers: [],
+      rows: [],
+      text: JSON.stringify({
+        format: 'easymoney-robinhood-credit-v1',
+        capturedAt: '2026-10-03T12:00:00Z',
+        request: { from: '2026-10-01', to: '2026-10-03', timeZone: 'America/Los_Angeles' },
+        account: {
+          id: 'synthetic-account',
+          customerId: 'synthetic-customer',
+          name: 'Synthetic Gold Card',
+        },
+        identityResponse: JSON.stringify({
+          data: {
+            authIdentity: {
+              id: 'synthetic-identity',
+              creditCustomers: [{ id: 'synthetic-customer', account: { id: 'synthetic-account' } }],
+            },
+          },
+        }),
+        transactionResponses: [
+          JSON.stringify({
+            data: {
+              unifiedTransactionSearch: {
+                transactions: {
+                  items: Array.from({ length: count }, (_, index) => ({
+                    id: `unified-${index}`,
+                    at: Date.parse('2026-10-02T12:00:00Z'),
+                    amountMicro: 5_000_000,
+                    description: 'Synthetic Coffee',
+                    visibility: 'VISIBLE',
+                    details: {
+                      __typename: 'CreditTransaction',
+                      id: `credit-${index}`,
+                      flow: 'OUTBOUND',
+                      transactionStatus: 'POSTED',
+                      transactionType: 'PURCHASE',
+                      visibility: 'VISIBLE',
+                      merchantDetails: { rawMerchantName: 'SYNTHETIC COFFEE CA' },
+                    },
+                  })),
+                  cursor: null,
+                },
+              },
+            },
+          }),
+        ],
+      }),
+    }).transactions.filter((row) => row !== null);
+  const sourceFiles: number[] = [];
+  for (const [index, count, sourceType] of [
+    [0, 2, 'activity-export'],
+    [1, 1, 'activity-export'],
+    [2, 2, 'statement'],
+  ] as const) {
+    const source = insertCommittedSourceFile({
+      fileName: `robinhood-${index}`,
+      parserName:
+        index === 2 ? 'robinhood-credit-card-statement-pdf' : 'robinhood-credit-card-api-json',
+      sourceType,
+      priority: 90,
+      institution: 'Robinhood',
+    });
+    sourceFiles.push(source.sourceFileId);
+    const sourceAccountId = insertSourceAccount(
+      source.sourceFileId,
+      accountId,
+      `robinhood-${index}`,
+      { institution: 'Robinhood', sourceAccountName: 'Synthetic Gold Card' },
+    );
+    for (const [occurrence, row] of rows(count).entries()) {
+      insertSourceTransaction({
+        ...source,
+        sourceAccountId,
+        stableSourceId: `${index}-${occurrence}`,
+        date: row.date,
+        amountCents: row.amountCents,
+        description: row.description,
+        priority: 90,
+        raw: index === 2 ? { crossSourceIdentity: row.raw?.crossSourceIdentity } : row.raw,
+      });
+    }
+  }
+  const ledger = buildLedgerFromSourceFacts(getDb());
+  expect(ledger.transactions).toHaveLength(2);
+  expect(ledger.provenance).toHaveLength(5);
+  const ids = ledger.transactions.map((row) => row.ledgerTransactionId);
+  materializeLedger(getDb(), ledger);
+  upsertTransactionAnnotation(ids[0]!, { notes: 'Keep this purchase note' });
+  getDb()
+    .prepare("UPDATE sourceFiles SET status = 'unimported' WHERE id IN (?, ?)")
+    .run(sourceFiles[0], sourceFiles[1]);
+  const rebuilt = buildLedgerFromSourceFacts(getDb());
+  expect(rebuilt.transactions.map((row) => row.ledgerTransactionId)).toEqual(ids);
+  materializeLedger(getDb(), rebuilt);
+  expect(getTransactionDetails(ids[0]!).transaction.notes).toBe('Keep this purchase note');
+  expect(
+    (
+      getDb()
+        .prepare('SELECT COUNT(*) AS count FROM sourceAccounts WHERE accountId = ?')
+        .get(accountId) as { count: number }
+    ).count,
+  ).toBe(3);
 });
 
 test('parser hash collisions preserve occurrences across overlapping exports, statements and accounts', () => {

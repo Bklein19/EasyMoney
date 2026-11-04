@@ -18,6 +18,7 @@ import { morganStanleyStatementParser } from './morganStanleyStatement.ts';
 import { robinhoodBankingParser } from './robinhoodBanking.ts';
 import { robinhoodBankingStatementParser } from './robinhoodBankingStatement.ts';
 import { robinhoodCreditCardStatementParser } from './robinhoodCreditCardStatement.ts';
+import { robinhoodCreditApiParser } from './robinhoodCreditApi.ts';
 import { robinhoodStatementParser } from './robinhoodStatement.ts';
 import { sequoiaFundActivityParser } from './sequoiaFundActivity.ts';
 import { sequoiaFundStatementParser } from './sequoiaFundStatement.ts';
@@ -43,6 +44,7 @@ export const IMPORT_PARSERS: AppImportParser[] = [
   robinhoodBankingParser,
   robinhoodBankingStatementParser,
   robinhoodCreditCardStatementParser,
+  robinhoodCreditApiParser,
   vanguardActivityParser,
   vanguardActivityCsvParser,
   morganStanleyActivityParser,

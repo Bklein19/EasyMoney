@@ -7007,12 +7007,49 @@ test('TIAA has one app catch-up target for any active local TIAA account', async
     status: 'active',
   });
 
-  expect(await caller.dataSync.targets()).toEqual([
+  expect(
+    (await caller.dataSync.targets()).filter((target) => target.institutionId === 'tiaa'),
+  ).toEqual([
     {
       id: 'tiaa',
       accountIds: [1],
       institutionId: 'tiaa',
       label: 'TIAA',
+    },
+  ]);
+});
+
+test('Robinhood card discovery is available before import and replaces local card export catch-up', async () => {
+  expect(
+    (await caller.dataSync.targets()).filter(
+      (target) => target.institutionId === 'robinhood-credit',
+    ),
+  ).toEqual([
+    {
+      id: 'robinhood-credit',
+      accountIds: [],
+      institutionId: 'robinhood-credit',
+      label: 'Robinhood Credit Card',
+    },
+  ]);
+  const accountId = Number(
+    insertRow('accounts', {
+      name: 'Synthetic Gold Card',
+      institution: 'Robinhood',
+      type: 'credit',
+      currentBalance: 0,
+      status: 'active',
+    }),
+  );
+  const targets = (await caller.dataSync.targets()).filter((target) =>
+    target.institutionId.startsWith('robinhood'),
+  );
+  expect(targets).toEqual([
+    {
+      id: 'robinhood-credit',
+      accountIds: [accountId],
+      institutionId: 'robinhood-credit',
+      label: 'Robinhood Credit Card',
     },
   ]);
 });

@@ -35,7 +35,7 @@ export function robinhoodAccountKind(account: SyncAccountCoverage): RobinhoodAcc
 }
 
 export function matchesRobinhoodBankingAccount(account: SyncAccountCoverage): boolean {
-  return robinhoodAccountKind(account) !== null;
+  return robinhoodAccountKind(account) === 'banking';
 }
 
 function artifactAccountKind(artifact: RobinhoodMobileArtifact): RobinhoodAccountKind {

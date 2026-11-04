@@ -69,7 +69,7 @@ function artifact(overrides: Partial<RobinhoodMobileArtifact>): RobinhoodMobileA
 }
 
 describe('Robinhood mobile export connector', () => {
-  test('targets banking and Gold Card accounts but excludes brokerage accounts', () => {
+  test('keeps local exports scoped to banking while online syncing handles Gold Cards', () => {
     const banking = account();
     const credit = account({
       id: 2,
@@ -86,6 +86,8 @@ describe('Robinhood mobile export connector', () => {
 
     expect(robinhoodAccountKind(banking)).toBe('banking');
     expect(robinhoodAccountKind(credit)).toBe('credit');
+    expect(matchesRobinhoodBankingAccount(banking)).toBe(true);
+    expect(matchesRobinhoodBankingAccount(credit)).toBe(false);
     expect(matchesRobinhoodBankingAccount(brokerage)).toBe(false);
   });
 
